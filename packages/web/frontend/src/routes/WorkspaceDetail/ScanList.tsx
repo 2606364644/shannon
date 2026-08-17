@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+// useEffect/useState 仍被行内组件（SSE 订阅等）使用；列表数据层已上移 useScans。
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate, useOutletContext, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Ban, ChevronRight, Eye, Play, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Ban, ChevronRight, Eye, Play, RefreshCw, Search, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,8 +18,9 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  listScans, cancelScan, deleteScan, deleteBlackboxRun, resumeScan, getScan, scanEventsUrl, ApiError,
+  cancelScan, deleteScan, deleteBlackboxRun, resumeScan, getScan, scanEventsUrl, ApiError,
 } from "@/api/client";
+import { useScans } from "./useScans";
 import { useEventSource } from "@/api/useEventSource";
 import type { BlackboxRunSummary, ScanSummary } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
@@ -30,9 +32,7 @@ import type { WsOverviewCtx } from "./";
 // 终态集（spec §5.1 resume 仅非终态放行，终态 422）。interrupted 等属未完成可恢复。
 const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed"]);
 
-// 运行中卡轮询间隔（静默刷新 listScans → progress_pct 实时推进；终态卡不轮询）。
-const POLL_INTERVAL_MS = 10_000;
-
+// 运行中判定（分段过滤用）；轮询节奏由 useScans 的 SWR refreshInterval 管理。
 const isRun = (s: ScanSummary) => s.is_running || s.status === "running";
 
 /** 状态分段（filter 分段控件口径）：running/completed/failed + other（interrupted 等，仅「全部」可见）。 */
@@ -81,33 +81,9 @@ export function ScanList() {
   // WorkspaceDetail（Outlet 父级）聚合联动：操作/scan_end 后同步刷新 Hero/指标条。
   // 独立渲染（单测直挂 Route）时无 context → null，退化为仅自身刷新。
   const wsCtx = useOutletContext<WsOverviewCtx | null>();
-  const [scans, setScans] = useState<ScanSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  // SWR 数据层（spec §6.3）：与父容器共享 key → 单请求单轮询（运行中才 10s，后台 tab 暂停）。
+  const { scans, loading, error: err, refresh: refreshScans } = useScans(workspace);
   const [filters, setFilters] = useState<ListFilters>(DEFAULT_LIST_FILTERS);
-
-  const load = () => {
-    if (!workspace) return;
-    setLoading(true);
-    setErr(null);
-    listScans(workspace)
-      .then(setScans)
-      .catch((e: unknown) => { setErr(String(e)); setScans([]); })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(load, [workspace]);
-
-  // 运行中行存在时静默轮询刷新（progress_pct 实时推进 → x% 动）；终态不轮询。
-  // 静默（不 setLoading）→ 不闪 Skeleton → 运行中行 SSE 连接保持、步级不重置。
-  const hasRunning = scans.some(isRun);
-  useEffect(() => {
-    if (!hasRunning || !workspace) return;
-    const id = setInterval(() => {
-      listScans(workspace).then(setScans).catch(() => {});
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [hasRunning, workspace]);
 
   // 关键词 + 类型先行过滤（分段计数以此为准，计数不随当前分段变化）；
   // 分段口径见 segOf：other（interrupted 等）只在「全部」出现。
@@ -133,8 +109,8 @@ export function ScanList() {
 
   const filtered = filters.seg === "all" ? kwTyped : kwTyped.filter((s) => segOf(s) === filters.seg);
 
-  // 行操作后：刷新自身列表 + 联动 Hero 聚合。
-  const reload = () => { load(); wsCtx?.refresh?.(); };
+  // 行操作后：刷新自身列表 + 联动 Hero 聚合（同 key mutate 经 SWR 去重为一次请求）。 */
+  const reload = () => { refreshScans(); wsCtx?.refresh?.(); };
 
   // 空工作区（v4）：过滤器隐藏（无对象可过滤）、列表头 CTA 移除（空态卡是唯一主操作）。
   // loading 期间保持显（避免加载闪隐），加载完确认为空才收起。
@@ -169,7 +145,7 @@ export function ScanList() {
         {workspace && showListChrome && (
           <Button variant="cta" asChild>
             <Link to={`/scan/new?workspace=${encodeURIComponent(workspace)}`}>
-              <Plus className="size-4" />{t("workspaceDetail.scans.newScan")}
+              {t("workspaceDetail.scans.newScan")}
             </Link>
           </Button>
         )}
@@ -232,7 +208,7 @@ export function ScanList() {
             {workspace && (
               <Button variant="cta" asChild>
                 <Link to={`/scan/new?workspace=${encodeURIComponent(workspace)}`}>
-                  <Plus className="size-4" />{t("workspaceDetail.scans.newScan")}
+                  {t("workspaceDetail.scans.newScan")}
                 </Link>
               </Button>
             )}

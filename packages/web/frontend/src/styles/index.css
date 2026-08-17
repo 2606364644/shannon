@@ -99,3 +99,26 @@
   .dash-flow-lane { opacity: 0.4; }
 }
 
+/* ===== 工作区磁贴 · 目标锁定角括线（重设计 2026-08-17）=====
+   TL+BR 两角 L 形描线（瞄准镜取景语言）：hover=coral 锁定该目标；
+   运行中（.ws-tile-live）=cyan 常显——该目标正在被扫描。纯透明度过渡，无位移。 */
+.ws-tile::before,
+.ws-tile::after {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  pointer-events: none; opacity: 0; transition: opacity 0.16s ease; z-index: 1;
+}
+.ws-tile::before {
+  top: 6px; left: 6px;
+  border-top: 1.5px solid hsl(var(--primary)); border-left: 1.5px solid hsl(var(--primary));
+  border-top-left-radius: 3px;
+}
+.ws-tile::after {
+  bottom: 6px; right: 6px;
+  border-bottom: 1.5px solid hsl(var(--primary)); border-right: 1.5px solid hsl(var(--primary));
+  border-bottom-right-radius: 3px;
+}
+.ws-tile:hover::before, .ws-tile:hover::after { opacity: 0.85; }
+.ws-tile-live::before, .ws-tile-live::after {
+  opacity: 1; border-color: hsl(var(--c-cyan));
+}
+

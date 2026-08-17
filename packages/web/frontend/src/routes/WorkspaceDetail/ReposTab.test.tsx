@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { SWRConfig } from "swr";
 import { AuthProvider } from "@/auth/AuthContext";
 import { ReposTab } from "./ReposTab";
 
@@ -26,9 +27,11 @@ describe("ReposTab", () => {
     );
     render(
       <AuthProvider>
-        <MemoryRouter>
-          <ReposTab workspace="ws1" />
-        </MemoryRouter>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <MemoryRouter>
+            <ReposTab workspace="ws1" />
+          </MemoryRouter>
+        </SWRConfig>
       </AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
@@ -47,7 +50,7 @@ describe("ReposTab", () => {
       ]), { status: 200 }),
     );
     render(
-      <AuthProvider><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></AuthProvider>,
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("ftoa")).toBeTruthy());
     expect(screen.getByText("repos.linkedBadge")).toBeTruthy();   // 关联徽标
@@ -64,7 +67,7 @@ describe("ReposTab", () => {
       new Response(JSON.stringify([{ name: "r1", state: "ready" }]), { status: 200 }),
     );
     render(
-      <AuthProvider><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></AuthProvider>,
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
     expect(screen.queryByText("repos.linkedBadge")).toBeNull();
@@ -87,7 +90,7 @@ describe("ReposTab", () => {
       ]), { status: 200 });
     });
     render(
-      <AuthProvider><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></AuthProvider>,
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
     // 初始无批量删除入口
@@ -122,7 +125,7 @@ describe("ReposTab", () => {
       ]), { status: 200 });
     });
     const { container } = render(
-      <AuthProvider><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></AuthProvider>,
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
     );
     await waitFor(() => expect(screen.getByText("r1")).toBeTruthy());
     // 列头只出现一次（重构前每个分组一张独立表，列头重复 N 次）

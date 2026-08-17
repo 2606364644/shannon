@@ -1,34 +1,27 @@
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
+import { getScanEventStore, EMPTY_SNAPSHOT, type SseSnapshot } from "./scanEventStore";
 import type { NdjsonEvent } from "./types";
 
-export type SseStatus = "open" | "closed" | "error";
+export type { SseStatus } from "./scanEventStore";
 export interface UseEventSource {
-  events: NdjsonEvent[]; status: SseStatus; lastEventId?: string;
+  events: NdjsonEvent[];
+  status: SseSnapshot["status"];
+  lastEventId?: string;
 }
 
+/** SSE 订阅 hook（spec §E）：scanEventStore 的薄包装。url 为空（scanId 未就绪）时
+ *  不连接。快照由 store 维持引用稳定，useSyncExternalStore 不会空转。 */
 export function useEventSource(url: string, stopType: string = "scan_end"): UseEventSource {
-  const [events, setEvents] = useState<NdjsonEvent[]>([]);
-  const [status, setStatus] = useState<SseStatus>("closed");
-  const [lastEventId, setLastEventId] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (!url) return;     // 守卫：url 缺失（如 scanId 尚未就绪）不连接，避免 EventSource 异常
-    const Es = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!Es) return;
-    const es = new Es(url);
-    setStatus("open");
-    es.onmessage = (e: MessageEvent) => {
-      const line = String(e.data);
-      let ev: NdjsonEvent;
-      try { ev = JSON.parse(line) as NdjsonEvent; } catch { return; }
-      if (e.lastEventId) setLastEventId(e.lastEventId);
-      if (ev.type === stopType) { setStatus("closed"); es.close(); }
-      setEvents((prev) => [...prev, ev]);
-    };
-    es.onerror = () => setStatus("error");    // EventSource 内置自动重连（带 Last-Event-ID）
-    es.onopen = () => setStatus("open");
-    return () => es.close();
-  }, [url, stopType]);
-
-  return { events, status, lastEventId };
+  // getScanEventStore 是按 key 幂等的纯 Map 访问（连接在 subscribe 时才建立），
+  // 渲染期调用安全；url 为空时不取 store。
+  const store = url ? getScanEventStore(url, stopType) : null;
+  const subscribe = useCallback(
+    (cb: () => void) => (store ? store.subscribe(cb) : () => {}),
+    [store],
+  );
+  const getSnapshot = useCallback(
+    () => (store ? store.getSnapshot() : EMPTY_SNAPSHOT),
+    [store],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

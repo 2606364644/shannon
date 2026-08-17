@@ -7,6 +7,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { Toaster } from "@/components/ui/sonner";
 import { HostProfilesPage } from "./HostProfilesPage";
@@ -36,9 +37,12 @@ afterAll(() => server.close());
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/p/ws1/host-profiles"]}>
-      <Routes>
-        <Route path="/p/:workspace/host-profiles" element={<><HostProfilesPage /><Toaster /></>} />
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache 隔离。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/host-profiles" element={<><HostProfilesPage /><Toaster /></>} />
+        </Routes>
+      </SWRConfig>
     </MemoryRouter>,
   );
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { renderWithSwr } from "@/test/swr-render";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -59,7 +60,7 @@ afterAll(() => server.close());
 // index/repos/settings 用占位 div 替换，聚焦 WorkspaceDetail 布局本身（header + Outlet），
 // 不引入 ScanList/ReposTab 的自有请求。
 function renderAt(initialPath: string) {
-  return render(
+  return renderWithSwr(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/p/:workspace" element={<WorkspaceDetail />}>
@@ -88,11 +89,11 @@ describe("WorkspaceDetail ws 概览", () => {
     expect(screen.getByText("scanlist-content")).toBeInTheDocument();
   });
 
-  it("Hero 显 latest 状态徽标 + 扫描任务数聚合（scans.length）", async () => {
+  it("Hero 显扫描任务数聚合（scans.length），不显 latest 状态徽标", async () => {
     renderAt("/p/ws");
-    // 聚合 2 条扫描 → 「扫描任务 · 2」；latest（created_at 倒序 = s1）→ running 徽标
+    // 聚合 2 条扫描 → 「扫描任务 · 2」；成功/失败是单项扫描任务的概念，头部无状态徽标
     await waitFor(() => expect(screen.getByText(/扫描任务 · 2/)).toBeInTheDocument());
-    expect(document.querySelector("[title='running']")).toBeInTheDocument();
+    expect(document.querySelector("[title='running']")).not.toBeInTheDocument();
   });
 
   it("累计发现大数字（Hero 威胁信号）", async () => {

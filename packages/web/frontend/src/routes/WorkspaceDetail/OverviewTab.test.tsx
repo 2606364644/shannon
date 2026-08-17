@@ -3,6 +3,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { OverviewTab } from "./OverviewTab";
 
@@ -27,9 +28,13 @@ afterAll(() => server.close());
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/p/:workspace/scans/:scanId/overview" element={<OverviewTab />} />
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache，防全局缓存把前一测试的同 key 数据
+          带进后一测试（各测试 msw payload 不同）。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/scans/:scanId/overview" element={<OverviewTab />} />
+        </Routes>
+      </SWRConfig>
     </MemoryRouter>,
   );
 }

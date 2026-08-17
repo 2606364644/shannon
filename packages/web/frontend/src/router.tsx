@@ -1,30 +1,34 @@
+import { lazy } from "react";
 import { createBrowserRouter, useNavigate, useParams, Navigate } from "react-router-dom";
 import { useEffect } from "react";
-import { ScanNewPage } from "./pages/ScanNewPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import WorkspaceDetail from "./routes/WorkspaceDetail";
-import { ScanList } from "./routes/WorkspaceDetail/ScanList";
-import ScanDetail from "./routes/WorkspaceDetail/ScanDetail";
-import { OverviewTab } from "./routes/WorkspaceDetail/OverviewTab";
-import { ReportTab } from "./routes/WorkspaceDetail/ReportTab";
-import { DeliverablesTab } from "./routes/WorkspaceDetail/DeliverablesTab";
-import { LogsTab } from "./routes/WorkspaceDetail/LogsTab";
-import LiveTab from "./routes/WorkspaceDetail/LiveTab";
-import { ReposTab } from "./routes/WorkspaceDetail/ReposTab";
-import WsSettingsTab from "./routes/WorkspaceDetail/WsSettingsTab";
-import { AuthProfilesPage } from "./pages/AuthProfilesPage";
-import { AuthProfileTestPage } from "./pages/AuthProfileTestPage";
-import { VerifyProcessPage } from "./pages/VerifyProcessPage";
-import { HostProfilesPage } from "./pages/HostProfilesPage";
 import { getScan, listScans } from "./api/client";
 import { AppShell } from "./components/layout/AppShell";
-import { DevComponentsPage } from "./pages/DevComponentsPage";
 import LoginPage from "./pages/LoginPage";
 import { RequireAuth } from "./auth/RequireAuth";
-import { UsersPage } from "./pages/UsersPage";
 import { RequireAdmin } from "./auth/RequireAdmin";
-import { WorkspacesEntry } from "./components/WorkspacesEntry";
+
+// 重页面按需加载（spec §B）：Login/Dashboard 是最高频首屏路径保持 eager；
+// ReportTab → MarkdownView → react-markdown/micromark/highlight 栈随动态 import 独立成 chunk。
+const ScanNewPage = lazy(() => import("./pages/ScanNewPage").then(m => ({ default: m.ScanNewPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const UsersPage = lazy(() => import("./pages/UsersPage").then(m => ({ default: m.UsersPage })));
+const WorkspaceDetail = lazy(() => import("./routes/WorkspaceDetail"));
+const ScanList = lazy(() => import("./routes/WorkspaceDetail/ScanList").then(m => ({ default: m.ScanList })));
+const ScanDetail = lazy(() => import("./routes/WorkspaceDetail/ScanDetail"));
+const OverviewTab = lazy(() => import("./routes/WorkspaceDetail/OverviewTab").then(m => ({ default: m.OverviewTab })));
+const ReportTab = lazy(() => import("./routes/WorkspaceDetail/ReportTab").then(m => ({ default: m.ReportTab })));
+const DeliverablesTab = lazy(() => import("./routes/WorkspaceDetail/DeliverablesTab").then(m => ({ default: m.DeliverablesTab })));
+const LogsTab = lazy(() => import("./routes/WorkspaceDetail/LogsTab").then(m => ({ default: m.LogsTab })));
+const LiveTab = lazy(() => import("./routes/WorkspaceDetail/LiveTab"));
+const ReposTab = lazy(() => import("./routes/WorkspaceDetail/ReposTab").then(m => ({ default: m.ReposTab })));
+const WsSettingsTab = lazy(() => import("./routes/WorkspaceDetail/WsSettingsTab"));
+const AuthProfilesPage = lazy(() => import("./pages/AuthProfilesPage").then(m => ({ default: m.AuthProfilesPage })));
+const AuthProfileTestPage = lazy(() => import("./pages/AuthProfileTestPage").then(m => ({ default: m.AuthProfileTestPage })));
+const VerifyProcessPage = lazy(() => import("./pages/VerifyProcessPage").then(m => ({ default: m.VerifyProcessPage })));
+const HostProfilesPage = lazy(() => import("./pages/HostProfilesPage").then(m => ({ default: m.HostProfilesPage })));
+const WorkspacesEntry = lazy(() => import("./components/WorkspacesEntry").then(m => ({ default: m.WorkspacesEntry })));
+const DevComponentsPage = lazy(() => import("./pages/DevComponentsPage").then(m => ({ default: m.DevComponentsPage })));
 
 // per-scan 默认 tab：进行中 -> live，完成 -> report。fetch scan status 后 navigate（replace 避免占历史栈）。
 function DefaultScanTab() {

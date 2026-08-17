@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiGetText, getScan, scanReportPath, blackboxRunReportPath } from "../../api/client";
+import { scanReportPath, blackboxRunReportPath } from "../../api/client";
 // useTranslation 在子组件 SingleReport/CombinedReport 内使用；顶层 ReportTab 仅路由态。
 import { MarkdownView } from "../../components/MarkdownView";
 import { ErrorState } from "../../components/ErrorState";
@@ -9,6 +9,8 @@ import { Empty } from "../../components/Empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunFailureBanner, isRunFailureStatus } from "./runStatus";
+import { useScanDetail } from "./useScanDetail";
+import { useApiText } from "@/api/useApiResource";
 import type { BlackboxRunSummary } from "@/api/types";
 
 type Track = "whitebox" | "blackbox" | "combined";
@@ -21,16 +23,10 @@ type Track = "whitebox" | "blackbox" | "combined";
  */
 export function ReportTab() {
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
-  const [combined, setCombined] = useState<boolean | null>(null);
-
-  // 先探 combined 标记（getScan 透传 session.combined）。失败/非组合 → null（走单视图）。
-  useEffect(() => {
-    if (!workspace || !scanId) return;
-    setCombined(null);
-    getScan(workspace, scanId)
-      .then((s) => setCombined(s.combined === true))
-      .catch(() => setCombined(false));
-  }, [workspace, scanId]);
+  // combined 探测走共享 key（2026-08-17 批次 Task 2）：与 ScanDetail / OverviewTab 同份
+  // ["scan", ws, id] 缓存，不再独立 getScan。失败 → false（走单视图）。
+  const { data, error } = useScanDetail(workspace, scanId);
+  const combined = error ? false : data ? data.combined === true : null;
 
   if (combined === null) {
     // combined 探测中：Skeleton（与单视图 loading 一致外观）。
@@ -44,20 +40,11 @@ export function ReportTab() {
   return <SingleReport ws={workspace!} scanId={scanId!} />;
 }
 
-/** 非组合：原单报告视图（零回归）。 */
+/** 非组合：原单报告视图（零回归；SWR 迁移 2026-08-17 批次 Task 4）。 */
 function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
   const { t } = useTranslation();
-  const [md, setMd] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    setLoading(true);
-    setErr(null);
-    setMd("");
-    apiGetText(scanReportPath(ws, scanId))
-      .then((txt) => { setMd(txt); setLoading(false); })
-      .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [ws, scanId]);
+  // key 即报告 path → 切 tab 重挂载时缓存即时显示（大 markdown 不重拉）。
+  const { text: md, loading, error: err } = useApiText(scanReportPath(ws, scanId));
   if (err) return <ErrorState message={t("workspaceDetail.report.loadError", { error: err })} />;
   if (loading) {
     return (
@@ -85,21 +72,11 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
   const selectedRun = outletCtx?.selectedRun ?? null;
   const runSummary = outletCtx?.runSummary ?? null;
   const [track, setTrack] = useState<Track>("combined");
-  const [md, setMd] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    setErr(null);
-    setMd("");
-    const path = (selectedRun && (track === "blackbox" || track === "combined"))
-      ? blackboxRunReportPath(ws, scanId, selectedRun, track === "combined" ? "combined" : undefined)
-      : scanReportPath(ws, scanId, track);
-    apiGetText(path)
-      .then((txt) => { setMd(txt); setLoading(false); })
-      .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [ws, scanId, track, selectedRun]);
+  // key 即报告 path（track × selectedRun 派生）→ 三子 tab 切换后切回缓存即时显示。
+  const path = (selectedRun && (track === "blackbox" || track === "combined"))
+    ? blackboxRunReportPath(ws, scanId, selectedRun, track === "combined" ? "combined" : undefined)
+    : scanReportPath(ws, scanId, track);
+  const { text: md, loading, error: err } = useApiText(path);
 
   // 选中 run 终态失败且无可用报告 → 黑盒/融合子 tab 优先展示失败原因横幅（而非通用 Empty/Error）。
   const showRunFailure = (track === "blackbox" || track === "combined")

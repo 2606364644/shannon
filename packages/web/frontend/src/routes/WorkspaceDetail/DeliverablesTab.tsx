@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  apiGet, apiGetText, scanDeliverablesPath, blackboxRunDeliverablesPath,
+  apiGetText, scanDeliverablesPath, blackboxRunDeliverablesPath,
 } from "../../api/client";
+import { useApiJson } from "@/api/useApiResource";
 import type { DeliverablesSummary, DeliverablesFile } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { MarkdownView } from "../../components/MarkdownView";
@@ -25,23 +26,16 @@ export function DeliverablesTab() {
   // 版本化 run（spec 2026-08-14）：selectedRun 非空时黑盒产物读该 run 的 deliverables。
   const outletCtx = useOutletContext<{ selectedRun?: string | null }>();
   const selectedRun = outletCtx?.selectedRun ?? null;
-  const [data, setData] = useState<DeliverablesSummary | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<DeliverablesFile | null>(null);
-  useEffect(() => {
-    if (!workspace || !scanId) return;
-    setLoading(true);
-    setData(null);
-    setSel(null);
-    setErr(null);
-    const path = selectedRun
-      ? blackboxRunDeliverablesPath(workspace, scanId, selectedRun)
-      : scanDeliverablesPath(workspace, scanId);
-    apiGet<DeliverablesSummary>(path)
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((e: unknown) => { setData(null); setErr(String(e)); setLoading(false); });
-  }, [workspace, scanId, selectedRun]);
+  // SWR 数据层（2026-08-17 批次 Task 4）：key 即产物 path（run 选择派生）→ 切 tab
+  // 重挂载缓存即时显示；path 变化（切 run）时重置文件选中。
+  const path = workspace && scanId
+    ? (selectedRun
+        ? blackboxRunDeliverablesPath(workspace, scanId, selectedRun)
+        : scanDeliverablesPath(workspace, scanId))
+    : null;
+  const { data, loading, error: err } = useApiJson<DeliverablesSummary>(path);
+  useEffect(() => { setSel(null); }, [path]);
 
   // 三态早返回（同 Task 9 模式）：err → ErrorState；loading → Skeleton；data → 主布局
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.loadError", { error: err })} />;

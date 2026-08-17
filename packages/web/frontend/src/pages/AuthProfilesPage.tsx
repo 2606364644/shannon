@@ -1,12 +1,13 @@
 // 认证档案库 页面(ws-child tab 内容)。范式镜像 UsersPage.tsx
 // (refresh / loading / error / Card+Table / dialog 挂载) + ReposTab(useParams ws-scoped)。
 // 结构: 档案列表 + 新建/编辑/删除 + 凭据行(占位, Task 12 扩展)。
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2, Pencil, Copy, FlaskConical } from "lucide-react";
-import { listAuthProfiles, deleteAuthProfile, forkProfile } from "@/api/authProfiles";
+import { deleteAuthProfile, forkProfile } from "@/api/authProfiles";
+import { useAuthProfiles } from "@/api/useAuthProfiles";
 import { ApiError } from "@/api/client";
 import type { AuthProfile } from "@/api/types";
 import { Card } from "@/components/ui/card";
@@ -22,25 +23,12 @@ export function AuthProfilesPage() {
   const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
   const nav = useNavigate();
-  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AuthProfile | null>(null);
   const [delTarget, setDelTarget] = useState<AuthProfile | null>(null);
-
-  async function refresh() {
-    if (!workspace) return;
-    setLoading(true); setError(null);
-    try {
-      setProfiles(await listAuthProfiles(workspace));
-    } catch {
-      setError(t("authProfiles.createFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { void refresh(); }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+  // SWR 数据层（2026-08-17 渐进迁移）：切回 tab 缓存即时显示 + 后台 revalidate，
+  // 取代旧 useState+refresh 每次全屏 Skeleton；key 与 ScanFormFields 下拉共享。
+  const { profiles, loading, error, refresh } = useAuthProfiles(workspace);
 
   async function onDelete() {
     if (!workspace || !delTarget) return;

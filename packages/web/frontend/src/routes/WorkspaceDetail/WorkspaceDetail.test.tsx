@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { screen, waitFor, cleanup } from "@testing-library/react";
+import { renderWithSwr } from "@/test/swr-render";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -36,7 +37,7 @@ afterAll(() => server.close());
 
 // ws 概览：/p/:ws index 渲染扫描列表占位（不引入 ScanList 自有 listScans 请求）。
 function renderAt(path: string) {
-  return render(
+  return renderWithSwr(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/p/:workspace" element={<WorkspaceDetail />}>
@@ -48,13 +49,13 @@ function renderAt(path: string) {
 }
 
 describe("WorkspaceDetail header", () => {
-  it("显返回链接 + workspace 名 + 元信息（latest status/scan_type 徽标）", async () => {
+  it("显返回链接 + workspace 名 + 元信息（latest scan_type 徽标；无状态徽标）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans", () =>
         HttpResponse.json([
           { scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 1000,
             completed_at: 2000, vuln_count: 0, is_running: false },
-          // latest（created_at 最新）→ 状态/类型徽标取这条
+          // latest（created_at 最新）→ 类型徽标取这条
           { scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 3000,
             vuln_count: 0, is_running: true },
         ]),
@@ -65,8 +66,8 @@ describe("WorkspaceDetail header", () => {
     expect(screen.getByText("ws1")).toBeInTheDocument();
     // Hero 类型徽标 + 指标条「运行中」ctx 都会出现 whitebox —— 至少一处即证明 latest 元信息渲染
     await waitFor(() => expect(screen.getAllByText("whitebox").length).toBeGreaterThan(0));
-    // latest = s1(running) → StatusBadge 兜底显 running（title 属性保留原 status）
-    expect(container.querySelector("[title='running']")).toBeInTheDocument();
+    // 成功/失败是单项扫描任务的概念，头部不显 latest 状态徽标
+    expect(container.querySelector("[title='running']")).not.toBeInTheDocument();
   });
 
   it("fetch 失败降级显 workspace 名（不阻塞 Outlet）", async () => {

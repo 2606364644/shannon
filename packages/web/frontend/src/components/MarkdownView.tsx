@@ -2,7 +2,19 @@ import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type Re
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
+import rehypeHighlightSubset from "@/lib/rehype-highlight-subset";
+import bash from "highlight.js/lib/languages/bash";
+import json from "highlight.js/lib/languages/json";
+import python from "highlight.js/lib/languages/python";
+import javascript from "highlight.js/lib/languages/javascript";
+import typescript from "highlight.js/lib/languages/typescript";
+import java from "highlight.js/lib/languages/java";
+import sql from "highlight.js/lib/languages/sql";
+import http from "highlight.js/lib/languages/http";
+import yaml from "highlight.js/lib/languages/yaml";
+import xml from "highlight.js/lib/languages/xml";
+import ini from "highlight.js/lib/languages/ini";
+import css from "highlight.js/lib/languages/css";
 import GithubSlugger from "github-slugger";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
@@ -20,6 +32,12 @@ import {
   type TopRiskItem,
 } from "@/lib/report-stats";
 import type { ParsedVulnBlock } from "../api/types";
+
+// 语言子集（spec §4.3）：经 vendored 精简插件（rehype-highlight-subset）注册，
+// 未列出的语法不进 bundle（上游 rehype-highlight 的 common fallback 不可摇树）。
+const HL_LANGS = { bash, json, python, javascript, typescript, java, sql, http, yaml, xml, ini, css };
+// 嵌套元组形态（react-markdown 约定）：rehypePlugins 数组的单个元素 = [plugin, options]。
+const HIGHLIGHT_PLUGIN = [[rehypeHighlightSubset, { languages: HL_LANGS }]] as const;
 
 interface Heading {
   id: string;
@@ -790,7 +808,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
               >
                 <ReactMarkdown
                   remarkPlugins={REMARK_PLUGINS}
-                  rehypePlugins={[makeSegmentSlugPlugin(i), rehypeHighlight] as never}
+                  rehypePlugins={[makeSegmentSlugPlugin(i), ...HIGHLIGHT_PLUGIN] as never}
                   components={proseComponents as never}
                 >
                   {g.md}
@@ -846,7 +864,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                             <div id={`${block.id}-body`} className="prose prose-sm max-w-none break-words prose-headings:font-sans">
                               <ReactMarkdown
                                 remarkPlugins={REMARK_PLUGINS}
-                                rehypePlugins={[rehypeHighlight] as never}
+                                rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
                                 components={proseComponents as never}
                               >
                                 {bodyMd}
@@ -861,7 +879,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                               <div className="prose prose-sm max-w-none break-words prose-headings:font-sans">
                                 <ReactMarkdown
                                   remarkPlugins={REMARK_PLUGINS}
-                                  rehypePlugins={[rehypeHighlight] as never}
+                                  rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
                                   components={proseComponents as never}
                                 >
                                   {pocMd}
@@ -891,7 +909,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                   <div className="prose prose-sm max-w-none break-words prose-headings:font-sans">
                     <ReactMarkdown
                       remarkPlugins={REMARK_PLUGINS}
-                      rehypePlugins={[rehypeHighlight] as never}
+                      rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
                       components={proseComponents as never}
                     >
                       {e.md}

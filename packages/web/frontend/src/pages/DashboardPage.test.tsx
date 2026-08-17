@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
+import { screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
+import { renderWithSwr } from "@/test/swr-render";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { DashboardPage } from "./DashboardPage";
@@ -28,7 +29,7 @@ const userUser = { id: 1, username: "alice", role: "user", must_change_password:
 const userAdmin = { id: 2, username: "root", role: "admin", must_change_password: false };
 
 function renderPage() {
-  return render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+  return renderWithSwr(<MemoryRouter><DashboardPage /></MemoryRouter>);
 }
 
 describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
@@ -69,6 +70,9 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
     // 磁贴 meta：扫描数
     expect(screen.getByText("1 扫描")).toBeInTheDocument();
     expect(screen.getByText("2 扫描")).toBeInTheDocument();
+    // 工作区级别不显失败标志（成功/失败是任务级概念）：ws-b latest=failed 仍无状态字
+    expect(screen.queryByText("失败")).not.toBeInTheDocument();
+    expect(screen.queryByText("中断")).not.toBeInTheDocument();
   });
 
   it("无扫描表格（明细与操作全部在工作区页，两页零结构重叠）", async () => {

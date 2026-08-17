@@ -1,7 +1,7 @@
 # 前端性能优化四件套 + React 19 升级 设计
 
 > 日期：2026-08-17
-> 状态：设计定稿（brainstorming + 全量代码/依赖核查产出，待 writing-plans 拆任务）
+> 状态：已实施（2026-08-17，实施记录见 git log / 计划文档；§4.3 有一处实施期修正，见文末「实施结果」）
 > 主题：修复 `packages/web/frontend` 的四个已实证性能问题——①路由零代码分割（单 chunk 1.2MB）②MarkdownView 滚动重复解析 ③WorkspaceSwitcher 全局 5s 无条件轮询 ④SSE 事件数组无界增长——并以 React 官方机制为主轴落地：React.lazy + Suspense、React Compiler、useSyncExternalStore；数据层引入 SWR（用户指定）；同时升级 React 18.3.1 → 19.2.8 并顺手清理 forwardRef / `<title>` 样板。
 > 关联：无前置 spec；本 spec 只动 `packages/web/frontend`，后端 / Python 侧零改动。
 
@@ -190,3 +190,34 @@
 ## 10. 实施顺序
 
 **A（升级）→ B（分割）→ C（编译器）→ D（SWR）→ E（SSE store）**，A 是其余各项的前置；每步独立可验证（测试 + build 通过才进下一步）。
+
+---
+
+## 11. 实施结果（2026-08-17）
+
+### chunk 前后对比（vite build）
+
+| chunk | 实施前（单 chunk） | 实施后 | gzip 后 |
+|---|---|---|---|
+| 全部 JS | 1150.47 kB 单文件（gzip 349.96 kB） | 多 chunk 按需加载 | — |
+| 主入口 index | —（含在上面） | 531.88 kB（含 React Compiler ~30 kB 运行时） | 177.22 kB |
+| react-vendor | —（含在上面） | 81.62 kB（长缓存独立） | 27.71 kB |
+| MarkdownView（报告栈） | —（含在上面，首屏必拉） | 282.55 kB（仅打开报告时加载） | 89.23 kB |
+| ScanNewPage / ScanDetail / Settings 等其余 | —（含在上面） | 0.24–63.10 kB / 页 | — |
+
+首屏（Dashboard 路由）JS 由 1150.47 kB（gzip 349.96）降至约 630 kB（gzip 约 210，入口+vendor+共享小 chunk），减约 45%；报告栈 282.55 kB 延迟到 ReportTab 打开。
+
+### §4.3 实施期修正（rehype-highlight 语言子集）
+
+计划中的 `languages` 选项方案只影响运行时注册，**减不了 bundle**：`rehype-highlight/lib/index.js` 的 fallback `settings.languages || common` 引用使 rollup 无法摇掉 lowlight 的 common 全集 re-export。实施改为 vendored 精简插件 `src/lib/rehype-highlight-subset.ts`（只 import `createLowlight`，languages 必传、无 common 引用），common 全集（kotlin/objectivec/swift 等 35 个未用语法，~94 kB）被整体摇除；`rehype-highlight` 依赖移除，`lowlight` + `hast-util-to-text` 转直接依赖。
+
+### 测试结论
+
+`npm test`：864 通过（新增 `scanEventStore.test.ts` 6 个；`useWorkspaces`/`useEventSource` 既有直测按新语义适配——SWR 独立 cache wrapper、rAF 同步桩），仅 2 个已知基线文件失败（本地 fixture 缺失，非回归）。`tsc -b` 0 error；`npm run build` 成功。
+
+### 其余交付
+
+- React 18.3.1 → 19.2.8；`@types/react` 19；14 个 ui 原语 forwardRef → ref-as-prop。
+- SWR 2.5.1：`useWorkspaces`（后台 tab 停轮询 + 回前台刷新）、Dashboard 条件轮询（`refreshInterval` 函数式）、`useScans` 共享 key 去重（WorkspaceDetail + ScanList 单请求单轮询）。
+- SSE：`scanEventStore`（rAF 批量 + 5000 环形缓冲 + 引用计数单例）+ `useEventSource` 改 `useSyncExternalStore` 薄包装（对外 API 不变）。
+- React Compiler 1.0.0（`panicThreshold: "none"`，失败回退不挂构建）。

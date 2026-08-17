@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
-import { Activity, ChevronRight, Plus, RefreshCw, Waves } from "lucide-react";
+import { Activity, ChevronRight, CircleDollarSign, Clock, Layers, RefreshCw, ShieldCheck, Waves } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Empty } from "@/components/Empty";
 import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
-import { listAllScans, apiGet } from "@/api/client";
-import type { ScanSummary, Workspace } from "@/api/types";
+import { listAllScans } from "@/api/client";
+import type { ScanSummary } from "@/api/types";
+import { useWorkspaces } from "@/api/useWorkspaces";
 import { fmtCost, currencySymbol } from "@/utils/currency";
 import { fmtTime, fmtElapsed } from "@/utils/format";
 import { scanSegmentLabel } from "@/routes/WorkspaceDetail/ScanProgressBadge";
-import { useAsync } from "@/lib/useAsync";
+import useSWR from "swr";
 import { useAuth } from "@/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,9 @@ function isToday(unix: number | null | undefined): boolean {
 }
 
 const isRun = (s: ScanSummary) => s.is_running || s.status === "running";
+
+/** 稳定空数组：SWR 首帧 data=undefined 时的兜底引用（避免每次渲染新 [] 触发 [data] effect）。 */
+const EMPTY_SCANS: ScanSummary[] = [];
 
 /** 发现构成：vuln_counts 按类别聚合 → Top4 + 其他（类别≠严重度，配色用同族珊瑚递减
  *  透明度，避免被误读为严重级别）。旧数据无 vuln_counts → total=0 整条隐藏。 */
@@ -42,16 +46,8 @@ function vulnComposition(scans: ScanSummary[]) {
   };
 }
 
-/** 磁贴状态口径（左侧色条 + 状态字）：running=cyan / failed=red / interrupted=amber /
- *  completed 仅 0 发现时给绿色 all-clear 条（完成≠异常，无发现才值得标「清」）。 */
-type TileSt = "running" | "completed" | "failed" | "interrupted";
-function tileSt(s: ScanSummary | undefined): TileSt | null {
-  if (!s) return null;
-  if (isRun(s)) return "running";
-  if (s.status === "completed" || s.status === "done") return "completed";
-  if (["failed", "killed", "crashed"].includes(s.status)) return "failed";
-  return "interrupted";
-}
+/** 磁贴只保留「运行中」活动指示（cyan 色条 + dot-live + 状态字）：成功/失败/中断是
+ *  单项扫描任务的概念，工作区级别不设状态标志（明细状态在 ScanList 逐行可见）。 */
 
 /** 猎杀特效偏好（概览本地，不进全局设置）：signal 轨迹 | flow 污点流光 */
 const FX_KEY = "supernova-dash-fx";
@@ -68,11 +64,23 @@ type DashFx = "signal" | "flow";
  */
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { data, loading, error, refresh } = useAsync(listAllScans, []);
+  // SWR 数据层（spec §6.3）：条件轮询（有运行中才 10s）+ 后台 tab 自动暂停 + 回前台刷新。
+  const { data: raw, isLoading, error: rawError, mutate } = useSWR<ScanSummary[]>(
+    "all-scans",
+    () => listAllScans(),
+    { refreshInterval: (latest?: ScanSummary[]) => (latest?.some(isRun) ? 10_000 : 0) },
+  );
+  const data = raw ?? EMPTY_SCANS;
+  const loading = isLoading && raw === undefined;
+  const error = rawError ? (rawError instanceof Error ? rawError.message : String(rawError)) : null;
+  const refresh = useCallback(async () => { await mutate(); }, [mutate]);
   // admin 无 ws 空态判断：拉一次用户可见 ws 列表（与 ScanNewPage 同源 /workspaces）。
   // CreateWorkspaceDialog 唯一入口在 ws 内 Switcher（/p/:ws），无 ws 时进不去 → 着陆空态补创建入口解锁。
   // wsError：拉取失败时 workspaces=[] 会误判「无 ws」→ guard 掉，退回普通空态。
-  const { data: workspaces, loading: wsLoading, error: wsError } = useAsync(() => apiGet<Workspace[]>("/workspaces"), []);
+  // SWR 残留清理（2026-08-17 批次 Task 6）：换 useWorkspaces（与全局 Switcher 同 key
+  // "/workspaces" 缓存去重）；intervalMs=0 关轮询——本页只需拉一次判空态，轮询是
+  // Switcher 的语义。
+  const { data: workspaces, loading: wsLoading, error: wsError } = useWorkspaces(0);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const nav = useNavigate();
@@ -91,14 +99,7 @@ export function DashboardPage() {
   const doRefresh = () => { setRefreshedAt(Date.now()); void refresh(); };
   const ageSec = Math.floor((Date.now() - refreshedAt) / 1000);
 
-  // 有扫描在跑时自动轮询（10s 对齐上方新鲜度 tick）：磁贴进度/状态保持新鲜；
-  // tab 隐藏暂停、跑完自动停（回归安静）。
-  const hasRunning = data.some(isRun);
-  useEffect(() => {
-    if (!hasRunning) return;
-    const id = setInterval(() => { if (!document.hidden) void refresh(); }, 10_000);
-    return () => clearInterval(id);
-  }, [hasRunning, refresh]);
+  // 有扫描在跑时自动轮询由 SWR refreshInterval 承担（条件轮询见上）。
 
   // 全局聚合（横幅）：发现数 / 构成 / 今日完成 / 成本 / 需关注（失败+中断，非运行非完成）。
   const running = data.filter(isRun);
@@ -160,7 +161,7 @@ export function DashboardPage() {
     }
     return (
       <Empty title={t("dashboard.empty.title")} hint={t("dashboard.empty.hint")}>
-        <Button variant="cta" asChild><Link to="/scan/new"><Plus className="size-4" />{t("dashboard.newScan")}</Link></Button>
+        <Button variant="cta" asChild><Link to="/scan/new">{t("dashboard.newScan")}</Link></Button>
       </Empty>
     );
   }
@@ -231,7 +232,7 @@ export function DashboardPage() {
 
           <div className="flex items-center px-5 py-4">
             <Button variant="cta" asChild className="shrink-0">
-              <Link to="/scan/new"><Plus className="size-4" />{t("dashboard.newScan")}</Link>
+              <Link to="/scan/new">{t("dashboard.newScan")}</Link>
             </Button>
           </div>
         </div>
@@ -308,7 +309,10 @@ function BnStat({ label, value, tone }: { label: string; value: ReactNode; tone?
   );
 }
 
-/** 工作区磁贴：ws 名 + 状态 + 发现数/构成谱带 + 运行中扫描 mini 进度行 + meta。
+/** 工作区磁贴（重设计 2026-08-17，preview/dashboard-ws-tiles-redesign.html）：hairline 分区
+ *  （身份 / 信号 / 活动 / meta，对齐威胁横幅竖切语言）+ 目标锁定角括线（.ws-tile，见 index.css：
+ *  hover=coral 锁定，运行中=cyan 常显「正在被扫描」）。运行进度条 fill 统一 cyan（运行=cyan
+ *  全局语义）；空态（0 发现）是正向时刻——绿色盾形对勾。meta 区图标统计与切换器抽屉同语言。
  *  整卡可点进工作区页；运行中 mini 行可点直达该扫描 live（stopPropagation）。 */
 function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; latest?: ScanSummary }) {
   const { t } = useTranslation();
@@ -317,65 +321,71 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
   const totalVulns = scans.reduce((a, s) => a + (s.vuln_count ?? 0), 0);
   const composition = useMemo(() => vulnComposition(scans), [scans]);
 
-  const st = tileSt(latest);
-  const label = st ? t(`workspaces.status.${st === "completed" ? "completed" : st}`) : "";
-  // 左侧状态色条：running=cyan 辉光 / failed=red / interrupted=amber / completed+0发现=green all-clear。
-  const rail =
-    st === "running" ? "bg-cyan shadow-[0_0_8px_hsl(var(--c-cyan)/0.5)]"
-    : st === "failed" ? "bg-red"
-    : st === "interrupted" ? "bg-amber"
-    : st === "completed" && totalVulns === 0 ? "bg-green/70"
-    : "bg-transparent";
-
   return (
     <div
       data-testid={`ws-tile-${name}`}
       onClick={() => nav(`/p/${name}`)}
-      className="group relative flex cursor-pointer flex-col gap-2.5 overflow-hidden rounded-xl border bg-card p-4 pl-[18px] shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/55"
+      className={cn(
+        "ws-tile group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card",
+        "shadow-[var(--shadow-card)] transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5",
+        running.length > 0 && "ws-tile-live",
+      )}
     >
-      <span className={cn("absolute inset-y-0 left-0 w-[3px]", rail)} aria-hidden />
-      <div className="flex min-w-0 items-center gap-2">
-        {st === "running" && <span className="dash-live-dot h-[7px] w-[7px]" aria-hidden />}
-        <span className="truncate font-mono text-[13.5px] font-semibold">{name}</span>
-        <span className={cn(
-          "ml-auto flex shrink-0 items-center gap-1.5 text-[10.5px] font-medium",
-          st === "running" ? "text-cyan" : st === "failed" ? "text-red" : st === "interrupted" ? "text-amber" : "text-muted-foreground",
-        )}>
-          <span className="size-1.5 rounded-full bg-current" aria-hidden />
-          {label}
-        </span>
+      <span
+        className={cn(
+          "absolute inset-y-0 left-0 w-[3px]",
+          running.length > 0 ? "bg-cyan shadow-[0_0_8px_hsl(var(--c-cyan)/0.5)]" : "bg-transparent",
+        )}
+        aria-hidden
+      />
+
+      {/* 身份区：live dot + ws 名 + 运行中描边 chip */}
+      <div className="flex min-w-0 items-center gap-2 px-4 pb-2.5 pt-3">
+        {running.length > 0 && <span className="dash-live-dot h-[7px] w-[7px]" aria-hidden />}
+        <span className="truncate font-mono text-[13px] font-semibold tracking-tight">{name}</span>
+        {running.length > 0 && (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-cyan/50 px-2 py-px font-mono text-[10px] font-medium tracking-wide text-cyan">
+            <span className="size-1 rounded-full bg-current" aria-hidden />
+            {t("workspaces.status.running")}
+          </span>
+        )}
       </div>
 
-      <div className="flex items-baseline gap-2">
-        <span className={cn(
-          "font-mono text-[27px] font-semibold leading-none tracking-tight tabular-nums",
-          totalVulns > 0 ? "text-red" : "text-muted-foreground/70",
-        )}>
-          {totalVulns.toLocaleString()}
-        </span>
-        <span className="text-[10.5px] uppercase tracking-[0.05em] text-muted-foreground">{t("dashboard.tiles.findings")}</span>
-      </div>
-
-      {composition.total > 0 ? (
-        <div>
-          <div className="flex h-1 gap-px overflow-hidden rounded-full bg-border">
-            {composition.top.map(([cls, n], i) => (
-              <span key={cls} className="bg-primary" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
-            ))}
-            {composition.rest > 0 && <span className="bg-primary/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
-          </div>
-          <div className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground/90">
-            {composition.top.map(([cls, n]) => `${cls} ${n.toLocaleString()}`).join(" · ")}
-            {composition.rest > 0 ? ` · ${t("dashboard.hero.other")} ${composition.rest.toLocaleString()}` : ""}
-          </div>
+      {/* 信号区：发现数（主角）+ 分段构成谱带（2px 间隙分段读数，同族珊瑚透明度阶梯） */}
+      {totalVulns === 0 ? (
+        <div className="flex items-end gap-2 px-4 pb-3.5 pt-1">
+          <ShieldCheck className="mb-1 size-4 shrink-0 text-green" aria-hidden />
+          <span className="font-mono text-[30px] font-semibold leading-none tracking-tight tabular-nums text-green">0</span>
+          <span className="pb-0.5 text-[10px] tracking-[0.08em] text-muted-foreground">{t("dashboard.tiles.allClear")}</span>
         </div>
-      ) : totalVulns === 0 ? (
-        <div className="font-mono text-[10.5px] text-green/80">all clear · {t("dashboard.tiles.allClear")}</div>
-      ) : null}
+      ) : (
+        <div className="flex items-end gap-3 px-4 pb-3">
+          <div className="flex flex-none flex-col gap-0.5">
+            <span className="font-mono text-[30px] font-semibold leading-none tracking-tight tabular-nums text-red">
+              {totalVulns.toLocaleString()}
+            </span>
+            <span className="text-[10px] tracking-[0.08em] text-muted-foreground">{t("dashboard.tiles.findings")}</span>
+          </div>
+          {composition.total > 0 && (
+            <div className="min-w-0 flex-1 pb-1">
+              <div className="flex h-[5px] gap-0.5">
+                {composition.top.map(([cls, n], i) => (
+                  <span key={cls} className="rounded-[2px] bg-primary" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
+                ))}
+                {composition.rest > 0 && <span className="rounded-[2px] bg-primary/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
+              </div>
+              <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                {composition.top.map(([cls, n]) => `${cls} ${n.toLocaleString()}`).join(" · ")}
+                {composition.rest > 0 ? ` · ${t("dashboard.hero.other")} ${composition.rest.toLocaleString()}` : ""}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* 运行中扫描 mini 行（可点直达实时） */}
+      {/* 活动区：运行中扫描 mini 行（可点直达实时；进度 fill cyan=运行语义） */}
       {running.length > 0 && (
-        <div className="flex flex-col gap-1.5 border-t border-dashed border-border pt-2">
+        <div className="flex flex-col gap-2 border-t border-border/70 px-4 pb-2.5 pt-2">
           {running.map((s) => {
             const pct = Math.max(0, Math.min(100, Math.round(s.progress_pct ?? 0)));
             return (
@@ -383,7 +393,7 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
                 key={s.scan_id}
                 to={`/p/${name}/scans/${s.scan_id}/live`}
                 onClick={(e) => e.stopPropagation()}
-                className="grid gap-1 font-mono text-[11.5px]"
+                className="grid gap-1 font-mono text-[11px]"
               >
                 <span className="flex items-center justify-between gap-2.5">
                   <span className="truncate text-foreground transition-colors hover:text-primary">{s.workflow_id ?? s.scan_id}</span>
@@ -392,7 +402,7 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
                   </span>
                 </span>
                 <span className="block h-[3px] overflow-hidden rounded-full bg-border">
-                  <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                  <span className="block h-full rounded-full bg-cyan" style={{ width: `${pct}%` }} />
                 </span>
               </Link>
             );
@@ -400,12 +410,20 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
         </div>
       )}
 
-      <div className="mt-auto flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-        <span>{t("dashboard.tiles.scansUnit", { n: scans.length })}</span>
-        <span className="opacity-40">·</span>
-        <span>{tileCost(scans)}</span>
-        <span className="opacity-40">·</span>
-        <span>{fmtTime(latest?.created_at)}</span>
+      {/* meta 区：图标统计（与切换器抽屉同语言：Layers 扫描 / 成本 / 时钟最近活动） */}
+      <div className="mt-auto flex items-center gap-3 border-t border-border/70 px-4 pb-2.5 pt-2">
+        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[10.5px] tabular-nums text-foreground/80">
+          <Layers className="size-3 shrink-0 opacity-75" aria-hidden />
+          {t("dashboard.tiles.scansUnit", { n: scans.length })}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[10.5px] tabular-nums text-muted-foreground" title={t("dashboard.stats.totalCost")}>
+          <CircleDollarSign className="size-3 shrink-0 opacity-75" aria-hidden />
+          {tileCost(scans)}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[10.5px] tabular-nums text-muted-foreground" title={t("dashboard.startedAt")}>
+          <Clock className="size-3 shrink-0 opacity-75" aria-hidden />
+          {fmtTime(latest?.created_at)}
+        </span>
         <ChevronRight className="ml-auto size-3 shrink-0 text-muted-foreground/70 transition-all group-hover:translate-x-0.5 group-hover:text-primary" aria-hidden />
       </div>
     </div>

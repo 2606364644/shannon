@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { SessionData, SessionMetrics } from "../../api/types";
+import type { SessionMetrics } from "../../api/types";
 import { fmtCost } from "../../utils/currency";
-import { getScan } from "../../api/client";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
@@ -13,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { useScanDetail } from "./useScanDetail";
 
 function fmtMs(ms: number | null | undefined): string {
   if (ms == null || Number.isNaN(ms)) return "—";
@@ -23,17 +22,8 @@ function fmtMs(ms: number | null | undefined): string {
 export function OverviewTab() {
   const { t } = useTranslation();
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
-  const [s, setS] = useState<SessionData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!workspace || !scanId) return;
-    setErr(null);
-    setLoading(true);
-    getScan(workspace, scanId)
-      .then((data) => { setS(data); setLoading(false); })
-      .catch((e: unknown) => { setErr(String(e)); setLoading(false); });
-  }, [workspace, scanId]);
+  // SWR 数据层（2026-08-17 批次 Task 2）：与 ScanDetail / ReportTab 共享 key，单请求。
+  const { data: s, loading, error: err } = useScanDetail(workspace, scanId);
 
   if (err) return <ErrorState message={t("workspaceDetail.overview.loadError", { error: err })} />;
   if (loading) {

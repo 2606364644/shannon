@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { listRepos, deleteRepo, deleteRepos, pullRepo, ApiError } from "@/api/client";
+import { deleteRepo, deleteRepos, pullRepo, ApiError } from "@/api/client";
+import { useRepos } from "@/api/useRepos";
 import { useAuth } from "@/auth/AuthContext";
 import type { Repo, RepoState } from "@/api/types";
 import { cn } from "@/lib/utils";
@@ -84,8 +85,6 @@ export function ReposTab({ workspace: wsProp }: Props) {
   const { user } = useAuth();
   const params = useParams<{ workspace: string }>();
   const workspace = wsProp ?? params.workspace ?? "";
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
@@ -93,21 +92,12 @@ export function ReposTab({ workspace: wsProp }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // SWR 数据层（2026-08-17 批次 Task 3）：key ["repos", ws] 与 ScanFormFields 下拉共享，
+  // 切回 tab 缓存即时显示。enabled=!!user 保留旧「等 auth user ready 再首拉」语义。
+  const { repos, loading, error, refresh } = useRepos(workspace, !!user);
 
-  const refresh = useCallback(async () => {
-    try {
-      setRepos(await listRepos(workspace));
-    } catch (e) {
-      if (e instanceof ApiError) toast.error(t("repos.errors.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t, workspace]);
-
-  // 等用户态 ready 再拉取（与 MemberManagerDialog 一致）。
-  // 在生产环境路由已包 RequireAuth，user 进入此组件时已就绪；
-  // 在测试里 AuthProvider 异步拉 /auth/me，未就绪时跳过首拉、待 user 改变再触发。
-  useEffect(() => { if (user) void refresh(); }, [refresh, user]);
+  // 加载失败 toast（旧 refresh catch 行为）：error 变化时提示一次。
+  useEffect(() => { if (error) toast.error(t("repos.errors.loadFailed")); }, [error, t]);
   useEffect(() => () => { if (pullTimerRef.current) clearTimeout(pullTimerRef.current); }, []);
 
   async function doDelete() {

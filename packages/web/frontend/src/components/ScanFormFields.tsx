@@ -10,10 +10,12 @@ import { RepoCombobox } from "./RepoCombobox";
 import { CredentialRows } from "./auth/CredentialRows";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
-import { listRepos, listScans } from "@/api/client";
-import { listAuthProfiles, createAuthProfile } from "@/api/authProfiles";
-import { listHostProfiles } from "@/api/hostProfiles";
-import type { Repo, ScanSummary, Workspace, AuthProfile, AuthProfileCredential, VerifyState, HostProfile } from "@/api/types";
+import { listScans } from "@/api/client";
+import { createAuthProfile } from "@/api/authProfiles";
+import { useAuthProfiles } from "@/api/useAuthProfiles";
+import { useHostProfiles } from "@/api/useHostProfiles";
+import { useRepos } from "@/api/useRepos";
+import type { ScanSummary, Workspace, AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
 import type { FormState, AuthFormState, HostFormState } from "../pages/ScanNewPage";
 import { useAuth } from "@/auth/AuthContext";
 import { apiErrorMessage } from "@/lib/apiError";
@@ -216,14 +218,9 @@ function ProfileRightSummary({ auth, workspace, refreshSignal }: {
   refreshSignal: number;
 }) {
   const { t } = useTranslation();
-  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
-  useEffect(() => {
-    if (!workspace || !auth.profileId) {
-      setProfiles([]);
-      return;
-    }
-    listAuthProfiles(workspace).then(setProfiles).catch(() => setProfiles([]));
-  }, [workspace, auth.profileId, refreshSignal]);
+  // SWR 共享 key（同 BottomProfileBlock）；selected 查找本地派生。
+  const { profiles, refresh } = useAuthProfiles(workspace);
+  useEffect(() => { void refresh(); }, [refreshSignal, refresh]);
   const selected = profiles.find((p) => p.id === auth.profileId);
   if (!selected) {
     return (
@@ -396,27 +393,11 @@ function BottomProfileBlock({ auth, setAuth, workspace, refreshSignal }: {
   refreshSignal: number;
 }) {
   const { t } = useTranslation();
-  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    if (!workspace) {
-      setProfiles([]);
-      setLoading(false);
-      setLoadFailed(false);
-      return;
-    }
-    setLoading(true);
-    setLoadFailed(false);
-    listAuthProfiles(workspace)
-      .then((list) => setProfiles(list))
-      .catch(() => {
-        setProfiles([]);
-        setLoadFailed(true);
-      })
-      .finally(() => setLoading(false));
-  }, [workspace, refreshSignal]);
+  // SWR 共享 key（2026-08-17 批次 Task 5）：与档案管理页同 ["auth-profiles", ws] 缓存，
+  // 浏览过档案 tab 后此下拉即时填充。refreshSignal（inline 保存新档案后递增）→ mutate。
+  const { profiles, loading, error, refresh } = useAuthProfiles(workspace);
+  const loadFailed = error !== null;
+  useEffect(() => { void refresh(); }, [refreshSignal, refresh]);
 
   const selected = profiles.find((p) => p.id === auth.profileId);
 
@@ -586,27 +567,9 @@ function HostProfilePicker({ host, setHost, workspace }: {
   workspace: string;
 }) {
   const { t } = useTranslation();
-  const [profiles, setProfiles] = useState<HostProfile[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    if (!workspace) {
-      setProfiles([]);
-      setLoading(false);
-      setLoadFailed(false);
-      return;
-    }
-    setLoading(true);
-    setLoadFailed(false);
-    listHostProfiles(workspace)
-      .then((list) => setProfiles(list))
-      .catch(() => {
-        setProfiles([]);
-        setLoadFailed(true);
-      })
-      .finally(() => setLoading(false));
-  }, [workspace]);
+  // SWR 共享 key（2026-08-17 批次 Task 5）：与 HOST 档案管理页同缓存。
+  const { profiles, loading, error } = useHostProfiles(workspace || undefined);
+  const loadFailed = error !== null;
 
   if (!workspace) {
     return <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>;
@@ -815,7 +778,6 @@ export function ScanFormFields({
   const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [repos, setRepos] = useState<Repo[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   // 黑盒「复用白盒结果」候选：当前 ws 的 whitebox scans（按 created_at 倒序，listScans 契约）。
   const [wbScans, setWbScans] = useState<ScanSummary[]>([]);
@@ -826,14 +788,11 @@ export function ScanFormFields({
   // 守 hooks 规则--白盒提前 return 不跳过此 useState）。onProfileSaved 在黑盒区定义（用 setAuth）。
   const [profileRefresh, setProfileRefresh] = useState(0);
 
-  // P2: repo 列表按选定 ws 拉取——ws 未选时不发起（路径无意义）
-  useEffect(() => {
-    if (!workspace) {
-      setRepos([]);
-      return;
-    }
-    listRepos(workspace).then(setRepos).catch(() => {});
-  }, [workspace, addOpen]);
+  // P2: repo 列表按选定 ws 拉取（SWR 共享 key，2026-08-17 批次 Task 5——与 ReposTab
+  // 同 ["repos", ws] 缓存：浏览过仓库 tab 后表单下拉即时填充）。
+  // ws 未选 → key null 挂起（路径无意义）。addOpen 关闭（clone 对话框完成）时 refresh。
+  const { repos, refresh: refreshRepos } = useRepos(workspace);
+  useEffect(() => { if (!addOpen) void refreshRepos(); }, [addOpen, refreshRepos]);
 
   // 黑盒复用候选：按选定 ws 拉取其 whitebox scans。ws 切换 -> 旧 scan_id 失效，清空待重选。
   // 重跑预填（presetReuseScanId）：首帧保留预填值（已在 f.reuseScanId），仅拉候选验证，

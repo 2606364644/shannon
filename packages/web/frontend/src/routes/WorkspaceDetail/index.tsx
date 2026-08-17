@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, Link, NavLink } from "react-router-dom";
 import { ArrowLeft, Settings, FolderGit2, Pin, KeyRound, Globe, ScanLine } from "lucide-react";
@@ -7,15 +7,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { StatusBadge } from "@/components/StatusBadge";
 import { MemberManagerDialog } from "@/components/MemberManagerDialog";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
-import { listScans, ApiError, setPinnedWorkspace } from "@/api/client";
+import { setPinnedWorkspace } from "@/api/client";
 import type { ScanSummary } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuth } from "@/auth/AuthContext";
 import { fmtCost, currencySymbol } from "@/utils/currency";
 import { toast } from "sonner";
+import { useScans } from "./useScans";
 
 /** Outlet context：ScanList 操作（取消/删除/scan_end）后联动刷新工作台头聚合。 */
 export interface WsOverviewCtx {
@@ -61,11 +61,13 @@ function SectionLink({
 
 /**
  * 工作区页 = 操作台（重设计 v2，overview-workspace-redesign-preview.html 2026-08-16）：
- * 两行紧凑工作台头（r1 = ws 名 + dot-live + 状态/类型/扫描数徽标 + 命令栏；
+ * 两行紧凑工作台头（r1 = ws 名 + dot-live + 类型/扫描数徽标 + 命令栏；
  * r2 = 一行 mono 统计摘要：累计发现 + mini 谱带 + 运行中 + 需关注 + 花费 + 最新）
  * 替代原 Hero 大卡 + 四格指标条——态势震撼感让给概览大屏，这里数字只是干活要看的上下文。
  * 主体（过滤器 + 完整扫描表格）在 Outlet 的 ScanList。
  *
+ * 头部不显 latest 状态徽标——成功/失败是单项扫描任务的概念（ScanList 逐行可见），
+ * 工作区级别不设状态标志。
  * 空工作区（从未扫描）：中性虚线「尚未扫描」徽标 + 引导行（绝不绿色 all-clear）。
  * 聚合数据源 GET /workspaces/{ws}/scans；ScanList 操作经 Outlet context 联动刷新，
  * 运行中时 10s 静默轮询保持徽标/摘要新鲜。
@@ -73,34 +75,9 @@ function SectionLink({
 export default function WorkspaceDetail() {
   const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
-  const [scans, setScans] = useState<ScanSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-
-  const load = () => {
-    if (!workspace) return;
-    setLoading(true);
-    setNotFound(false);
-    listScans(workspace)
-      .then((rows) => { setScans(rows); setLoading(false); })
-      .catch((e: unknown) => {
-        setScans([]);
-        setLoading(false);
-        setNotFound(e instanceof ApiError && e.status === 404);
-      });
-  };
-
-  useEffect(load, [workspace]);
-
-  // 运行中时静默轮询（与 ScanList 同节奏）：徽标/摘要保持新鲜；跑完自动停。
+  // SWR 数据层（spec §6.3）：与 ScanList 共享 key（["scans", workspace]）→ 单请求单轮询。
+  const { scans, loading, notFound, refresh } = useScans(workspace);
   const hasRunning = scans.some(isRunningScan);
-  useEffect(() => {
-    if (!hasRunning || !workspace) return;
-    const id = setInterval(() => {
-      listScans(workspace).then(setScans).catch(() => {});
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [hasRunning, workspace]);
 
   const { user, refreshUser } = useAuth();
   const isPinned = user?.pinned_workspace === workspace;
@@ -210,7 +187,6 @@ export default function WorkspaceDetail() {
               </Badge>
             ) : (
               <span className="flex flex-wrap items-center gap-1.5">
-                {agg.latest && <StatusBadge status={agg.latest.status} />}
                 {agg.latest?.combined === true ? (
                   // 组合任务只显「组合」（scan_type 底层仍为 whitebox，双徽标冗余——与 ScanList 类型格同口径）
                   <Badge variant="outline" className="border-primary/35 font-mono text-primary">
@@ -321,7 +297,7 @@ export default function WorkspaceDetail() {
         </div>
       </Card>
 
-      <ErrorBoundary><Outlet context={{ refresh: load } satisfies WsOverviewCtx} /></ErrorBoundary>
+      <ErrorBoundary><Outlet context={{ refresh } satisfies WsOverviewCtx} /></ErrorBoundary>
     </div>
   );
 }

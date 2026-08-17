@@ -7,6 +7,7 @@ import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProfilesPage } from "./AuthProfilesPage";
@@ -64,9 +65,13 @@ afterAll(() => server.close());
 function renderPage(ws = "ws1") {
   return render(
     <MemoryRouter initialEntries={[`/p/${ws}/auth-profiles`]}>
-      <Routes>
-        <Route path="/p/:workspace/auth-profiles" element={<AuthProfilesPage />} />
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache 隔离，防止全局缓存把前一个测试的
+          列表数据带进后一个（beforeEach 各测试的 msw store 不同）。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/auth-profiles" element={<AuthProfilesPage />} />
+        </Routes>
+      </SWRConfig>
       <Toaster />
     </MemoryRouter>,
   );

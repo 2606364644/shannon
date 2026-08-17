@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { DeliverablesTab } from "./DeliverablesTab";
 
@@ -31,9 +32,12 @@ afterAll(() => server.close());
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/p/:workspace/scans/:scanId/deliverables" element={<DeliverablesTab />} />
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache，防跨测试缓存污染。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/scans/:scanId/deliverables" element={<DeliverablesTab />} />
+        </Routes>
+      </SWRConfig>
     </MemoryRouter>,
   );
 }

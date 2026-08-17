@@ -2,12 +2,13 @@
 // (refresh / loading / error / Card+Table / dialog 挂载) + useParams ws-scoped。
 // 结构: 档案列表 + 新建/编辑/删除 + system 档案 fork + refresh。
 // 列: 名称(+system 徽章) / 来源(手填=「手动」/GET 链接截断+Tooltip+复制) / 映射条数 / 更新时间 / 操作(编辑·刷新·删除；system 仅 fork)。
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2, Pencil, Copy, RefreshCw } from "lucide-react";
-import { listHostProfiles, deleteHostProfile, forkHostProfile, refreshHostProfile } from "@/api/hostProfiles";
+import { deleteHostProfile, forkHostProfile, refreshHostProfile } from "@/api/hostProfiles";
+import { useHostProfiles } from "@/api/useHostProfiles";
 import { ApiError } from "@/api/client";
 import type { HostProfile } from "@/api/types";
 import { Card } from "@/components/ui/card";
@@ -22,26 +23,13 @@ import { HostProfileDialog } from "@/components/HostProfileDialog";
 export function HostProfilesPage() {
   const { t } = useTranslation();
   const { workspace } = useParams<{ workspace: string }>();
-  const [profiles, setProfiles] = useState<HostProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<HostProfile | null>(null);
   const [delTarget, setDelTarget] = useState<HostProfile | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
-
-  async function refresh() {
-    if (!workspace) return;
-    setLoading(true); setError(null);
-    try {
-      setProfiles(await listHostProfiles(workspace));
-    } catch {
-      setError(t("hostProfiles.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => { void refresh(); }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+  // SWR 数据层（2026-08-17 渐进迁移）：切回 tab 缓存即时显示 + 后台 revalidate；
+  // key 与 ScanFormFields 下拉共享。
+  const { profiles, loading, error, refresh } = useHostProfiles(workspace);
 
   async function onDelete() {
     if (!workspace || !delTarget) return;

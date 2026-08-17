@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/re
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse, delay } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import ScanDetail from "./ScanDetail";
 
@@ -30,16 +31,20 @@ afterAll(() => server.close());
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
-          <Route index element={<div>default-content</div>} />
-          <Route path="overview" element={<div>ov-content</div>} />
-          <Route path="report" element={<div>rp-content</div>} />
-          <Route path="deliverables" element={<div>dl-content</div>} />
-          <Route path="logs" element={<div>lg-content</div>} />
-          <Route path="live" element={<div>lv-content</div>} />
-        </Route>
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache，防全局缓存跨测试污染
+          （onScanEnd 死循环回归测试依赖 server.use 换 handler 后真的重新 fetch）。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
+            <Route index element={<div>default-content</div>} />
+            <Route path="overview" element={<div>ov-content</div>} />
+            <Route path="report" element={<div>rp-content</div>} />
+            <Route path="deliverables" element={<div>dl-content</div>} />
+            <Route path="logs" element={<div>lg-content</div>} />
+            <Route path="live" element={<div>lv-content</div>} />
+          </Route>
+        </Routes>
+      </SWRConfig>
     </MemoryRouter>,
   );
 }

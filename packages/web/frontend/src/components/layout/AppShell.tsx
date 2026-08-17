@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { TopBar } from "./TopBar";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/auth/AuthContext";
 
 export function AppShell() {
@@ -23,7 +24,10 @@ export function AppShell() {
           （视觉同一列）。py-5 + TopBar h-12 = 5.5rem 是 live/logs 的 h-[calc(100dvh-5.5rem)]
           依赖，勿改。 */}
       <main className="mx-auto w-full max-w-[2400px] px-7 py-5">
-        <Outlet />
+        {/* lazy 路由 chunk 加载期的页面级骨架（spec §B）：高度贴近典型页首屏，避免布局跳动 */}
+        <Suspense fallback={<div className="space-y-4"><Skeleton className="h-28 w-full" /><Skeleton className="h-44 w-full" /></div>}>
+          <Outlet />
+        </Suspense>
       </main>
       {mustChange && (
         <ChangePasswordDialog

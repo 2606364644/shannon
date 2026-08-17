@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, useLocation, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Plus, Trash2 } from "lucide-react";
@@ -11,11 +11,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { getScan, rerunBlackbox, addBlackboxToWhitebox, deleteBlackboxRun, ApiError } from "@/api/client";
-import type { SessionData, BlackboxRunSummary } from "@/api/types";
+import { rerunBlackbox, addBlackboxToWhitebox, deleteBlackboxRun, ApiError } from "@/api/client";
+import type { BlackboxRunSummary } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { runStatusLabelKey, isRunFailureStatus, isRunTerminal, RunFailureBanner } from "./runStatus";
 import { ScanProgressOverview } from "./ScanProgressOverview";
+import { useScanDetail } from "./useScanDetail";
 
 // per-scan 视图的 tab 集：只含 scan 级 tab（overview/report/deliverables/logs/live）。
 // repos/settings 是 ws 级，留在 ws 概览页入口，不进 scan tabs。
@@ -140,20 +141,11 @@ export default function ScanDetail() {
   // 当前 tab = 路径末段（.../scans/:scanId/<tab>）。index 路由无 tab 段时由
   // DefaultScanTab 立即 replace 跳 live/report，此处 pop=scanId 为瞬时态（无高亮）。
   const current = pathname.split("/").pop() ?? "live";
-  const [meta, setMeta] = useState<SessionData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // silent=true 不翻 loading：loading 翻转会卸载 ScanProgressOverview，其 endedFor
-  // （scan_end 只通知一次）ref 随卸载销毁，重挂载后 SSE 历史回放的 scan_end 会再次
-  // 触发 onScanEnd → 死循环刷新。终态扫描（report 页）必中，见 ScanProgressOverview。
-  const load = (silent = false) => {
-    if (!workspace || !scanId) return;
-    if (!silent) setLoading(true);
-    getScan(workspace, scanId)
-      .then((s) => { setMeta(s); setLoading(false); })
-      .catch(() => { setMeta(null); setLoading(false); });
-  };
-  useEffect(load, [workspace, scanId]);
+  // SWR 数据层（2026-08-17 批次 Task 2）：key ["scan", ws, id] 与 OverviewTab /
+  // ReportTab(combined 探测) 共享 → 详情页三处 getScan 合一。refresh 即 silent
+  // revalidate（不翻 loading、不卸载 ScanProgressOverview——其 endedFor 的
+  // scan_end 一次性通知 ref 随卸载销毁会致死循环刷新，见 ScanProgressOverview）。
+  const { data: meta, loading, refresh: load } = useScanDetail(workspace, scanId);
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
   const isCombined = meta?.combined === true;
@@ -334,7 +326,7 @@ export default function ScanDetail() {
           <ScanProgressOverview
             ws={workspace!} scanId={scanId!}
             combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
-            onScanEnd={() => load(true)}
+            onScanEnd={() => load()}
           />
         )}
         <Tabs value={current} onValueChange={(v) => navigate(v)}>

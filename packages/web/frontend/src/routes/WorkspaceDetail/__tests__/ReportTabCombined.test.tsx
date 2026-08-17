@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { SWRConfig } from "swr";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
@@ -71,6 +72,7 @@ function stepComplete(name: string, phase: string) {
 
 function renderDetail(path = "/p/ws/scans/c1/report") {
   return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
@@ -80,26 +82,31 @@ function renderDetail(path = "/p/ws/scans/c1/report") {
         </Route>
       </Routes>
     </MemoryRouter>,
+    </SWRConfig>
   );
 }
 
 function renderReport() {
   return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
     <MemoryRouter initialEntries={["/p/ws/scans/c1/report"]}>
       <Routes>
         <Route path="/p/:workspace/scans/:scanId/report" element={<ReportTab />} />
       </Routes>
     </MemoryRouter>,
+    </SWRConfig>
   );
 }
 
 function renderDeliverables() {
   return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
     <MemoryRouter initialEntries={["/p/ws/scans/c1/deliverables"]}>
       <Routes>
         <Route path="/p/:workspace/scans/:scanId/deliverables" element={<DeliverablesTab />} />
       </Routes>
     </MemoryRouter>,
+    </SWRConfig>
   );
 }
 
@@ -246,6 +253,7 @@ describe("DeliverablesTab 组合扫描 - 三桶", () => {
 // 嵌套 ScanDetail 父：ReportTab 的 runSummary 经 Outlet context 传入（spec 2026-08-14 可见性）。
 function renderDetailReport() {
   return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
     <MemoryRouter initialEntries={["/p/ws/scans/c1/report"]}>
       <Routes>
         <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
@@ -253,6 +261,7 @@ function renderDetailReport() {
         </Route>
       </Routes>
     </MemoryRouter>,
+    </SWRConfig>
   );
 }
 

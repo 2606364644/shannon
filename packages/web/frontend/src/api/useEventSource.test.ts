@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useEventSource } from "./useEventSource";
+import { _resetScanEventStoresForTests } from "./scanEventStore";
+
+afterEach(() => _resetScanEventStoresForTests());
 
 // fake EventSource：构造后可手动 emit message
 class FakeES {
@@ -14,6 +17,9 @@ class FakeES {
   emit(data: string, lastEventId?: string) { this.onmessage?.({ data, lastEventId }); }
 }
 vi.stubGlobal("EventSource", FakeES);
+// store 层 rAF 批量（spec §E）：测试里同步执行 rAF 回调，保持同步断言风格。
+vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { cb(0); return 0; });
+vi.stubGlobal("cancelAnimationFrame", () => {});
 
 describe("useEventSource", () => {
   it("累积事件 + scan_end 关闭", () => {

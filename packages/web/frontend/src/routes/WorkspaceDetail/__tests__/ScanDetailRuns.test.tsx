@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { SWRConfig } from "swr";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
@@ -43,6 +44,7 @@ afterAll(() => server.close());
 
 function renderDetail(initial = "/p/ws/scans/s1/report") {
   return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
         <Route path="/p/:workspace/scans/:scanId" element={<ScanDetail />}>
@@ -50,6 +52,7 @@ function renderDetail(initial = "/p/ws/scans/s1/report") {
         </Route>
       </Routes>
     </MemoryRouter>,
+    </SWRConfig>
   );
 }
 

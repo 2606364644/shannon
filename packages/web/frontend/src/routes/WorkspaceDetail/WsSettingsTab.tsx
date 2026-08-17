@@ -240,22 +240,29 @@ export default function WsSettingsTab() {
         <p className="text-sm text-muted-foreground">{t("wsConfig.subtitle")}</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        {/* lg 下整卡锁定一屏：词典面板自身滚动，编辑区填满剩余高度，
+            保存按钮收进编辑区底部（原来挂在整块 grid 之下，首屏看不到）。 */}
+        <div className="grid gap-5 lg:h-[calc(100dvh-29rem)] lg:min-h-[22rem] lg:grid-cols-[minmax(0,1fr)_20rem]">
           {/* 编辑区 */}
-          <div className="min-w-0 space-y-2">
+          <div className="flex min-w-0 flex-col gap-2">
             <Label htmlFor="ws-env-text">{t("wsConfig.envText")}</Label>
             <Textarea
               id="ws-env-text"
               aria-label={t("wsConfig.envText")}
-              className="font-mono text-sm min-h-[460px]"
+              className="min-h-[460px] font-mono text-sm lg:min-h-0 lg:flex-1"
               value={envText}
               disabled={!canEdit}
               placeholder={PLACEHOLDER}
               onChange={(e) => setEnvText(e.target.value)}
             />
-            {isDefault && canEdit && (
-              <p className="text-xs text-muted-foreground">{t("wsConfig.keys.prefillHint")}</p>
-            )}
+            <div className="flex flex-wrap items-center gap-3">
+              {canEdit && (
+                <Button onClick={onSave} disabled={busy}>{t("wsConfig.save")}</Button>
+              )}
+              {isDefault && canEdit && (
+                <p className="text-xs text-muted-foreground">{t("wsConfig.keys.prefillHint")}</p>
+              )}
+            </div>
             {warnings && (
               <div className="space-y-1 text-sm text-amber-600 dark:text-amber-500">
                 {warnings.ineffective.length > 0 && (
@@ -269,7 +276,7 @@ export default function WsSettingsTab() {
           </div>
 
           {/* 配置词典面板：把后端 key 分类（生效 / 进程级）做成始终可见、可交互的清单 */}
-          <aside className="space-y-4 rounded-lg border bg-card/60 p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto">
+          <aside className="space-y-4 rounded-lg border bg-card/60 p-4 lg:overflow-y-auto">
             <div className="space-y-1">
               <h3 className="text-sm font-medium">{t("wsConfig.keys.panelTitle")}</h3>
               <p className="text-xs text-muted-foreground">{t("wsConfig.keys.panelDesc")}</p>
@@ -329,9 +336,6 @@ export default function WsSettingsTab() {
             </div>
           </aside>
         </div>
-        {canEdit && (
-          <Button onClick={onSave} disabled={busy}>{t("wsConfig.save")}</Button>
-        )}
       </CardContent>
     </Card>
   );

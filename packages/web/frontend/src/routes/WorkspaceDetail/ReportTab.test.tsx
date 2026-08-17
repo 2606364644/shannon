@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
+import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { ReportTab } from "./ReportTab";
 
@@ -22,9 +23,12 @@ const MD = `# 综合安全评估报告
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/p/:workspace/scans/:scanId/report" element={<ReportTab />} />
-      </Routes>
+      {/* SWR 迁移适配（spec §6.5）：独立 cache，防跨测试缓存污染（各测试 msw payload 不同）。 */}
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <Routes>
+          <Route path="/p/:workspace/scans/:scanId/report" element={<ReportTab />} />
+        </Routes>
+      </SWRConfig>
     </MemoryRouter>,
   );
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { renderWithSwr } from "@/test/swr-render";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -30,7 +31,7 @@ afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 function renderList() {
-  return render(
+  return renderWithSwr(
     <MemoryRouter initialEntries={["/p/ws"]}>
       <Routes><Route path="/p/:workspace" element={<ScanList />} /></Routes>
     </MemoryRouter>,
