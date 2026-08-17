@@ -79,7 +79,7 @@ describe("WsSettingsTab", () => {
     expect(screen.getByLabelText("wsConfig.envText")).toHaveValue(ENV_TEXT);
   });
 
-  it("编辑 + 保存 → PUT body {env_text}", async () => {
+  it("编辑 + 保存 → PUT body {env_text}，成功后编辑框显示回显文本（凭据打码）", async () => {
     let putBody: { env_text?: string } | null = null;
     server.use(
       http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
@@ -87,16 +87,23 @@ describe("WsSettingsTab", () => {
       http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
       http.put("/api/workspaces/:ws/config", async ({ request }) => {
         putBody = await request.json() as { env_text?: string };
-        return HttpResponse.json({ ok: true, warnings: { ineffective: [], unknown: [] } });
+        return HttpResponse.json({
+          ok: true,
+          warnings: { ineffective: [], unknown: [] },
+          // 后端回显：注释行保留、凭据打码（保存什么就看到什么）
+          env_text: "# --- 引擎与端点 ---\nSUPERNOVA_OPENAI_API_KEY=••••\n",
+        });
       }),
     );
     renderAt("ws-a");
     await waitFor(() => expect(screen.getByText("wsConfig.save")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("wsConfig.envText"),
-      { target: { value: "SUPERNOVA_AI_PROVIDER=openai_compatible\n" } });
+      { target: { value: "# --- 引擎与端点 ---\nSUPERNOVA_OPENAI_API_KEY=sk-real\n" } });
     fireEvent.click(screen.getByText("wsConfig.save"));
     await waitFor(() => expect(putBody).not.toBeNull());
-    expect(putBody!.env_text).toBe("SUPERNOVA_AI_PROVIDER=openai_compatible\n");
+    expect(putBody!.env_text).toBe("# --- 引擎与端点 ---\nSUPERNOVA_OPENAI_API_KEY=sk-real\n");
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toBe("# --- 引擎与端点 ---\nSUPERNOVA_OPENAI_API_KEY=••••\n"));
   });
 
   it("保存返回 warnings → 展示 ineffective / unknown key", async () => {
@@ -107,6 +114,7 @@ describe("WsSettingsTab", () => {
       http.put("/api/workspaces/:ws/config", async () => HttpResponse.json({
         ok: true,
         warnings: { ineffective: ["SUPERNOVA_MAX_CONCURRENT"], unknown: ["BOGUS_KEY"] },
+        env_text: "x=1\n",
       })),
     );
     renderAt("ws-a");
@@ -147,7 +155,7 @@ describe("WsSettingsTab", () => {
     expect(screen.getByText("CLAUDE_CODE_MAX_OUTPUT_TOKENS")).toBeInTheDocument();
   });
 
-  it("点击「填入模板」→ textarea 注入注释模板", async () => {
+  it("点击「填入模板」→ 注入与预填同源的推荐模板（真实默认值 + 凭据注释行）", async () => {
     server.use(
       http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
       http.get("/api/workspaces/:ws/config", () => HttpResponse.json({ env_text: "" })),
@@ -157,7 +165,30 @@ describe("WsSettingsTab", () => {
     await waitFor(() => expect(screen.getByText("wsConfig.keys.insertTemplate")).toBeInTheDocument());
     fireEvent.click(screen.getByText("wsConfig.keys.insertTemplate"));
     const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
-    await waitFor(() => expect(ta.value).toContain("wsConfig.keys.template"));
+    // 非凭据键填真实默认值（保存即生效），与单击注入/新建预填同源
+    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_AI_PROVIDER=openai_compatible"));
+    expect(ta.value).toContain("SUPERNOVA_OPENAI_BASE_URL=https://llm-proxy.futuoa.com/v1");
+    expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=10000");
+    // 凭据行以 # 注释占位
+    expect(ta.value).toContain("#SUPERNOVA_OPENAI_API_KEY=");
+  });
+
+  it("模板注入跳过已有 key（含注释行），不产生重复行", async () => {
+    server.use(
+      http.get("/api/auth/me", () => HttpResponse.json({ user: { id: 1, username: "admin", role: "admin" } })),
+      http.get("/api/workspaces/:ws/config", () =>
+        HttpResponse.json({ env_text: "SUPERNOVA_MAX_TURNS=50\n" })),
+      http.get("/api/workspaces/:ws/members", () => HttpResponse.json({ members: [] })),
+    );
+    renderAt("ws-a");
+    await waitFor(() => expect(screen.getByText("wsConfig.keys.insertTemplate")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("wsConfig.keys.insertTemplate"));
+    const ta = screen.getByLabelText("wsConfig.envText") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("SUPERNOVA_AI_PROVIDER=openai_compatible"));
+    // 已有值保留为 50，未追加模板默认行
+    expect((ta.value.match(/SUPERNOVA_MAX_TURNS=/g) || []).length).toBe(1);
+    expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=50");
+    expect(ta.value).not.toContain("SUPERNOVA_MAX_TURNS=10000");
   });
 
   it("点击生效 key → 注入 KEY=默认值 到 textarea", async () => {

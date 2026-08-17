@@ -224,6 +224,75 @@ def test_put_then_get_masks_gitlab_token(authed_client, tmp_workspaces):
     assert "glpat-secret" not in env_text
 
 
+# ---- display 文本回显保真（保存什么就看到什么）----
+
+def test_put_then_get_preserves_comments_and_layout(authed_client, tmp_workspaces):
+    """保存后 GET/PUT 回显用户提交的原样文本：注释行、空行、ineffective/unknown 行、
+    顺序全部保留（运行时仍只按 parse 出的字段生效）。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    text = ("# --- 引擎与端点 ---\n"
+            "SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+            "#SUPERNOVA_OPENAI_API_KEY=\n"
+            "\n"
+            "SUPERNOVA_MAX_CONCURRENT=8\n"
+            "BOGUS_KEY=x\n")
+    r = authed_client.put("/api/workspaces/ws-a/config", json={"env_text": text},
+                          headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    # PUT 响应即回显（注释/占位/警告行原样，凭据占位行无值不打码）
+    assert r.json()["env_text"] == text
+    # GET 同样原样
+    assert authed_client.get("/api/workspaces/ws-a/config").json()["env_text"] == text
+
+
+def test_put_masks_credential_in_display_and_at_rest(authed_client, app_with_ws, tmp_workspaces):
+    """提交的凭据值：回显打码 + config.yaml 落盘无明文。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    text = ("SUPERNOVA_OPENAI_API_KEY=sk-secret\n"
+            "GITLAB_TOKEN=glpat-secret\n"
+            "SUPERNOVA_OPENAI_BASE_URL=http://x\n")
+    r = authed_client.put("/api/workspaces/ws-a/config", json={"env_text": text},
+                          headers={"X-CSRF-Token": tok})
+    body = r.json()["env_text"]
+    assert "SUPERNOVA_OPENAI_API_KEY=••••" in body
+    assert "GITLAB_TOKEN=••••" in body
+    assert "sk-secret" not in body and "glpat-secret" not in body
+    # 落盘（display 段 + 整个 yaml）不含明文凭据；字段值走 vault 加密
+    raw = (tmp_workspaces / "ws-a" / "config.yaml").read_text("utf-8")
+    assert "sk-secret" not in raw and "glpat-secret" not in raw
+    assert app_with_ws.state.ws_config_store.read("ws-a").provider.api_key == "sk-secret"
+
+
+def test_masked_roundtrip_keeps_credential(authed_client, app_with_ws, tmp_workspaces):
+    """保存 → 回显掩码 → 原文再保存：掩码触发智能保留，凭据不丢。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    tok = _csrf(authed_client)
+    authed_client.put("/api/workspaces/ws-a/config", json={
+        "env_text": "SUPERNOVA_OPENAI_API_KEY=sk-orig\n",
+    }, headers={"X-CSRF-Token": tok})
+    echoed = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert echoed == "SUPERNOVA_OPENAI_API_KEY=••••\n"
+    authed_client.put("/api/workspaces/ws-a/config", json={"env_text": echoed},
+                      headers={"X-CSRF-Token": tok})
+    assert app_with_ws.state.ws_config_store.read("ws-a").provider.api_key == "sk-orig"
+
+
+def test_legacy_config_without_display_text_still_renders(authed_client, tmp_workspaces):
+    """旧配置（yaml 无 env_text 段）→ GET 回落 render_env_text，行为不变。"""
+    (tmp_workspaces / "ws-a").mkdir()
+    (tmp_workspaces / "ws-a" / "config.yaml").write_text(
+        "provider:\n"
+        "  ai_provider: openai_compatible\n"
+        "  base_url: http://legacy\n"
+        "  small_model: glm-5.2-coder\n"
+        "  medium_model: glm-5.2-coder\n"
+        "  large_model: glm-5.2-coder\n", encoding="utf-8")
+    env_text = authed_client.get("/api/workspaces/ws-a/config").json()["env_text"]
+    assert "SUPERNOVA_OPENAI_BASE_URL=http://legacy" in env_text
+
+
 # ---- env 段（扫描期 per-workspace 覆盖）----
 
 def test_put_then_get_env_section_roundtrip(authed_client, app_with_ws, tmp_workspaces):

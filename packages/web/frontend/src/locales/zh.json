@@ -844,7 +844,7 @@
   },
   "wsConfig": {
     "title": "工作区配置",
-    "subtitle": "直接填 env 文本（KEY=value）覆盖全局 provider 配置；未写的字段回落全局默认。",
+    "subtitle": "填 KEY=value 覆盖全局配置；未填字段回落全局默认。",
     "envText": "AI 配置（env 文本）",
     "keys": {
       "panelTitle": "可用配置项",
@@ -852,7 +852,8 @@
       "insertTemplate": "填入完整模板",
       "inserted": "已注入 {{key}}",
       "exists": "{{key}} 已存在，已跳过",
-      "templateInserted": "已注入配置模板（# 开头为注释，删除 # 并填值即生效）",
+      "existsAll": "模板键均已存在，未注入",
+      "templateInserted": "已注入推荐模板（# 注释的凭据行删除 # 并填值后生效）",
       "effectiveTitle": "工作区可覆盖",
       "processTitle": "仅全局生效（启动期）",
       "processDesc": "这些键在 worker 启动时读一次，工作区覆盖不生效，请在全局 .env / .env.profiles 设置。",
@@ -864,8 +865,7 @@
         "runtime": "运行时",
         "scanSwitches": "扫描期开关",
         "git": "Git 访问（可选，未填回落全局）"
-      },
-      "template": "# ===== 工作区 AI 配置（# 开头为注释，删除 # 并填值即生效）=====\n# --- 引擎与端点 ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=填入 API key\n# --- 模型 ---\n#SUPERNOVA_MODEL=通用回落模型\n#SUPERNOVA_OPENAI_SMALL_MODEL=轻量档模型\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=常规档模型\n#SUPERNOVA_OPENAI_LARGE_MODEL=重度档模型\n# --- 运行时 ---\n#SUPERNOVA_MAX_TURNS=10000\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- 扫描期开关（工作区可覆盖）---\n#SUPERNOVA_LLM_TRACK_ENABLED=0\n#SUPERNOVA_GITNEXUS_LLM_ENABLED=1\n#SUPERNOVA_BROWSER_ENGINE=agent-browser\n#SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json\n#SUPERNOVA_AGENT_NARRATION_LANG=zh"
+      }
     },
     "save": "保存",
     "saved": "配置已保存",

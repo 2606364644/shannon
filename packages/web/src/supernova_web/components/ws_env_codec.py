@@ -70,6 +70,31 @@ INEFFECTIVE_KEYS: frozenset[str] = frozenset({
 # 凭据字段（render 时掩码、PUT 时智能保留）
 CREDENTIAL_FIELDS: frozenset[str] = frozenset({"api_key", "gitlab_token"})
 
+# 凭据字段对应的全部 env key 变体（mask_credentials 用，含 per-provider 名）。
+CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
+    key for key, (fld, _) in ENV_TO_FIELD.items() if fld in CREDENTIAL_FIELDS
+)
+
+
+def mask_credentials(text: str) -> str:
+    """把凭据 key 行的值替换为掩码，其余内容原样保留（含注释 / 空行 / 顺序）。
+
+    display 文本 = 用户提交的 env 文本经此函数处理后的版本：GET/PUT 直接回显它，
+    保证「保存什么就看到什么」；唯一改动是凭据值打码，确保 config.yaml 不落明文。
+    注释行同样打码（用户可能把真实凭据注释掉留底，不能让明文残留在盘上）。
+    """
+    out: list[str] = []
+    for line in text.split("\n"):
+        body = line.lstrip()
+        if body.startswith("#"):
+            body = body[1:].lstrip()
+        key, eq, value = body.partition("=")
+        if eq and key.strip() in CREDENTIAL_ENV_KEYS and value.strip():
+            out.append(f"{line[: line.index(body)]}{key}={MASKED}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
 
 @dataclass
 class ParsedEnv:

@@ -60,6 +60,10 @@ class WsConfig:
     git: WsGitFields = field(default_factory=WsGitFields)
     # 扫描期 env 覆盖（KEY→value，原始 str；非凭据，不加密）。
     env: dict[str, str] = field(default_factory=dict)
+    # 编辑框原样文本（凭据值已 mask_credentials 打码），yaml 键 env_text。
+    # GET 直接回显它（注释/顺序/占位行全保留）；None = 旧配置（该字段引入前保存），
+    # GET 回落 render_env_text 从存储字段反向渲染。
+    display_text: str | None = None
 
 
 DEFAULT_WS_PROVIDER = "openai_compatible"
@@ -150,10 +154,12 @@ class WsConfigStore:
         git_kwargs = {k: git_raw.get(k) for k in known_git}
         env_raw = data.get("env") or {}
         env = {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else {}
+        display_raw = data.get("env_text")
         return WsConfig(
             provider=WsProviderFields(**prov_kwargs),
             git=WsGitFields(**git_kwargs),
             env=env,
+            display_text=display_raw if isinstance(display_raw, str) else None,
         )
 
     def write(self, ws: str, cfg: WsConfig) -> None:
@@ -171,6 +177,8 @@ class WsConfigStore:
         data = {"provider": prov, "git": git}
         if cfg.env:
             data["env"] = cfg.env
+        if cfg.display_text is not None:
+            data["env_text"] = cfg.display_text
         path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), "utf-8")
 
     def resolve_provider_config(self, ws: str) -> dict:

@@ -14,6 +14,8 @@ export interface WsConfigWarnings {
 export interface WsConfigPutResult {
   ok: boolean;
   warnings: WsConfigWarnings;
+  // 保存成功即回显的原样文本（凭据已打码）——与后续 GET 返回一致
+  env_text: string;
 }
 
 const enc = encodeURIComponent;

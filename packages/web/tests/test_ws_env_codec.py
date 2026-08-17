@@ -4,7 +4,7 @@ spec: docs/superpowers/specs/2026-08-10-ws-config-env-textarea-design.md
 """
 import pytest
 
-from supernova_web.components.ws_env_codec import parse_env_text, render_env_text
+from supernova_web.components.ws_env_codec import parse_env_text, render_env_text, mask_credentials
 from supernova_web.components.ws_config_store import (
     WsConfig, WsProviderFields, WsGitFields,
 )
@@ -213,3 +213,46 @@ def test_render_git_section_token_masked():
 
 def test_render_empty_config_returns_empty():
     assert render_env_text(WsConfig(), ai_provider="anthropic_api") == ""
+
+
+# ---- mask_credentials：display 文本打码（其余原样保留）----
+
+def test_mask_credentials_masks_credential_values_only():
+    text = ("# --- 引擎 ---\n"
+            "SUPERNOVA_AI_PROVIDER=openai_compatible\n"
+            "SUPERNOVA_OPENAI_API_KEY=sk-secret\n"
+            "SUPERNOVA_OPENAI_BASE_URL=http://x\n"
+            "GITLAB_TOKEN=glpat-x\n")
+    masked = mask_credentials(text)
+    assert "SUPERNOVA_OPENAI_API_KEY=••••" in masked
+    assert "GITLAB_TOKEN=••••" in masked
+    # 非凭据行与注释行原样保留
+    assert "# --- 引擎 ---" in masked
+    assert "SUPERNOVA_AI_PROVIDER=openai_compatible" in masked
+    assert "SUPERNOVA_OPENAI_BASE_URL=http://x" in masked
+    assert "sk-secret" not in masked
+    assert "glpat-x" not in masked
+
+
+def test_mask_credentials_masks_commented_credential_lines():
+    """注释掉的凭据行同样打码（用户可能注释留底，明文不能落盘）。"""
+    masked = mask_credentials("#SUPERNOVA_OPENAI_API_KEY=sk-real\n")
+    assert masked == "#SUPERNOVA_OPENAI_API_KEY=••••\n"
+
+
+def test_mask_credentials_covers_all_provider_variants():
+    masked = mask_credentials(
+        "ANTHROPIC_AUTH_TOKEN=sk-a\nANTHROPIC_API_KEY=sk-b\nSUPERNOVA_AUTH_TOKEN=sk-c\n")
+    assert masked == ("ANTHROPIC_AUTH_TOKEN=••••\n"
+                      "ANTHROPIC_API_KEY=••••\n"
+                      "SUPERNOVA_AUTH_TOKEN=••••\n")
+
+
+def test_mask_credentials_preserves_layout_verbatim():
+    """空行、顺序、行尾换行、非凭据内容逐字保留——回显即所存。"""
+    text = "A=1\n\n# note\nB=2\n"
+    assert mask_credentials(text) == text
+
+
+def test_mask_credentials_ignores_empty_credential_values():
+    assert mask_credentials("SUPERNOVA_OPENAI_API_KEY=\n") == "SUPERNOVA_OPENAI_API_KEY=\n"

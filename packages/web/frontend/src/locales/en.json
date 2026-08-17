@@ -844,7 +844,7 @@
   },
   "wsConfig": {
     "title": "Workspace Config",
-    "subtitle": "Edit env text (KEY=value) to override global provider config; unwritten keys fall back to global defaults.",
+    "subtitle": "KEY=value lines override global config; unset keys fall back to global defaults.",
     "envText": "AI config (env text)",
     "keys": {
       "panelTitle": "Available keys",
@@ -852,7 +852,8 @@
       "insertTemplate": "Insert full template",
       "inserted": "Inserted {{key}}",
       "exists": "{{key}} already exists, skipped",
-      "templateInserted": "Template inserted (# lines are comments; remove # and set the value to apply)",
+      "existsAll": "All template keys already exist; nothing inserted",
+      "templateInserted": "Recommended template inserted (remove # from credential lines and fill in values to apply)",
       "effectiveTitle": "Overrideable per workspace",
       "processTitle": "Global only (startup)",
       "processDesc": "These keys are read once at worker startup; per-workspace overrides have no effect. Set them in global .env / .env.profiles.",
@@ -864,8 +865,7 @@
         "runtime": "Runtime",
         "scanSwitches": "Scan-time switches",
         "git": "Git access (optional, falls back to global)"
-      },
-      "template": "# ===== Workspace AI config (# lines are comments; remove # and set value to apply) =====\n# --- Engine & endpoint ---\n#SUPERNOVA_AI_PROVIDER=openai_compatible\n#SUPERNOVA_OPENAI_BASE_URL=https://your-endpoint/v1\n#SUPERNOVA_OPENAI_API_KEY=your api key\n# --- Models ---\n#SUPERNOVA_MODEL=general fallback model\n#SUPERNOVA_OPENAI_SMALL_MODEL=light tier model\n#SUPERNOVA_OPENAI_MEDIUM_MODEL=standard tier model\n#SUPERNOVA_OPENAI_LARGE_MODEL=heavy tier model\n# --- Runtime ---\n#SUPERNOVA_MAX_TURNS=10000\n#SUPERNOVA_ADAPTIVE_THINKING=true\n# --- Scan-time switches (workspace-overridable) ---\n#SUPERNOVA_LLM_TRACK_ENABLED=0\n#SUPERNOVA_GITNEXUS_LLM_ENABLED=1\n#SUPERNOVA_BROWSER_ENGINE=agent-browser\n#SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json\n#SUPERNOVA_AGENT_NARRATION_LANG=zh"
+      }
     },
     "save": "Save",
     "saved": "Configuration saved",

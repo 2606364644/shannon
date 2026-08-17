@@ -7,6 +7,10 @@ PUT 语义：文本区 = ws 配置的完整定义。出现的字段=设值；未
 凭据（api_key / gitlab_token）值 == •••• → 保留原值（智能保留）；否则更新或清空。
 进程级 / 未知 key 不阻塞，以 warnings 返回。
 
+回显契约：PUT 把提交文本（凭据值打码）存为 display 文本，GET/PUT 响应原样返回——
+注释行、空行、顺序、ineffective/unknown 行全部保留，「保存什么就看到什么」，
+运行时仍只按 parse 出的字段生效。旧配置（无 display 文本）GET 回落 render_env_text。
+
 spec: docs/superpowers/specs/2026-08-10-ws-config-env-textarea-design.md
 """
 
@@ -17,7 +21,7 @@ from ..auth.dependencies import workspace_member, workspace_manager
 from ..components.ws_config_store import (
     DEFAULT_WS_PROVIDER, WsConfig, WsProviderFields, WsGitFields, WsConfigStore,
 )
-from ..components.ws_env_codec import parse_env_text, render_env_text, MASKED
+from ..components.ws_env_codec import parse_env_text, render_env_text, mask_credentials, MASKED
 
 router = APIRouter(prefix="/api/workspaces", tags=["ws-config"])
 
@@ -35,6 +39,12 @@ def _render_ai_provider(cfg: WsConfig) -> str:
     return cfg.provider.ai_provider or DEFAULT_WS_PROVIDER
 
 
+def _display_text(cfg: WsConfig) -> str:
+    """有 display 文本（本次保存起都会写）直接回显；旧配置回落反向渲染。"""
+    return cfg.display_text if cfg.display_text is not None else render_env_text(
+        cfg, ai_provider=_render_ai_provider(cfg))
+
+
 @router.get("/{ws}/config")
 async def get_ws_config(ws: str, request: Request, user=Depends(workspace_member)):
     store = _store(request)
@@ -42,7 +52,7 @@ async def get_ws_config(ws: str, request: Request, user=Depends(workspace_member
     # is_default：工作区尚无 config.yaml（未保存过）→ 前端据此预填完整推荐模板，
     # 让用户打开即见一套可用的默认配置（凭据行留空等填），而非空白或残缺默认。
     return {
-        "env_text": render_env_text(cfg, ai_provider=_render_ai_provider(cfg)),
+        "env_text": _display_text(cfg),
         "is_default": not store.config_exists(ws),
     }
 
@@ -79,6 +89,8 @@ async def put_ws_config(ws: str, body: EnvTextIn, request: Request,
             gitlab_token=gitlab_token,
         ),
         env=parsed.env,
+        # 提交文本原样存（凭据值打码）→ GET/下次保存回显一致；运行时只认 parse 出的字段。
+        display_text=mask_credentials(body.env_text),
     )
     try:
         store.write(ws, cfg)  # write 内 validate_ws_config（非法 ai_provider → ValueError → 422）
@@ -87,4 +99,6 @@ async def put_ws_config(ws: str, body: EnvTextIn, request: Request,
     return {
         "ok": True,
         "warnings": {"ineffective": parsed.ineffective, "unknown": parsed.unknown},
+        # 保存成功即回显（前端免去再 GET 一趟），凭据已打码
+        "env_text": mask_credentials(body.env_text),
     }

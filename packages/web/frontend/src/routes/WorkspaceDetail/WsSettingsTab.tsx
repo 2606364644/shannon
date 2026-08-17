@@ -10,7 +10,6 @@ import type { Member } from "@/api/members";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const PLACEHOLDER = [
@@ -91,19 +90,22 @@ const PROCESS_KEYS: CfgKey[] = [
   { key: "CLAUDE_CODE_MAX_OUTPUT_TOKENS", kind: "str", defaultValue: "32000" },
 ];
 
-// 新工作区默认预填模板：遍历生效配置组（prefill!==false），非凭据/空值键填真实默认值（保存即生效），
+// 推荐模板：遍历生效配置组（prefill!==false），非凭据/空值键填真实默认值（保存即生效），
 // 凭据类（defaultValue=""）用 # 注释行（不落盘空串、用户删 # 填值才生效）。
-// 不预填：进程级键（PROCESS_KEYS，ws 不生效）+ git 段（prefill=false，多数扫描不依赖 GitLab）。
+// 不含：进程级键（PROCESS_KEYS，ws 不生效）+ git 段（prefill=false，多数扫描不依赖 GitLab）。
 // 词典渲染仍显示全部组（EFFECTIVE_GROUPS.map），需要时点击注入。
-function buildDefaultTemplate(t: (k: string) => string): string {
+// includeKey 给定时只收该函数放行的 key（模板注入时跳过文本区已有键）；全部被滤掉返回 ""。
+function buildDefaultTemplate(t: (k: string) => string, includeKey?: (key: string) => boolean): string {
   const blocks = EFFECTIVE_GROUPS.filter((g) => g.prefill !== false).map((g) => {
+    const keys = includeKey ? g.keys.filter((k) => includeKey(k.key)) : g.keys;
+    if (!keys.length) return null;
     const lines = [`# --- ${t(g.titleKey)} ---`];
-    for (const k of g.keys) {
+    for (const k of keys) {
       lines.push(k.defaultValue === "" ? `#${k.key}=` : `${k.key}=${k.defaultValue}`);
     }
     return lines.join("\n");
-  });
-  return blocks.join("\n\n") + "\n";
+  }).filter((b): b is string => b !== null);
+  return blocks.length ? blocks.join("\n\n") + "\n" : "";
 }
 
 function kindColor(kind: KeyKind): string | undefined {
@@ -186,9 +188,10 @@ export default function WsSettingsTab() {
     setWarnings(null);
     try {
       const r = await putWsConfig(ws, envText);
-      // 保存后用后端渲染的 env 文本重置（凭据回填掩码、清空字段落实）
-      const fresh = await getWsConfig(ws);
-      setEnvText(fresh.env_text);
+      // 用 PUT 响应的原样文本回显（注释/顺序保留、凭据打码）——保存什么就看到什么，
+      // 免去二次 GET；config.yaml 已存在，is_default 置 false 免得预填提示残留
+      setEnvText(r.env_text);
+      setIsDefault(false);
       if (r.warnings && (r.warnings.ineffective.length || r.warnings.unknown.length)) {
         setWarnings(r.warnings);
       }
@@ -221,14 +224,17 @@ export default function WsSettingsTab() {
     });
   }
 
-  // 把完整模板以注释行（# 开头）注入文本区。注释行后端 parse 时忽略（ws_env_codec），
-  // 故不会污染配置；用户删除行首 # 并填值即生效。
+  // 把推荐模板（与新建预填、单击注入同源 EFFECTIVE_GROUPS）注入文本区：真实默认值直接生效，
+  // 凭据行以 # 注释占位。文本区已有同名 key（含 # 注释行）则跳过，与单击注入的防重复语义一致
+  // （parse 时后行覆盖前行，重复行会悄悄改值）。
   function insertTemplate() {
-    const tpl = t("wsConfig.keys.template");
-    setEnvText((prev) => {
-      if (!prev.trim()) return tpl;
-      return `${prev.replace(/\n$/, "")}\n\n${tpl}`;
-    });
+    const exists = (key: string) => new RegExp(`^\\s*#?\\s*${key}=`, "m").test(envText);
+    const tpl = buildDefaultTemplate(t, (key) => !exists(key));
+    if (!tpl) {
+      toast.info(t("wsConfig.keys.existsAll"));
+      return;
+    }
+    setEnvText(envText.trim() ? `${envText.replace(/\n$/, "")}\n\n${tpl}` : tpl);
     toast.success(t("wsConfig.keys.templateInserted"));
   }
 
@@ -243,11 +249,9 @@ export default function WsSettingsTab() {
         {/* lg 下整卡锁定一屏：词典面板自身滚动，编辑区填满剩余高度，
             保存按钮收进编辑区底部（原来挂在整块 grid 之下，首屏看不到）。 */}
         <div className="grid gap-5 lg:h-[calc(100dvh-29rem)] lg:min-h-[22rem] lg:grid-cols-[minmax(0,1fr)_20rem]">
-          {/* 编辑区 */}
+          {/* 编辑区（无可见 Label：卡片标题+副标题已说明，textarea 留 aria-label） */}
           <div className="flex min-w-0 flex-col gap-2">
-            <Label htmlFor="ws-env-text">{t("wsConfig.envText")}</Label>
             <Textarea
-              id="ws-env-text"
               aria-label={t("wsConfig.envText")}
               className="min-h-[460px] font-mono text-sm lg:min-h-0 lg:flex-1"
               value={envText}
