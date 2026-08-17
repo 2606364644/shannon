@@ -1,7 +1,7 @@
 # 认证测试「停止」按钮（批量 + 单角色）
 
 - 日期：2026-08-17
-- 状态：设计已确认，待 plan
+- 状态：已实现（TDD，2026-08-17）
 - 范围：认证档案测试登录（批量 `test-batch` + 单角色 `testCredential`）补**用户主动停止**能力
 - 涉及包：`web`（前后端）；blackbox worker **零改动**
 - 演进自：`2026-08-11-auth-verify-batch-role-test-design.md`（批量测试）
@@ -112,3 +112,18 @@
 
 - **在跑探针不被强杀**：activity 无心跳，Temporal 取消只在活动间隙生效。当前 cred 的探针子进程后台跑完（最长 10 分钟）后结果丢弃（watcher 只回填 running，届时已非 running，不覆盖 failed）。停止的即时效果 = 状态翻转 + 后续角色不再开始。强杀需 pid 跟踪/心跳改造，YAGNI 不做。
 - **取消后 token 浪费**：同上，in-flight cred 的 LLM 调用会继续到自然结束。
+
+---
+
+## 8. 实现与设计的偏差（2026-08-17 TDD 实施时确认）
+
+1. **未开始 cred 的 scan-config 清理由 watcher 承担**（非端点）：未开始 cred 的 probe_dir 不在
+   store（只有 running 过的 cred 才写），端点无从定位其明文配置；watcher 终态回填时按
+   cred_probe_map 清（`_delete_probe_scan_config`）。清理语义与 `reap_stale_probes` 启动期兜底一致。
+2. **批量页停止后轮询退出是显式的**：新语义下未开始 cred 保持 unverified，「全终态」退出条件
+   永不满足 → `onStop` 成功后直接 `setTesting(false) + setPolling(false)`（用户停止即批次终结）。
+3. **前端 `failure_point` 类型联合扩展 `"cancelled"`**（`api/types.ts`）：后端新写的枚举值需要
+   类型对齐；测试 fixture 直接受益。
+4. **watcher 回填对「有真实 result」的场景不加过滤**：仅 result() 抛（取消/崩溃，无 per-cred
+   结果可依）时才限定只写 running cred；COMPLETED 且有 result 时全量回填（真实数据非猜测，
+   未开始 cred 若有结果仍应回填——COMPLETED 批次所有选中 cred 必然都跑过）。
