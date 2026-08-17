@@ -2007,13 +2007,13 @@ class ScanManager:
             await handle.cancel()
         except Exception:  # noqa: BLE001 - best-effort; 不在跑/不可达均忽略
             pass
-        # 标取消的 run cancelled（run 级 session + bb_runs[] 条目；best-effort）
+        # 标取消的 run cancelled（run 级 session + bb_runs[] 条目；best-effort）。走
+        # _mark_run 而非直调 store：终态钩子顺带给 run events.ndjson 补 scan_end——
+        # 被取消的黑盒 workflow 走 except CancelledError 直接 return（不 finalize），
+        # run 事件文件无人写终态行，归并流会永不关流（MergedEventTailer 关流条件
+        # 依赖每个已发现 run 源见到自己的 scan_end）。
         if active_run_id is not None:
-            try:
-                self._store.update_blackbox_run(
-                    ws, scan_id, active_run_id, status="cancelled", phase="cancelled")
-            except Exception:  # noqa: BLE001
-                pass
+            await self._mark_run(scan_dir, active_run_id, "cancelled", status="cancelled")
         # 清残留 handle 登记（白盒 handle 在 running 阶段仍挂 _handles；对齐 delete 清理）
         self._handles.pop(scan_key, None)
         await self._mark_cancelled(scan_dir)
@@ -2582,6 +2582,36 @@ class ScanManager:
                                                       "cancelled") else None)
         except Exception:  # noqa: BLE001 - best-effort，不阻塞接力
             pass
+        if status in _RUN_TERMINAL_STATUSES:
+            # run 事件文件补终态行（取消/run_timeout/worker 崩溃时黑盒 workflow 不跑
+            # finalize，归并流依赖每源自己的 scan_end 判关流）——独立 best-effort：
+            # session 标记失败不应连带跳过事件收口，反之亦然。
+            try:
+                await self._ensure_run_scan_end(scan_dir, run_id, status, reason)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _ensure_run_scan_end(self, scan_dir: Path, run_id: str,
+                                   status: str, reason: str | None = None) -> None:
+        """run 级 events.ndjson 的 scan_end 兜底（修归并流永不关流）。
+
+        MergedEventTailer 的关流条件是「wb scan_end 已扣住 + 每个已发现 run 源见过
+        scan_end」。黑盒 workflow 未走到 finalize 时 run-K/events.ndjson 不会有自己的
+        scan_end——取消（except CancelledError 直接 return）、run_timeout 服务端判超时
+        （代码内 except 不执行）、worker 崩溃后 finalize activity 无法执行、finalize
+        自身 best-effort 失败（黑盒 workflows.py:503-507 指望的「web _watch 兜底」对
+        run 子目录失效——_watch 只盯任务根）。旧收口（_mark_run/_reconcile）只写
+        session，流因此永不关流（live 页永久「已连接」）。本方法统一在 run 标终态时
+        补写事件行。
+
+        幂等：run events 已有 scan_end（黑盒正常完成/失败的 finalize 已写）→ no-op；
+        文件不存在（黑盒未提交，tailer 不会发现该源）→ no-op。
+        """
+        events = blackbox_run_dir(scan_dir, run_id) / "events.ndjson"
+        if not events.exists() or self._has_scan_end(events):
+            return
+        await self._write_scan_end(
+            events, status, -1, reason or f"run {status}（web 收口）")
 
     @staticmethod
     def _ws_of(scan_dir: Path) -> str:

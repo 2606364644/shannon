@@ -197,6 +197,70 @@ async def test_new_run_picked_up_mid_stream(tmp_path):
         await _cancel(task)
 
 
+# ---- run 空闲兜底（wb scan_end 已扣住、run 源无 scan_end 且停更） ----
+
+@pytest.mark.asyncio
+async def test_stalled_run_synthesizes_run_end_and_closes(tmp_path):
+    """wb scan_end 已扣住 + run 源再无写入且无自己的 scan_end（取消/run_timeout/
+    worker 崩溃且 web 收口缺失）→ 空闲兜底合成 run_end{synthetic} 后关流，wb
+    scan_end 仍作末条（live 页不再永久「已连接」）。"""
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    _append(scan / "events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T13:36:46Z", "message": "wb"})
+            + _line({"type": "scan_end", "ts": "2026-08-17T15:31:56Z", "status": "cancelled"}))
+    _append(scan / "blackbox-runs/run-1/events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T15:29:00Z", "message": "bb"}))
+
+    c = await _collect(MergedEventTailer(scan), run_idle_timeout=0.05)
+    assert _msgs(c.events) == ["wb", "bb"]
+    syn = [e for e in c.events if e.get("synthetic")]
+    assert len(syn) == 1, "应恰好合成一条 run_end（synthetic）"
+    assert syn[0]["type"] == "run_end" and syn[0]["run"] == "run-1"
+    assert c.events[-1]["type"] == "scan_end" and c.events[-1]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_idle_fallback_spares_active_run(tmp_path):
+    """run 仍在写（last_active 持续刷新）→ 空闲兜底不误伤（NodeGoat「误写任务级
+    scan_end 而 run 实际在跑」保护不回归）；停更超窗后才合成 run_end 收口。"""
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    _append(scan / "events.ndjson",
+            _line({"type": "scan_end", "ts": "2026-08-17T15:31:56Z", "status": "failed"}))
+    run_events = scan / "blackbox-runs/run-1/events.ndjson"
+    _append(run_events, _line({"type": "InfoEvent", "ts": "2026-08-17T15:29:00Z", "message": "bb-1"}))
+
+    tailer = MergedEventTailer(scan)
+    c = _Collector()
+    task = asyncio.create_task(tailer.tail(
+        c.cb, poll_interval=0.01, close_grace=0.05, run_idle_timeout=0.25))
+    try:
+        stop = asyncio.Event()
+
+        async def _writer():
+            i = 2
+            while not stop.is_set():
+                _append(run_events, _line(
+                    {"type": "InfoEvent", "ts": "2026-08-17T15:30:00Z", "message": f"bb-{i}"}))
+                i += 1
+                await asyncio.sleep(0.05)
+
+        writer = asyncio.create_task(_writer())
+        await asyncio.sleep(0.6)  # > 2× 空闲窗口，但写入持续 → 不得合成
+        assert not any(e.get("synthetic") for e in c.events), \
+            "run 持续写入时不得合成 run_end"
+        assert not c.done.is_set()
+        stop.set()
+        await writer
+        await asyncio.wait_for(c.done.wait(), timeout=3)
+        syn = [e for e in c.events if e.get("synthetic")]
+        assert len(syn) == 1 and syn[0]["type"] == "run_end" and syn[0]["run"] == "run-1"
+        assert c.events[-1]["type"] == "scan_end" and c.events[-1]["status"] == "failed"
+    finally:
+        await _cancel(task)
+
+
 # ---- 断点续传（复合 id） ----
 
 @pytest.mark.asyncio

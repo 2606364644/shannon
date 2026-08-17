@@ -4,7 +4,10 @@
 核心不变量（spec §7.4 / bug-fix）：全场景 events 文件只有一个 scan_end。
 - 成功路径：黑盒 finalize 已写 scan_end → _ensure_scan_end no-op（不写第二条）。
 - 异常 / 跳过 / 提交失败：events 无 scan_end → _ensure_scan_end 补写防 _watch 永久 tail。
+- run 级对称不变量（2026-08-18 P1 修复）：黑盒 workflow 未走到 finalize（raise /
+  取消）时，run-K/events.ndjson 由 _mark_run 终态钩子补 scan_end，否则归并流永不关流。
 """
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -140,6 +143,47 @@ async def test_orchestrator_exception_ensures_scan_end(mgr, tmp_path):
         rbp.assert_not_awaited()                  # 白盒抛 → 不建 run / 不进 _run_blackbox_phase
         ws_end.assert_awaited()                    # _ensure_scan_end 补写（events 无 scan_end）
         assert scan_key not in mgr._orchestrator_tasks  # finally pop
+
+
+async def test_orchestrator_blackbox_raise_writes_run_events_scan_end(mgr, tmp_path):
+    """黑盒 workflow raise（run_timeout 服务端判超时 / worker 崩溃 →
+    WorkflowFailureError 上抛，workflow 代码内 except 不执行、finalize 不跑）→
+    编排 except _mark_run(failed) 必须顺带给 run-K/events.ndjson 补 scan_end——
+    MergedEventTailer 关流条件依赖每个已发现 run 源见到自己的 scan_end。"""
+    from supernova_web.components.scan_store import ScanStore
+    store = ScanStore(tmp_path); mgr._store = store
+    wb_id, scan_dir = store.create_scan("ws", "http://t", "/code/x")
+    (scan_dir / "deliverables" / "whitebox").mkdir(parents=True)
+    (scan_dir / "deliverables" / "whitebox" / "recon_deliverable.md").write_text("x")
+    (scan_dir / "deliverables" / "whitebox" / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}')
+    (scan_dir / "events.ndjson").write_text('{"type":"PhaseEvent","phase":"whitebox"}\n')
+    run_events = scan_dir / "blackbox-runs" / "run-1" / "events.ndjson"
+    run_events.parent.mkdir(parents=True)
+    run_events.write_text('{"type":"InfoEvent","message":"bb"}\n')  # 黑盒开跑过、未 finalize
+
+    wb_handle = AsyncMock()
+    bb_handle = MagicMock()
+
+    async def _result(handle, **kw):
+        if handle is wb_handle:
+            return {"status": "completed"}
+        raise RuntimeError("workflow failed (run_timeout / worker crash)")
+
+    with patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)), \
+         patch.object(mgr, "_await_workflow_result", new=_result), \
+         patch.object(store, "create_blackbox_run",
+                      MagicMock(return_value=("run-1", run_events.parent))):
+        scan_key = ("ws", wb_id)
+        req = ScanRequest(type="whitebox", url="http://t/",
+                          source={"kind": "repo", "value": "r"}, workspace="ws")
+        mgr._orchestrator_tasks[scan_key] = None
+        await mgr._combined_orchestrator(scan_key, wb_handle, scan_dir, req)
+
+    ends = [json.loads(l) for l in run_events.read_text().splitlines()
+            if json.loads(l).get("type") == "scan_end"]
+    assert len(ends) == 1, "run events 应恰好补写一条 scan_end"
+    assert ends[0]["status"] == "failed"
 
 
 async def test_orchestrator_returned_whitebox_failure_stops_blackbox(mgr, tmp_path):

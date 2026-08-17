@@ -44,6 +44,9 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
     # 测试/CI 可调小）。env 读取在请求期——monkeypatch 即时生效。
     import os
     grace = float(os.environ.get("SUPERNOVA_EVENTS_CLOSE_GRACE_SECONDS", "10"))
+    # run 源空闲兜底窗口（默认 300s：黑盒 workflow 未 finalize 且 web 收口缺失时合成
+    # run_end 关流的最后防线；run 仍在写则不触发。负值禁用）。
+    run_idle = float(os.environ.get("SUPERNOVA_EVENTS_RUN_IDLE_SECONDS", "300"))
 
     async def gen():
         queue: asyncio.Queue = asyncio.Queue()
@@ -55,7 +58,8 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
                 await queue.put(None)  # sentinel：关流（仅 wb 终态 scan_end 会到这里）
 
         task = asyncio.create_task(
-            tailer.tail(on_event, last_event_id=last, close_grace=grace))
+            tailer.tail(on_event, last_event_id=last, close_grace=grace,
+                        run_idle_timeout=run_idle))
         try:
             while True:
                 item = await queue.get()

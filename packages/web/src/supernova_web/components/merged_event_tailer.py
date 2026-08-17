@@ -15,6 +15,11 @@
     事故：编排器 15:31 误写任务级 scan_end failed 而黑盒 run 实际跑到 16:04——扣住
     后 run 的事件仍持续可推；
   - ``run-K`` 的 scan_end 改写 type=run_end 转发（run 收尾对全量流非终态）。
+- **run 空闲兜底**：wb scan_end 已扣住而某 run 源 ``run_idle_timeout`` 秒无新增且
+  无自己的 scan_end（黑盒 workflow 未 finalize：取消/run_timeout/worker 崩溃，且
+  web 侧收口缺失）→ 合成 ``run_end{synthetic:true}`` 视为终态，防流永不关流
+  （live 页永久「已连接」）。run 仍在写则 last_active 持续刷新，不会误伤上述
+  「误写任务级 scan_end 而 run 实际在跑」的场景。负值禁用。
 - **顺序**：每轮 poll 内各源新增行按 ``ts`` 排序输出（解析失败/缺失按源优先级稳定
   兜底：ac < wb < run-K）。各段（认证→白盒→黑盒）时间上不重叠，ts 排序为防御。
 """
@@ -60,6 +65,7 @@ class _Source:
     # 待发事件：(ts or None, 行尾字节 offset, data)
     pending: list[tuple[datetime | None, int, dict]] = field(default_factory=list)
     seen_end: bool = False  # 已见本源 scan_end
+    last_active: float = 0.0  # 最近一次读到新字节的 loop 时钟（run 空闲兜底判据）
 
     def reset(self) -> None:
         """文件被截断/重建：归零重读（重放由前端 id 去重吸收）。"""
@@ -79,7 +85,12 @@ class MergedEventTailer:
     # ---- 源发现与断点恢复 ----
 
     def _discover(self, resume: dict[str, int]) -> None:
-        """补齐源表：固定 ac/wb + 重扫 blackbox-runs/run-K（新 run 流中自动纳入）。"""
+        """补齐源表：固定 ac/wb + 重扫 blackbox-runs/run-K（新 run 流中自动纳入）。
+
+        仅在 ``tail()``（运行中的 event loop）内调用，可安全取 loop 时钟初始化
+        ``last_active``（run 空闲兜底的计时起点）。
+        """
+        now = asyncio.get_running_loop().time()
         fixed = [
             ("ac", self._dir / "authcheck-events.ndjson", 0),
             ("wb", self._dir / "events.ndjson", 1),
@@ -89,7 +100,8 @@ class MergedEventTailer:
                 self._sources[label] = _Source(label, path, priority,
                                                file_off=resume.get(label, 0),
                                                line_pos=resume.get(label, 0),
-                                               emit_off=resume.get(label, 0))
+                                               emit_off=resume.get(label, 0),
+                                               last_active=now)
         runs_root = self._dir / "blackbox-runs"
         if runs_root.is_dir():
             for entry in runs_root.iterdir():
@@ -102,7 +114,8 @@ class MergedEventTailer:
                         label, entry / "events.ndjson", 1000 + int(m.group(1)),
                         file_off=resume.get(label, 0),
                         line_pos=resume.get(label, 0),
-                        emit_off=resume.get(label, 0))
+                        emit_off=resume.get(label, 0),
+                        last_active=now)
 
     @staticmethod
     def parse_last_event_id(raw: str | None) -> dict[str, int]:
@@ -125,17 +138,22 @@ class MergedEventTailer:
 
     async def tail(self, on_event: OnEvent, last_event_id: str | None = None,
                    poll_interval: float = 0.2, close_grace: float = 10.0,
-                   source_wait_timeout: float = 300.0) -> None:
+                   source_wait_timeout: float = 300.0,
+                   run_idle_timeout: float = 300.0) -> None:
         """归并推送直到终态（wb scan_end 扣发 + 全 run 终态 + 宽限）或源等待超时。
 
         - ``close_grace``：终态条件首次全满足后再等的窗口——覆盖「白盒刚收尾、
           run-1 目录尚未建」的创建竞态，也留出用户点续跑的缝隙。
         - ``source_wait_timeout``：所有源文件都未出现时的等待上限（对齐 EventTailer
           的文件出现等待；超时返程，前端 EventSource 重连后重试）。
+        - ``run_idle_timeout``：wb scan_end 已扣住而某 run 源此窗口内无新增且无自己
+          的 scan_end → 合成 ``run_end{synthetic:true}`` 终态（web 侧 _ensure_run_scan_end
+          收口漏网时的最后防线；run 仍在写则 last_active 刷新不误伤）。负值禁用。
         """
         resume = self.parse_last_event_id(last_event_id)
         waited = 0.0
         closable_since: float | None = None
+        loop = asyncio.get_running_loop()
         while True:
             self._discover(resume)
             for source in self._sources.values():
@@ -147,10 +165,24 @@ class MergedEventTailer:
             runs = [s for s in self._sources.values() if s.label not in ("ac", "wb")]
             closable = (self._held_end is not None
                         and all(s.seen_end for s in runs))
+            if (not closable and self._held_end is not None
+                    and run_idle_timeout >= 0):
+                now = loop.time()
+                for s in runs:
+                    if not s.seen_end and now - s.last_active >= run_idle_timeout:
+                        s.seen_end = True
+                        await on_event(
+                            {"ts": datetime.now().isoformat(),
+                             "category": "CONTROL", "type": "run_end",
+                             "run": s.label, "status": "unknown",
+                             "synthetic": True},
+                            self._id_snapshot())
+                closable = (self._held_end is not None
+                            and all(s.seen_end for s in runs))
             if closable:
                 if closable_since is None:
-                    closable_since = asyncio.get_running_loop().time()
-                elif asyncio.get_running_loop().time() - closable_since >= close_grace:
+                    closable_since = loop.time()
+                elif loop.time() - closable_since >= close_grace:
                     await on_event(self._held_end, self._id_snapshot())
                     return
             else:
@@ -181,6 +213,7 @@ class MergedEventTailer:
         if not chunk:
             return
         source.file_off += len(chunk)
+        source.last_active = asyncio.get_running_loop().time()
         lines = (source.carry + chunk).split(b"\n")
         source.carry = lines.pop()  # 未终结的半截行留待下轮
         for raw in lines:

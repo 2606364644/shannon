@@ -332,6 +332,67 @@ async def test_cancel_combined_marks_cancelled_terminal_state(tmp_path, monkeypa
     assert '"scan_end"' in event_text and '"cancelled"' in event_text
 
 
+# ── cancel: run 事件文件补 scan_end（归并流关流依赖）─────────────────────────
+
+@pytest.mark.asyncio
+async def test_cancel_combined_running_writes_run_events_scan_end(
+        tmp_path, monkeypatch):
+    """取消黑盒 running run：黑盒 workflow 走 except CancelledError 直接 return
+    （不跑 finalize），run-K/events.ndjson 的终态行必须由 web 补写——否则
+    MergedEventTailer「每 run 见过 scan_end」的关流条件永不满足，live 页
+    永久「已连接」。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    scan_dir = _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1
+    store.update_blackbox_run("WS", "s1", "run-1", phase="running", status="running")
+    run_events = scan_dir / "blackbox-runs" / "run-1" / "events.ndjson"
+    run_events.write_text(
+        '{"type":"InfoEvent","ts":"2026-08-18T10:00:00Z","message":"bb"}\n')
+
+    await mgr.cancel("WS", "s1")
+
+    lines = [json.loads(l) for l in run_events.read_text().splitlines() if l.strip()]
+    ends = [l for l in lines if l.get("type") == "scan_end"]
+    assert len(ends) == 1, "run events 应恰好补写一条 scan_end"
+    assert ends[0]["status"] == "cancelled"
+
+
+# ── _ensure_run_scan_end：幂等 / 文件不存在 no-op ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ensure_run_scan_end_idempotent_and_skips_missing(tmp_path, monkeypatch):
+    """已有 scan_end（黑盒正常 finalize 已写）→ no-op；黑盒未提交（文件不存在，
+    tailer 不会发现该源）→ no-op；无 scan_end 才补写。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1（无 events.ndjson → no-op）
+    store.create_blackbox_run("WS", "s1")  # run-2
+    events = scan_dir / "blackbox-runs" / "run-2" / "events.ndjson"
+    events.parent.mkdir(parents=True, exist_ok=True)
+    events.write_text(
+        '{"type":"InfoEvent","ts":"2026-08-18T10:00:00Z","message":"bb"}\n')
+
+    await mgr._ensure_run_scan_end(scan_dir, "run-1", "failed")  # 文件不存在
+    assert not (scan_dir / "blackbox-runs" / "run-1" / "events.ndjson").exists()
+
+    await mgr._ensure_run_scan_end(scan_dir, "run-2", "failed", reason="编排中断")
+    ends = [json.loads(l) for l in events.read_text().splitlines()
+            if json.loads(l).get("type") == "scan_end"]
+    assert len(ends) == 1 and ends[0]["status"] == "failed"
+
+    await mgr._ensure_run_scan_end(scan_dir, "run-2", "cancelled")  # 已有 → 幂等
+    ends = [json.loads(l) for l in events.read_text().splitlines()
+            if json.loads(l).get("type") == "scan_end"]
+    assert len(ends) == 1 and ends[0]["status"] == "failed"
+
+
 # ── 零回归守卫：非组合 resume/cancel 不走 combined 分支 ──────────────────────
 
 @pytest.mark.asyncio
