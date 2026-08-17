@@ -426,7 +426,6 @@
       "rolePlaceholder": "Pick or type a role",
       "rolePresetsHint": "Click a built-in role to fill in; type custom roles (e.g. audit admin) directly",
       "rolePresets": {
-        "superadmin": "Super admin",
         "admin": "Admin",
         "user": "User"
       },
@@ -971,7 +970,33 @@
       "hideProcess": "Hide",
       "process": "Login process",
       "noLog": "No process log yet",
-      "alreadyRunning": "Verification in progress, please wait…"
+      "alreadyRunning": "Verification in progress, please wait…",
+      "failure": {
+        "username_or_password": {
+          "title": "Login failed: wrong username or password",
+          "hint": "The agent reached and submitted the login form; the target site rejected these credentials. Check the account/password stored in this profile."
+        },
+        "totp_secret": {
+          "title": "Login failed: TOTP verification rejected",
+          "hint": "Check that the TOTP secret in the profile is correct and bound to this account."
+        },
+        "out_of_band": {
+          "title": "Login failed: issue outside the form submission",
+          "hint": "Something failed beyond username/password/TOTP (e.g. redirect timeout, CAPTCHA, risk-control interception). Check the process log to locate it."
+        },
+        "engine": {
+          "title": "Validation engine call failed (unrelated to the target account)",
+          "hint": "The LLM engine driving the browser login returned an error before any real login attempt. Go to Workspace Settings → LLM config and verify the API key, base_url and models match and are valid, then retry.",
+          "401": "Likely cause: the API key is invalid/expired, or the key does not match the base_url (e.g. an internal-proxy key sent to a public endpoint).",
+          "403": "Likely cause: the API key has no access to the configured model.",
+          "429": "Likely cause: rate limit or insufficient quota — retry later or switch the key."
+        },
+        "no_verdict": {
+          "title": "Validation finished without a verdict",
+          "hint": "The agent completed the login flow but produced no structured verdict (abnormal model output). Check the process log or retry."
+        },
+        "detailLabel": "Technical details"
+      }
     },
     "loadFailed": "Load failed",
     "process": {
@@ -984,7 +1009,7 @@
       "back": "Back to auth profiles",
       "notFound": "Profile not found",
       "noRoles": "No role credentials in this profile",
-      "start": "Test selected roles",
+      "start": "Start test",
       "starting": "Testing…",
       "selected": "{{n}}/{{m}} roles selected",
       "seeDetail": "View details",

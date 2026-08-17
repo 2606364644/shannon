@@ -81,3 +81,69 @@ async def test_auth_validation_probe_forwards_proxy_url(monkeypatch):
     ) as validate:
         await run_auth_validation_probe(inp)
     assert validate.call_args.kwargs["proxy_url"] == "http://127.0.0.1:19090"
+
+
+@pytest.mark.asyncio
+async def test_probe_forwards_provider_config():
+    """完整 provider 配置透传 validate_authentication（2026-08-17 key/端点错配根因修复）。"""
+    inp = _input()
+    inp.provider_config = {"type": "openai_compatible", "base_url": "https://llm-proxy.example/v1",
+                           "api_key": "user-key-x", "medium_model": "m"}
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(return_value=AuthValidationResult(success=True)),
+    ) as m:
+        await run_auth_validation_probe(inp)
+    assert m.call_args.kwargs["provider_config"] == inp.provider_config
+
+
+@pytest.mark.asyncio
+async def test_probe_llm_401_classified_as_engine():
+    """LLM 引擎 401（如 key/端点错配）→ failure_point=engine，与登录失败区分。"""
+    from supernova_core.models.errors import PentestError
+
+    err = PentestError(
+        "Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}",
+        "validation", retryable=False,
+        context={"provider_error_code": "AuthenticationError"})
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(side_effect=err),
+    ):
+        result = await run_auth_validation_probe(_input())
+    assert result.success is False
+    assert result.failure_point == "engine"
+    assert "401" in (result.failure_detail or "")
+
+
+@pytest.mark.asyncio
+async def test_probe_llm_401_without_context_classified_as_engine():
+    """无 provider_error_code context 的旧路径异常 → 消息签名兜底命中 engine。"""
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(side_effect=RuntimeError(
+            "Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}")),
+    ):
+        result = await run_auth_validation_probe(_input())
+    assert result.failure_point == "engine"
+
+
+@pytest.mark.asyncio
+async def test_probe_rate_limit_classified_as_engine():
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(side_effect=RuntimeError("Rate limit reached, retry later")),
+    ):
+        result = await run_auth_validation_probe(_input())
+    assert result.failure_point == "engine"
+
+
+@pytest.mark.asyncio
+async def test_probe_unrelated_exception_stays_out_of_band():
+    """非引擎类异常（如浏览器崩溃）保持 out_of_band，不被误分类。"""
+    with patch(
+        "supernova_blackbox.pipeline.activities.validate_authentication",
+        new=AsyncMock(side_effect=RuntimeError("browser crashed")),
+    ):
+        result = await run_auth_validation_probe(_input())
+    assert result.failure_point == "out_of_band"

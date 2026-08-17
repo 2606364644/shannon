@@ -134,6 +134,7 @@ def _build_validate_auth_executor_kwargs(
     config_path: str | None,
     deliverables_path: str | None,
     api_key: str | None,
+    provider_config: dict | None,
     repo_path: str,
     state_file: Path,
     audit_logger: "ActivityLogger | None",
@@ -152,6 +153,7 @@ def _build_validate_auth_executor_kwargs(
         deliverables_path=deliverables_path,
         config_path=config_path,
         api_key=api_key,
+        provider_config=provider_config,
         prompt_override="validate-authentication",
         prompt_variables={"AUTH_STATE_FILE": str(state_file)},
         structured_output_schema=AUTH_VALIDATION_SCHEMA,
@@ -171,6 +173,7 @@ async def validate_authentication(
     repo_path: str = "",
     deliverables_path: str | None = None,
     api_key: str | None = None,
+    provider_config: dict | None = None,
     audit_logger: "ActivityLogger | None" = None,
     tool_audit_logger: "ToolAuditLogger | None" = None,
     proxy_url: str | None = None,
@@ -179,6 +182,10 @@ async def validate_authentication(
 
     Returns ``AuthValidationResult(success=True)`` when no auth config is present
     (nothing to validate) or when the agent confirms successful login.
+
+    provider_config（完整 provider dict，base_url+key+模型一体）优先于 api_key；
+    两者都缺时 executor 回落 env profile。仅传 api_key 会让 base_url 落到 worker
+    env，key 与端点来自两套配置时 401（2026-08-17 NodeGoat 探针根因）。
 
     子项目2 T4: 当 ``dist_config.accounts`` 非空时，循环 primary + 每个 account 各登录
     一次，落 ``identity-manifest.json``；primary 失败 fail-fast，非 primary 失败仅记
@@ -220,6 +227,7 @@ async def validate_authentication(
             **_build_validate_auth_executor_kwargs(
                 web_url=web_url, config_path=config_path,
                 deliverables_path=deliverables_path, api_key=api_key,
+                provider_config=provider_config,
                 repo_path=repo_path, state_file=state_file,
                 audit_logger=audit_logger, tool_audit_logger=tool_audit_logger,
                 proxy_url=proxy_url,
@@ -277,6 +285,7 @@ async def validate_authentication(
                 **_build_validate_auth_executor_kwargs(
                     web_url=web_url, config_path=config_path,
                     deliverables_path=deliverables_path, api_key=api_key,
+                    provider_config=provider_config,
                     repo_path=repo_path, state_file=state_file,
                     audit_logger=audit_logger, tool_audit_logger=tool_audit_logger,
                     proxy_url=proxy_url,

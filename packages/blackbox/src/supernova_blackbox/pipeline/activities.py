@@ -33,7 +33,7 @@ from supernova_core.services.host_proxy import (
     ProxyHandle,
 )
 
-from .shared import BlackboxActivityInput
+from .shared import BlackboxActivityInput, is_engine_failure
 from supernova_blackbox.services.exploitation_checker import QueueValidationResult
 
 
@@ -235,6 +235,7 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
             repo_path=input.repo_path or "",
             deliverables_path=str(deliverables),
             api_key=input.api_key,
+            provider_config=input.provider_config,
             tool_audit_logger=tool_audit_logger,
             proxy_url=input.proxy_url,
         )
@@ -319,6 +320,7 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
             web_url=input.web_url,
             config_path=input.config_path,
             api_key=input.api_key,
+            provider_config=input.provider_config,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
             correlation_context=input.correlation_context,
@@ -398,6 +400,7 @@ async def run_endpoint_verify(input: BlackboxActivityInput) -> dict:
             vuln_classes=list(ALL_VULN_CLASSES),
             config_path=input.config_path,
             api_key=input.api_key,
+            provider_config=input.provider_config,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
             proxy_url=input.proxy_url,
@@ -530,6 +533,7 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
             deliverables_path=str(bb),
             config_path=input.config_path,
             api_key=input.api_key,
+            provider_config=input.provider_config,
             pipeline_testing=input.pipeline_testing_mode,
             tool_audit_logger=tool_audit_logger,
             proxy_url=input.proxy_url,
@@ -851,6 +855,7 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
             prompt_manager=prompt_manager,
             executor=executor,
             api_key=input.api_key,
+            provider_config=input.provider_config,
             tool_audit_logger=tool_audit_logger,
             proxy_url=input.proxy_url,
         )
@@ -869,7 +874,9 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
                 attempt_number=attempt, error=str(e)))
         return AuthValidationResult(
             success=False,
-            failure_point="out_of_band",
+            # LLM 引擎失败（provider 401/限额等）≠ 登录失败：分类成 engine 让前端
+            # 指向 LLM 配置排查；其余维持 out_of_band（2026-08-17 NodeGoat 401 误读根因）。
+            failure_point="engine" if is_engine_failure(e) else "out_of_band",
             failure_detail=f"{type(e).__name__}: {e}",
         )
     dur_ms = int((time.monotonic() - agent_start) * 1000)

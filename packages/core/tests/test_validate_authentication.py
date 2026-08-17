@@ -816,3 +816,33 @@ async def test_validate_authentication_creates_sandbox_cwd(tmp_path):
     assert result.success is True
     assert repo_path.is_dir()  # 最终也应是目录
     assert cwd_existed["is_dir"] is True  # ← 关键:agent 跑时 cwd 已预创建
+
+
+@pytest.mark.asyncio
+async def test_auth_validation_forwards_provider_config_to_executor(tmp_path):
+    """provider_config 完整穿线到 executor.execute（2026-08-17 key/端点错配根因：
+    仅 api_key 时 base_url 回落 worker env，两套配置混用必 401）。"""
+    mock_executor = MagicMock()
+    mock_executor.execute = AsyncMock(return_value=AgentMetrics(
+        duration_ms=100, structured_output={"login_success": True}))
+    mock_dist_config = MagicMock()
+    mock_dist_config.authentication = {"username": "admin", "password": "pw"}
+    mock_dist_config.accounts = []
+
+    provider_config = {"type": "openai_compatible",
+                       "base_url": "https://llm-proxy.example/v1",
+                       "api_key": "user-key-x", "medium_model": "m"}
+    with patch("supernova_core.config.parser.parse_config", return_value=MagicMock()), \
+         patch("supernova_core.config.parser.distribute_config", return_value=mock_dist_config):
+        result = await validate_authentication(
+            web_url="https://example.com",
+            config_path="/path/to/config.yaml",
+            workspace_path=str(tmp_path),
+            prompt_manager=MagicMock(),
+            executor=mock_executor,
+            provider_config=provider_config,
+        )
+
+    assert result.success is True
+    call_kwargs = mock_executor.execute.call_args.kwargs
+    assert call_kwargs.get("provider_config") == provider_config

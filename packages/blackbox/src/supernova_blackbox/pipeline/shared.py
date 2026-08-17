@@ -3,6 +3,37 @@ from dataclasses import dataclass, field
 from supernova_core.models.base import BasePipelineInput
 from supernova_core.constants import DEFAULT_DELIVERABLES_SUBDIR
 
+# LLM 引擎级错误的消息签名（无 provider_error_code context 的旧路径/直抛异常兜底）。
+# openai SDK 标准格式 "Error code: 40x - {...}" + 常见 provider 限额/令牌文案。
+_ENGINE_ERROR_MARKERS: tuple[str, ...] = (
+    "error code: 401", "error code: 403", "error code: 429",
+    "令牌已过期", "invalid api key", "incorrect api key",
+    "rate limit", "ratelimit", "quota", "insufficient credit",
+    "exceeded your current quota",
+)
+_ENGINE_ERROR_TYPE_NAMES = frozenset({
+    "authenticationerror", "permissionerror", "ratelimiterror", "permissiondeniederror",
+})
+
+
+def is_engine_failure(exc: BaseException) -> bool:
+    """LLM 引擎级失败判定：驱动 agent 的 provider 调用自身失败，与目标站登录无关。
+
+    两级判据：① executor 已把 provider 语义错误类（AuthenticationError 等）塞进
+    PentestError.context["provider_error_code"]；② 消息/类型签名兜底（openai SDK
+    "Error code: 4xx"、智谱「令牌已过期」、限额类文案）。命中 → auth 探针记
+    failure_point="engine"，前端提示用户查 LLM 配置而非账号密码。
+
+    放 shared.py（非 activities.py）：workflow 沙箱可安全导入的纯函数，
+    batch workflow 的框架级兜底 except 复用同一判据。"""
+    ctx = getattr(exc, "context", None)
+    if isinstance(ctx, dict) and ctx.get("provider_error_code"):
+        return True
+    if type(exc).__name__.lower() in _ENGINE_ERROR_TYPE_NAMES:
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _ENGINE_ERROR_MARKERS)
+
 
 @dataclass
 class BlackboxPipelineInput(BasePipelineInput):
@@ -41,6 +72,10 @@ class BlackboxAuthValidationInput(BasePipelineInput):
     # Combined auth precheck may run in its own workflow, but it must receive the
     # same immutable HOST snapshot as the subsequent blackbox workflow.
     host_mappings: dict[str, str] = field(default_factory=dict)
+    # 完整 provider 配置穿线（对齐 BlackboxPipelineInput P3c 阶段 1：base_url+key+模型一体）。
+    # 仅传 api_key 会让 base_url/模型回落 worker env profile——key 与端点来自两套配置时
+    # 必然 401（2026-08-17 NodeGoat 探针根因）。None=CLI/env 兜底路径，行为不变。
+    provider_config: dict | None = None
 
 
 @dataclass
@@ -71,6 +106,9 @@ class BlackboxAuthValidationBatchInput(BasePipelineInput):
     """
     items: list[BlackboxAuthValidationBatchItem] = field(default_factory=list)
     api_key: str | None = None
+    # 同 BlackboxAuthValidationInput.provider_config：profile 级共享（同 provider），
+    # items 各自独立 probe/events/workspace_path。
+    provider_config: dict | None = None
 
 
 @dataclass

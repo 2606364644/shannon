@@ -75,7 +75,20 @@ async def lifespan(app: FastAPI):
     except Exception:
         import logging
         logging.getLogger("supernova_web").exception("auth-profile seed failed; continuing startup")
-    # 清上次 worker 异常残留的认证 probe 目录(含明文凭据 YAML)
+    # 认证验证启动对账(2026-08-17 卡"测试中"根因):watcher 随旧进程死亡后 running 凭据成
+    # 永久孤儿(batch 前端不轮询 verify-status)。终态回填 / 在跑重挂跟踪,先于 probe 清理
+    # (后者会保护 running cred 的 probe)。best-effort,失败不阻断启动。
+    try:
+        reconciled = await app.state.scan_manager.reconcile_auth_validation()
+        if reconciled:
+            import logging
+            logging.getLogger("supernova_web").info(
+                "Reconciled %d orphaned auth validation result(s).", reconciled)
+    except Exception:
+        import logging
+        logging.getLogger("supernova_web").exception(
+            "auth validation reconcile failed; continuing startup")
+    # 清上次 worker 异常残留的认证 probe 明文凭据(收窄:只删 scan-config.yaml,保留过程记录)
     app.state.scan_manager.reap_stale_probes()
     yield
     app.state._purge_task.cancel()

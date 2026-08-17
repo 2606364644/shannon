@@ -77,6 +77,7 @@ class EndpointVerifyExecutor:
         audit_logger: "ActivityLogger | None" = None,
         tool_audit_logger: "ToolAuditLogger | None" = None,
         proxy_url: str | None = None,
+        provider_config: dict | None = None,
     ) -> dict:
         """跑端点 live 验证 agent,产 endpoint_verify.json 到 blackbox/。
 
@@ -96,6 +97,7 @@ class EndpointVerifyExecutor:
             web_url=web_url,
             config_path=config_path,
             api_key=api_key,
+            provider_config=provider_config,
             pipeline_testing=pipeline_testing,
             prompt_variables={
                 "endpoints_manifest": manifest,

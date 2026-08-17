@@ -426,7 +426,6 @@
       "rolePlaceholder": "选择或输入角色",
       "rolePresetsHint": "点击内置角色快速填入；特殊角色（如审计管理员）直接输入",
       "rolePresets": {
-        "superadmin": "超管",
         "admin": "管理员",
         "user": "用户"
       },
@@ -971,7 +970,33 @@
       "hideProcess": "收起",
       "process": "登录过程",
       "noLog": "暂无过程记录",
-      "alreadyRunning": "正在验证中，请稍候…"
+      "alreadyRunning": "正在验证中，请稍候…",
+      "failure": {
+        "username_or_password": {
+          "title": "登录失败：用户名或密码错误",
+          "hint": "验证 agent 已到达登录表单并提交，目标站点拒绝了这组凭据。请核对档案中该角色的账号密码。"
+        },
+        "totp_secret": {
+          "title": "登录失败：TOTP 动态码未通过",
+          "hint": "请检查档案中的 TOTP 密钥是否正确、是否与该账号绑定。"
+        },
+        "out_of_band": {
+          "title": "登录失败：表单提交之外的问题",
+          "hint": "登录过程中出现了不属于用户名/密码/TOTP 的失败（如跳转超时、验证码、风控拦截）。可查看过程日志定位。"
+        },
+        "engine": {
+          "title": "验证引擎调用失败（与目标站账号密码无关）",
+          "hint": "驱动浏览器执行登录的 LLM 引擎返回了错误，浏览器尚未真正执行登录。请前往「工作区设置 → LLM 配置」检查 API Key、接口地址(base_url)与模型是否匹配且有效，修正后重试。",
+          "401": "常见原因：API Key 无效或过期，或 Key 与接口地址不匹配（例如内网代理的 Key 发给了公网端点）。",
+          "403": "常见原因：API Key 无权访问所配置的模型。",
+          "429": "常见原因：触发限流或额度不足，稍后重试或更换 Key。"
+        },
+        "no_verdict": {
+          "title": "验证完成但未得出结论",
+          "hint": "agent 跑完了登录过程但没有给出结构化结论（模型输出异常）。可查看过程日志，或重试一次。"
+        },
+        "detailLabel": "技术详情"
+      }
     },
     "loadFailed": "加载失败",
     "process": {
@@ -984,7 +1009,7 @@
       "back": "返回认证档案",
       "notFound": "未找到该档案",
       "noRoles": "该档案无角色凭据",
-      "start": "开始测试选中角色",
+      "start": "开始测试",
       "starting": "测试中…",
       "selected": "已选 {{n}}/{{m}} 个角色",
       "seeDetail": "看详情",

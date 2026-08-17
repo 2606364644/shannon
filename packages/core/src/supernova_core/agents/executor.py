@@ -180,12 +180,18 @@ class AgentExecutor:
                 if isinstance(result.error_code, ErrorCode)
                 else ErrorCode.AGENT_EXECUTION_FAILED
             )
+            # provider 语义错误类（字符串，如 AuthenticationError/RateLimitError）经
+            # context 保留：下游（auth 探针等）据此区分"LLM 引擎失败"与目标站登录失败，
+            # 不再让原始异常串（如 401 令牌过期）被误读为账号密码问题。
+            context = _result_cost_context(result)
+            if isinstance(result.error_code, str) and not isinstance(result.error_code, ErrorCode):
+                context["provider_error_code"] = result.error_code
             raise PentestError(
                 result.error or f"Agent {agent_name.value} execution failed",
                 "validation",
                 retryable=result.retryable,
                 error_code=error_code,
-                context=_result_cost_context(result),
+                context=context,
             )
 
         queue_filename = get_queue_filename(agent_name)

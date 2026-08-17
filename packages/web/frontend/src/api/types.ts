@@ -318,7 +318,9 @@ export interface ScanAuthentication {
 export type VerifyState = "unverified" | "running" | "success" | "failed";
 export interface VerifyStatus {
   state: VerifyState;
-  failure_point?: "username_or_password" | "totp_secret" | "out_of_band";
+  // engine = LLM 引擎/provider 调用失败（与目标站登录无关，2026-08-17 起）；
+  // no_verdict = agent 跑完但无结构化结论（内部值，见 auth_profile_store.VerifyStatus）。
+  failure_point?: "username_or_password" | "totp_secret" | "out_of_band" | "engine" | "no_verdict";
   failure_detail?: string;
   last_verified_at?: string;
   // 块3c：最近一次验证的 probe 目录 + workflow_id（verify-log 定位 + 下次覆盖清理）。

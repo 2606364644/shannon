@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /** 内置角色预设（值即存档的 role 字符串；标签走 i18n scan.auth.rolePresets.*）。
- *  覆盖最常见的两类（超管/管理员）+ 低权用户；审计管理员等特殊角色不预设，直接输入即可。 */
-export const ROLE_PRESETS = ["superadmin", "admin", "user"] as const;
+ *  覆盖最常见的两级（管理员/普通用户）；超管、审计管理员等特殊角色不预设，直接输入即可。 */
+export const ROLE_PRESETS = ["admin", "user"] as const;
 
 /** 多角色凭据录入草稿（前端内部态，scan 页 inline + 档案 dialog 共用）。
  *  - 新建 id 空（后端分配）；编辑 id 透传原值。

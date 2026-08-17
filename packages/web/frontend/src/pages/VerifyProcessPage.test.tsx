@@ -104,3 +104,46 @@ describe("VerifyProcessPage", () => {
     expect(screen.getByText("验证中…")).toBeInTheDocument();
   });
 });
+
+describe("VerifyProcessPage 失败提示（VerifyFailureNote）", () => {
+  it("engine 失败 → 引擎提示标题 + 401 子码 + 折叠技术详情", async () => {
+    currentProf = {
+      ...failedProf,
+      credentials: [{
+        id: "cred_a", role: "admin", username: "admin",
+        verify_status: {
+          state: "failed", failure_point: "engine",
+          failure_detail: "PentestError: Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}",
+          probe_dir: "/p/probe-1", workflow_id: "wf-1",
+        },
+      }],
+    };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("验证引擎调用失败（与目标站账号密码无关）")).toBeInTheDocument());
+    expect(screen.getByText(/工作区设置 → LLM 配置/)).toBeInTheDocument();
+    expect(screen.getByText("技术详情")).toBeInTheDocument();
+  });
+
+  it("旧记录兜底：out_of_band + detail 含 401 签名 → 按 engine 渲染", async () => {
+    currentProf = {
+      ...failedProf,
+      credentials: [{
+        id: "cred_a", role: "admin", username: "admin",
+        verify_status: {
+          state: "failed", failure_point: "out_of_band",
+          failure_detail: "PentestError: Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}",
+          probe_dir: "/p/probe-1", workflow_id: "wf-1",
+        },
+      }],
+    };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("验证引擎调用失败（与目标站账号密码无关）")).toBeInTheDocument());
+  });
+
+  it("out_of_band 普通失败 → 常规提示（不误报引擎）", async () => {
+    currentProf = failedProf;  // detail "Login failed: invalid creds"，无引擎签名
+    renderPage();
+    await waitFor(() => expect(screen.getByText("登录失败：表单提交之外的问题")).toBeInTheDocument());
+    expect(screen.queryByText(/验证引擎调用失败/)).not.toBeInTheDocument();
+  });
+});

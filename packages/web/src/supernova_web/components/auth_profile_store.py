@@ -33,7 +33,11 @@ class VerifyStatus(BaseModel):
     # "running" = 测试登录 workflow 已起、未到终态（前端重载过程页时识别它 → 重连 SSE 恢复实时观测）。
     # start_auth_validation 启动 workflow 后写 running；get_auth_validation_result 终态覆盖为 success/failed。
     state: Literal["unverified", "running", "success", "failed"] = "unverified"
-    failure_point: str | None = None  # username_or_password | totp_secret | out_of_band
+    # username_or_password | totp_secret | out_of_band（LLM-facing enum）
+    # | engine（内部：LLM 引擎/provider 调用失败，与目标站登录无关——2026-08-17 起
+    #   is_engine_failure 命中时写入，前端据此引导查 LLM 配置而非账号密码）
+    # | no_verdict（内部：agent 跑完但无 structured verdict）
+    failure_point: str | None = None
     failure_detail: str | None = None
     last_verified_at: str | None = None
     # 块3c：最近一次验证的 probe 目录 + workflow_id。verify-log 读它定位过程记录；下次"测试登录"

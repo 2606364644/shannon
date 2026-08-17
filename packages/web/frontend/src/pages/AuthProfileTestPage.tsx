@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VerifyLivePanel } from "./VerifyLivePanel";
 import { HostFields } from "@/components/ScanFormFields";
+import { VerifyFailureNote } from "@/components/auth/VerifyFailureNote";
 import { DEFAULT_HOST } from "./ScanNewPage";
 import type { HostFormState } from "./ScanNewPage";
 
@@ -196,7 +197,7 @@ export function AuthProfileTestPage() {
         <>
           {/* header: 档案名 + login_url + overall 徽章 + 开始按钮 */}
           <Card className="p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 space-y-1">
                 <h2 className="break-all font-mono text-lg font-medium">{profile.name}</h2>
                 <p className="break-all font-mono text-xs text-muted-foreground">{profile.login_url}</p>
@@ -296,10 +297,11 @@ export function AuthProfileTestPage() {
                         onComplete={handleCredComplete}
                       />
                     )}
-                    {st === "failed" && c.verify_status?.failure_detail && (
-                      <p className="border-l-2 border-red/60 bg-red/10 px-2.5 py-1.5 text-xs leading-relaxed text-red/80">
-                        {c.verify_status.failure_detail}
-                      </p>
+                    {st === "failed" && (c.verify_status?.failure_point || c.verify_status?.failure_detail) && (
+                      <VerifyFailureNote
+                        failurePoint={c.verify_status?.failure_point}
+                        failureDetail={c.verify_status?.failure_detail}
+                      />
                     )}
                   </div>
                 );

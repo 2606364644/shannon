@@ -460,3 +460,45 @@ async def test_batch_workflow_no_mappings_skips_proxy():
     # 不带 mappings → 不起 proxy、不 stop（直连，零回归）
     assert "setup_proxy" not in calls
     assert "stop_proxy" not in calls
+
+
+@pytest.mark.asyncio
+async def test_workflow_threads_provider_config_to_probe():
+    """完整 provider 配置穿线：input.provider_config → probe activity input。
+
+    2026-08-17 根因：仅传 api_key 时 base_url/模型回落 worker env profile，
+    key 与端点来自两套配置 → LLM 401 被误记为登录失败。"""
+    seen = []
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        pass
+
+    @activity.defn
+    async def setup_display(i):
+        pass
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        seen.append(i.get("provider_config") if isinstance(i, dict) else getattr(i, "provider_config", None))
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        pass
+
+    provider_config = {"type": "openai_compatible", "base_url": "https://llm-proxy.example/v1",
+                       "api_key": "user-key-x", "medium_model": "m"}
+    inp = BlackboxAuthValidationInput(
+        web_url="http://target/", config_path="/c.yaml", workspace_path="/wp",
+        provider_config=provider_config,
+    )
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(
+            env.client, task_queue="tq-auth-pc", workflows=[AuthValidationWorkflow],
+            activities=[log_phase_start_activity, setup_display,
+                        run_auth_validation_probe, finalize_summary],
+        ):
+            await env.client.execute_workflow(
+                AuthValidationWorkflow.run, inp, id="w-auth-pc", task_queue="tq-auth-pc")
+    assert seen == [provider_config]

@@ -149,26 +149,40 @@ class ScanManager:
         return None
 
     def reap_stale_probes(self) -> int:
-        """启动期清所有 ws 的 auth-probes/*/ 残留(worker 异常残留的明文 probe 目录)。
+        """启动期清残留 probe 的明文凭据(worker/web 异常退出滞留的 scan-config.yaml)。
 
-        验证是即时操作(test → 取 result → 删),无长期运行态;启动时残留 = 上次 worker
-        崩溃。整目录删(含明文 scan-config.yaml)。返清理数量。
+        收窄(2026-08-17):只删明文 scan-config.yaml,保留 events.ndjson/auth-state.json 供
+        verify-log 回看/诊断(对齐 get_auth_validation_result finally 的收窄清理——整目录 rmtree
+        会销毁卡 running 案例的过程证据);清空后的空目录顺手移除。running cred 的 probe 跳过:
+        重启时验证仍在跑(batch 后续 cred 尚未跑),删其 scan-config 会让下一 cred activity
+        读不到配置。返清理文件数。
         """
-        import shutil
+        protected = self._running_probe_dirs()
         n = 0
         if not self._workspaces_dir.is_dir():
             return 0
         for ws_dir in self._workspaces_dir.iterdir():
             probes = ws_dir / "auth-probes"
-            if probes.is_dir():
-                for probe in probes.iterdir():
-                    if probe.is_dir():
-                        shutil.rmtree(probe, ignore_errors=True)
+            if not probes.is_dir():
+                continue
+            for probe in probes.iterdir():
+                if not probe.is_dir() or probe.resolve() in protected:
+                    continue
+                cfg = probe / "scan-config.yaml"
+                if cfg.exists():
+                    try:
+                        cfg.unlink()
                         n += 1
+                    except OSError:
+                        pass
                 try:
-                    probes.rmdir()  # 空了删父目录
+                    probe.rmdir()  # 仅清空后成(留 events 的 probe 保回看)
                 except OSError:
                     pass
+            try:
+                probes.rmdir()
+            except OSError:
+                pass
         return n
 
     async def start(self, req: ScanRequest) -> tuple[str, str]:
@@ -841,12 +855,14 @@ class ScanManager:
             encoding="utf-8",
         )
         client = await Client.connect(self._temporal_address())
-        # _resolve_provider_config 在 ws_config_store 非None 时会 validate_ws_config；
-        # 探针不应因 per-ws provider 配置异常而阻塞（api_key 是可选的，活动层有 env 兜底）。
+        # 完整 provider 配置（base_url+key+模型）穿线——与黑盒/白盒扫描提交一致。
+        # 仅传 api_key 会让 base_url/模型回落 worker env profile，key 与端点来自两套
+        # 配置时 LLM 401（2026-08-17 NodeGoat 探针根因）。解析失败（配置不完整）→
+        # None 降级 env 兜底（原 api_key 语义），探针不因 provider 配置异常阻塞。
         try:
-            api_key = self._resolve_provider_config(ws).get("api_key")
+            provider_config = self._resolve_provider_config(ws)
         except Exception:
-            api_key = None
+            provider_config = None
         # HOST 档案：选中 → mappings（单 cred workflow 据此起 host proxy）；都不传 → {} 直连。
         host_mappings = self._host_config_mappings(
             await self._resolve_host_config_sources(host_profile_id, host_url, ws))
@@ -854,8 +870,9 @@ class ScanManager:
             web_url=profile.login_url,
             config_path=str(cfg_file),
             workspace_path=str(probe_dir),
-            api_key=api_key,
+            api_key=provider_config.get("api_key") if provider_config else None,
             host_mappings=host_mappings,
+            provider_config=provider_config,
             # 块1c：event_file 落点 = probe_dir/events.ndjson。workflow 经 setup_display 把
             # agent 登录每步写此文件（验证过程可见），verify-log 端点读它回看/实时观看。
             event_file=str(probe_dir / "events.ndjson"),
@@ -946,12 +963,15 @@ class ScanManager:
                 host_mappings=host_mappings,
             ))
             cred_probe_map[cred.id] = {"probe_dir": str(probe_dir)}
+        # 同单 cred 探针：完整 provider 配置穿线；解析失败 → None 降级 env 兜底。
         try:
-            api_key = self._resolve_provider_config(ws).get("api_key")
+            provider_config = self._resolve_provider_config(ws)
         except Exception:
-            api_key = None
+            provider_config = None
         inp = BlackboxAuthValidationBatchInput(
-            items=items, api_key=api_key,
+            items=items,
+            api_key=provider_config.get("api_key") if provider_config else None,
+            provider_config=provider_config,
             env_overrides=self._resolve_env_overrides(ws))
         client = await Client.connect(self._temporal_address())
         batch_wf_id = f"authval-batch-{ws}-{uuid4().hex[:8]}"
@@ -982,7 +1002,13 @@ class ScanManager:
         scan-config.yaml(密码卫生,保留 events.ndjson 供回看)+ probe_dir 越界守护。running 的 cred
         写 running verify_status(前端轮询 profile 定位 running 订阅其 verify-events)。全部终态
         (all_done)→ 退出。fire-and-forget(start_batch 起 asyncio.create_task)。
+
+        query 抛错恢复(2026-08-17 单 cred batch 卡 running 根因):workflow 把最后 cred 置终态
+        与 run() 返回(完成)在同一 workflow task 内,query 永远观测不到它的终态——下一次 query
+        撞已完成 workflow 必抛错。describe 分流:终态 → result() 回填收尾;仍 RUNNING(Temporal
+        抖动)→ 容错续轮询。不再一错即死(旧行为 except pass 静默吞,终态永不回填)。
         """
+        from temporalio.client import WorkflowExecutionStatus
         from supernova_blackbox.pipeline.workflows import BatchAuthValidationWorkflow
 
         allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
@@ -991,7 +1017,24 @@ class ScanManager:
             client = await Client.connect(self._temporal_address())
             handle = client.get_workflow_handle(workflow_id)
             while True:
-                progress = await handle.query(BatchAuthValidationWorkflow.batch_progress)
+                try:
+                    progress = await handle.query(BatchAuthValidationWorkflow.batch_progress)
+                except Exception as query_err:
+                    try:
+                        desc = await handle.describe()
+                    except Exception:
+                        _log.warning("batch watcher describe %s 失败,续轮询: %r",
+                                     workflow_id, query_err)
+                        await asyncio.sleep(2)
+                        continue
+                    if desc.status == WorkflowExecutionStatus.RUNNING:
+                        await asyncio.sleep(2)  # 抖动 → 容错续轮询
+                        continue
+                    # 终态:最后 cred 的终态 query 观测不到 → result() 回填全部收尾
+                    await self._backfill_batch_from_result(
+                        handle, ws, profile_id, workflow_id,
+                        cred_probe_map, allowed_parent, backfilled)
+                    return
                 for item in progress.get("items", []):
                     cred_id = item.get("cred_id")
                     if not cred_id or cred_id not in cred_probe_map:
@@ -1012,7 +1055,184 @@ class ScanManager:
                     break
                 await asyncio.sleep(2)
         except Exception:
-            pass  # best-effort:Temporal 不可用/query 抛错不致 web 崩(前端轮询 profile 兜底)
+            _log.exception("batch watcher %s 异常退出(verify_status 可能滞留 running,待启动对账收尾)",
+                           workflow_id)
+
+    async def _backfill_batch_from_result(self, handle, ws: str, profile_id: str,
+                                          workflow_id: str, cred_probe_map: dict[str, dict],
+                                          allowed_parent: Path, backfilled: set[str]) -> None:
+        """workflow 终态后从 result() 回填(query 观测不到最后 cred 的终态,见 watcher 注释)。
+
+        result=per-cred dict list;result() 抛(FAILED 等非 COMPLETED 终态)→ 未回填 cred 全记
+        failed/out_of_band,不留 running。幂等:backfilled 记录已回填 cred 不重写。"""
+        from .auth_profile_store import VerifyStatus
+        try:
+            raw = await handle.result()
+        except Exception as e:
+            raw = None
+            fail_detail = f"{type(e).__name__}: {e}"
+        for cred_id, entry in cred_probe_map.items():
+            if cred_id in backfilled:
+                continue
+            item = next(
+                (r for r in raw if isinstance(r, dict) and r.get("cred_id") == cred_id), None) \
+                if raw is not None else None
+            if item is None:
+                item = {"cred_id": cred_id, "state": "failed", "failure_point": "out_of_band",
+                        "failure_detail": fail_detail if raw is None
+                        else f"batch result 缺 cred {cred_id} 条目"}
+            self._apply_batch_cred_terminal(
+                ws, profile_id, cred_id, item, entry["probe_dir"], workflow_id, allowed_parent)
+            backfilled.add(cred_id)
+
+    def _iter_ws_names(self) -> list[str]:
+        """workspaces/ 下用户 ws 名(跳点目录/文件;.system 档案只读 seed,无验证生命周期)。"""
+        if not self._workspaces_dir.is_dir():
+            return []
+        return sorted(d.name for d in self._workspaces_dir.iterdir()
+                      if d.is_dir() and not d.name.startswith("."))
+
+    def _running_probe_dirs(self) -> set[Path]:
+        """所有 state=running 凭据的 probe_dir(resolve 后)——启动清理须保护(验证仍在跑)。"""
+        out: set[Path] = set()
+        if self._auth_profile_store is None:
+            return out
+        for ws in self._iter_ws_names():
+            try:
+                profiles = self._auth_profile_store.read(ws)
+            except Exception:
+                continue
+            for prof in profiles:
+                for cred in prof.credentials:
+                    vs = cred.verify_status
+                    if vs.state == "running" and vs.probe_dir:
+                        out.add(Path(vs.probe_dir).resolve())
+        return out
+
+    async def reconcile_auth_validation(self) -> int:
+        """启动对账:watcher 随旧 web 进程死亡后,verify_status=running 的凭据成永久孤儿
+        (batch 前端不轮询 verify-status → 页面永久卡"测试中",2026-08-17 单 cred batch 必现)。
+        对齐 scan 的 reconcile_orphaned 语义:
+
+        - workflow 已终态 → 回填(batch: per-cred result;单 cred: 复用 get_auth_validation_result)
+        - workflow 仍 RUNNING → batch 重挂 watcher / 单 cred 起有界轮询续跟
+        - workflow 查不到(Temporal 历史被清)→ failed/out_of_band(running 永无终态)
+        - workflow_id 越界 → 跳过不动(不猜终态)
+
+        返 0(未注入 store/无孤儿/Temporal 不可达)或回填数。best-effort:单组失败不阻断其余。
+        """
+        from temporalio.client import WorkflowExecutionStatus
+        from .auth_profile_store import VerifyStatus
+        if self._auth_profile_store is None:
+            return 0
+        # (ws, workflow_id) -> [(profile_id, cred_id, probe_dir)]
+        groups: dict[tuple[str, str], list[tuple[str, str, str | None]]] = {}
+        for ws in self._iter_ws_names():
+            try:
+                profiles = self._auth_profile_store.read(ws)
+            except Exception:
+                _log.warning("auth validation reconcile: 读 ws %s auth-profiles 失败,跳过", ws,
+                             exc_info=True)
+                continue
+            for prof in profiles:
+                for cred in prof.credentials:
+                    vs = cred.verify_status
+                    if vs.state != "running" or not vs.workflow_id:
+                        continue
+                    if not vs.workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
+                        _log.warning("auth validation reconcile: cred %s/%s workflow_id 越界,跳过: %s",
+                                     prof.id, cred.id, vs.workflow_id)
+                        continue
+                    groups.setdefault((ws, vs.workflow_id), []).append(
+                        (prof.id, cred.id, vs.probe_dir))
+        if not groups:
+            return 0
+        try:
+            client = await Client.connect(self._temporal_address())
+        except Exception:
+            _log.exception("auth validation reconcile: Temporal 不可达,跳过(下次重启再对账)")
+            return 0
+        n = 0
+        for (ws, wf_id), creds in groups.items():
+            is_batch = wf_id.startswith(f"authval-batch-{ws}-")
+            allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+            try:
+                handle = client.get_workflow_handle(wf_id)
+                desc = await handle.describe()
+            except Exception as e:
+                # workflow 不存在(历史被清/误删):running 永无终态 → 判 failed 结案
+                detail = f"{type(e).__name__}: {e}"
+                for profile_id, cred_id, probe_dir in creds:
+                    self._auth_profile_store.set_verify_status(
+                        ws, profile_id, cred_id,
+                        VerifyStatus(state="failed", failure_point="out_of_band",
+                                     failure_detail=f"workflow 不存在或不可查: {detail}",
+                                     last_verified_at=datetime.now(timezone.utc).isoformat(),
+                                     probe_dir=probe_dir, workflow_id=wf_id))
+                    n += 1
+                _log.warning("auth validation reconcile: %s 查不到, %d 个 running cred 判 failed",
+                             wf_id, len(creds))
+                continue
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                # 重启时验证真在跑:重挂跟踪(watcher 已随旧进程死亡)
+                if is_batch:
+                    profile_id = creds[0][0]
+                    cred_probe_map = {cid: {"probe_dir": pd or ""} for _, cid, pd in creds}
+                    asyncio.create_task(self._watch_batch_progress(
+                        ws, profile_id, wf_id, cred_probe_map))
+                else:
+                    for profile_id, cred_id, probe_dir in creds:
+                        asyncio.create_task(self._follow_single_auth_validation(
+                            ws, profile_id, cred_id, wf_id, probe_dir or ""))
+                _log.info("auth validation reconcile: %s 仍在跑,重挂跟踪(%d cred)", wf_id, len(creds))
+                continue
+            if is_batch:
+                await self._backfill_batch_from_result(
+                    handle, ws, creds[0][0], wf_id,
+                    {cid: {"probe_dir": pd or ""} for _, cid, pd in creds},
+                    allowed_parent, set())
+                n += len(creds)
+            elif desc.status == WorkflowExecutionStatus.COMPLETED:
+                for profile_id, cred_id, probe_dir in creds:
+                    try:
+                        await self.get_auth_validation_result(
+                            ws, wf_id, probe_dir or "", profile_id, cred_id)
+                        n += 1
+                    except Exception:
+                        _log.exception("auth validation reconcile: 单 cred %s 回填失败", wf_id)
+            else:
+                # FAILED/CANCELLED/TERMINATED 等:running 永无 success → failed 结案
+                for profile_id, cred_id, probe_dir in creds:
+                    self._auth_profile_store.set_verify_status(
+                        ws, profile_id, cred_id,
+                        VerifyStatus(state="failed", failure_point="out_of_band",
+                                     failure_detail=f"workflow 终态 {desc.status}",
+                                     last_verified_at=datetime.now(timezone.utc).isoformat(),
+                                     probe_dir=probe_dir, workflow_id=wf_id))
+                    n += 1
+            _log.info("auth validation reconcile: %s 终态对账完成", wf_id)
+        return n
+
+    async def _follow_single_auth_validation(self, ws: str, profile_id: str, cred_id: str,
+                                             workflow_id: str, probe_dir: str,
+                                             deadline_s: float = 900.0) -> None:
+        """单 cred 验证重启续跟:周期 get_auth_validation_result 直到终态(有界防泄漏)。
+
+        RUNNING → AuthValidationPending 续等;终态 → 内部已回填;不可恢复错误 → 放弃留待下次
+        启动对账。fire-and-forget(reconcile 起 asyncio.create_task)。"""
+        start = time.monotonic()
+        while time.monotonic() - start < deadline_s:
+            try:
+                await self.get_auth_validation_result(
+                    ws, workflow_id, probe_dir, profile_id, cred_id)
+                return
+            except AuthValidationPending:
+                await asyncio.sleep(5)
+            except Exception:
+                _log.exception("follow single auth validation %s 失败,放弃(留待启动对账)",
+                               workflow_id)
+                return
+        _log.warning("follow single auth validation %s 超时放弃(留待启动对账)", workflow_id)
 
     def _apply_batch_cred_terminal(self, ws: str, profile_id: str, cred_id: str, item: dict,
                                    probe_dir: str, workflow_id: str, allowed_parent: Path) -> None:
@@ -1098,9 +1318,24 @@ class ScanManager:
             if desc.status == WorkflowExecutionStatus.RUNNING:
                 raise AuthValidationPending(f"验证 workflow 仍在运行: {workflow_id}")
             raw = await handle.result()
+            now = datetime.now(timezone.utc).isoformat()
+            # 批量 workflow result = per-cred dict list(守护②已放行 authval-batch- 前缀,解析
+            # 须同步支持):按 cred_id 精确取条目,不能按单 cred 语义误判(否则 list 无 success
+            # 字段 → 恒 failed)。
+            if isinstance(raw, list):
+                entry = next(
+                    (r for r in raw if isinstance(r, dict) and r.get("cred_id") == cred_id), None)
+                if entry is None:
+                    raise ValueError(f"批量 result 缺 cred {cred_id} 条目: {workflow_id}")
+                status = VerifyStatus(
+                    state="success" if entry.get("state") == "success" else "failed",
+                    failure_point=entry.get("failure_point"),
+                    failure_detail=entry.get("failure_detail"),
+                    last_verified_at=now, probe_dir=probe_dir, workflow_id=workflow_id)
+                self._auth_profile_store.set_verify_status(ws, profile_id, cred_id, status)
+                return status
             # AuthValidationResult 经 Temporal 序列化:本 SDK 下为实例,dict 模式防御 SDK 差异。
             success = raw.get("success") if isinstance(raw, dict) else getattr(raw, "success", False)
-            now = datetime.now(timezone.utc).isoformat()
             if success:
                 status = VerifyStatus(state="success", last_verified_at=now,
                                       probe_dir=probe_dir, workflow_id=workflow_id)
@@ -2048,11 +2283,19 @@ class ScanManager:
         client = await Client.connect(self._temporal_address())
         probe_dir = scan_dir / ".authcheck"
         probe_dir.mkdir(parents=True, exist_ok=True)
+        # 完整 provider 配置穿线（同认证管理页探针，2026-08-17）：仅 api_key 会让 base_url
+        # 回落 worker env profile → key/端点错配 401。预验证提交前 ws provider 已由
+        # _submit_whitebox 校验过完整性，此处解析失败罕见；仍兜底 None 走 env。
+        try:
+            provider_config = self._resolve_provider_config(ws)
+        except Exception:
+            provider_config = None
         inp = BlackboxAuthValidationInput(
             web_url=web_url, config_path=config_path,
             workspace_path=str(probe_dir),
             event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
-            api_key=self._resolve_provider_config(ws).get("api_key"),
+            api_key=provider_config.get("api_key") if provider_config else None,
+            provider_config=provider_config,
             env_overrides=self._resolve_env_overrides(ws),
             host_mappings=host_mappings or {})
         handle = await client.start_workflow(

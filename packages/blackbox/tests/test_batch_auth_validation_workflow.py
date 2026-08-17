@@ -217,3 +217,43 @@ async def test_batch_workflow_requires_nonempty_items():
             with pytest.raises(Exception):
                 await env.client.execute_workflow(
                     BatchAuthValidationWorkflow.run, inp, id="w-batch6", task_queue="tq-batch6")
+
+
+@pytest.mark.asyncio
+async def test_batch_workflow_threads_provider_config_to_probe():
+    """完整 provider 配置穿线：profile 级 provider_config 灌入每个 cred 的 probe activity input。
+
+    2026-08-17 根因：仅传 api_key 时 base_url/模型回落 worker env profile，
+    key 与端点来自两套配置 → LLM 401 被误记为登录失败。"""
+    seen = []
+
+    @activity.defn
+    async def setup_display(i):
+        pass
+
+    @activity.defn
+    async def log_phase_start_activity(i, steps=None, intents=None):
+        pass
+
+    @activity.defn
+    async def run_auth_validation_probe(i):
+        seen.append(i.get("provider_config") if isinstance(i, dict) else getattr(i, "provider_config", None))
+        return AuthValidationResult(success=True)
+
+    @activity.defn
+    async def finalize_summary(i, summary):
+        pass
+
+    provider_config = {"type": "openai_compatible", "base_url": "https://llm-proxy.example/v1",
+                       "api_key": "user-key-x", "medium_model": "m"}
+    inp = BlackboxAuthValidationBatchInput(
+        items=_items(2), provider_config=provider_config)
+    async with await WorkflowEnvironment.start_local() as env:
+        async with Worker(env.client, task_queue="tq-batch-pc",
+                          workflows=[BatchAuthValidationWorkflow],
+                          activities=[setup_display, log_phase_start_activity,
+                                      run_auth_validation_probe, finalize_summary]):
+            await env.client.execute_workflow(
+                BatchAuthValidationWorkflow.run, inp, id="w-batch-pc", task_queue="tq-batch-pc")
+    # 每个 cred 的 probe 都拿到同一份完整配置（profile 级共享）
+    assert seen == [provider_config, provider_config]

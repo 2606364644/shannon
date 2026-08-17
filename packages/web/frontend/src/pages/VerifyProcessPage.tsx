@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VerifyLivePanel } from "./VerifyLivePanel";
+import { VerifyFailureNote } from "@/components/auth/VerifyFailureNote";
 import { DashboardPanel } from "@/components/DashboardPanel";
 import { LogStream } from "@/components/LogStream";
 import { dashboardReducer, emptyState } from "@/state/dashboardReducer";
@@ -169,10 +170,10 @@ export function VerifyProcessPage() {
                   : t("authProfiles.test")}
               </Button>
             </div>
-            {st === "failed" && vs?.failure_detail && (
-              <p className="mt-3 border-l-2 border-red/60 bg-red/10 px-2.5 py-1.5 text-xs leading-relaxed text-red/80">
-                {vs.failure_detail}
-              </p>
+            {st === "failed" && (vs?.failure_point || vs?.failure_detail) && (
+              <div className="mt-3">
+                <VerifyFailureNote failurePoint={vs?.failure_point} failureDetail={vs?.failure_detail} />
+              </div>
             )}
           </Card>
 

@@ -307,6 +307,127 @@ async def test_watcher_skips_unknown_cred_id(tmp_path):
     # cred_unknown 不在 profile → 不影响(KeyError 不抛,跳过)
 
 
+# ---- watcher query 撞已完成 workflow 的恢复（2026-08-17 单 cred batch 卡 running 根因）----
+# workflow 把最后 cred 置终态与 run() 返回（完成）在同一 workflow task 内，query 永远观测
+# 不到它的终态；watcher 下一次 query 撞已完成 workflow 抛错。旧行为 except pass 静默死 →
+# 终态永不回填 → 前端永久卡"测试中"。恢复路径：describe 分流——终态 → result() 回填收尾。
+
+def _desc(status):
+    from temporalio.client import WorkflowExecutionStatus
+    d = MagicMock()
+    d.status = status
+    return d
+
+
+def _mock_recovery_client(query_error=None, desc_status=None, result=None):
+    """handle.query 抛错 + describe 返回指定状态(或抛) + result 返回值(或抛)。"""
+    handle = MagicMock()
+    handle.query = AsyncMock(side_effect=query_error or Exception("query: already completed"))
+    handle.describe = (AsyncMock(return_value=desc_status)
+                       if not isinstance(desc_status, Exception)
+                       else AsyncMock(side_effect=desc_status))
+    handle.result = AsyncMock(return_value=result) if not isinstance(result, Exception) \
+        else AsyncMock(side_effect=result)
+    client = MagicMock()
+    client.get_workflow_handle = MagicMock(return_value=handle)
+    return client, handle
+
+
+@pytest.mark.asyncio
+async def test_watcher_recovers_terminal_from_result_when_query_unobservable(tmp_path):
+    """query 抛错(已完成不可 query)+describe=COMPLETED → result() 回填全部 cred 终态并退出。
+    单 cred batch（唯一 cred 即最后 cred，query 必然观测不到其终态）的必现路径。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    mgr = _mgr(tmp_path, store)
+    client, handle = _mock_recovery_client(
+        desc_status=_desc(WorkflowExecutionStatus.COMPLETED),
+        result=[{"cred_id": "cred_a", "state": "success"}])
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(asyncio, "sleep", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr._watch_batch_progress(
+            "ws1", "prof_1", "authval-batch-ws1-x", {"cred_a": {"probe_dir": str(probe_a)}})
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "success"
+    assert by_id["cred_a"].verify_status.last_verified_at is not None
+    # 密码卫生同既有路径：删 scan-config，保留 events
+    assert not (probe_a / "scan-config.yaml").exists()
+    assert (probe_a / "events.ndjson").exists()
+
+
+@pytest.mark.asyncio
+async def test_watcher_survives_transient_query_error_while_running(tmp_path):
+    """query 抛错但 describe=RUNNING（Temporal 抖动）→ 续轮询而非一错即死。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    mgr = _mgr(tmp_path, store)
+    handle = MagicMock()
+    handle.query = AsyncMock(side_effect=[
+        Exception("transient rpc error"),
+        {"items": [{"cred_id": "cred_a", "state": "success"}], "all_done": True},
+    ])
+    handle.describe = AsyncMock(return_value=_desc(WorkflowExecutionStatus.RUNNING))
+    client = MagicMock()
+    client.get_workflow_handle = MagicMock(return_value=handle)
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(asyncio, "sleep", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr._watch_batch_progress(
+            "ws1", "prof_1", "authval-batch-ws1-x", {"cred_a": {"probe_dir": str(probe_a)}})
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_a"].verify_status.state == "success"
+
+
+@pytest.mark.asyncio
+async def test_watcher_marks_failed_when_result_raises(tmp_path):
+    """describe=COMPLETED 但 result() 抛（workflow 带失败终态收尾）→ 未回填 cred 全记
+    failed/out_of_band，不留 running。"""
+    from temporalio.client import WorkflowExecutionStatus
+    store = _multi_store(tmp_path)
+    probe_a = _prep_probe(tmp_path, "cred_a")
+    mgr = _mgr(tmp_path, store)
+    client, _ = _mock_recovery_client(
+        desc_status=_desc(WorkflowExecutionStatus.COMPLETED),
+        result=Exception("workflow execution failed"))
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls, \
+         patch.object(asyncio, "sleep", new=AsyncMock()):
+        ClientCls.connect = AsyncMock(return_value=client)
+        await mgr._watch_batch_progress(
+            "ws1", "prof_1", "authval-batch-ws1-x", {"cred_a": {"probe_dir": str(probe_a)}})
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    vs = by_id["cred_a"].verify_status
+    assert vs.state == "failed"
+    assert vs.failure_point == "out_of_band"
+    assert "workflow execution failed" in (vs.failure_detail or "")
+
+
+@pytest.mark.asyncio
+async def test_get_auth_validation_result_parses_batch_list_for_cred(tmp_path):
+    """verify-status 端点守护已放行 authval-batch- 前缀，结果解析须同步支持批量 result
+    （per-cred dict list）——按 cred_id 取条目回填，而非误判单 cred 语义成 failed。"""
+    store = _multi_store(tmp_path)
+    mgr = _mgr(tmp_path, store)
+    probe_b = _prep_probe(tmp_path, "cred_b")
+    from temporalio.client import WorkflowExecutionStatus
+    client, _ = _mock_recovery_client(
+        desc_status=_desc(WorkflowExecutionStatus.COMPLETED),
+        result=[{"cred_id": "cred_a", "state": "failed", "failure_point": "engine",
+                 "failure_detail": "boom"},
+                {"cred_id": "cred_b", "state": "success"}])
+    with patch("supernova_web.components.scan_manager.Client") as ClientCls:
+        ClientCls.connect = AsyncMock(return_value=client)
+        status = await mgr.get_auth_validation_result(
+            "ws1", "authval-batch-ws1-x", str(probe_b), "prof_1", "cred_b")
+    assert status.state == "success"
+    by_id = {c.id: c for c in store.read("ws1")[0].credentials}
+    assert by_id["cred_b"].verify_status.state == "success"
+    # 其余 cred 不被连带回填（按 cred_id 精确取条目）
+    assert by_id["cred_a"].verify_status.state == "unverified"
+
+
 # ---- workflow_id 前缀守护放宽(Slice 4:接受 authval-batch-{ws}-)----
 
 

@@ -16,7 +16,7 @@ from supernova_core.utils.paths import (
     WHITEBOX_SUBDIR,
 )
 
-from .shared import BlackboxActivityInput, BlackboxAuthValidationBatchInput, BlackboxAuthValidationInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress
+from .shared import BlackboxActivityInput, BlackboxAuthValidationBatchInput, BlackboxAuthValidationInput, BlackboxPipelineInput, BlackboxPipelineState, PipelineProgress, is_engine_failure
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ class BlackboxScanWorkflow:
             event_file=input.event_file,
             host_mappings=input.host_mappings or {},
             env_overrides=input.env_overrides,
+            provider_config=input.provider_config,   # P3c 阶段 1 补齐：此前字段已定义但未灌入，全链 **act_input.__dict__ 继承
         )
 
         retry_policy = retry_for(
@@ -651,6 +652,7 @@ class AuthValidationWorkflow:
             event_file=input.event_file,
             host_mappings=input.host_mappings or {},
             env_overrides=input.env_overrides,
+            provider_config=input.provider_config,   # 完整穿线，防 key/端点错配
         )
         # 块1（认证验证可观测性）：setup_display 挂 AuditSession + StructuredEventRenderer 写
         # events.ndjson（agent 登录每步落盘）。event_file=None（CLI 直调）则不挂 renderer，setup_display
@@ -754,6 +756,7 @@ class BatchAuthValidationWorkflow:
                 event_file=item.event_file,
                 env_overrides=input.env_overrides,
                 host_mappings=item.host_mappings or {},
+                provider_config=input.provider_config,   # 完整穿线，防 key/端点错配
             )
             # setup_display best-effort（失败不阻塞，降级无 events，NullAuditSession 兜底）；成功后
             # finalize 必跑（停 heartbeat，否则 daemon 线程泄漏）。
@@ -800,9 +803,11 @@ class BatchAuthValidationWorkflow:
             except Exception as e:
                 # per-cred 异常隔离：某 cred activity 重试耗尽/抛错 → 标 failed，不阻断后续 cred
                 # （对齐 Branch B 非 primary 失败不阻断）。run_auth_validation_probe 自身降级返回不抛，
-                # 此 except 兜底 activity 框架级异常（non_retryable / 重试耗尽）。
+                # 此 except 兜底 activity 框架级异常（non_retryable / 重试耗尽）。LLM 引擎失败
+                # （provider 401/限额）分类成 engine，与目标站登录失败区分（2026-08-17）。
                 result = AuthValidationResult(
-                    success=False, failure_point="out_of_band",
+                    success=False,
+                    failure_point="engine" if is_engine_failure(e) else "out_of_band",
                     failure_detail=f"{type(e).__name__}: {e}")
             finally:
                 if proxy_url:

@@ -82,7 +82,7 @@ describe("AuthProfileTestPage", () => {
     await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
     expect(screen.getAllByText(/admin/).length).toBeGreaterThan(0);
     expect(screen.getByText(/3\/3/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始测试选中角色" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始测试" })).toBeInTheDocument();
     // 3 个 toggle 全选中（aria-pressed=true）
     expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(3);
   });
@@ -103,17 +103,17 @@ describe("AuthProfileTestPage", () => {
     await waitFor(() => expect(screen.getByText(/3\/3/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "取消全选" }));
     await waitFor(() => expect(screen.getByText(/0\/3/)).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "开始测试选中角色" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "开始测试" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "全选" }));
     await waitFor(() => expect(screen.getByText(/3\/3/)).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "开始测试选中角色" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "开始测试" })).not.toBeDisabled();
   });
 
   it("发起测试 → POST test-batch（全选省略 cred_ids）", async () => {
     currentProf = prof;
     renderPage();
     await waitFor(() => expect(screen.getByText(/3\/3/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "开始测试选中角色" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始测试" }));
     await waitFor(() => expect(batchCalls).toBe(1));
     // 全选 → cred_ids 省略（body 不含 cred_ids 键 → JSON {}）
     expect(batchBody).toEqual({});
@@ -127,7 +127,7 @@ describe("AuthProfileTestPage", () => {
     const toggles = screen.getAllByRole("button", { pressed: true });
     fireEvent.click(toggles[1]);
     await waitFor(() => expect(screen.getByText(/2\/3/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "开始测试选中角色" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始测试" }));
     await waitFor(() => expect(batchCalls).toBe(1));
     expect(batchBody).toEqual({ cred_ids: ["c1", "c3"] });  // c2 被取消
   });
@@ -146,5 +146,55 @@ describe("AuthProfileTestPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
     expect(screen.getByText("HOST 解析")).toBeInTheDocument();
+  });
+});
+
+describe("AuthProfileTestPage 失败提示（VerifyFailureNote）", () => {
+  it("engine 失败 → 显示引擎提示（与账号无关 + 指向 LLM 配置）+ 折叠技术详情", async () => {
+    currentProf = {
+      ...prof,
+      credentials: [{
+        id: "c1", role: "admin", username: "admin",
+        verify_status: {
+          state: "failed", failure_point: "engine",
+          failure_detail: "PentestError: Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}",
+        },
+      }],
+    };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("验证引擎调用失败（与目标站账号密码无关）")).toBeInTheDocument());
+    expect(screen.getByText(/工作区设置 → LLM 配置/)).toBeInTheDocument();
+    expect(screen.getByText(/Key 与接口地址不匹配/)).toBeInTheDocument();  // 401 子码提示
+    expect(screen.getByText("技术详情")).toBeInTheDocument();
+    // 原始异常串默认折叠（在 details 内、不可见），展开后可见
+    expect(screen.queryByText(/PentestError/)).not.toBeVisible();
+  });
+
+  it("旧记录兜底：failure_point=out_of_band 但 detail 含 401 签名 → 按 engine 渲染", async () => {
+    currentProf = {
+      ...prof,
+      credentials: [{
+        id: "c1", role: "admin", username: "admin",
+        verify_status: {
+          state: "failed", failure_point: "out_of_band",
+          failure_detail: "PentestError: Error code: 401 - {'error': {'code': '401', 'message': '令牌已过期或验证不正确'}}",
+        },
+      }],
+    };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("验证引擎调用失败（与目标站账号密码无关）")).toBeInTheDocument());
+  });
+
+  it("username_or_password 失败 → 账号密码提示（不误报引擎）", async () => {
+    currentProf = {
+      ...prof,
+      credentials: [{
+        id: "c1", role: "admin", username: "admin",
+        verify_status: { state: "failed", failure_point: "username_or_password", failure_detail: "wrong password" },
+      }],
+    };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("登录失败：用户名或密码错误")).toBeInTheDocument());
+    expect(screen.queryByText(/验证引擎调用失败/)).not.toBeInTheDocument();
   });
 });
