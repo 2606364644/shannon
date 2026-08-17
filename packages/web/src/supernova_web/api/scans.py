@@ -69,17 +69,19 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     from supernova_web.components.metrics_normalizer import normalize_metrics
     from supernova_web.components.workspaces_indexer import _to_unix
     from supernova_web.components.scan_store import (
-        resolve_workflow_id, _compute_progress_pct, merge_latest_run_view)
+        resolve_workflow_id, _compute_progress_pct, effective_scan_status,
+        merge_latest_run_view)
     mgr = SessionManager(scan_dir.parent)
     data = mgr.get_session_data(scan_dir)
     idx = request.app.state.indexer
-    status = idx._status_of(scan_dir, mgr.get_status(scan_dir))
+    raw_status = idx._status_of(scan_dir, mgr.get_status(scan_dir))
     combined = data.get("combined")
     # 版本化 run（spec §5.2/§5.3）：bb_phase/bb_reason 合并 latest run（与 list 同视图）——
     # 任务级 phase 停在 precheck/pending，前端时间线/进度概览的 eventsUrl 切换都按 run
     # phase 消费（ScanProgressOverview.resolveActiveEventsUrl），不合并则黑盒段永显「待
     # 接力」、run 级实时进度不可见（list/detail 口径一致，修 run 版本化重构遗留）。
     bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
+    status = effective_scan_status(raw_status, combined, bb_phase)
     host_config = data.get("host_config") or {}
     host_enabled = bool(host_config.get("enabled")) if isinstance(host_config, dict) else False
     host_source = host_config.get("source") if host_enabled else None

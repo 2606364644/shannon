@@ -702,11 +702,15 @@ def test_scan_detail_bb_phase_merged_from_latest_run(authed_client, tmp_workspac
     _, run_dir = store.create_blackbox_run("WS", wb_id)  # 任务 combined=True + run-1 pending
     SessionManager(run_dir.parent).update_session(run_dir, {
         "bb_phase": "running", "completed_agents": ["e"]})  # run-1 黑盒 1/2
+    # 白盒 workflow 的根 session 可能已经先落 completed；组合 detail 仍应以后续黑盒阶段为准。
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"status": "completed"})
     d = authed_client.get(f"/api/workspaces/WS/scans/{wb_id}").json()
     assert d["combined"] is True
+    assert d["status"] == "running"
     assert d["bb_phase"] == "running"  # 取自 latest run（任务级停在 pending）
     assert d["progress_pct"] == 77.5  # 与 list 同口径：55 + 45 × (5-4)/2
     # list/detail 一致（同 merge_latest_run_view 视图）
     lst = authed_client.get("/api/workspaces/WS/scans").json()
     row = next(s for s in lst if s["scan_id"] == wb_id)
+    assert row["status"] == "running"
     assert row["bb_phase"] == "running" and row["progress_pct"] == 77.5

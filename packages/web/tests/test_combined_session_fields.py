@@ -220,6 +220,45 @@ def test_progress_pct_combined_completed_is_100(tmp_path):
     assert d["progress_pct"] == 100
 
 
+def test_combined_whitebox_completed_but_blackbox_pending_is_not_terminal(tmp_path):
+    """白盒 workflow 已写 completed 但黑盒 run 仍 pending 时，组合任务不能显示已完成。
+
+    白盒和黑盒共用任务根目录；白盒 workflow 的 scan_end/session.status 会先落
+    completed，黑盒阶段则落在 latest run。对外状态必须以后者为准，避免列表/详情把
+    「白盒完成、黑盒待接力」误报为组合扫描完成。
+    """
+    from supernova_web.components.scan_store import ScanStore
+
+    ws = "ws1"
+    scan_id = "repo-20260813-120006"
+    scans_dir = tmp_path / ws / "scans" / scan_id
+    scans_dir.mkdir(parents=True)
+    _make_combined_session(
+        scans_dir,
+        combined=True,
+        bb_phase="pending",
+        expected_agents={"whitebox": 8, "blackbox": 2},
+        completed_agents=[f"wb-{i}" for i in range(8)],
+    )
+    store = ScanStore(tmp_path)
+    run_id, _ = store.create_blackbox_run(ws, scan_id)
+    assert run_id == "run-1"
+
+    # 模拟白盒 workflow 已结束；黑盒 run 仍保持 create_blackbox_run 的 pending。
+    session_file = scans_dir / "session.json"
+    data = json.loads(session_file.read_text(encoding="utf-8"))
+    data["status"] = "completed"
+    data["completed_at"] = 1700000001.0
+    session_file.write_text(json.dumps(data), encoding="utf-8")
+
+    row = store.list_scans(ws)[0].as_dict()
+
+    assert row["bb_phase"] == "pending"
+    assert row["status"] == "running"
+    assert row["is_running"] is True
+    assert row["progress_pct"] == 55.0
+
+
 def test_scan_detail_payload_includes_combined_fields(tmp_path):
     """_scan_detail payload 含 combined/bb_phase/bb_reason/progress_pct/expected_agents/completed_agents。"""
     from supernova_web.components.scan_store import ScanStore

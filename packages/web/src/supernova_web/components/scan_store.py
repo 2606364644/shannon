@@ -71,6 +71,32 @@ def merge_latest_run_view(scan_dir: Path, data: dict) -> tuple[str | None, str |
         run_data.get("bb_reason", data.get("bb_reason")), merged
 
 
+def effective_scan_status(status: str, combined: bool | None,
+                          bb_phase: str | None) -> str:
+    """返回组合扫描对外可见的整体状态。
+
+    组合扫描的白盒 workflow 会先在任务根 session 写入 ``status=completed``，
+    但黑盒接力阶段的真实状态写在 latest blackbox run。对外状态必须以后者为准，
+    否则会在「白盒完成、黑盒待接力/运行中」期间提前显示整个扫描已完成。
+
+    非组合扫描以及缺失/未知阶段保持原状态，兼容历史 session。
+    """
+    if combined is not True:
+        return status
+    # 显式取消/失败是更强的终态信号，不能被残留的 pending/running phase 覆盖。
+    if status in {"failed", "cancelled", "killed", "crashed", "skipped"}:
+        return status
+    if bb_phase in {"precheck", "pending", "running"}:
+        return "running"
+    if bb_phase == "failed":
+        return "failed"
+    if bb_phase == "skipped":
+        return "skipped"
+    if bb_phase == "completed":
+        return "completed"
+    return status
+
+
 def _compute_progress_pct(status: str, combined: bool | None,
                           bb_phase: str | None, data: dict) -> float:
     """收起态粗略进度 0-100（spec §9.2 三阶段加权）。
@@ -85,16 +111,13 @@ def _compute_progress_pct(status: str, combined: bool | None,
 
     收起态精度门槛低（用户不展开不细看），故除零保护 + 容错缺失字段。
     """
-    if status == "completed":
-        return 100.0
-    if status in ("failed", "cancelled", "skipped"):
-        return 0.0
-
     expected = data.get("expected_agents") or {} if isinstance(data, dict) else {}
     completed = data.get("completed_agents") or [] if isinstance(data, dict) else []
     completed_n = len(completed) if isinstance(completed, list) else 0
 
     if combined is True:
+        if status in ("failed", "cancelled", "killed", "crashed", "skipped"):
+            return 0.0
         # 三阶段加权（spec §9.2）：precheck 0-5% / 白盒 5-50% / 黑盒 55-45%。
         wb_expected = expected.get("whitebox", 0) or 0
         bb_expected = expected.get("blackbox", 0) or 0
@@ -112,7 +135,16 @@ def _compute_progress_pct(status: str, combined: bool | None,
             bb_done = max(completed_n - wb_expected, 0) if bb_expected > 0 else 0
             ratio = (bb_done / bb_expected) if bb_expected > 0 else 0.0
             return round(55 + 45 * ratio, 1)
-        # bb_phase=completed 已在上面 status==completed 处理；其余（failed/skipped bb_phase）→ 0。
+        if bb_phase == "completed":
+            return 100.0
+        if bb_phase in ("failed", "cancelled", "skipped"):
+            return 0.0
+        # 未知阶段保留旧 session 的 status 兜底；正常组合阶段均已在上面处理。
+        return 100.0 if status == "completed" else 0.0
+
+    if status == "completed":
+        return 100.0
+    if status in ("failed", "cancelled", "skipped"):
         return 0.0
 
     # 纯白盒/纯黑盒：completed / expected × 100。
@@ -560,7 +592,7 @@ class ScanStore:
         workspaces_dir 仅供 list/delete（此处不用）。"""
         mgr = SessionManager(scan_dir.parent)
         data = mgr.get_session_data(scan_dir)
-        status = _compute_status(scan_dir, mgr.get_status(scan_dir))
+        raw_status = _compute_status(scan_dir, mgr.get_status(scan_dir))
         metrics = data.get("metrics", {}) if isinstance(data, dict) else {}
         try:
             vuln_counts = get_workspace_vuln_counts(scan_dir)
@@ -577,6 +609,7 @@ class ScanStore:
         # completed_agents) + latest run completed_agents，bb_phase/bb_reason 取自 latest
         # run（与 api/scans._scan_detail 同一视图，list/detail 口径一致）。
         bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
+        status = effective_scan_status(raw_status, combined, bb_phase)
         progress_pct = _compute_progress_pct(status, combined, bb_phase, progress_data)
         return ScanSummary(
             scan_id=scan_id,
