@@ -7,6 +7,13 @@ from supernova_whitebox.audit.session_registry import clear_audit_session, set_a
 from supernova_whitebox.pipeline import activities
 
 
+@pytest.fixture(autouse=True)
+def _gitnexus_llm_off(monkeypatch):
+    """测试统一走各用例注入的 fake_llm：关掉 GitNexus LLM 开关，否则
+    _make_verdict_llm_client 构建真 client 静默打真实 LLM（默认开）。"""
+    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: False)
+
+
 class _RecordingSession:
     def __init__(self):
         self.info_calls: list[tuple[str, str]] = []
@@ -31,6 +38,7 @@ def _input(repo):
         deliverables_subdir = None
         workspace_name = None
         workspace_path = None
+        provider_config = None
 
     return FakeInput()
 
@@ -84,6 +92,30 @@ def _write_sink(deliverables, sink_id, category, sink_subtype):
         "column": 0,
         "dangerous_slots": [],
         "rule_id": "rule",
+    })
+    ci_path.write_text(json.dumps(ci))
+
+
+def _write_entry_point(deliverables, func_block_id, route, http_method):
+    """Append an entry_point to code_index.json (created if absent)."""
+    from pathlib import Path
+    ci_path: Path = deliverables / "code_index.json"
+    if ci_path.exists():
+        ci = json.loads(ci_path.read_text())
+    else:
+        ci = {
+            "repository": "r", "language": "python",
+            "total_blocks": 0, "total_entry_points": 0, "total_chains": 0,
+            "blocks": [], "edges": [], "entry_points": [], "chains": [],
+        }
+    ci.setdefault("entry_points", []).append({
+        "func_block_id": func_block_id,
+        "entry_type": "http_route",
+        "route": route,
+        "http_method": http_method,
+        "confidence": 1.0,
+        "evidence": "annot",
+        "needs_llm_review": False,
     })
     ci_path.write_text(json.dumps(ci))
 
@@ -227,3 +259,28 @@ async def test_summary_info_when_all_classes_zero(tmp_path, monkeypatch):
     msgs = [msg for (msg, _lvl) in session.info_calls]
     assert "info" in levels
     assert any("3 类 0 findings" in m and "taint_flows=0" in m for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_entry_points_route_flows_into_queue(tmp_path, monkeypatch):
+    """O2 前半：code_index.json 的 entry_points 经 activity join 进 builder，
+    GN 轨漏洞 path 带 "METHOD /path" 前缀（下游 PoC 模板层直接可用）。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_pgraph(deliverables, [_flow("sql_value")])
+    _write_entry_point(deliverables, "app.py:h:1", "/search", "POST")
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    data = json.loads((deliverables / "injection_gitnexus_queue.json").read_text())
+    assert data["vulnerabilities"][0]["path"] == "POST /search → q->db"

@@ -747,7 +747,9 @@ async def test_batch_fill_gaps_merges_groups(monkeypatch):
 
     partials = [_gn_partial("A1", "C1.java"), _gn_partial("B1", "C2.java")]
     gapmap = await mod._batch_fill_gaps(partials, endpoints={}, repo_path="/tmp/x")
-    assert gapmap == {"A1": {"http_method": "POST", "route_path": "/a", "witness_payload": "wa"}}
+    assert gapmap == {"A1": {"http_method": "POST", "route_path": "/a",
+                             "witness_payload": "wa",
+                             "param_location": None, "body_template": None}}
     assert "B1" not in gapmap  # 失败组无 gap → 后续降级骨架
 
 
@@ -863,3 +865,161 @@ async def test_generate_checkpoint_corrupt_starts_fresh(tmp_path, monkeypatch):
     (d / _POC_CHECKPOINT_FILENAME).write_text("{NOT JSON", encoding="utf-8")  # 损坏
     out = await PoCGenerator.generate(d, ["injection"], "https://t.example.com", "whitebox")
     assert out.exists()  # 不报错,正常产出
+
+
+# --------------------------------------------------------------------------- #
+# 改动 3：参数位（query/body）+ gap-fill 上下文增厚 + body_template。
+# --------------------------------------------------------------------------- #
+
+class _BodyVuln:
+    """NodeGoat 实测形态：POST JSON API，参数在 req.body。"""
+    ID = "INJ-LLM-01"
+    source = "req.body.preTax @ contributions.js:71"
+    path = "POST /contributions -> mongo insert"
+    endpoint = None; source_endpoint = None
+    witness_payload = "1; drop"
+    verdict = "vulnerable"; confidence = "high"
+
+
+def test_infer_placement_body_signals():
+    from supernova_core.services.poc_generator import _infer_placement
+    assert _infer_placement(_BodyVuln(), "injection") == "body"
+    assert _infer_placement(_BodyVuln(), "xss") == "body"
+
+    class Spring:
+        source = "@RequestBody ConfigDto at C.java:71"
+        evidence_chain = None
+    assert _infer_placement(Spring(), "injection") == "body"
+
+    class Query:
+        source = "coupon_code (C.java:m:70)"
+        evidence_chain = "query param coupon_code -> raw sql"
+    assert _infer_placement(Query(), "injection") == "query"
+    assert _infer_placement(Query(), "xss") == "query"
+
+
+def test_extract_body_param():
+    from supernova_core.services.poc_generator import _extract_body_param
+    assert _extract_body_param("req.body.preTax @ contributions.js:71") == "preTax"
+    assert _extract_body_param("request.body['name'] @ x.ts:1") == "name"
+    assert _extract_body_param("coupon_code (C.java:70)") is None
+    assert _extract_body_param(None) is None
+
+
+def test_template_injection_body_signal_puts_witness_in_body():
+    """req.body 信号 → 模板层 body + 参数名来自 req.body.x（修「恒 query」）。"""
+    spec = build_template_spec(_BodyVuln(), "injection", "http://t", {},
+                               ConfidenceBand.CONFIRMED)
+    assert spec is not None
+    assert spec.method == "POST"
+    assert spec.body == "preTax=1; drop"
+    assert spec.query == {}
+
+
+def test_template_injection_without_signal_keeps_query():
+    """无 body 信号 → 维持 query（历史行为）。"""
+    class V(_BodyVuln):
+        source = "preTax (C.java:70)"
+        path = "GET /contributions?q=1 -> render"
+    spec = build_template_spec(V(), "injection", "http://t", {},
+                               ConfidenceBand.CONFIRMED)
+    assert spec.query == {"id": "1; drop"}   # 无 param 信号 → id 兜底
+    assert spec.body is None
+
+
+def test_assemble_respects_gap_param_location_and_json_template():
+    """gap param_location=body + dict 原型 → witness 注入 JSON body 对应键。"""
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    p = _extract_deterministic(_BodyVuln(), "injection", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, {"http_method": "POST", "route_path": "/contributions",
+                         "witness_payload": "1; drop",
+                         "param_location": "body",
+                         "body_template": {"name": "x", "preTax": 1}}, {})
+    assert spec.method == "POST"
+    assert json.loads(spec.body) == {"name": "x", "preTax": "1; drop"}
+    assert spec.query == {}
+
+
+def test_assemble_gap_param_location_overrides_deterministic():
+    """LLM 判 query 可覆盖确定性 body 信号（读码后的判定更权威）。"""
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    p = _extract_deterministic(_BodyVuln(), "injection", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, {"http_method": "POST", "route_path": "/contributions",
+                         "witness_payload": "1; drop",
+                         "param_location": "query"}, {})
+    assert spec.query == {"preTax": "1; drop"}
+    assert spec.body is None
+
+
+def test_assemble_body_without_template_form_fallback():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    p = _extract_deterministic(_BodyVuln(), "injection", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, {"http_method": "POST", "route_path": "/contributions",
+                         "witness_payload": "1; drop",
+                         "param_location": "body"}, {})
+    assert spec.body == "preTax=1; drop"
+
+
+def test_build_body_from_gap_variants():
+    from supernova_core.services.poc_generator import _build_body_from_gap
+    # dict：注入 witness 键，其余保留
+    out = _build_body_from_gap("preTax", "W", {"name": "x", "preTax": 1})
+    assert json.loads(out) == {"name": "x", "preTax": "W"}
+    # JSON 字符串原型（GLM 无 strict 常见形态）→ 同 dict
+    out = _build_body_from_gap("preTax", "W", '{"name":"x","preTax":1}')
+    assert json.loads(out) == {"name": "x", "preTax": "W"}
+    # form 字符串：替换 param 段
+    assert _build_body_from_gap("b", "W", "a=1&b=2&c=3") == "a=1&b=W&c=3"
+    # form 字符串：无 param 段 → 追加
+    assert _build_body_from_gap("b", "W", "a=1") == "a=1&b=W"
+    # 无 template → form 兜底
+    assert _build_body_from_gap("b", "W", None) == "b=W"
+
+
+def test_gapfill_prompt_includes_thick_context_and_placement_instruction():
+    """增厚上下文（sink_call/slot/mismatch/完整 evidence）+ 参数位指令。"""
+    import supernova_core.services.poc_generator as mod
+    marker = "Z" * 350 + "TAILMARK"   # 旧 300 截断会丢掉 TAILMARK
+    class V:
+        ID = "INJ-GN-01"
+        source = "email (routes/login.ts:login:34)"
+        sink_call = "routes/login.ts:login:query:34:4"
+        slot_type = "SQL-val"
+        mismatch_reason = "concat into sql value slot"
+        vulnerable_code_location = None; exploitation_hypothesis = None
+        evidence_chain = "req.body.email -> string interpolation " + marker
+    p = mod.PartialSpec(vuln=V(), vuln_class="injection", band=ConfidenceBand.HIGH,
+                        param_name="email", placement="body",
+                        controller_file="routes/login.ts",
+                        method=None, path=None, witness=None)
+    prompt = mod._build_gapfill_prompt("routes/login.ts", [p], recon_ctx={})
+    assert "routes/login.ts:login:query:34:4" in prompt   # sink_call 进上下文
+    assert "SQL-val" in prompt                            # slot_type
+    assert "concat into sql value slot" in prompt         # mismatch_reason
+    assert "TAILMARK" in prompt                           # evidence 超 300 字符不截
+    assert "param_location" in prompt                     # 参数位输出指令
+    assert "body_template" in prompt
+
+
+def test_gapfill_schema_has_placement_fields():
+    import supernova_core.services.poc_generator as mod
+    props = mod.GAPFILL_OUTPUT_SCHEMA["properties"]["items"]["items"]["properties"]
+    assert props["param_location"]["enum"] == ["query", "body", None]
+    assert "body_template" in props
+
+
+async def test_llm_fill_gaps_passes_placement_fields_through(monkeypatch):
+    """白名单透传 param_location / body_template（缺失字段为 None）。"""
+    import supernova_core.services.poc_generator as mod
+
+    async def fake_run(prompt, **kw):
+        return SimpleNamespace(success=True, structured_output={
+            "items": [{"ID": "G1", "http_method": "POST", "route_path": "/a",
+                       "witness_payload": "w",
+                       "param_location": "body",
+                       "body_template": {"k": 1}}]}, error=None)
+    monkeypatch.setattr(mod, "run_claude_prompt", fake_run)
+    gapmap = await mod.llm_fill_gaps(
+        "C.java", [_gn_partial("G1", "C.java")], recon_ctx={}, repo_path="/tmp/x")
+    assert gapmap["G1"]["param_location"] == "body"
+    assert gapmap["G1"]["body_template"] == {"k": 1}

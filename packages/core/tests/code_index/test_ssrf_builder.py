@@ -8,7 +8,7 @@ from supernova_core.code_index.parameter_models import (
     DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import SsrfVulnerability
 
 
@@ -223,3 +223,32 @@ async def test_build_ssrf_finding_carries_title():
 
     findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
     assert findings[0].title == "SSRF via url param in /proxy"
+
+
+@pytest.mark.asyncio
+async def test_build_ssrf_entry_points_route_label():
+    """O2 前半：join 命中 → source_endpoint 从 FuncBlock 占位变 "METHOD /path"，
+    path 同步带前缀；miss → 两字段保持原样。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow()], language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
+                '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+                '"confidence":"high"}')
+
+    ep = EntryPoint(
+        func_block_id="app.py:proxy:1", entry_type="http_route",
+        route="/proxy", http_method="GET", confidence=1.0,
+        evidence="annot", needs_llm_review=False,
+    )
+    findings = await build_ssrf_findings(
+        pgraph, llm_client=fake_llm, entry_points={"app.py:proxy:1": ep})
+    assert findings[0].source_endpoint == "GET /proxy"
+    assert findings[0].path == "GET /proxy → url->fetch(L5)"
+
+    # miss（不传 kwarg）→ FuncBlock id 占位保持
+    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    assert findings[0].source_endpoint == "app.py:proxy:1"
+    assert findings[0].path == "url->fetch(L5)"

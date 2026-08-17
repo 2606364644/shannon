@@ -17,6 +17,7 @@ from typing import Awaitable, Callable
 from supernova_core.code_index.chain_verdict import (
     CandidateChain,
     extract_candidate_chains,
+    http_route_label,
     judge_chain_verdict,
 )
 from supernova_core.code_index.parameter_models import (
@@ -24,7 +25,7 @@ from supernova_core.code_index.parameter_models import (
     SinkCallSite,
     TaintFlow,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.models.queue_schemas import XssVulnerability
 
@@ -144,6 +145,7 @@ async def build_xss_findings(
     llm_client: Callable[..., Awaitable[str]],
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
+    entry_points: dict[str, EntryPoint] | None = None,
 ) -> list[XssVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="xss", sink_call_sites=sink_call_sites,
@@ -170,6 +172,10 @@ async def build_xss_findings(
                       f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
         await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         is_stored = chain.flow_id.startswith("stored#")
+        # O2 前半：join entry_point 路由，path 带 "METHOD /path" 前缀（join miss → 原样）。
+        route_label = http_route_label(chain.entry_point_id, entry_points)
+        path = (f"{route_label} → {verdict.evidence_chain}"
+                if route_label else verdict.evidence_chain)
         findings.append(XssVulnerability(
             ID=f"XSS-GN-{i:02d}",
             vulnerability_type="Stored" if is_stored else "Reflected",
@@ -178,7 +184,7 @@ async def build_xss_findings(
             title=verdict.title,
             source=f"{chain.source_param} ({chain.entry_point_id})",
             source_detail=verdict.evidence_chain,
-            path=verdict.evidence_chain,
+            path=path,
             sink_function=_sink_function_label(chain.sink_call_site_id),
             render_context=_RENDER_CONTEXT.get(chain.render_context, "HTML_BODY"),
             encoding_observed=None,

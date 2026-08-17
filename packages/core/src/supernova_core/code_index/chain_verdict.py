@@ -26,6 +26,7 @@ synthesis in xss_builder still works off TaintFlow source_type/slot).
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
@@ -35,6 +36,7 @@ from supernova_core.code_index.parameter_models import (
     SinkCallSite,
     SinkCategory,
 )
+from supernova_core.code_index.models import EntryPoint
 from supernova_core.code_index.sanitizer_library import annotate_sanitizers
 from supernova_core.agents.llm_json import _extract_json_payload
 from supernova_core.i18n import current_lang
@@ -52,7 +54,9 @@ CHAIN_VERDICT_SCHEMA: dict = {
         "confidence": {"type": "string"},
         "title": {"type": ["string", "null"]},
     },
-    "required": ["verdict", "evidence_chain", "title"],
+    # witness_payload 入 required（可 null）：openai_compatible 引擎不发 schema 时
+    # 仅靠 prompt 约束，不在 required 里模型常直接省略 → 下游 PoC 无 witness 可用。
+    "required": ["verdict", "witness_payload", "evidence_chain", "title"],
 }
 
 logger = logging.getLogger(__name__)
@@ -100,11 +104,38 @@ Rules:
 - A defense is effective ONLY if it matches the slot/render_context AND no concat after.
 - Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
 - Be decisive: return vulnerable OR safe.
+- witness_payload = the MINIMAL concrete attack input that would trigger this sink
+  (e.g. "' OR '1'='1" for a SQL value slot, "http://169.254.169.254/" for a url slot).
+  Required when verdict is vulnerable; use null only when verdict is safe.
 - {title_directive}
 
 Respond with a compact JSON object ONLY:
-{{"verdict":"safe|vulnerable","witness_payload":"<minimal>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>"}}
+{{"verdict":"safe|vulnerable","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>"}}
 """
+
+# unparseable 有界重试（spec O2 后半）：openai_compatible 引擎（GLM）端点不支持
+# response_format=json_schema（发之 400），schema 只用于本地解析，模型仅受 prompt
+# 约束——实测对 Markdown 输出合规率极低（2026-07-22 spec R5: 14/14 unparseable）。
+# 重试链：先轻量转格式（对齐 providers_openai._lightweight_reparse 措辞，便宜），
+# 再全量重发 + 加强 JSON-only 指令。耗尽才落保守分支（不丢报，witness=None）。
+_JSON_ONLY_REMINDER = (
+    "\n\nIMPORTANT: Your previous response was NOT valid JSON. "
+    "Respond with ONLY the compact JSON object — no markdown fences, "
+    "no explanation, no code blocks."
+)
+
+
+def _reformat_prompt(raw: str) -> str:
+    """轻量转格式 prompt（不用 str.format：schema 里的 JSON 花括号会撞占位符）。"""
+    return (
+        "将以下分析结论转为符合 schema 的纯 JSON，只输出 JSON 本体，"
+        "不要任何解释、前言或 markdown 代码围栏。schema 字段："
+        '{"verdict":"safe|vulnerable","witness_payload":"<攻击载荷字符串或 null>",'
+        '"evidence_chain":"<source->sink 证据链>",'
+        '"mismatch_reason":"<字符串或 null>","confidence":"high|medium|low",'
+        '"title":"<一句话标题>"}\n'
+        f"待转换文本：\n{raw[:4000]}"
+    )
 
 
 @dataclass(frozen=True)
@@ -138,6 +169,29 @@ def _slot_value(slot) -> str:
     return slot.value if hasattr(slot, "value") else str(slot)
 
 
+def _parse_verdict_json(raw: object) -> dict | None:
+    """LLM 原始输出 → verdict dict。
+
+    extract 失败 / 非法 JSON / 非 object / verdict 值不合法 → None（调用方重试
+    或落保守分支）。比旧裸 json.loads 多验一层 verdict 枚举：字段缺失/错值说明
+    模型没按 schema 输出，与"解析崩"同 Treatment 走重试。
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        payload = _extract_json_payload(raw)
+        if payload is None:
+            return None
+        data = json.loads(payload)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if str(data.get("verdict", "")).strip().lower() not in ("safe", "vulnerable"):
+        return None
+    return data
+
+
 def _fallback_title(candidate: "CandidateChain") -> str:
     """Deterministic descriptive title when the LLM pass fails / returns no title.
 
@@ -151,6 +205,29 @@ def _fallback_title(candidate: "CandidateChain") -> str:
 
 def _category_value(category) -> str:
     return category.value if hasattr(category, "value") else str(category)
+
+
+def http_route_label(
+    entry_point_id: str | None,
+    entry_points: dict[str, EntryPoint] | None,
+) -> str | None:
+    """Join a chain's entry_point_id to its parsed HTTP route → "METHOD /path".
+
+    entry_points maps EntryPoint.func_block_id → EntryPoint（route-bearing，
+    由 pipeline activity 从 code_index.json 构建）。join miss / http_method
+    未知时返回 None——调用方保持原字段值，PoC gap-fill LLM 兜底。与 authz 轨
+    _endpoint_label 同构，但更严格：缺真实 method 的 label 匹配不上 PoC 的
+    derive_method_path 正则，索性不发。
+    """
+    if not entry_point_id or not entry_points:
+        return None
+    ep = entry_points.get(entry_point_id)
+    if ep is None or not ep.route or not ep.http_method:
+        return None
+    route = ep.route.strip()
+    if not route.startswith("/"):
+        route = f"/{route}"
+    return f"{ep.http_method.strip().upper()} {route}"
 
 
 def _route_for(vuln_class: str, slot_value: str, sink_category: str | None = None) -> bool:
@@ -270,6 +347,33 @@ def extract_candidate_chains(
     return chains
 
 
+async def _retry_verdict_parse(
+    prompt: str, raw: str, *, llm_client: Callable[..., Awaitable[str]],
+) -> dict | None:
+    """unparseable 后的有界重试：先轻量转格式（便宜），再全量重发+加强 JSON-only。
+
+    env SUPERNOVA_CHAIN_VERDICT_RETRIES 控制总次数（默认 2；0 = 直接保守降级）。
+    调用异常 / 全部尝试仍失败 → None（judge 落保守分支）。
+    """
+    max_retries = max(0, int(os.getenv("SUPERNOVA_CHAIN_VERDICT_RETRIES", "2")))
+    retry_prompts: list[str] = []
+    if raw.strip():
+        retry_prompts.append(_reformat_prompt(raw))
+    while len(retry_prompts) < max_retries:
+        retry_prompts.append(prompt + _JSON_ONLY_REMINDER)
+    for retry_prompt in retry_prompts[:max_retries]:
+        try:
+            raw = await llm_client(retry_prompt, output_format=CHAIN_VERDICT_SCHEMA)
+        except Exception as exc:
+            logger.warning("chain-verdict retry LLM call failed (%s); giving up", exc)
+            return None
+        data = _parse_verdict_json(raw)
+        if data is not None:
+            logger.info("chain-verdict: recovered parseable output after retry")
+            return data
+    return None
+
+
 async def judge_chain_verdict(
     candidate: CandidateChain,
     *,
@@ -314,18 +418,26 @@ async def judge_chain_verdict(
             title=_fallback_title(candidate),
         )
 
-    try:
-        payload = _extract_json_payload(raw) if isinstance(raw, str) else None
-        if payload is None:
-            raise json.JSONDecodeError("no JSON payload found", raw or "", 0)
-        data = json.loads(payload)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("chain-verdict LLM returned non-JSON: %r", raw[:200])
+    data = _parse_verdict_json(raw)
+    if data is None:
+        data = await _retry_verdict_parse(
+            prompt, raw if isinstance(raw, str) else "", llm_client=llm_client)
+    if data is None:
+        # 空输出与非法输出分流：诊断时区分「调用层失败」与「模型不合规」。
+        final_raw = raw if isinstance(raw, str) else ""
+        if not final_raw.strip():
+            reason = ("llm chain-verdict pass returned empty output "
+                      "after all attempts; needs review")
+        else:
+            reason = ("llm chain-verdict pass returned unparseable output "
+                      "after all attempts; needs review")
+        logger.warning("chain-verdict LLM output unparseable after retries: %r",
+                       final_raw[:200])
         return ChainVerdict(
             verdict="vulnerable",
             witness_payload=None,
             evidence_chain=f"{candidate.source_param} -> {candidate.sink_call_site_id} (unparseable-llm, needs_review)",
-            mismatch_reason="llm chain-verdict pass returned unparseable output; needs review",
+            mismatch_reason=reason,
             confidence="low",
             title=_fallback_title(candidate),
         )
