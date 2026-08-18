@@ -18,6 +18,7 @@ class _FakeInput:
         self.api_key = None
         self.pipeline_testing_mode = False
         self.prompt_override = None
+        self.provider_config = None  # P3c 穿线字段（agent 调用前求值，缺属性即 AttributeError）
 
 
 def _write_index_with_candidate(tmp_path):
@@ -86,7 +87,7 @@ async def test_judge_writes_gitnexus_queue_from_candidates(tmp_path):
                 inst.log_info = AsyncMock()
                 result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    queue_path = tmp_path / "whitebox" / "authz_gitnexus_queue.json"
+    queue_path = tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json"
     assert queue_path.exists()
     data = json.loads(queue_path.read_text())
     assert len(data["vulnerabilities"]) == 1
@@ -140,8 +141,8 @@ async def test_judge_skips_llm_when_no_candidates(tmp_path):
     assert called["n"] == 1, "0 候选应触发 explore（非静默写空 queue）"
     assert called["prompt"] is not None
     assert "explore" in called["prompt"].lower() or "route" in called["prompt"].lower()
-    assert (tmp_path / "whitebox" / "authz_gitnexus_queue.json").exists()
-    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
+    assert (tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json").exists()
+    data = json.loads((tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"] == []  # explore 返空，queue 仍空（无幻觉）
     assert result["candidate_count"] == 0  # 确定性候选仍 0（explore 不改 candidate_count）
 
@@ -166,7 +167,7 @@ async def test_judge_lenient_on_invalid_llm_output(tmp_path):
                 inst.log_info = AsyncMock()
                 await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
+    data = json.loads((tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"] == []  # lenient
 
 
@@ -281,7 +282,7 @@ async def test_judge_explore_fills_missing_id_not_drops(tmp_path):
                 inst.log_info = AsyncMock()
                 await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
 
-    data = json.loads((tmp_path / "whitebox" / "authz_gitnexus_queue.json").read_text())
+    data = json.loads((tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json").read_text())
     assert len(data["vulnerabilities"]) == 2  # BUG 时此处为 0(parse_lenient 丢缺 ID)
     assert all(v.get("ID") for v in data["vulnerabilities"])  # 补了 ID
     assert all(v.get("needs_review") is True for v in data["vulnerabilities"])  # 探索软候选

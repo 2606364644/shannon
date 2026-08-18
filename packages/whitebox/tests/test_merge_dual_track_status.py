@@ -98,7 +98,7 @@ async def test_failed_class_tagged_in_counts(tmp_path, monkeypatch):
     assert counts["llm"] == 1
     assert counts["gitnexus"] == 0
     assert counts["llm_only"] == 1
-    out = json.loads((deliverables / "xss_exploitation_queue.json").read_text())
+    out = json.loads((deliverables / "intermediate" / "xss_exploitation_queue.json").read_text())
     assert len(out["vulnerabilities"]) == 1
     assert out["vulnerabilities"][0]["merge_source"] == "llm-only"
 

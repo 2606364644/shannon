@@ -183,7 +183,7 @@ async def test_xss_queue_contains_second_order_finding(tmp_path, monkeypatch):
     finally:
         clear_audit_session()
 
-    q = deliverables / "xss_gitnexus_queue.json"
+    q = deliverables / "intermediate" / "xss_gitnexus_queue.json"
     assert q.exists(), "xss_gitnexus_queue.json must be written"
     data = json.loads(q.read_text())
     ids = [v["ID"] for v in data["vulnerabilities"]]

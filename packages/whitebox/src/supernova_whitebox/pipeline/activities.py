@@ -494,7 +494,10 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 failed = True
                 fail_reason = f"build_authz_gitnexus_track failed: {exc}"
                 logger.warning("authz gitnexus build track failed: %s", exc)
-                atomic_write_json(deliverables / "authz_gitnexus_queue.json", {"vulnerabilities": []})
+                # tiering：*_gitnexus_queue.json 属中间产物 → 桶内 intermediate/
+                atomic_write_json(
+                    intermediate_path(deliverables, "authz_gitnexus_queue.json"),
+                    {"vulnerabilities": []})
                 return {"candidate_count": 0, "verdict_count": 0, "dominance_candidates": 0,
                         "framework_candidates": 0, "failed": True, "fail_reason": fail_reason}
             candidate_count = len(dom_cands) + len(fw_cands)
@@ -637,7 +640,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                         pass
 
             atomic_write_json(
-                deliverables / "authz_gitnexus_queue.json",
+                intermediate_path(deliverables, "authz_gitnexus_queue.json"),
                 {"vulnerabilities": vulnerabilities},
             )
             return {
@@ -960,12 +963,17 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
             intent=intent_for("merge-dual-track"),
         ):
             for vuln_class in ("injection", "xss", "ssrf", "authz", "auth"):
-                exploitation_path = deliverables / f"{vuln_class}_exploitation_queue.json"
-                gitnexus_path = deliverables / f"{vuln_class}_gitnexus_queue.json"
+                # tiering 双路径读：LLM 轨 queue 由 executor auto-write 落 intermediate/，
+                # GitNexus 轨写侧同迁（老 session 平铺兜底）。平铺直拼曾致 LLM 轨
+                # findings 恒空 → verdict OR 丢边。
+                exploitation_path = resolve_intermediate(
+                    deliverables, f"{vuln_class}_exploitation_queue.json")
+                gitnexus_path = resolve_intermediate(
+                    deliverables, f"{vuln_class}_gitnexus_queue.json")
 
                 # GitNexus-track findings (may exist independently of LLM track)
                 gitnexus_findings = []
-                if gitnexus_path.exists():
+                if gitnexus_path is not None:
                     gitnexus_parsed = VulnerabilityQueue.parse_lenient(
                         gitnexus_path.read_text(encoding="utf-8")
                     )
@@ -976,8 +984,11 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 # when BOTH tracks are empty.
                 llm_findings = []
                 llm_warnings = []
-                if exploitation_path.exists():
-                    llm_path = deliverables / f"{vuln_class}_llm_queue.json"
+                if exploitation_path is not None:
+                    # 保 LLM 轨原始副本（tier：*_llm_queue.json → intermediate/）
+                    llm_path = intermediate_path(
+                        deliverables, f"{vuln_class}_llm_queue.json")
+                    llm_path.parent.mkdir(parents=True, exist_ok=True)
                     llm_path.write_text(exploitation_path.read_text(encoding="utf-8"), encoding="utf-8")
                     llm_parsed = VulnerabilityQueue.parse_lenient(llm_path.read_text(encoding="utf-8"))
                     llm_findings = llm_parsed.queue.vulnerabilities
@@ -990,8 +1001,9 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                     gitnexus_findings,
                     mode="verdict",
                 )
+                # 合并版写回 intermediate/（SSOT；下游 resolve_intermediate 优先读到合并版）
                 atomic_write_json(
-                    exploitation_path,
+                    intermediate_path(deliverables, f"{vuln_class}_exploitation_queue.json"),
                     {"vulnerabilities": [finding.model_dump() for finding in merged]},
                 )
 
@@ -1545,8 +1557,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 # get written + counted alongside the single-hop ones.
                 findings = list(findings or []) + second_order_by_vc.get(vc, [])
                 if findings:
+                    # tiering：*_gitnexus_queue.json 属中间产物 → 桶内 intermediate/
                     atomic_write_json(
-                        deliverables / f"{vc}_gitnexus_queue.json",
+                        intermediate_path(deliverables, f"{vc}_gitnexus_queue.json"),
                         {"vulnerabilities": [f.model_dump() for f in findings]},
                     )
                     per_class[vc] = len(findings)
@@ -1754,8 +1767,8 @@ async def run_attack_chain_assembly_v2(input: ActivityInput) -> dict:
         # 1. GitNexus findings per class
         gn_by_class: dict[str, list] = {}
         for vt in ("injection", "xss", "ssrf", "authz"):
-            qpath = deliverables / f"{vt}_gitnexus_queue.json"
-            if qpath.exists():
+            qpath = resolve_intermediate(deliverables, f"{vt}_gitnexus_queue.json")
+            if qpath is not None:
                 try:
                     data = json.loads(qpath.read_text("utf-8"))
                     gn_by_class[vt] = data.get("vulnerabilities", []) or []

@@ -30,6 +30,7 @@ class _FakeInput:
         self.api_key = None
         self.pipeline_testing_mode = False
         self.prompt_override = None
+        self.provider_config = None  # P3c 穿线字段（agent 调用前求值，缺属性即 AttributeError）
 
 
 def _noop_cm_factory():
@@ -78,7 +79,7 @@ async def test_build_track_failure_returns_failed_not_raise(tmp_path):
     assert "build_authz_gitnexus_track" in result["fail_reason"]
     assert "code_index" in result["fail_reason"]
     # queue 写空（业务 fail 也写空 queue，下游 merger 不崩）
-    queue_path = tmp_path / "whitebox" / "authz_gitnexus_queue.json"
+    queue_path = tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json"
     assert queue_path.exists()
     data = json.loads(queue_path.read_text())
     assert data["vulnerabilities"] == []
@@ -135,7 +136,7 @@ async def test_verdict_agent_exception_marks_failed(tmp_path):
     assert result["failed"] is True
     assert "verdict agent" in result["fail_reason"]
     # queue 仍写空（agent 异常 -> vulnerabilities=[] -> 写空不崩 merger）
-    queue_path = tmp_path / "whitebox" / "authz_gitnexus_queue.json"
+    queue_path = tmp_path / "whitebox" / "intermediate" / "authz_gitnexus_queue.json"
     assert queue_path.exists()
     data = json.loads(queue_path.read_text())
     assert data["vulnerabilities"] == []

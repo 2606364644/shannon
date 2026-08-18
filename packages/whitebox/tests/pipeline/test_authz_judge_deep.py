@@ -157,7 +157,7 @@ async def test_authz_judge_verdict_writes_queue_with_source_track(tmp_path, monk
 
     await act.run_authz_gitnexus_judge(inp)
 
-    queue_path = deliverables / "authz_gitnexus_queue.json"
+    queue_path = deliverables / "intermediate" / "authz_gitnexus_queue.json"
     assert queue_path.exists()
     data = _json.loads(queue_path.read_text())
     assert len(data["vulnerabilities"]) == 1

@@ -139,7 +139,7 @@ async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
     finally:
         clear_audit_session()
 
-    q = deliverables / "injection_gitnexus_queue.json"
+    q = deliverables / "intermediate" / "injection_gitnexus_queue.json"
     assert q.exists()
     data = json.loads(q.read_text())
     assert len(data["vulnerabilities"]) == 1
@@ -171,7 +171,7 @@ async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
         clear_audit_session()
 
     assert result["per_class"] == {}
-    assert not (deliverables / "injection_gitnexus_queue.json").exists()
+    assert not (deliverables / "intermediate" / "injection_gitnexus_queue.json").exists()
     # 可观测性（spec §3.2）：pgraph 缺失 early return 发 warning。
     levels = [lvl for (_msg, lvl) in session.info_calls]
     assert "warning" in levels
@@ -205,8 +205,8 @@ async def test_writes_xss_and_ssrf_queues(tmp_path, monkeypatch):
 
     assert "xss" in result["per_class"]
     assert "ssrf" in result["per_class"]
-    assert (deliverables / "xss_gitnexus_queue.json").exists()
-    assert (deliverables / "ssrf_gitnexus_queue.json").exists()
+    assert (deliverables / "intermediate" / "xss_gitnexus_queue.json").exists()
+    assert (deliverables / "intermediate" / "ssrf_gitnexus_queue.json").exists()
 
 
 @pytest.mark.asyncio
@@ -282,5 +282,5 @@ async def test_entry_points_route_flows_into_queue(tmp_path, monkeypatch):
     finally:
         clear_audit_session()
 
-    data = json.loads((deliverables / "injection_gitnexus_queue.json").read_text())
+    data = json.loads((deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"][0]["path"] == "POST /search → q->db"
