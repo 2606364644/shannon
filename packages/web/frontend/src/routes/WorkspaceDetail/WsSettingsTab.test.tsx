@@ -43,8 +43,8 @@ describe("WsSettingsTab", () => {
     expect(ta.value).toContain("SUPERNOVA_AI_PROVIDER=openai_compatible");
     expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=10000");
     expect(ta.value).toContain("SUPERNOVA_ADAPTIVE_THINKING=true");
-    expect(ta.value).toContain("SUPERNOVA_LLM_TRACK_ENABLED=0");
-    expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=1");
+    expect(ta.value).toContain("SUPERNOVA_LLM_TRACK_ENABLED=1");
+    expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=0");
     expect(ta.value).toContain("SUPERNOVA_BROWSER_ENGINE=agent-browser");
     expect(ta.value).toContain("SUPERNOVA_AGENT_NARRATION_LANG=zh");
     // 凭据行以 # 注释出现（不落盘空串、删 # 填值才生效）

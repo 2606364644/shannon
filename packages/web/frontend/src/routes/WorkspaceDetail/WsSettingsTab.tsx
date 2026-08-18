@@ -66,8 +66,8 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
   {
     titleKey: "wsConfig.keys.groups.scanSwitches",
     keys: [
-      { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "bool", defaultValue: "0" },
-      { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "bool", defaultValue: "1" },
+      { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "bool", defaultValue: "1" },
+      { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "bool", defaultValue: "0" },
       { key: "SUPERNOVA_BROWSER_ENGINE", kind: "str", defaultValue: "agent-browser" },
       { key: "SUPERNOVA_PRICING_OVERRIDE", kind: "str", defaultValue: ".env.profiles/glm.pricing.json" },
       { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
