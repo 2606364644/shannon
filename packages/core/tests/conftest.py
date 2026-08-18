@@ -37,21 +37,20 @@ def _clean_logging_singletons():
     # （旧版写 LogBus._xxx 落在 _LogBusProxy 代理 instance __dict__、不触达真实 bus，
     # 且污染代理后续 __getattr__ → 跨测试串读。）
     try:
-        from supernova_core.logging.log_bus import _BUSES
+        from supernova_core.logging.log_bus import _BUSES, reset_diagnostic
         for bus in list(_BUSES.values()):
             bus._attached = False
             bus._dispatcher = None
             if bus._drain_task is not None and not bus._drain_task.done():
                 bus._drain_task.cancel()
             bus._drain_task = None
-            if bus._diagnostic is not None:
-                bus._diagnostic.close()
-                bus._diagnostic = None
             while True:
                 try:
                     bus.queue.get_nowait()
                 except _queue.Empty:
                     break
         _BUSES.clear()
+        # diagnostic 已是进程级单例（2026-08-18 起不在 bus 上），单独重置。
+        reset_diagnostic()
     except Exception:  # pragma: no cover - LogBus 未导入的极端情况
         pass

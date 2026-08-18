@@ -66,22 +66,14 @@ def _restore_temporalio_logger():
 
 @pytest.fixture(autouse=True)
 def _restore_log_bus():
-    """LogBus 是模块级单例，configure_logging/attach 改其状态会泄漏到其他测试：
-    teardown 重置 _dispatcher/_attached/_drain_task、关 diagnostic、清 queue。"""
-    try:
-        yield
-    finally:
-        LogBus._dispatcher = None
-        LogBus._attached = False
-        LogBus._drain_task = None
-        if LogBus._diagnostic is not None:
-            LogBus._diagnostic.close()
-            LogBus._diagnostic = None
-        while True:
-            try:
-                LogBus.queue.get_nowait()
-            except _queue.Empty:
-                break
+    """LogBus 状态清理交 conftest._clean_logging_singletons（清 _BUSES 注册表）。
+
+    本 fixture 曾用 ``LogBus._diagnostic = None`` 等赋值清理——P3c 后 LogBus 是
+    _LogBusProxy 代理，赋值落在代理 instance __dict__、不触达真实 bus，且后续
+    ``LogBus._diagnostic`` 读命中 instance dict 不再走 __getattr__ -> _diagnostic
+    被毒化为 None（test_idempotent_replaces 断言 NoneType 的根因，2026-08-18）。
+    """
+    yield
 
 
 def _our_handlers(root_or_logger=None) -> list[logging.Handler]:
@@ -219,3 +211,30 @@ def test_rust_log_not_overwritten_when_user_set(tmp_path, monkeypatch):
     monkeypatch.setenv("RUST_LOG", "temporalio_sdk_core=debug")
     configure_logging(log_dir=tmp_path)
     assert os.environ["RUST_LOG"] == "temporalio_sdk_core=debug"
+
+
+# --- diagnostic 进程级化（2026-08-18）：pop 后 fallback 不丢 ---
+
+def test_fallback_writes_diagnostic_after_bus_pop(tmp_path, monkeypatch):
+    """wf 终结（drain_and_detach pop bus）后，残余 emit 的 fallback 仍写进程级
+    diagnostic.log——diagnostic 不随 bus 丢失/降级为 no-op（2026-08-18 模块级化）。"""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from supernova_core.logging.log_bus import attach, drain_and_detach
+
+    configure_logging(log_dir=tmp_path)
+
+    async def _lifecycle():
+        spy = MagicMock()
+        spy.dispatch = AsyncMock()
+        await attach(spy, workflow_id="wf-pop")
+        await drain_and_detach(workflow_id="wf-pop")  # 收尾 -> bus 被 pop
+
+    asyncio.run(_lifecycle())
+    monkeypatch.setattr(
+        "supernova_core.logging.log_bus._resolve_wf_id",
+        lambda explicit=None: "wf-pop",
+    )
+    logging.getLogger("post.pop").warning("post-pop-msg")
+    assert "post-pop-msg" in (tmp_path / "diagnostic.log").read_text(), \
+        "wf 终结后的 fallback 日志应仍落 diagnostic.log"

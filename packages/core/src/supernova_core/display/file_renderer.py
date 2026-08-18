@@ -10,7 +10,6 @@ from supernova_core.display.formatters import (
     agent_body, agent_title, format_duration, format_error_block,
     gitnexus_body, humanize_tool_call, phase_body, step_body, tag,
 )
-from supernova_core.logging.diagnostic_log import format_diagnostic_line
 from supernova_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
 from supernova_core.agents.pricing import currency_symbol
 
@@ -171,6 +170,11 @@ class DiagnosticLogRenderer:
         self._diag = diagnostic_log
 
     async def render(self, event) -> None:
+        # format_diagnostic_line 延迟到使用点 import：模块级 import 会先初始化
+        # supernova_core.logging 包（__init__ → log_bus → audit 包 __init__ →
+        # session → workflow_logger → 本模块），file_renderer 尚未初始化完 → 循环
+        # ImportError（2026-08-18 预存，test_diagnostic_log.py collection 即崩）。
+        from supernova_core.logging.diagnostic_log import format_diagnostic_line
         from supernova_core.display.events import LogEvent
         match event:
             case LogEvent():

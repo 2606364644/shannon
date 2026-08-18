@@ -58,15 +58,14 @@ async def _restore_log_bus():
         if bus._drain_task is not None and not bus._drain_task.done():
             bus._drain_task.cancel()
         bus._drain_task = None
-        if bus._diagnostic is not None:
-            bus._diagnostic.close()
-            bus._diagnostic = None
         while True:
             try:
                 bus.queue.get_nowait()
             except _queue.Empty:
                 break
     _BUSES.clear()
+    from supernova_core.logging.log_bus import reset_diagnostic
+    reset_diagnostic()  # diagnostic 是进程级单例（不在 bus 上），单独重置
 
 
 # --- attach/detach 状态机 + drain 链路 ---
@@ -89,12 +88,14 @@ async def test_logging_routes_through_dispatcher_to_console(tmp_path):
     buf = StringIO()
     console = Console(file=buf, width=200, color_system=None)
     dispatcher = DisplayDispatcher([RichConsoleRenderer(console)])
+    await dispatcher.start()  # 解耦后 dispatch 只入队，须起 drain task 才有消费
     await LogBus.attach(dispatcher)
     try:
         logging.getLogger("supernova_core.code_index").warning("routed-msg")
         await asyncio.sleep(0.2)  # 等 drain（sleep 0.05 一轮）
     finally:
         await LogBus.drain_and_detach()
+        await dispatcher.close()  # 排空 dispatcher 队列 + 收尾 drain task（防泄漏）
     out = buf.getvalue()
     assert "routed-msg" in out
     assert "code_index" in out
