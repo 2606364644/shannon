@@ -160,11 +160,14 @@ export default function ScanDetail() {
   const [addBbBusy, setAddBbBusy] = useState(false);
   const [deleteRunOpen, setDeleteRunOpen] = useState(false);
   const [deleteRunBusy, setDeleteRunBusy] = useState(false);
-  const whiteboxTerminal =
-    meta?.scan_type === "whitebox" && ["completed", "done"].includes(status);
+  // 加黑盒入口的可见条件：白盒产物已终态的任务（completed/done，或 cancelled——取消过
+  // 手动黑盒 run 的任务白盒产物仍完好）。run 运行中任务级 status=running（后端
+  // _add_blackbox_run 把任务级标 running），按钮随 status 自然隐藏；下方 runs 非终态门
+  // 是 legacy 数据（任务级停终态但 run 未收口）的兜底。后端 _whitebox_deliverables_ready 422 兜底。
+  const whiteboxAddable =
+    meta?.scan_type === "whitebox" && ["completed", "done", "cancelled"].includes(status);
   // 加黑盒前置门（后端 422 兜底，前端先拦免空跑）：无目标 URL（纯白盒任务，黑盒无目标
-  // 可打）不可加；任一 run 非终态不可叠加——任务级 status 停留 completed，按钮不会因
-  // run 在跑而自动消失，须显式禁用。
+  // 可打）不可加；任一 run 非终态不可叠加（legacy 状态兜底，正常路径按钮已隐藏）。
   const addBbBlockedBy = !meta?.web_url
     ? t("workspaceDetail.scans.runs.addNoUrlHint")
     : runs.some((r) => !isRunTerminal(r.status))
@@ -275,9 +278,9 @@ export default function ScanDetail() {
               <Trash2 className="size-3.5" /> {t("workspaceDetail.scans.runs.delete")}
             </Button>
           )}
-          {/* 加黑盒入口（spec §6）：终端态白盒任务可新建黑盒 run（纯白盒→首个 run；
+          {/* 加黑盒入口（spec §6）：白盒产物已终态的任务可新建黑盒 run（纯白盒→首个 run；
               已 combined→下一个 run）。无目标 URL / run 在跑时禁用（后端 422 兜底）。 */}
-          {whiteboxTerminal && (
+          {whiteboxAddable && (
             <Button size="sm" variant="outline" onClick={() => setAddBbOpen(true)}
               disabled={!!addBbBlockedBy} title={addBbBlockedBy ?? undefined}>
               <Plus className="size-3.5" /> {t("workspaceDetail.scans.runs.addBlackbox")}
@@ -324,8 +327,7 @@ export default function ScanDetail() {
       >
         {!loading && meta && (
           <ScanProgressOverview
-            ws={workspace!} scanId={scanId!}
-            combined={meta.combined} bbPhase={meta.bb_phase} selectedRun={selectedRun}
+            ws={workspace!} scanId={scanId!} runsCount={runs.length}
             onScanEnd={() => load()}
           />
         )}
@@ -339,7 +341,7 @@ export default function ScanDetail() {
           </div>
         </Tabs>
       </div>
-      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj }} /></ErrorBoundary></div>
+      <div className={isFlexLayout ? "min-h-0 flex-1 overflow-hidden" : undefined}><ErrorBoundary key={current}><Outlet context={{ selectedRun, runSummary: selectedRunObj, combined: meta?.combined ?? null, bbPhase: meta?.bb_phase ?? null, runsCount: runs.length }} /></ErrorBoundary></div>
 
       {/* 加黑盒确认 Dialog（空 body = 无认证直连；后续可扩认证/HOST 选择） */}
       <Dialog open={addBbOpen} onOpenChange={setAddBbOpen}>

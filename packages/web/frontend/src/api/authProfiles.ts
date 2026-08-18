@@ -44,6 +44,12 @@ export const testBatch = (ws: string, pid: string, credIds?: string[],
   return apiPost<{ workflow_id: string }>(
     `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/test-batch`, body);
 };
+// 停止认证测试（批量/单 cred 通用）：后端先回填状态（绑此 wf 且 running → failed/cancelled）
+// 再 handle.cancel()。幂等：无 running 返 already_finished。
+export const cancelTest = (ws: string, pid: string, workflowId: string) =>
+  apiPost<{ cancelled: string; already_finished?: boolean }>(
+    `/workspaces/${enc(ws)}/auth-profiles/${enc(pid)}/cancel-test`,
+    { workflow_id: workflowId });
 export const getVerifyStatus = (
   ws: string, pid: string, cid: string, workflowId: string, probeDir: string,
 ) =>

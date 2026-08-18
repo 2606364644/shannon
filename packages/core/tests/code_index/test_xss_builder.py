@@ -7,7 +7,7 @@ from supernova_core.code_index.vuln_chain_builders.xss_builder import (
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph, TaintFlow, PropagationStep, SinkCallSite, SinkCategory,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import XssVulnerability
 
 
@@ -219,3 +219,32 @@ async def test_build_xss_finding_carries_title():
     findings = await build_xss_findings(
         pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
     assert findings[0].title == "Reflected XSS via q param into innerHTML"
+
+
+@pytest.mark.asyncio
+async def test_build_xss_entry_points_prefixes_path_with_route():
+    """O2 前半：entry_points join 命中 → path 带 "METHOD /path" 前缀；miss → 原样。"""
+    sid = "app.py:h:innerHTML:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("generic", source="q", sink_id=sid)],
+        language_coverage=["typescript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"><script>",'
+                '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
+                '"confidence":"high"}')
+
+    ep = EntryPoint(
+        func_block_id="app.py:h:1", entry_type="http_route",
+        route="/comment", http_method="POST", confidence=1.0,
+        evidence="annot", needs_llm_review=False,
+    )
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)},
+        entry_points={"app.py:h:1": ep})
+    assert findings[0].path == "POST /comment → q->innerHTML"
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+    assert findings[0].path == "q->innerHTML"

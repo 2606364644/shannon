@@ -1,38 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import i18n from "@/i18n";
-import { resolveActiveEventsUrl, ScanProgressOverview } from "./ScanProgressOverview";
+import { ScanProgressOverview } from "./ScanProgressOverview";
 
-// === resolveActiveEventsUrl 纯函数 ===
-describe("resolveActiveEventsUrl", () => {
-  const base = { ws: "ws1", scanId: "scan1" };
-  const scanEvents = "/api/workspaces/ws1/scans/scan1/events";
-  const runEvents = (run: string) =>
-    `/api/workspaces/ws1/scans/scan1/blackbox-runs/${run}/events`;
-
-  it("纯白盒（非组合）→ 任务根 events", () => {
-    expect(resolveActiveEventsUrl({ ...base })).toBe(scanEvents);
+// === mergedScanEventsUrl 纯函数（全量归并流：认证/白盒/黑盒 run-K 单一 URL）===
+describe("mergedScanEventsUrl", () => {
+  const base = "/api/workspaces/ws1/scans/scan1/events";
+  it("无 rev → 裸归并流 URL", async () => {
+    const { mergedScanEventsUrl } = await import("@/api/client");
+    expect(mergedScanEventsUrl("ws1", "scan1")).toBe(base);
   });
-  it("纯黑盒 → 任务根 events", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: false })).toBe(scanEvents);
+  it("有 rev → ?rev= 后缀（run 数变化强制重开流）", async () => {
+    const { mergedScanEventsUrl } = await import("@/api/client");
+    expect(mergedScanEventsUrl("ws1", "scan1", 2)).toBe(`${base}?rev=2`);
   });
-  it("组合 bbPhase=pending（白盒段）→ 任务根 events", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "pending" })).toBe(scanEvents);
-  });
-  it("组合 bbPhase=precheck → 任务根 events", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "precheck" })).toBe(scanEvents);
-  });
-  it("组合 bbPhase=running + selectedRun → run events", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "running", selectedRun: "run-1" })).toBe(runEvents("run-1"));
-  });
-  it("组合 bbPhase=running 无 selectedRun → 任务根 events（fallback）", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "running" })).toBe(scanEvents);
-  });
-  it("组合 bbPhase=completed + selectedRun → run events（看完成 run 历史）", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "completed", selectedRun: "run-2" })).toBe(runEvents("run-2"));
-  });
-  it("组合 bbPhase=failed + selectedRun → run events", () => {
-    expect(resolveActiveEventsUrl({ ...base, combined: true, bbPhase: "failed", selectedRun: "run-1" })).toBe(runEvents("run-1"));
+  it("isBlackboxSegmentActive 仅作阶段徽章判定（不再决定流 URL）", async () => {
+    const { isBlackboxSegmentActive } = await import("@/api/client");
+    expect(isBlackboxSegmentActive({ combined: true, bbPhase: "running", selectedRun: "run-1" })).toBe(true);
+    expect(isBlackboxSegmentActive({ combined: true, bbPhase: "precheck", selectedRun: "run-1" })).toBe(false);
+    expect(isBlackboxSegmentActive({ combined: false, bbPhase: "running", selectedRun: "run-1" })).toBe(false);
   });
 });
 

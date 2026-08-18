@@ -183,6 +183,23 @@ async def test_batch(ws: str, pid: str, request: Request,
         raise HTTPException(422, str(e))
 
 
+@router.post("/{ws}/auth-profiles/{pid}/cancel-test")
+async def cancel_test(ws: str, pid: str, request: Request, body: dict | None = None,
+                      user=Depends(workspace_member)):
+    """用户停止认证测试(批量/单 cred 通用,auth-test-cancel spec §3)。
+
+    body {workflow_id}: 批量 = test-batch 返的 batch workflow_id;单 cred = test 返的 workflow_id。
+    manager 侧先回填状态(绑此 wf 且 running 的 cred → failed/cancelled + 删明文 scan-config)
+    再 handle.cancel() best-effort。ValueError(越界/未绑定) → 422(对齐 test-batch 错误映射)。"""
+    workflow_id = (body or {}).get("workflow_id")
+    if not workflow_id:
+        raise HTTPException(422, "workflow_id 必填")
+    try:
+        return await request.app.state.scan_manager.cancel_auth_validation(ws, pid, workflow_id)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
 @router.get("/{ws}/auth-profiles/{pid}/credentials/{cid}/verify-status")
 async def verify_status(ws: str, pid: str, cid: str, workflow_id: str,
                         probe_dir: str, request: Request,

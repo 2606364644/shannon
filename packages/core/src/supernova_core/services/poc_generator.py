@@ -239,6 +239,40 @@ def _is_open_redirect(vuln: Any) -> bool:
     return any(hint in technique for hint in _OPEN_REDIRECT_HINTS)
 
 
+# 请求体确定性信号（source/evidence_chain 里的框架形态，小写匹配）：
+# NodeGoat/Express 'req.body.preTax'、Koa 'ctx.request.body'、Spring '@RequestBody'。
+_BODY_SIGNALS = ("req.body", "request.body", "@requestbody", "req.body[", "request.body[")
+
+_BODY_PARAM_RE = re.compile(r"(?:req|request)\.body(?:\.|\['?)(\w+)")
+
+
+def _extract_body_param(source: str | None) -> str | None:
+    """从 source 提取请求体参数名（'req.body.preTax @ f.js:71' → 'preTax'）。"""
+    if not source:
+        return None
+    m = _BODY_PARAM_RE.search(source)
+    return m.group(1) if m else None
+
+
+def _infer_placement(vuln: Any, vuln_class: str) -> str:
+    """确定性参数位推断："query" | "body"。
+
+    修「injection/xss 恒 query」：POST JSON/form API（req.body.x / @RequestBody）
+    的 witness 放 query 会拼出错误请求形态。信号缺失时维持类兜底（inj/xss →
+    query，ssrf 非 redirect → body），与历史行为一致；gap-fill 路径上 LLM 的
+    param_location 优先于此推断（见 _assemble）。
+    """
+    if vuln_class == "ssrf":
+        return "query" if _is_open_redirect(vuln) else "body"
+    text = " ".join([
+        getattr(vuln, "source", None) or "",
+        getattr(vuln, "evidence_chain", None) or "",
+    ]).lower()
+    if any(sig in text for sig in _BODY_SIGNALS):
+        return "body"
+    return "query"
+
+
 def _base_spec(vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand) -> HttpRequestSpec:
     method, path = derive_method_path(vuln)
     info = find_endpoint_info(endpoints, path)
@@ -270,13 +304,18 @@ def build_template_spec(
     if not witness:
         return None  # 无 witness_payload，模板拼不出，交 LLM
 
-    if vuln_class == "injection":
-        param = extract_param_name(getattr(vuln, "source", None)) or "id"
-        spec.query = {param: witness}
-        return spec
-    if vuln_class == "xss":
-        param = extract_param_name(getattr(vuln, "source", None)) or "q"
-        spec.query = {param: witness}
+    if vuln_class in ("injection", "xss"):
+        param = (extract_param_name(getattr(vuln, "source", None))
+                 or _extract_body_param(getattr(vuln, "source", None))
+                 or ("id" if vuln_class == "injection" else "q"))
+        if _infer_placement(vuln, vuln_class) == "body":
+            # req.body/@RequestBody 信号：witness 放 body（模板层无 JSON 原型，
+            # form 兜底；JSON 形态由 gap-fill 的 body_template 补）。
+            if spec.method == "GET":
+                spec.method = "POST"
+            spec.body = f"{param}={witness}"
+        else:
+            spec.query = {param: witness}
         return spec
     if vuln_class == "ssrf":
         if _is_open_redirect(vuln):
@@ -357,12 +396,13 @@ def _extract_deterministic(
 ) -> PartialSpec:
     """从 vuln 确定性提取 PartialSpec（不调 LLM）。缺 route/witness 时 needs_gap_fill=True。"""
     method, path = derive_method_path(vuln)
-    param = extract_param_name(getattr(vuln, "source", None))
-    gn_param, gn_file, _gn_method = extract_gn_location(getattr(vuln, "source", None))
+    source = getattr(vuln, "source", None)
+    param = extract_param_name(source) or _extract_body_param(source)
+    gn_param, gn_file, _gn_method = extract_gn_location(source)
     if not param and gn_param:
         param = gn_param
     witness = getattr(vuln, "witness_payload", None) or None
-    placement = "body" if vuln_class == "ssrf" else "query"
+    placement = _infer_placement(vuln, vuln_class)
     return PartialSpec(
         vuln=vuln, vuln_class=vuln_class, band=band, param_name=param,
         placement=placement, controller_file=gn_file,
@@ -403,20 +443,61 @@ def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRe
     if not witness:
         spec.note = "请求形态未推断（缺 witness），需手工补全 body/参数"
         return spec
-    # 按 vuln_class 决定参数位（对齐既有 build_template_spec 逻辑）
-    if partial.vuln_class == "ssrf":
-        if _is_open_redirect(partial.vuln):
-            param = partial.param_name or "next"
-            spec.query = {param: witness}
-        else:
-            param = getattr(partial.vuln, "vulnerable_parameter", None) or partial.param_name or "url"
-            if spec.method == "GET":
-                spec.method = "POST"
-            spec.body = f"{param}={witness}"
-    else:  # injection / xss
-        param = partial.param_name or ("id" if partial.vuln_class == "injection" else "q")
+    # 参数位：LLM param_location 优先，其次 partial.placement（_extract_deterministic
+    # 的 _infer_placement 确定性信号 + 类兜底，与 build_template_spec 同一套逻辑）。
+    # ssrf open-redirect 恒 query（302 跳转参数，现状保留）。
+    gap_loc = str(g.get("param_location") or "").strip().lower()
+    placement = gap_loc if gap_loc in ("query", "body") else partial.placement
+    if partial.vuln_class == "ssrf" and _is_open_redirect(partial.vuln):
+        placement = "query"
+    param = _assemble_param(partial)
+    if placement == "body":
+        if spec.method == "GET":
+            spec.method = "POST"
+        spec.body = _build_body_from_gap(param, witness, g.get("body_template"))
+    else:
         spec.query = {param: witness}
     return spec
+
+
+def _assemble_param(partial: "PartialSpec") -> str:
+    """组装时用的参数名（对齐 build_template_spec 各类兜底链）。"""
+    if partial.vuln_class == "ssrf":
+        if _is_open_redirect(partial.vuln):
+            return partial.param_name or "next"
+        return (getattr(partial.vuln, "vulnerable_parameter", None)
+                or partial.param_name or "url")
+    return partial.param_name or (
+        "id" if partial.vuln_class == "injection" else "q")
+
+
+def _build_body_from_gap(param: str, witness: str, template: Any) -> str:
+    """LLM body_template（dict/JSON-str 原型或 form-str）注入 witness → 请求体串。
+
+    dict（或可 json.loads 的 str）：param 键存在则替换其值为 witness，其余键保留
+    作 body 上下文，_coerce_request_body 归一为 JSON 串；form str：'param=xxx'
+    段替换为 'param=witness'；无/不识别 template → form 兜底 'param=witness'。
+    """
+    if isinstance(template, str) and template.strip():
+        try:
+            loaded = json.loads(template)
+        except (json.JSONDecodeError, ValueError):
+            loaded = None
+        if isinstance(loaded, dict):
+            template = loaded
+    if isinstance(template, dict):
+        data = dict(template)
+        if param in data:
+            data[param] = witness
+        return _coerce_request_body(data) or f"{param}={witness}"
+    if isinstance(template, str) and template.strip():
+        t = template.strip()
+        # 左边界断言防误中后缀同名的参数（param=id 不该命中 'uid=1'）
+        m = re.search(rf"(?<![A-Za-z0-9_]){re.escape(param)}=([^&]*)", t)
+        if m:
+            return t[:m.start()] + f"{param}={witness}" + t[m.end():]
+        return f"{t}&{param}={witness}" if "=" in t else f"{param}={witness}"
+    return f"{param}={witness}"
 
 
 def _group_by_controller_file(
@@ -470,6 +551,11 @@ GAPFILL_OUTPUT_SCHEMA: dict = {
                                     "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", None]},
                     "route_path": {"type": ["string", "null"]},
                     "witness_payload": {"type": ["string", "null"]},
+                    # 参数位 + body 原型（修「injection/xss 恒 query」：
+                    # req.body/@RequestBody 参数的 witness 必须放 body）
+                    "param_location": {"type": ["string", "null"],
+                                       "enum": ["query", "body", None]},
+                    "body_template": {"type": ["string", "object", "null"]},
                 },
                 "required": ["ID"],
             },
@@ -525,10 +611,24 @@ async def llm_fill_gap(
 
 
 def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], recon_ctx: dict) -> str:
+    # 上下文增厚（spec R5 后续）：原来每条只给 {ID,param,class,evidence[:300]}，
+    # witness 只能产通用 payload。现在给齐 sink/source/slot/代码位置/假设/完整
+    # evidence（ssrf 有 vulnerable_code_location/exploitation_hypothesis，inj/xss
+    # 自动为 None 跳过），并要求 LLM 判参数位 + 给 body 原型。
     items_desc = json.dumps([
-        {"ID": getattr(p.vuln, "ID", ""), "param": p.param_name,
-         "method_hint": None, "vuln_class": p.vuln_class,
-         "evidence_chain": (getattr(p.vuln, "evidence_chain", None) or "")[:300]}
+        {k: v for k, v in {
+            "ID": getattr(p.vuln, "ID", ""),
+            "param": p.param_name,
+            "vuln_class": p.vuln_class,
+            "source": getattr(p.vuln, "source", None) or None,
+            "sink_call": (getattr(p.vuln, "sink_call", None)
+                          or getattr(p.vuln, "sink_function", None) or None),
+            "slot_type": getattr(p.vuln, "slot_type", None) or None,
+            "vulnerable_code_location": getattr(p.vuln, "vulnerable_code_location", None) or None,
+            "exploitation_hypothesis": getattr(p.vuln, "exploitation_hypothesis", None) or None,
+            "mismatch_reason": getattr(p.vuln, "mismatch_reason", None) or None,
+            "evidence_chain": (getattr(p.vuln, "evidence_chain", None) or "")[:1000] or None,
+        }.items() if v is not None}
         for p in partials
     ], ensure_ascii=False)
     file_line = f"Handler file: {file_key}\n" if file_key else "Handler file: unknown\n"
@@ -538,8 +638,13 @@ def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], r
         f"(@PostMapping / router.get / @app.route …) and a minimal witness payload.\n\n"
         f"Vulnerabilities to fill:\n{items_desc}\n\n"
         f"Recon endpoint context:\n{json.dumps(recon_ctx, ensure_ascii=False)}\n\n"
-        f"Output JSON {{\"items\":[{{\"ID\",\"http_method\",\"route_path\","
-        f"\"witness_payload\"}}]}}. Output JSON only."
+        'For each item also decide "param_location": "query" if the tainted param '
+        'is read from the query string, "body" if from the request body. '
+        'When body, also give "body_template": the JSON object prototype of that '
+        "endpoint's body (tainted param as a key with a placeholder value) or a "
+        "form string like 'a=1&b=2'.\n\n"
+        f'Output JSON {{"items":[{{"ID","http_method","route_path",'
+        f'"witness_payload","param_location","body_template"}}]}}. Output JSON only.'
     )
 
 
@@ -578,6 +683,8 @@ async def llm_fill_gaps(
                 "http_method": it.get("http_method"),
                 "route_path": it.get("route_path"),
                 "witness_payload": it.get("witness_payload"),
+                "param_location": it.get("param_location"),
+                "body_template": it.get("body_template"),
             }
     return out
 

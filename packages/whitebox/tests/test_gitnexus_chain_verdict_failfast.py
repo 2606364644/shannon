@@ -46,8 +46,16 @@ def _input(repo):
         deliverables_subdir = None
         workspace_name = None
         workspace_path = None
+        provider_config = None
 
     return FakeInput()
+
+
+@pytest.fixture(autouse=True)
+def _gitnexus_llm_off(monkeypatch):
+    """测试统一走 _wire 注入的 fake_llm：关掉 GitNexus LLM 开关，否则
+    _make_verdict_llm_client 构建真 client 静默打真实 LLM（默认开）。"""
+    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: False)
 
 
 def _write_pgraph(deliverables, flows):

@@ -334,8 +334,151 @@ describe("DeliverablesTab", () => {
     expect(screen.queryByText(/^加载…$/)).not.toBeInTheDocument();
     // 关键守卫：FilePreview 错误是局部的，至少有一个 role="alert"（ErrorState 渲染）
     expect(screen.getAllByRole("alert").length).toBeGreaterThanOrEqual(1);
-    // 守卫：左侧 vuln grid 标题仍可见（页面主体未崩）
-    expect(screen.getByText(/漏洞聚合/)).toBeInTheDocument();
+    // 守卫：左列聚合入口仍可见（页面主体未崩；FileStage 返回按钮也含「漏洞聚合」字样，
+    // 用带计数的精确匹配避免歧义）
+    expect(screen.getByText(/漏洞聚合 · 0/)).toBeInTheDocument();
+  });
+
+  it("默认舞台为聚合视图；选中文件切换为 FileStage，返回按钮回聚合视图", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return new HttpResponse("# h1", { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({
+            aggregated_vulnerabilities: [
+              { ID: "V-01", vulnerability_type: "T", externally_exploitable: false },
+            ],
+            files: [{ path: "whitebox/a.md", size: 4, kind: "md" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/scans/scan1/deliverables");
+    // 默认：聚合视图在舞台，无文件舞台
+    await waitFor(() => expect(screen.getByTestId("agg-view")).toBeInTheDocument());
+    expect(screen.queryByTestId("file-stage")).not.toBeInTheDocument();
+    expect(screen.getByText("V-01")).toBeInTheDocument();
+    // 点文件 → FileStage（含完整路径 + 返回按钮），聚合视图退场
+    fireEvent.click(screen.getByText("a.md"));
+    await waitFor(() => expect(screen.getByTestId("file-stage")).toBeInTheDocument());
+    expect(screen.getByText("whitebox/a.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /返回漏洞聚合/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("agg-view")).not.toBeInTheDocument();
+    // 返回按钮 → 回聚合视图
+    fireEvent.click(screen.getByRole("button", { name: /返回漏洞聚合/ }));
+    await waitFor(() => expect(screen.getByTestId("agg-view")).toBeInTheDocument());
+    expect(screen.queryByTestId("file-stage")).not.toBeInTheDocument();
+  });
+
+  it("左列「漏洞聚合」入口在选中文件后可点击回聚合视图", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return new HttpResponse("# h1", { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({ files: [{ path: "whitebox/a.md", size: 4, kind: "md" }] }),
+        );
+      }),
+    );
+    renderAt("/p/ws/scans/scan1/deliverables");
+    fireEvent.click(await screen.findByText("a.md"));
+    await waitFor(() => expect(screen.getByTestId("file-stage")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /漏洞聚合 · 0/ }));
+    await waitFor(() => expect(screen.getByTestId("agg-view")).toBeInTheDocument());
+  });
+
+  it("exploitation_queue 结构化渲染 VulnCard（解析 vulnerabilities[]）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return new HttpResponse(
+            JSON.stringify({ vulnerabilities: [{ ID: "INJ-Q1", vulnerability_type: "SQLi", externally_exploitable: true }] }),
+            { headers: { "content-type": "text/plain" } },
+          );
+        }
+        return HttpResponse.json(
+          makeSummary({
+            files: [{ path: "whitebox/injection_exploitation_queue.json", size: 60, kind: "exploitation_queue" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/scans/scan1/deliverables");
+    fireEvent.click(await screen.findByText("injection_exploitation_queue.json"));
+    // VulnCard 渲染（红色 ID 文本）而非原始 JSON pre
+    await waitFor(() => expect(screen.getByText("INJ-Q1")).toBeInTheDocument());
+    expect(screen.getByText(/可达/)).toBeInTheDocument();
+  });
+
+  it("exploitation_queue 非法 JSON 回退原文 pre（不崩）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return new HttpResponse("not-json", { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({
+            files: [{ path: "whitebox/x_exploitation_queue.json", size: 8, kind: "exploitation_queue" }],
+          }),
+        );
+      }),
+    );
+    renderAt("/p/ws/scans/scan1/deliverables");
+    fireEvent.click(await screen.findByText("x_exploitation_queue.json"));
+    await waitFor(() => expect(screen.getByText("not-json")).toBeInTheDocument());
+  });
+
+  it("other kind 显示不支持预览空态，不请求 ?path= 且无空 <pre>", async () => {
+    let pathRequested = false;
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          pathRequested = true;
+          return new HttpResponse("x", { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({ files: [{ path: "whitebox/logo.png", size: 100, kind: "other" }] }),
+        );
+      }),
+    );
+    const { container } = renderAt("/p/ws/scans/scan1/deliverables");
+    fireEvent.click(await screen.findByText("logo.png"));
+    await waitFor(() => expect(screen.getByText(/不支持在线预览/)).toBeInTheDocument());
+    expect(pathRequested).toBe(false);
+    const emptyPres = Array.from(container.querySelectorAll("pre")).filter((p) => p.textContent === "");
+    expect(emptyPres.length).toBe(0);
+  });
+
+  it("big_json「仍要加载」按需拉取并展示截断提示（默认零 fetch 之外的第二步）", async () => {
+    const bigContent = JSON.stringify({ pad: "x".repeat(300 * 1024) });
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("path")) {
+          return new HttpResponse(bigContent, { headers: { "content-type": "text/plain" } });
+        }
+        return HttpResponse.json(
+          makeSummary({ files: [{ path: "whitebox/parameter_graph.json", size: 307200, kind: "big_json" }] }),
+        );
+      }),
+    );
+    renderAt("/p/ws/scans/scan1/deliverables");
+    fireEvent.click(await screen.findByText("parameter_graph.json"));
+    // 默认：过大提示 + 「仍要加载」按钮
+    await waitFor(() => expect(screen.getByText(/文件过大/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /仍要加载/ })).toBeInTheDocument();
+    // 按需加载：内容渲染 + 截断提示（> 256KB 展示上限）
+    fireEvent.click(screen.getByRole("button", { name: /仍要加载/ }));
+    await waitFor(() => expect(screen.getByText(/仅显示前/)).toBeInTheDocument());
+    expect(screen.getByText(/262144/)).toBeInTheDocument();
   });
 });
 

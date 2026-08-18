@@ -12,9 +12,10 @@ from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
+    http_route_label,
     judge_chain_verdict,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     SinkCallSite,
@@ -32,6 +33,7 @@ async def build_ssrf_findings(
     llm_client: Callable[..., Awaitable[str]],
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
+    entry_points: dict[str, EntryPoint] | None = None,
 ) -> list[SsrfVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="ssrf", sink_call_sites=sink_call_sites,
@@ -62,20 +64,25 @@ async def build_ssrf_findings(
             detail = (f"SSRF-GN-{i:02d} vulnerable: source={chain.source_param} "
                       f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
         await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
+        # O2 前半：join entry_point 路由。source_endpoint 优先写 "METHOD /path"
+        #（原来是 FuncBlock id 占位，对 PoC 层无路由价值）；join miss → 保持占位。
+        route_label = http_route_label(chain.entry_point_id, entry_points)
+        path = (f"{route_label} → {verdict.evidence_chain}"
+                if route_label else verdict.evidence_chain)
         findings.append(SsrfVulnerability(
             ID=f"SSRF-GN-{i:02d}",
             vulnerability_type="URL_Manipulation",
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
             title=verdict.title,
-            source_endpoint=chain.entry_point_id,  # best-effort; renderer tolerant
+            source_endpoint=route_label or chain.entry_point_id,  # best-effort; renderer tolerant
             vulnerable_parameter=chain.source_param,
             vulnerable_code_location=chain.sink_call_site_id,
             missing_defense=verdict.mismatch_reason,
             exploitation_hypothesis=None,
             suggested_exploit_technique=None,
             # Task 2 fields:
-            path=verdict.evidence_chain,
+            path=path,
             verdict=verdict.verdict,
             witness_payload=verdict.witness_payload,
             source_track="gitnexus",

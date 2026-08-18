@@ -225,7 +225,7 @@ describe("ReportTab 组合扫描 - 三子 tab", () => {
 // DeliverablesTab —— 三桶（白盒 / 黑盒 / 融合）
 // =================================================================
 describe("DeliverablesTab 组合扫描 - 三桶", () => {
-  it("combined 按桶分组渲染「白盒产物 / 黑盒产物 / 融合产物」", async () => {
+  it("combined 统一文件树按 track 前缀分桶（白盒 / 黑盒 / 融合友好名目录）", async () => {
     const combinedSummary = {
       track: "combined",
       files: [
@@ -241,10 +241,11 @@ describe("DeliverablesTab 组合扫描 - 三桶", () => {
       http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () => HttpResponse.json(combinedSummary)),
     );
     renderDeliverables();
-    expect(await screen.findByText(/白盒产物/)).toBeInTheDocument();
-    expect(screen.getByText(/黑盒产物/)).toBeInTheDocument();
-    expect(screen.getByText(/融合产物/)).toBeInTheDocument();
-    // 各桶含对应文件名
+    // track 目录友好名（重设计 2026-08-17：一棵树，白盒/黑盒/融合为顶层目录）
+    expect(await screen.findByText("白盒")).toBeInTheDocument();
+    expect(screen.getByText("黑盒")).toBeInTheDocument();
+    expect(screen.getByText("融合")).toBeInTheDocument();
+    // 各桶含对应文件名（顶层目录默认展开）
     expect(screen.getByText("xss_exploitation_queue.json")).toBeInTheDocument();
     expect(screen.getByText("combined_report.md")).toBeInTheDocument();
   });

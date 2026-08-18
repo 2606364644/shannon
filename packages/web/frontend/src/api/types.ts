@@ -77,6 +77,11 @@ export interface ScanEndEvent extends CommonFields {
   type: "scan_end"; status: "completed" | "failed" | "killed" | "crashed";
   returncode?: number; stderr_tail?: string;
 }
+/** 黑盒 run 级收尾（归并流把 run 的 scan_end 改写为 run_end 转发：对全量流非终态）。 */
+export interface RunEndEvent extends CommonFields {
+  type: "run_end"; status: string; run: string;
+  returncode?: number; stderr_tail?: string;
+}
 export interface CorrelationProgressEvent extends CommonFields {
   type: "correlation_progress"; node: "repo" | "edge"; name: string;
   status: "started" | "completed" | "failed"; detail?: string;
@@ -85,7 +90,7 @@ export interface CorrelationProgressEvent extends CommonFields {
 export type NdjsonEvent =
   | WorkflowHeaderEvent | PhaseEvent | StepEvent | AgentEvent | ToolCallEvent
   | LlmTurnEvent | InfoEvent | ErrorEvent | SummaryEvent | ResumeEvent
-  | GitnexusLlmEvent | ScanEndEvent | CorrelationProgressEvent | LogEventEvent;
+  | GitnexusLlmEvent | ScanEndEvent | RunEndEvent | CorrelationProgressEvent | LogEventEvent;
 
 // === API 响应类型（对齐 backend-design.md）===
 export type WorkspaceStatus =
@@ -319,8 +324,9 @@ export type VerifyState = "unverified" | "running" | "success" | "failed";
 export interface VerifyStatus {
   state: VerifyState;
   // engine = LLM 引擎/provider 调用失败（与目标站登录无关，2026-08-17 起）；
-  // no_verdict = agent 跑完但无结构化结论（内部值，见 auth_profile_store.VerifyStatus）。
-  failure_point?: "username_or_password" | "totp_secret" | "out_of_band" | "engine" | "no_verdict";
+  // no_verdict = agent 跑完但无结构化结论（内部值，见 auth_profile_store.VerifyStatus）；
+  // cancelled = 用户主动停止测试（auth-test-cancel，2026-08-17 起）。
+  failure_point?: "username_or_password" | "totp_secret" | "out_of_band" | "engine" | "no_verdict" | "cancelled";
   failure_detail?: string;
   last_verified_at?: string;
   // 块3c：最近一次验证的 probe 目录 + workflow_id（verify-log 定位 + 下次覆盖清理）。

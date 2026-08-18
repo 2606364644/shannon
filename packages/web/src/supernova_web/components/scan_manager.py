@@ -523,7 +523,7 @@ class ScanManager:
             子集模式与全角色模式共用：调用方负责筛 creds 子集（子集）或传全量（全角色）。
             primary = 首个 low（无 low 回落首个，兜底防全 high 时无 primary）。
             """
-            from supernova_core.utils.authz_identity import derive_privilege_tier
+            from supernova_core.utils.authz_identity import derive_privilege_tier, slugify_account_id
             # high_priv_names 硬编码（plan 作者认可简化；env 化推迟）。
             high_priv_names = ["admin"]
 
@@ -536,6 +536,7 @@ class ScanManager:
                 raise ValueError(f"认证档案无凭据: {req.auth_profile_id}")
             primary_auth = credential_to_authentication(profile, primary)
             accounts = []
+            used_ids: set[str] = set()
             for c in creds:
                 if c.id == primary.id:
                     continue
@@ -543,7 +544,8 @@ class ScanManager:
                 if getattr(c, "totp_secret", None):
                     creds_d["totp_secret"] = c.totp_secret
                 accounts.append({
-                    "id": c.id,
+                    # 存量凭据 ID 含下划线（cred_xxx），须清洗成 core 认可的 slug
+                    "id": slugify_account_id(c.id, used_ids),
                     "role": c.role,
                     "tier": _tier_of(c),
                     "credentials": creds_d,
@@ -596,26 +598,16 @@ class ScanManager:
             # inline 多角色（2026-08-07）：auth_accounts 非空 → 展开 accounts[]（id=角色 slug 去重、
             # tier=derive_privilege_tier、totp_secret 透传）。形状对齐 profile 模式 _expand_multi_identity。
             if req.auth_accounts:
-                from supernova_core.utils.authz_identity import derive_privilege_tier
+                from supernova_core.utils.authz_identity import derive_privilege_tier, slugify_account_id
                 used_ids: set[str] = set()
                 accounts = []
                 for acc in req.auth_accounts:
                     role = (acc.get("role") or "").strip() or "role"
-                    base = "".join(ch if ch.isalnum() else "-" for ch in role.lower())
-                    while "--" in base:
-                        base = base.replace("--", "-")
-                    base = base.strip("-") or "role"
-                    slug = base
-                    n = 2
-                    while slug in used_ids:
-                        slug = f"{base}-{n}"
-                        n += 1
-                    used_ids.add(slug)
                     creds = {"username": acc.get("username", ""), "password": acc.get("password", "")}
                     if acc.get("totp_secret"):
                         creds["totp_secret"] = acc["totp_secret"]
                     accounts.append({
-                        "id": slug,
+                        "id": slugify_account_id(role, used_ids),
                         "role": role,
                         "tier": derive_privilege_tier(role, ["admin"]),
                         "credentials": creds,
@@ -1062,16 +1054,23 @@ class ScanManager:
                                           allowed_parent: Path, backfilled: set[str]) -> None:
         """workflow 终态后从 result() 回填(query 观测不到最后 cred 的终态,见 watcher 注释)。
 
-        result=per-cred dict list;result() 抛(FAILED 等非 COMPLETED 终态)→ 未回填 cred 全记
-        failed/out_of_band,不留 running。幂等:backfilled 记录已回填 cred 不重写。"""
-        from .auth_profile_store import VerifyStatus
+        result=per-cred dict list;result() 抛(FAILED/CANCELED 等非 COMPLETED 终态)→ 无 per-cred
+        结果可依:只把 store 中当前仍 running 的 cred 标 failed/out_of_band;unverified(从未开始,
+        没测≠失败)与已终态(幂等不覆盖)不写状态,仅删其 scan-config(密码卫生,对齐
+        reap_stale_probes 启动期清理)。幂等:backfilled 记录已回填 cred 不重写。"""
         try:
             raw = await handle.result()
         except Exception as e:
             raw = None
             fail_detail = f"{type(e).__name__}: {e}"
+        profile = self._auth_profile_store.get(ws, profile_id) if self._auth_profile_store else None
+        states = {c.id: c.verify_status.state for c in profile.credentials} if profile else {}
         for cred_id, entry in cred_probe_map.items():
             if cred_id in backfilled:
+                continue
+            if raw is None and states.get(cred_id) != "running":
+                # 异常终态(取消/崩溃)且该 cred 不在跑:未开始或已终态 → 状态不动,只删明文配置
+                self._delete_probe_scan_config(entry["probe_dir"], allowed_parent)
                 continue
             item = next(
                 (r for r in raw if isinstance(r, dict) and r.get("cred_id") == cred_id), None) \
@@ -1083,6 +1082,67 @@ class ScanManager:
             self._apply_batch_cred_terminal(
                 ws, profile_id, cred_id, item, entry["probe_dir"], workflow_id, allowed_parent)
             backfilled.add(cred_id)
+
+    def _delete_probe_scan_config(self, probe_dir: str, allowed_parent: Path) -> None:
+        """删 probe 的明文 scan-config.yaml(密码卫生,保留 events.ndjson)。越界 probe_dir 不动。"""
+        resolved = Path(probe_dir).resolve()
+        if not resolved.is_relative_to(allowed_parent):
+            return  # 越界守护(防任意路径删除)
+        cfg = resolved / "scan-config.yaml"
+        if cfg.exists():
+            try:
+                cfg.unlink()
+            except OSError:
+                pass
+
+    async def cancel_auth_validation(self, ws: str, profile_id: str,
+                                     workflow_id: str) -> dict:
+        """用户停止认证测试(批量/单 cred 通用,auth-test-cancel spec §3)。
+
+        顺序:先回填状态后 cancel(Temporal 不可达也不卡 running)。
+        1) 守护:workflow_id 须 authval-{ws}-/authval-batch-{ws}- 前缀且绑该档案某 cred;
+        2) 绑此 wf 且 running 的 cred → failed/cancelled + 删 scan-config(保留 events);
+           unverified 不动(没测≠失败;其残留 scan-config 由 watcher 终态回填时清理——
+           probe_dir 不在 store,只有 running 过的 cred 才写);
+        3) handle.cancel() best-effort(吞异常)。无 running → 幂等 already_finished,不 cancel。"""
+        from .auth_profile_store import VerifyStatus
+        if self._auth_profile_store is None:
+            raise RuntimeError("auth_profile_store 未注入，无法取消认证验证")
+        if not workflow_id.startswith((f"authval-{ws}-", f"authval-batch-{ws}-")):
+            raise ValueError(
+                f"workflow_id 越界(必须以 authval-{ws}- 或 authval-batch-{ws}- 开头): {workflow_id}")
+        profile = self._auth_profile_store.get(ws, profile_id)
+        if profile is None:
+            raise ValueError(f"认证档案不存在: {profile_id}")
+        bound = [c for c in profile.credentials
+                 if c.verify_status.workflow_id == workflow_id]
+        if not bound:
+            raise ValueError(f"workflow 未绑定该档案任何凭据: {workflow_id}")
+        allowed_parent = (self._workspaces_dir / ws / "auth-probes").resolve()
+        running = [c for c in bound if c.verify_status.state == "running"]
+        for cred in running:
+            if cred.verify_status.probe_dir:
+                self._apply_batch_cred_terminal(
+                    ws, profile_id, cred.id,
+                    {"cred_id": cred.id, "state": "failed", "failure_point": "cancelled",
+                     "failure_detail": "用户取消测试"},
+                    cred.verify_status.probe_dir, workflow_id, allowed_parent)
+            else:  # 无 probe_dir(防御):直接写状态,无配置可删
+                self._auth_profile_store.set_verify_status(
+                    ws, profile_id, cred.id,
+                    VerifyStatus(state="failed", failure_point="cancelled",
+                                 failure_detail="用户取消测试",
+                                 last_verified_at=datetime.now(timezone.utc).isoformat(),
+                                 workflow_id=workflow_id))
+        if not running:
+            return {"cancelled": workflow_id, "already_finished": True}
+        try:
+            client = await Client.connect(self._temporal_address())
+            await client.get_workflow_handle(workflow_id).cancel()
+        except Exception:
+            _log.warning("auth validation cancel %s: temporal 取消失败(best-effort,状态已回填)",
+                         workflow_id, exc_info=True)
+        return {"cancelled": workflow_id}
 
     def _iter_ws_names(self) -> list[str]:
         """workspaces/ 下用户 ws 名(跳点目录/文件;.system 档案只读 seed,无验证生命周期)。"""
@@ -1580,6 +1640,12 @@ class ScanManager:
         mgr = SessionManager(scan_dir.parent)
         if _compute_status(scan_dir, mgr.get_status(scan_dir)) == "running":
             raise ScanRunning(scan_id)
+        # bb_runs 非终态（手动加的黑盒 run 在跑/待跑）同样拒删：任务级 running 门通常已拦
+        # （_add_blackbox_run 会把任务级标 running），此门防 race 与 legacy 状态（run 在跑
+        # 而任务级停终态的旧数据）。取消（_cancel_combined 标 run cancelled）后可删。
+        runs = mgr.get_session_data(scan_dir).get("bb_runs") or []
+        if any(r.get("status") not in _RUN_TERMINAL_STATUSES for r in runs):
+            raise ScanRunning(scan_id)
         # 防御：清残留登记（非 running 时 _watch finally 通常已清，此处兜底防异常路径泄漏）。
         scan_key = (ws, scan_id)
         self._handles.pop(scan_key, None)
@@ -1670,6 +1736,36 @@ class ScanManager:
         host = os.environ.get("SUPERNOVA_TEMPORAL_HOST", "localhost")
         port = int(os.environ.get("SUPERNOVA_TEMPORAL_PORT", "7233"))
         return f"{host}:{port}"
+
+    async def _await_workflow_result(self, handle: Any,
+                                     attempts: int = 5,
+                                     backoff_base: float = 2.0) -> Any:
+        """await workflow 终态，对长轮询瞬态 RPC 错误重取 handle 续等。
+
+        temporalio 的 handle.result() 走 GetWorkflowExecutionHistory 长轮询，core 对
+        UserLongPoll 每次 poll 有 70s 硬 gRPC 超时且 DeadlineExceeded 不重试（对比
+        TaskLongPoll 放行）——一次网络抖动即抛 "context deadline exceeded"，曾致组合
+        扫描黑盒 run 被误标 failed（workflow 服务端仍在跑，NodeGoat-20260817-132940）。
+        DEADLINE_EXCEEDED / UNAVAILABLE 视为瞬态：退避后重取 handle 继续 result()（新
+        handle 从头拉 history 再续等，语义无损）。其余错误（含 WorkflowFailureError，
+        非 RPCError）原样上抛。"""
+        from temporalio.service import RPCError, RPCStatusCode
+        workflow_id = handle.id
+        for attempt in range(attempts):
+            try:
+                return await handle.result()
+            except RPCError as exc:
+                transient = exc.status in (
+                    RPCStatusCode.DEADLINE_EXCEEDED, RPCStatusCode.UNAVAILABLE)
+                if not transient or attempt == attempts - 1:
+                    raise
+                _log.warning(
+                    "workflow %s result() 瞬态 RPC 错误(%s)，第 %d/%d 次重试",
+                    workflow_id, exc.status.name, attempt + 2, attempts)
+                await asyncio.sleep(backoff_base ** attempt)
+                client = await Client.connect(self._temporal_address())
+                handle = client.get_workflow_handle(workflow_id)
+        raise AssertionError("unreachable")
 
     async def _check_temporal(self) -> None:
         import socket
@@ -1861,30 +1957,34 @@ class ScanManager:
 
     async def _cancel_combined(self, ws: str, scan_id: str, scan_dir: Path,
                                scan_key: tuple[str, str]) -> dict:
-        """组合扫描 cancel（spec §11.5）：按 bb_phase/bb_rerun_attempts 算 workflow_id →
-        re-attach + handle.cancel()；orchestrator task 一并取消 + 标终态 cancelled。
+        """组合扫描 cancel（spec §11.5）：按 latest run 状态算 workflow_id → re-attach +
+        handle.cancel()；orchestrator task 一并取消 + 标终态 cancelled。
 
-        workflow_id 算法（与 resume / _reconcile_combined_scan 同口径）：
-        - running + rerun=0 → {ws}-{scan_id}-bb；
-        - running + rerun=N>0 → {ws}-{scan_id}-bb-rerun-N；
-        - 其他（pending/precheck）→ {ws}-{scan_id}（白盒）。
+        取消目标：latest run 非终态且 phase=running → {ws}-{scan_id}-bb-{K}；否则 →
+        {ws}-{scan_id}（白盒，白盒阶段取消/legacy）。precheck workflow（-authcheck）另做
+        无条件 best-effort 取消（pending/precheck 段唯一在跑的 workflow）。
 
         orchestrator task（_orchestrator_tasks 登记）取消：防后台接力继续 submit 黑盒 / 写
         scan_end 与 _mark_cancelled 终态竞争。_handles 同步清（白盒 handle 残留 running 阶段）。
         Temporal 连接/cancel best-effort（不可达仍标 cancelled——对齐既有 cancel ③ 轨语义）。
         """
-        # 版本化 run（spec §11.5）：按 latest run 的 bb_phase 算 workflow_id（取代旧
-        # task-level bb_phase/bb_rerun_attempts）。
+        # 版本化 run（spec §11.5）：latest run 非终态（pending/precheck/running）即本次
+        # 取消对象——running 取消 -bb-{K} workflow；pending/precheck 段黑盒尚未提交，
+        # 取消白盒 base 不存在（首跑）或非目标，实际在跑的是认证预验证（-authcheck，
+        # 下方无条件 best-effort 取消覆盖两种 precheck 路径）。run 一并标 cancelled
+        # （否则永久 pending，删除/新增的非终态门永久禁用）。
         runs = self._store.list_blackbox_runs(ws, scan_id)
         latest = runs[-1] if runs else None
         active_run_id: str | None = None
-        if latest:
-            rd = self._store.get_blackbox_run_dir(ws, scan_id, latest["run_id"])
-            if rd is not None and SessionManager(rd.parent).get_session_data(rd).get(
-                    "bb_phase") == "running":
-                active_run_id = latest["run_id"]
+        latest_phase: str | None = None
+        if latest and latest.get("status") not in _RUN_TERMINAL_STATUSES:
+            active_run_id = latest["run_id"]
+            rd = self._store.get_blackbox_run_dir(ws, scan_id, active_run_id)
+            if rd is not None:
+                latest_phase = SessionManager(rd.parent).get_session_data(rd).get(
+                    "bb_phase")
         # 算 workflow_id（latest run running → -bb-{K}；否则白盒 base）
-        if active_run_id is not None:
+        if active_run_id is not None and latest_phase == "running":
             wf_id = self._resolve_run_workflow_id(ws, scan_id, active_run_id)
         else:
             wf_id = self._resolve_workflow_id(ws, scan_id)
@@ -1899,13 +1999,21 @@ class ScanManager:
             await handle.cancel()
         except Exception:  # noqa: BLE001 - best-effort; temporal 不可达仍标 cancelled
             pass
-        # 标取消的 run cancelled（run 级 session + bb_runs[] 条目；best-effort）
+        # precheck workflow（-authcheck）无条件 best-effort 取消：首跑 kickoff 与手动加 run
+        # 两条 precheck 路径都用该固定 id；不在跑（不存在/已结束）时 cancel 抛错即忽略。
+        try:
+            client = await Client.connect(self._temporal_address())
+            handle = client.get_workflow_handle(f"{ws}-{scan_id}-authcheck")
+            await handle.cancel()
+        except Exception:  # noqa: BLE001 - best-effort; 不在跑/不可达均忽略
+            pass
+        # 标取消的 run cancelled（run 级 session + bb_runs[] 条目；best-effort）。走
+        # _mark_run 而非直调 store：终态钩子顺带给 run events.ndjson 补 scan_end——
+        # 被取消的黑盒 workflow 走 except CancelledError 直接 return（不 finalize），
+        # run 事件文件无人写终态行，归并流会永不关流（MergedEventTailer 关流条件
+        # 依赖每个已发现 run 源见到自己的 scan_end）。
         if active_run_id is not None:
-            try:
-                self._store.update_blackbox_run(
-                    ws, scan_id, active_run_id, status="cancelled", phase="cancelled")
-            except Exception:  # noqa: BLE001
-                pass
+            await self._mark_run(scan_dir, active_run_id, "cancelled", status="cancelled")
         # 清残留 handle 登记（白盒 handle 在 running 阶段仍挂 _handles；对齐 delete 清理）
         self._handles.pop(scan_key, None)
         await self._mark_cancelled(scan_dir)
@@ -1996,7 +2104,7 @@ class ScanManager:
         run_id: str | None = None
         final_status = "completed"
         try:
-            wb_result = await wb_handle.result()
+            wb_result = await self._await_workflow_result(wb_handle)
             # 白盒正常返回 status=failed（部分 agent 失败，workflow 未 raise）：停止接力，不建黑盒 run。
             # 防御 dict/dataclass 访问（照搬 :1044-1046 范式；真实 PipelineState 字段为 errors(list)/
             # error_code，测试 mock 用 error 键）。raise 路径（workflow 级崩溃）仍由下方 except 兜底。
@@ -2052,7 +2160,7 @@ class ScanManager:
         """
         final_status = "completed"
         try:
-            await bb_handle.result()
+            await self._await_workflow_result(bb_handle)
             await self._generate_combined_report(scan_dir, run_id)
             await self._mark_run(scan_dir, run_id, "completed", status="completed")
         except Exception as exc:
@@ -2134,7 +2242,7 @@ class ScanManager:
             config_path=str(scan_config) if scan_config.exists() else None,
             host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
         await self._mark_run(scan_dir, run_id, "running", status="running")
-        bb_result = await bb_handle.result()
+        bb_result = await self._await_workflow_result(bb_handle)
         # 黑盒 workflow 正常返回 status=failed（未 raise）：不生成融合报告，run 标
         # failed（融合报告仅成功路径产出 → combined/run-K/；raise 路径由编排层
         # except 兜底）。
@@ -2195,9 +2303,10 @@ class ScanManager:
         """给已有白盒任务加一个黑盒 run（spec §6/§7.1 #8 手动入口）。
 
         流程：白盒产物就绪检查 → （req 给了认证则重 dump scan-config.yaml + 更新 bb_url/
-        bb_auth_ref）→ 串行分配 run-K（_create_scan_lock）→ 有认证则 _run_precheck（fail →
-        run 标 failed + 收尾，不起黑盒）→ fire-and-forget ``_rerun_orchestrator(run_id,
-        -bb-{K})``。返回 run_id。
+        bb_auth_ref）→ 在跑守卫 → 串行分配 run-K（_create_scan_lock）→ 任务级进入 running
+        → fire-and-forget ``_add_run_kickoff``（precheck → _rerun_orchestrator）→ 立即返回
+        run_id。precheck 在 kickoff task 内异步跑（可达数分钟）——端点立即返回（202 语义），
+        且 precheck 期间 cancel 经 ``_orchestrator_tasks`` 可达（同步内联时取消无效）。
 
         req=None（沿用现盘 scan-config.yaml）：无 scan-config.yaml → 公开目标，跳过预验证。
         """
@@ -2236,26 +2345,61 @@ class ScanManager:
         async with self._create_scan_lock:
             run_id, _run_dir = self._store.create_blackbox_run(
                 ws, wb_scan_id, auth_ref=auth_ref)
+        # 任务级进入 running（resume 组合分支同款三步）：run 运行态如实上浮任务级 status
+        # （列表取消按钮/轮询/Dashboard 聚合依赖 is_running）。剥旧 scan_end 让收尾
+        # _ensure_scan_end 能写新终态（旧 scan_end 在尾则 no-op，任务级 status 无人更新），
+        # 且 SSE 不回放旧 scan_end、orphan_reconciler 的 has_scan_end 门不短路组合恢复。
+        # 刷新 submitted_at 盖 precheck 冷启动（run/.authcheck heartbeat 由判活候选覆盖，
+        # 宽限只补 worker 起写前的空窗）。
+        self._strip_trailing_scan_end(scan_dir / "events.ndjson")
+        mgr.update_session(scan_dir, {"status": "running", "completed_at": None})
+        self._mark_submitted_at(scan_dir)
         k = int(run_id.split("-")[1])
-        if config_path and not await self._run_precheck(
-                scan_dir, ws, wb_scan_id, bb_url, config_path,
-                host_mappings=self._session_host_mappings(data)):
-            # precheck 失败详情已由 _run_precheck 落任务 session，读回并入 run（横幅用）。
-            try:
-                pdata = SessionManager(scan_dir.parent).get_session_data(scan_dir)
-            except Exception:  # noqa: BLE001 - 读不到就只标笼统 auth_failed
-                pdata = {}
-            await self._mark_run(
-                scan_dir, run_id, "failed", reason="auth_failed", status="failed",
-                extra={"bb_failure_point": pdata.get("bb_failure_point"),
-                       "bb_failure_detail": pdata.get("bb_failure_detail")})
-            await self._ensure_scan_end(scan_dir, status="failed")
-            return run_id
         scan_key = (ws, wb_scan_id)
         self._orchestrator_tasks[scan_key] = asyncio.create_task(
-            self._rerun_orchestrator(
-                scan_key, scan_dir, ws, wb_scan_id, auth_ref, run_id, f"-bb-{k}"))
+            self._add_run_kickoff(
+                scan_key, scan_dir, ws, wb_scan_id, run_id, k, config_path, bb_url,
+                auth_ref, self._session_host_mappings(data)))
         return run_id
+
+    async def _add_run_kickoff(self, scan_key: tuple[str, str], scan_dir: Path,
+                               ws: str, wb_scan_id: str, run_id: str, k: int,
+                               config_path: str | None, bb_url: str,
+                               auth_ref: dict,
+                               host_mappings: dict[str, str] | None) -> None:
+        """手动加 run 的后台启动（镜像 _combined_kickoff 模式）：precheck → _rerun_orchestrator。
+
+        precheck（登录目标站，可达数分钟）在后台 task 内跑：POST /blackbox-runs 立即返回；
+        cancel 经 _orchestrator_tasks 取消本 task 即终止 precheck + 黑盒全链（同步内联时
+        precheck 期间 cancel 无效——orchestrator 未注册，precheck 过后黑盒照常提交）。
+
+        - precheck fail → run 标 failed（读回 bb_failure_* 供横幅）+ _ensure_scan_end(failed)。
+        - CancelledError（cancel 路径）：向上抛出，终态由 _cancel_combined/_mark_cancelled 负责。
+        - finally 幂等 pop _orchestrator_tasks（_rerun_orchestrator finally 已 pop，兜底防
+          precheck-fail 路径泄漏）。
+        """
+        try:
+            if config_path and not await self._run_precheck(
+                    scan_dir, ws, wb_scan_id, bb_url, config_path,
+                    host_mappings=host_mappings):
+                # precheck 失败详情已由 _run_precheck 落任务 session，读回并入 run（横幅用）。
+                try:
+                    pdata = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+                except Exception:  # noqa: BLE001 - 读不到就只标笼统 auth_failed
+                    pdata = {}
+                await self._mark_run(
+                    scan_dir, run_id, "failed", reason="auth_failed", status="failed",
+                    extra={"bb_failure_point": pdata.get("bb_failure_point"),
+                           "bb_failure_detail": pdata.get("bb_failure_detail")})
+                await self._ensure_scan_end(scan_dir, status="failed")
+                return
+            await self._rerun_orchestrator(
+                scan_key, scan_dir, ws, wb_scan_id, auth_ref, run_id, f"-bb-{k}")
+        except asyncio.CancelledError:
+            # cancel 路径（_cancel_combined 取消本 task）：向上抛出，终态由 _mark_cancelled 负责。
+            raise
+        finally:
+            self._orchestrator_tasks.pop(scan_key, None)
 
     async def _run_precheck(self, scan_dir: Path, ws: str, scan_id: str,
                             web_url: str, config_path: str | None,
@@ -2438,6 +2582,36 @@ class ScanManager:
                                                       "cancelled") else None)
         except Exception:  # noqa: BLE001 - best-effort，不阻塞接力
             pass
+        if status in _RUN_TERMINAL_STATUSES:
+            # run 事件文件补终态行（取消/run_timeout/worker 崩溃时黑盒 workflow 不跑
+            # finalize，归并流依赖每源自己的 scan_end 判关流）——独立 best-effort：
+            # session 标记失败不应连带跳过事件收口，反之亦然。
+            try:
+                await self._ensure_run_scan_end(scan_dir, run_id, status, reason)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _ensure_run_scan_end(self, scan_dir: Path, run_id: str,
+                                   status: str, reason: str | None = None) -> None:
+        """run 级 events.ndjson 的 scan_end 兜底（修归并流永不关流）。
+
+        MergedEventTailer 的关流条件是「wb scan_end 已扣住 + 每个已发现 run 源见过
+        scan_end」。黑盒 workflow 未走到 finalize 时 run-K/events.ndjson 不会有自己的
+        scan_end——取消（except CancelledError 直接 return）、run_timeout 服务端判超时
+        （代码内 except 不执行）、worker 崩溃后 finalize activity 无法执行、finalize
+        自身 best-effort 失败（黑盒 workflows.py:503-507 指望的「web _watch 兜底」对
+        run 子目录失效——_watch 只盯任务根）。旧收口（_mark_run/_reconcile）只写
+        session，流因此永不关流（live 页永久「已连接」）。本方法统一在 run 标终态时
+        补写事件行。
+
+        幂等：run events 已有 scan_end（黑盒正常完成/失败的 finalize 已写）→ no-op；
+        文件不存在（黑盒未提交，tailer 不会发现该源）→ no-op。
+        """
+        events = blackbox_run_dir(scan_dir, run_id) / "events.ndjson"
+        if not events.exists() or self._has_scan_end(events):
+            return
+        await self._write_scan_end(
+            events, status, -1, reason or f"run {status}（web 收口）")
 
     @staticmethod
     def _ws_of(scan_dir: Path) -> str:
@@ -2482,6 +2656,8 @@ class ScanManager:
         - precheck + authcheck workflow COMPLETED + 白盒 COMPLETED → 补 _run_blackbox_phase。
         - pending + 白盒 workflow COMPLETED → 补 _run_blackbox_phase（接力）。
         - running + 黑盒 workflow COMPLETED → 补 _generate_combined_report + _mark_bb(completed)。
+        - run 非终态 + workflow 不存在（编排随重启丢失、无可续执行）→ run 标 failed 收口
+          （防 bb_runs 永久卡非终态，堵 delete/加 run 的状态门）。
         - 任意 bb_phase + workflow 仍 RUNNING → 不干预（让 temporal 自然完成）。
         - 任意 bb_phase + workflow 不活跃 + events 无 scan_end → _ensure_scan_end 补写。
 
@@ -2530,7 +2706,14 @@ class ScanManager:
                     # run 黑盒完成（接力最后一步崩溃）→ 补 per-run 融合报告 + 标 completed。
                     await self._generate_combined_report(scan_dir, run_id)
                     await self._mark_run(scan_dir, run_id, "completed", status="completed")
-                # 其余（None/不存在）→ fall-through 补 scan_end
+                else:
+                    # workflow 不存在/不可达（None）→ 编排随 web 重启丢失且无 Temporal 执行
+                    # 可续 → run 标 failed 收口。否则 bb_runs 永久卡非终态，delete 的 bb_runs
+                    # 门与加 run 的在跑守卫被永久禁用。口径与 finally 补 scan_end 的激进性
+                    # 一致（_query_workflow_status 不可达也返 None）。
+                    await self._mark_run(
+                        scan_dir, run_id, "failed",
+                        reason="编排中断（web 重启），run 未完成", status="failed")
         except Exception:  # noqa: BLE001 - reconcile 是兜底增强，绝不因单 scan 异常拖垮
             _log.exception("_reconcile_combined_scan failed for %s", scan_dir)
         finally:

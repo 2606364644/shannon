@@ -98,3 +98,62 @@ def test_submit_grace_expired_not_alive(tmp_path, monkeypatch):
     (tmp_path / "session.json").write_text(json.dumps({"submitted_at": old}))
     from supernova_web.components.scan_liveness import is_scan_alive
     assert is_scan_alive(tmp_path) is False
+
+
+# ---- 组合扫描 run 级 heartbeat（黑盒 run 阶段判活，2026-08-17 根因修） ----
+# 黑盒 run 阶段 worker 的 workspace_path=run 子目录（按 event_file.parent 推导），heartbeat
+# 落 blackbox-runs/run-K/heartbeat，任务根 heartbeat 随白盒 finalize stop 而 stale——判活
+# 须覆盖子目录，否则 run 阶段 > 提交宽限(120s) 后被误判 interrupted。
+
+def test_run_heartbeat_fresh_is_active(tmp_path, monkeypatch):
+    """任务根 heartbeat stale + run-K heartbeat fresh → 活（黑盒 run 阶段）。"""
+    monkeypatch.delenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", raising=False)
+    (tmp_path / "session.json").write_text(json.dumps({"submitted_at": time.time() - 3600}))
+    run_hb = tmp_path / "blackbox-runs" / "run-1" / "heartbeat"
+    run_hb.parent.mkdir(parents=True)
+    run_hb.write_text(f"{time.time()}\n")
+    from supernova_web.components.scan_liveness import is_scan_alive
+    assert is_scan_recently_active(tmp_path) is True
+    assert is_scan_alive(tmp_path) is True
+
+
+def test_authcheck_heartbeat_fresh_is_active(tmp_path, monkeypatch):
+    """认证预验证段：.authcheck/heartbeat fresh → 活（precheck 可达数分钟）。"""
+    monkeypatch.delenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", raising=False)
+    (tmp_path / "session.json").write_text(json.dumps({"submitted_at": time.time() - 3600}))
+    probe = tmp_path / ".authcheck"
+    probe.mkdir()
+    (probe / "heartbeat").write_text(f"{time.time()}\n")
+    from supernova_web.components.scan_liveness import is_scan_alive
+    assert is_scan_alive(tmp_path) is True
+
+
+def test_all_heartbeats_stale_not_active(tmp_path, monkeypatch):
+    """任务根 + 多个 run heartbeat 全 stale → 死（worker 全退）。"""
+    monkeypatch.delenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", raising=False)
+    (tmp_path / "session.json").write_text(json.dumps({"submitted_at": time.time() - 3600}))
+    old = time.time() - 3600
+    for hb in (tmp_path / "heartbeat",
+               tmp_path / "blackbox-runs" / "run-1" / "heartbeat",
+               tmp_path / "blackbox-runs" / "run-2" / "heartbeat"):
+        hb.parent.mkdir(parents=True, exist_ok=True)
+        hb.write_text("x\n")
+        os.utime(hb, (old, old))
+    from supernova_web.components.scan_liveness import is_scan_alive
+    assert is_scan_alive(tmp_path) is False
+
+
+def test_compute_status_running_via_run_heartbeat(tmp_path, monkeypatch):
+    """集成：任务级 status=running（run 阶段）+ run heartbeat fresh → _compute_status
+    running；heartbeat 全 stale → interrupted（web 崩溃后正确翻转，resume 可续）。"""
+    monkeypatch.delenv("SUPERNOVA_SCAN_LIVENESS_SUBMIT_GRACE_SECONDS", raising=False)
+    (tmp_path / "session.json").write_text(json.dumps({
+        "status": "running", "submitted_at": time.time() - 3600}))
+    run_hb = tmp_path / "blackbox-runs" / "run-1" / "heartbeat"
+    run_hb.parent.mkdir(parents=True)
+    run_hb.write_text(f"{time.time()}\n")
+    from supernova_web.components.workspaces_indexer import _compute_status
+    assert _compute_status(tmp_path, "running") == "running"
+    old = time.time() - 3600
+    os.utime(run_hb, (old, old))
+    assert _compute_status(tmp_path, "running") == "interrupted"

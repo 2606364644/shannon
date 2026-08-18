@@ -432,6 +432,10 @@
       },
       "addRole": "+ Add role",
       "removeRole": "Remove role",
+      "changePassword": "Change",
+      "passwordSavedHint": "Password is stored encrypted and never echoed back; saving without changing keeps it",
+      "newPasswordPlaceholder": "New password",
+      "passwordUnset": "Not set",
       "selectAllRoles": "Select all",
       "deselectAllRoles": "Deselect all",
       "rolesSelected": "{{n}} / {{m}} roles selected; scan will validate with each role's credentials.",
@@ -670,6 +674,7 @@
         "statusFailed": "Failed",
         "statusRunning": "Running",
         "statusSkipped": "Skipped",
+        "statusCancelled": "Cancelled",
         "statusCompleted": "Completed",
         "addBlackbox": "Add blackbox scan",
         "addBlackboxDesc": "Create a new blackbox run for this whitebox result",
@@ -746,13 +751,11 @@
       "fileLoadError": "File load failed: {{error}}",
       "emptyJson": "No data (normal empty)",
       "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
-      "loadingPreview": "Loading…",
-      "combined": {
-        "bucketWhitebox": "Whitebox",
-        "bucketBlackbox": "Blackbox",
-        "bucketCombined": "Combined",
-        "bucketEmpty": "(none)"
-      }
+      "backToAgg": "Back to vulnerability aggregation",
+      "loadAnyway": "Load anyway",
+      "truncated": "…Content too long; showing first {{size}} characters",
+      "unsupportedKind": "This file type cannot be previewed",
+      "copyContent": "Copy file content"
     },
     "logs": {
       "listLoadError": "Failed to load log file list",
@@ -776,7 +779,9 @@
       "stalledHint": "Reconnecting to the live channel, or the scan has no progress data yet. If there's no update for a long time, the scan may have been interrupted due to a service restart or process exit.",
       "endedTitle": "Scan ended",
       "endedHint": "View the full report",
-      "viewReport": "View report"
+      "viewReport": "View report",
+      "phaseWhitebox": "Whitebox phase",
+      "phaseBlackbox": "Blackbox · {{run}}"
     }
   },
   "vuln": {
@@ -841,7 +846,10 @@
   },
   "fileTree": {
     "empty": "(empty)",
-    "large": "(large)"
+    "large": "(large)",
+    "trackWhitebox": "Whitebox",
+    "trackBlackbox": "Blackbox",
+    "trackCombined": "Combined"
   },
   "wsConfig": {
     "title": "Workspace Config",
@@ -972,6 +980,7 @@
       "process": "Login process",
       "noLog": "No process log yet",
       "alreadyRunning": "Verification in progress, please wait…",
+      "stop": "Stop",
       "failure": {
         "username_or_password": {
           "title": "Login failed: wrong username or password",
@@ -1020,6 +1029,9 @@
       "selected": "{{n}}/{{m}} roles selected",
       "seeDetail": "View details",
       "allDone": "All done",
+      "stop": "Stop test",
+      "stopFailed": "Failed to stop test",
+      "stopped": "Test stopped",
       "runningHint": "Verifying {{role}}·{{user}}…"
     },
     "createFailed": "Create failed",

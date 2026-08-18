@@ -295,8 +295,8 @@ async def run_logs(ws: str, scan_id: str, run_id: str, request: Request,
 async def run_events(ws: str, scan_id: str, run_id: str, request: Request,
                      _: User = Depends(workspace_member)):
     run_dir = _run_dir_or_404(request, ws, scan_id, run_id)
-    from .events import build_scan_events_response
-    return await build_scan_events_response(request, run_dir)
+    from .events import build_single_events_response
+    return await build_single_events_response(request, run_dir)
 
 
 @router.post("/{ws}/scans/{scan_id}/blackbox-runs", status_code=202)

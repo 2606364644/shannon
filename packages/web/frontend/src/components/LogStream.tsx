@@ -145,6 +145,9 @@ function describe(e: NdjsonEvent): RowDesc {
     case "ResumeEvent":
       return { icon: "↺", tag: "RESUME", body: `resume ← ${e.previous_workflow_id}` };
 
+    case "run_end":
+      return { icon: "◆", tag: "RUN", body: `${e.run} · ${e.status}` };
+
     case "InfoEvent":
       return { icon: "·", tag: "INFO", body: e.message };
 

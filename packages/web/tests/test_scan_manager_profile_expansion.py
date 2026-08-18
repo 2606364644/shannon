@@ -97,10 +97,10 @@ async def test_resolve_blackbox_expands_all_credentials_multi_identity(tmp_path)
     cfg = yaml.safe_load(body)
     assert "accounts" in cfg and len(cfg["accounts"]) == 2  # 其余 2 个（primary 进 authentication）
     tiers = {a["id"]: a["tier"] for a in cfg["accounts"]}
-    assert tiers["cred_admin"] == "high"
+    assert tiers["cred-admin"] == "high"
     # primary = 首个 low = cred_u1（不进 accounts）；cred_u2 在 accounts 中为 low
-    assert "cred_u1" not in tiers  # primary 不在 accounts
-    assert tiers["cred_u2"] == "low"
+    assert "cred-u1" not in tiers  # primary 不在 accounts
+    assert tiers["cred-u2"] == "low"
     # authentication 应为 primary(cred_u1) 展开的单 credentials Authentication
     assert cfg["authentication"]["credentials"]["username"] == "u1"
 
@@ -128,7 +128,7 @@ async def test_resolve_blackbox_multi_identity_all_high_falls_back_to_first(tmp_
     cfg = yaml.safe_load(body)
     # 全 high → primary 回落首个(cred_a1) → accounts 只剩 cred_a2
     assert len(cfg["accounts"]) == 1
-    assert cfg["accounts"][0]["id"] == "cred_a2"
+    assert cfg["accounts"][0]["id"] == "cred-a2"
     assert cfg["authentication"]["credentials"]["username"] == "a1"
 
 
@@ -194,10 +194,10 @@ async def test_resolve_blackbox_expands_credential_ids_subset(tmp_path):
     # 选中 2 个 → primary 进 authentication，剩 1 个进 accounts
     assert "accounts" in cfg and len(cfg["accounts"]) == 1
     acct_ids = {a["id"] for a in cfg["accounts"]}
-    assert acct_ids == {"cred_admin"}  # cred_u2 未选，不出现
+    assert acct_ids == {"cred-admin"}  # cred_u2 未选，不出现
     assert cfg["authentication"]["credentials"]["username"] == "u1"  # primary = 首个 low
     # 未选中的 cred_u2 完全不在 YAML
-    assert "cred_u2" not in body
+    assert "cred-u2" not in body
 
 
 @pytest.mark.asyncio
@@ -242,7 +242,7 @@ async def test_resolve_blackbox_multi_identity_accounts_carry_totp(tmp_path):
     await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
     cfg = yaml.safe_load((scan_dir / "scan-config.yaml").read_text("utf-8"))
     # primary = 首个 low = cred_u1；cred_admin 进 accounts 且带 totp_secret
-    acct = next(a for a in cfg["accounts"] if a["id"] == "cred_admin")
+    acct = next(a for a in cfg["accounts"] if a["id"] == "cred-admin")
     assert acct["credentials"]["totp_secret"] == "TOTP"
 
 
@@ -261,3 +261,43 @@ async def test_resolve_blackbox_credential_ids_subset_profile_missing_raises(tmp
     scan_dir.mkdir(parents=True)
     with pytest.raises(ValueError, match="认证档案不存在"):
         await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+
+
+@pytest.mark.asyncio
+async def test_multi_identity_account_ids_pass_core_parse_config(tmp_path):
+    """回归（2026-08-17）：存量凭据 ID 含下划线（cred_xxx），展开进 accounts[] 时
+    须清洗为 ^[a-z0-9-]+$ slug，否则认证预验证 parse_config 报
+    "accounts[0].id 'cred_xxx' must match ^[a-z0-9-]+$"。
+
+    走真实生成路径：upsert_profile 自动生成 cred_ + hex ID（带下划线）。
+    """
+    import yaml
+    from supernova_core.config.parser import parse_config
+    store = AuthProfileStore(tmp_path, CredentialVault(tmp_path / ".mk"))
+    profile = AuthProfile(
+        id="prof_1", name="NodeGoat", login_url="http://t/", login_type="form",
+        login_flow=["成功标志:/dashboard"],
+        credentials=[
+            AuthProfileCredential(id="", role="admin", username="admin", password="Admin_123"),
+            AuthProfileCredential(id="", role="user", username="user1", password="User1_123"),
+            AuthProfileCredential(id="", role="user", username="user2", password="User2_123"),
+        ])
+    profile = store.upsert_profile("ws1", profile)  # 自动生成 cred_xxx（下划线）
+    assert all("_" in c.id for c in profile.credentials)  # 前置：ID 确含下划线
+    mgr = ScanManager(tmp_path, tmp_path / "repos", MagicMock(), auth_profile_store=store)
+    req = ScanRequest(type="blackbox", reuse_whitebox_scan_id="wb-1", auth_profile_id="prof_1")
+    wb_dir = tmp_path / "ws1" / "scans" / "wb-1"
+    wb_dir.mkdir(parents=True)
+    mgr._store.get_scan_dir = MagicMock(return_value=wb_dir)
+    scan_dir = tmp_path / "ws1" / "scans" / "bb-1"
+    scan_dir.mkdir(parents=True)
+    config_path, _ = await mgr._resolve_blackbox_inputs(req, "ws1", scan_dir, None)
+    cfg = yaml.safe_load((scan_dir / "scan-config.yaml").read_text("utf-8"))
+    # accounts id = 清洗后的 slug（下划线 → 连字符），primary=user1 进 authentication
+    acct_ids = [a["id"] for a in cfg["accounts"]]
+    assert all("_" not in i for i in acct_ids)
+    assert acct_ids == [profile.credentials[0].id.replace("_", "-"),
+                        profile.credentials[2].id.replace("_", "-")]
+    # 端到端：core parser 必须接受（修复前在此抛 PentestError）
+    parsed = parse_config(config_path)
+    assert {a.id for a in parsed.accounts} == set(acct_ids)

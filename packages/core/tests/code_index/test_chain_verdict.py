@@ -3,7 +3,9 @@ import pytest
 from supernova_core.code_index.chain_verdict import (
     CHAIN_VERDICT_SCHEMA,
     CandidateChain,
+    _parse_verdict_json,
     extract_candidate_chains,
+    http_route_label,
     judge_chain_verdict,
     ChainVerdict,
 )
@@ -16,7 +18,7 @@ from supernova_core.code_index.parameter_models import (
     TaintFlow,
     PropagationStep,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 
 
 def _flow(sink_slot, source="q", source_type=ParameterSource.QUERY_PARAM, steps=None,
@@ -297,3 +299,184 @@ async def test_judge_chain_verdict_title_none_when_llm_omits():
 
     verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
     assert verdict.title is None
+
+
+# --------------------------------------------------------------------------- #
+# O2 后半：unparseable 有界重试 + 保守分支语义（此前 0 覆盖）。
+# --------------------------------------------------------------------------- #
+
+# 无任何 JSON 结构的纯 Markdown 叙述（fenced JSON 可被 L0 容错恢复，不算
+# unparseable；真正打穿 L0 的是无 {} 的叙述/截断输出——spec R5 的失败形态）。
+_GLM_MARKDOWN = (
+    "## 判定结论\n\n该链路存在 SQL 注入风险：参数 q 未经参数化直接拼接进入"
+    "SQL 值槽位，现有转义不覆盖该槽位。建议使用参数化查询修复。"
+)
+_VERDICT_JSON = (
+    '{"verdict":"vulnerable","witness_payload":"\' OR \'1\'=\'1",'
+    '"evidence_chain":"q -> db.execute(L1)","mismatch_reason":"concat",'
+    '"confidence":"high","title":"SQL 注入"}'
+)
+
+
+def _chain():
+    return CandidateChain(
+        vuln_class="injection", flow_id="f1", entry_point_id="ep",
+        source_param="q", source_type="query", sink_call_site_id="db.execute:1",
+        sink_slot="sql_value", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="forward",
+        post_sanitize_concat=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_judge_recovers_from_markdown_via_reformat_retry():
+    """首次返回 GLM Markdown → 轻量转格式重试恢复合法 JSON（spec O2 后半）。"""
+    prompts: list[str] = []
+
+    async def fake_llm(prompt, **kw):
+        prompts.append(prompt)
+        return _GLM_MARKDOWN if len(prompts) == 1 else _VERDICT_JSON
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload == "' OR '1'='1"
+    assert len(prompts) == 2                       # 1 次 + 1 次轻量转格式
+    assert "待转换文本" in prompts[1]              # 转格式 prompt 而非全量重发
+
+
+@pytest.mark.asyncio
+async def test_judge_unparseable_after_retries_is_conservative():
+    """全部尝试仍 Markdown → 保守分支：不丢报、witness=None、置信度 low。"""
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, **kw):
+        calls["n"] += 1
+        return _GLM_MARKDOWN
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert calls["n"] == 3                          # 1 原始 + 2 重试（默认）
+    assert verdict.verdict == "vulnerable"          # OR 友好，不静默清除
+    assert verdict.witness_payload is None
+    assert verdict.confidence == "low"
+    assert "unparseable output after all attempts" in verdict.mismatch_reason
+
+
+@pytest.mark.asyncio
+async def test_judge_empty_output_after_retries_distinguishes_reason():
+    """空输出与非法输出分流：mismatch_reason 报 empty 而非 unparseable。"""
+    async def fake_llm(prompt, **kw):
+        return ""
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert verdict.verdict == "vulnerable"
+    assert "empty output" in verdict.mismatch_reason
+
+
+@pytest.mark.asyncio
+async def test_judge_no_retry_when_env_zero(monkeypatch):
+    """SUPERNOVA_CHAIN_VERDICT_RETRIES=0 → 只打 1 次，直接保守降级。"""
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_RETRIES", "0")
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, **kw):
+        calls["n"] += 1
+        return _GLM_MARKDOWN
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert calls["n"] == 1
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload is None
+
+
+@pytest.mark.asyncio
+async def test_judge_retry_call_exception_falls_conservative():
+    """重试调用本身 raise → 放弃重试，保守降级（不 crash）。"""
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _GLM_MARKDOWN
+        raise RuntimeError("provider down")
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert calls["n"] == 2
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload is None
+
+
+@pytest.mark.asyncio
+async def test_judge_single_call_when_parseable():
+    """合法 JSON 一次到位 → 不触发任何重试。"""
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, **kw):
+        calls["n"] += 1
+        return _VERDICT_JSON
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert calls["n"] == 1
+    assert verdict.verdict == "vulnerable"
+
+
+@pytest.mark.asyncio
+async def test_judge_prompt_asks_for_concrete_witness():
+    """prompt 含具体 witness 指令（MINIMAL concrete attack input）。"""
+    prompts: list[str] = []
+
+    async def fake_llm(prompt, **kw):
+        prompts.append(prompt)
+        return _VERDICT_JSON
+
+    await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert "MINIMAL concrete attack input" in prompts[0]
+
+
+def test_schema_requires_witness_payload():
+    """witness_payload 入 required（可 null）——prompt-only 约束下防模型省略。"""
+    assert "witness_payload" in CHAIN_VERDICT_SCHEMA["required"]
+
+
+def test_parse_verdict_json_recovers_fenced_json():
+    assert _parse_verdict_json('```json\n{"verdict":"safe"}\n```') == {"verdict": "safe"}
+
+
+def test_parse_verdict_json_rejects_invalid_values():
+    assert _parse_verdict_json('{"verdict":"maybe"}') is None      # 非法枚举
+    assert _parse_verdict_json('["not","object"]') is None         # 非 object
+    assert _parse_verdict_json("") is None                         # 空输出
+    assert _parse_verdict_json(None) is None
+    assert _parse_verdict_json("no braces at all") is None
+
+
+# --------------------------------------------------------------------------- #
+# O2 前半：http_route_label（builder 路由 join 的共享 helper）。
+# --------------------------------------------------------------------------- #
+
+def _route_ep(func_block_id="app.py:h:1", route="/search", http_method="POST"):
+    return EntryPoint(
+        func_block_id=func_block_id, entry_type="http_route", route=route,
+        http_method=http_method, confidence=1.0, evidence="annot",
+        needs_llm_review=False,
+    )
+
+
+def test_http_route_label_hit():
+    assert http_route_label("app.py:h:1", {"app.py:h:1": _route_ep()}) == "POST /search"
+
+
+def test_http_route_label_normalizes_route_and_method():
+    ep = _route_ep(route="search", http_method="post")
+    assert http_route_label("app.py:h:1", {"app.py:h:1": ep}) == "POST /search"
+
+
+def test_http_route_label_miss_variants():
+    assert http_route_label("app.py:h:1", {}) is None                       # 空 map
+    assert http_route_label("app.py:h:1", None) is None                     # 不传
+    assert http_route_label(None, {"a": _route_ep()}) is None               # 无 id
+    assert http_route_label(
+        "app.py:h:1", {"app.py:h:1": _route_ep(route=None)}) is None        # 无路由
+    assert http_route_label(
+        "app.py:h:1", {"app.py:h:1": _route_ep(http_method=None)}) is None  # 无 method
+    assert http_route_label(
+        "app.py:x:9", {"app.py:h:1": _route_ep()}) is None                  # join miss

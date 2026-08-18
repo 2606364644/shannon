@@ -8,8 +8,16 @@ from supernova_core.code_index.parameter_models import (
     DangerousSlot, SlotContext, SinkCallSite, SinkCategory,
     ParameterPropagationGraph, TaintFlow, PropagationStep,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import InjectionVulnerability
+
+
+def _ep(func_block_id="app.py:handler:1", route="/search", http_method="POST"):
+    return EntryPoint(
+        func_block_id=func_block_id, entry_type="http_route", route=route,
+        http_method=http_method, confidence=1.0, evidence="annot",
+        needs_llm_review=False,
+    )
 
 
 def _flow(slot, steps=None):
@@ -217,3 +225,46 @@ async def test_build_injection_finding_carries_title():
 
     findings = await build_injection_findings(pgraph, llm_client=fake_llm)
     assert findings[0].title == "SQL Injection via q param"
+
+
+@pytest.mark.asyncio
+async def test_build_injection_entry_points_prefixes_path_with_route():
+    """O2 前半：entry_points join 命中 → path 带 "METHOD /path" 前缀（PoC 模板层
+    derive_method_path 直接命中），evidence 不丢。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value", steps=[_step("concat")])],
+        language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec","mismatch_reason":"x","confidence":"high"}')
+
+    findings = await build_injection_findings(
+        pgraph, llm_client=fake_llm, entry_points={"app.py:handler:1": _ep()})
+    assert findings[0].path == "POST /search → q->db.exec"
+    assert findings[0].evidence_chain == "q->db.exec"
+
+
+@pytest.mark.asyncio
+async def test_build_injection_entry_points_miss_keeps_path():
+    """join miss（不传 kwarg / 无路由 / 无 method）→ path 保持 evidence 原样。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value", steps=[_step("concat")])],
+        language_coverage=["python"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec","mismatch_reason":null,"confidence":"high"}')
+
+    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    assert findings[0].path == "q->db.exec"
+    findings = await build_injection_findings(
+        pgraph, llm_client=fake_llm,
+        entry_points={"app.py:handler:1": _ep(route=None)})
+    assert findings[0].path == "q->db.exec"
+    findings = await build_injection_findings(
+        pgraph, llm_client=fake_llm,
+        entry_points={"app.py:handler:1": _ep(http_method=None)})
+    assert findings[0].path == "q->db.exec"

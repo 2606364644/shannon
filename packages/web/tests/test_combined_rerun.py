@@ -134,7 +134,8 @@ async def test_rerun_with_new_auth_redumps_scan_config(mgr, tmp_path):
 # ── 预验证 fail → 新 run 标 failed ────────────────────────────────────────────
 
 async def test_rerun_precheck_fail_marks_run_failed(mgr, tmp_path):
-    """_run_precheck False → 新 run（run-2）标 failed（_mark_run），不起黑盒。"""
+    """_run_precheck False → 新 run（run-2）标 failed（_mark_run），不起黑盒。
+    precheck 在 _add_run_kickoff 后台 task 内跑（2026-08-17 异步化），drain 后断言。"""
     ws, scan_id = "ws-a", "s1"
     _make_combined(tmp_path, ws, scan_id)
     store = ScanStore(tmp_path); mgr._store = store
@@ -146,6 +147,7 @@ async def test_rerun_precheck_fail_marks_run_failed(mgr, tmp_path):
          patch.object(mgr, "_mark_run", new=AsyncMock()) as mr, \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()):
         run_id = await mgr.rerun_blackbox(ws, scan_id)
+        await _drain_bg_tasks(mgr)
     assert run_id == "run-2"
     sb.assert_not_awaited()
     mr.assert_awaited_with(

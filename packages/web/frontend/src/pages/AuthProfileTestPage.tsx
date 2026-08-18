@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, ExternalLink } from "lucide-react";
-import { getAuthProfile, testBatch } from "@/api/authProfiles";
+import { ArrowLeft, Loader2, ExternalLink, Square } from "lucide-react";
+import { getAuthProfile, testBatch, cancelTest } from "@/api/authProfiles";
 import { apiErrorMessage, providerIncompleteMissing } from "@/lib/apiError";
 import type { AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -163,6 +163,22 @@ export function AuthProfileTestPage() {
     }
   }
 
+  // 停止批次（auth-test-cancel）：后端先回填 running→failed/cancelled 再 handle.cancel()。
+  // 用户停止即批次终结（未开始的 cred 保持 unverified，轮询的"全终态"退出条件永不满足）→
+  // 直接停轮询/测试态；重拉落 failed 态、running 消失 → liveRun 清空（SSE 卸载）。
+  async function onStop() {
+    if (!workspace || !pid || !stopWfId) return;
+    try {
+      await cancelTest(workspace, pid, stopWfId);
+      toast.success(t("authProfiles.testPage.stopped"));
+      setTesting(false);
+      setPolling(false);
+      setRefreshTick((n) => n + 1);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, t("authProfiles.testPage.stopFailed")));
+    }
+  }
+
   function handleCredComplete() {
     // 某 cred scan_end → 重拉 profile（watcher 已回填该 cred 终态 + 下个 cred running，轮询自动订阅下一个）
     setRefreshTick((n) => n + 1);
@@ -184,6 +200,11 @@ export function AuthProfileTestPage() {
   const allSelected = !!profile && profile.credentials.length > 0
     && profile.credentials.every((c) => selectedIds.includes(c.id));
   const showProgress = !!batchWfId || selectedCreds.some((c) => credState(c) !== "unverified");
+  // 停止目标 workflow：发起态用 batchWfId；恢复态（重载页面靠轮询发现 running）用
+  // running cred 的 verify_status.workflow_id。两者皆无 → 停止不可用（显示测试中占位）。
+  const stopWfId = batchWfId
+    ?? profile?.credentials.find((c) => credState(c) === "running")
+      ?.verify_status?.workflow_id ?? null;
 
   return (
     <div className="space-y-4">
@@ -208,11 +229,20 @@ export function AuthProfileTestPage() {
                   <span aria-hidden>{verifyBadge(ov).icon}</span>{t(`authProfiles.overall.${ov}`)}
                 </Badge>
               </div>
-              <Button variant="cta" onClick={onStart} disabled={testing || selectedCreds.length === 0} className="shrink-0">
-                {testing
-                  ? <><Loader2 className="size-4 animate-spin" /> {t("authProfiles.testPage.starting")}</>
-                  : t("authProfiles.testPage.start")}
-              </Button>
+              {/* testing（wf id 已知）→ 停止按钮；wf id 未就绪/瞬态 → 测试中占位 */}
+              {testing && stopWfId ? (
+                <Button variant="destructive" onClick={onStop} className="shrink-0">
+                  <Square className="size-3.5" /> {t("authProfiles.testPage.stop")}
+                </Button>
+              ) : testing ? (
+                <Button variant="cta" disabled className="shrink-0">
+                  <Loader2 className="size-4 animate-spin" /> {t("authProfiles.testPage.starting")}
+                </Button>
+              ) : (
+                <Button variant="cta" onClick={onStart} disabled={selectedCreds.length === 0} className="shrink-0">
+                  {t("authProfiles.testPage.start")}
+                </Button>
+              )}
             </div>
           </Card>
 

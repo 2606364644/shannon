@@ -100,4 +100,22 @@ describe("scanEventStore", () => {
     expect(getScanEventStore("/sse", "scan_end")).toBe(getScanEventStore("/sse", "scan_end"));
     expect(getScanEventStore("/sse", "scan_end")).not.toBe(getScanEventStore("/sse", "clone_end"));
   });
+
+  it("SSE id 去重：重放事件按 lastEventId 丢弃（换 rev 重开流后幂等）", () => {
+    const store = getScanEventStore("/sse", "scan_end");
+    store.subscribe(vi.fn());
+    const es = FakeEventSource.instances[0]!;
+    // 首轮：带 id 的两条事件入列
+    es.onmessage?.({ data: JSON.stringify({ type: "InfoEvent", ts: "t1", seq: 1 }), lastEventId: "wb=10" });
+    es.onmessage?.({ data: JSON.stringify({ type: "InfoEvent", ts: "t2", seq: 2 }), lastEventId: "wb=20" });
+    flush();
+    expect(store.getSnapshot().events).toHaveLength(2);
+    // 重放：同 id 的事件被丢弃；新 id 正常入列；无 id 事件透传（兼容）
+    es.onmessage?.({ data: JSON.stringify({ type: "InfoEvent", ts: "t1", seq: 1 }), lastEventId: "wb=10" });
+    es.onmessage?.({ data: JSON.stringify({ type: "InfoEvent", ts: "t3", seq: 3 }), lastEventId: "wb=30" });
+    es.onmessage?.({ data: JSON.stringify({ type: "InfoEvent", ts: "t4", seq: 4 }), lastEventId: undefined });
+    flush();
+    const events = store.getSnapshot().events as unknown as Array<{ seq: number }>;
+    expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
 });

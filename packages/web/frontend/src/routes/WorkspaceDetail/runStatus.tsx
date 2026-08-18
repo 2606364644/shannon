@@ -63,6 +63,8 @@ export function runStatusLabelKey(status: string | null | undefined): string | n
       return `${RUNS}.statusRunning`;
     case "skipped":
       return `${RUNS}.statusSkipped`;
+    case "cancelled":
+      return `${RUNS}.statusCancelled`;
     case "completed":
     case "done":
       return `${RUNS}.statusCompleted`;
@@ -71,10 +73,12 @@ export function runStatusLabelKey(status: string | null | undefined): string | n
   }
 }
 
-/** run 是否处于终态（可删除）；pending/running/未知 → false（运行中禁删，对齐后端 409）。 */
+/** run 是否处于终态（可删除）；pending/running/未知 → false（运行中禁删，对齐后端 409）。
+ *  cancelled 是终态（_cancel_combined 会把 active run 标 cancelled）。 */
 export function isRunTerminal(status: string | null | undefined): boolean {
   return status === "completed" || status === "done" || status === "failed"
-    || status === "crashed" || status === "killed" || status === "skipped";
+    || status === "crashed" || status === "killed" || status === "skipped"
+    || status === "cancelled";
 }
 
 /** run/任务失败横幅：标题 + hint + 原始详情 + 引导动作（providerMissing → 工作区设置；

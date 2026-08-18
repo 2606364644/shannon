@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, Outlet } from "react-router-dom";
 import i18n from "@/i18n";
 import LiveTab from "./LiveTab";
 
-// mock useEventSource 返回受控 events + status（module-level mutable，每 test 改写）
+// mock useEventSource 返回受控 events + status（module-level mutable，每 test 改写）；
+// lastUrl 捕获本次渲染传入的 SSE URL（断言组合段切流）。
 const eventsState: { events: any[]; status: string } = { events: [], status: "open" };
+let lastUrl = "";
 vi.mock("../../api/useEventSource", () => ({
-  useEventSource: () => eventsState,
+  useEventSource: (url: string) => { lastUrl = url; return eventsState; },
 }));
 
-// scanEventsUrl 透传真实（仅拼 URL 字符串，无 IO）；LiveTab 瘦身后不再调 getScan。
+// scanEventsUrl 等为纯拼 URL（无 IO）；LiveTab 瘦身后不再调 getScan。
 vi.mock("../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../api/client")>("../../api/client");
   return { ...actual };
@@ -24,8 +26,23 @@ function renderLive() {
   );
 }
 
+// 经 Outlet context 下发组合段信息（复刻 ScanDetail 的下发路径）。
+function renderLiveCtx(ctx: Record<string, unknown>) {
+  const CtxRoute = () => <Outlet context={ctx} />;
+  return render(
+    <MemoryRouter initialEntries={["/p/ws/scans/scan1/live"]}>
+      <Routes>
+        <Route path="/p/:workspace/scans/:scanId" element={<CtxRoute />}>
+          <Route path="live" element={<LiveTab />} />
+          <Route path="report" element={<div>rp-content</div>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 // jsdom navigator.language 默认 en；现有断言依赖中文渲染，逐测试钉回 zh。
-beforeEach(() => { i18n.changeLanguage("zh"); eventsState.events = []; eventsState.status = "open"; });
+beforeEach(() => { i18n.changeLanguage("zh"); eventsState.events = []; eventsState.status = "open"; lastUrl = ""; });
 
 describe("LiveTab", () => {
   it("渲染 LogStream 容器（aria-live）", () => {
@@ -70,6 +87,41 @@ describe("LiveTab", () => {
     eventsState.status = "error";
     renderLive();
     expect(screen.getByText(/正在重连实时通道|暂无进度数据/)).toBeInTheDocument();
+  });
+});
+
+describe("LiveTab 全量归并流（单流，不切段）", () => {
+  it("无 context（非组合/单测直挂）→ 归并流 URL 无 rev，无阶段徽章", () => {
+    renderLive();
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events");
+    expect(screen.queryByTestId("live-phase-badge")).not.toBeInTheDocument();
+  });
+
+  it("组合 bbPhase=running + selectedRun → 仍归并流（带 rev），黑盒阶段徽章", () => {
+    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-1", runsCount: 1 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=1");
+    expect(screen.getByTestId("live-phase-badge")).toHaveTextContent("黑盒 · run-1");
+  });
+
+  it("runsCount 变化 → rev 变化（强制重开流：关流后新增 run 仍可续看）", () => {
+    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-2", runsCount: 2 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=2");
+  });
+
+  it("组合 bbPhase=precheck（认证/白盒段）→ 归并流 + 白盒阶段徽章", () => {
+    renderLiveCtx({ combined: true, bbPhase: "precheck", selectedRun: "run-1", runsCount: 1 });
+    expect(lastUrl).toBe("/api/workspaces/ws/scans/scan1/events?rev=1");
+    expect(screen.getByTestId("live-phase-badge")).toHaveTextContent("白盒阶段");
+  });
+
+  it("黑盒段 scan_end completed → 查看报告跳选中 run 的报告（?run=）", () => {
+    eventsState.events = [
+      { type: "scan_end", status: "completed", ts: "2026-01-01T00:00:00Z", category: "CONTROL" },
+    ];
+    eventsState.status = "closed";
+    renderLiveCtx({ combined: true, bbPhase: "running", selectedRun: "run-1" });
+    fireEvent.click(screen.getByRole("button", { name: /查看报告/ }));
+    expect(screen.getByText("rp-content")).toBeInTheDocument();
   });
 });
 

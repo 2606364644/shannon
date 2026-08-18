@@ -1389,7 +1389,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
-        from supernova_core.code_index.models import CodeIndex
+        from supernova_core.code_index.models import CodeIndex, EntryPoint
         from supernova_core.code_index.parameter_models import (
             ParameterPropagationGraph,
             SinkCallSite,
@@ -1451,11 +1451,18 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         # XSS routes by SinkCallSite.category == XSS (SlotContext has no render
         # context), so read code_index.json for the sink call sites.
         sink_call_sites: dict[str, SinkCallSite] = {}
+        # O2 前半：已解析的 HTTP 路由（entry_points.py 产物，code_index.json 落盘）
+        # 按 func_block_id join 给 builder，让 GN 轨漏洞带 "METHOD /path"（PoC
+        # 模板层直接命中，免 gap-fill LLM）。join miss → builder 保持原样兜底。
+        entry_point_map: dict[str, EntryPoint] = {}
         code_index_path = deliverables / "code_index.json"
         if code_index_path.exists():
             try:
                 index = CodeIndex.model_validate_json(code_index_path.read_text())
                 sink_call_sites = {s.id: s for s in index.sink_call_sites}
+                entry_point_map = {
+                    ep.func_block_id: ep for ep in index.entry_points if ep.route
+                }
             except Exception as exc:
                 logger.warning("gitnexus chain-verdict: code_index.json parse failed (%s)", exc)
 
@@ -1515,6 +1522,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 try:
                     findings = await builder(pgraph, llm_client=llm,
                                              sink_call_sites=sink_call_sites,
+                                             entry_points=entry_point_map,
                                              progress_cb=_chain_cb)
                 except Exception as exc:
                     # one vuln class failing must not block the others

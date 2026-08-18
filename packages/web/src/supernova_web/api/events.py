@@ -1,37 +1,37 @@
 # packages/web/src/supernova_web/api/events.py
-"""scan events SSE 构造（build_scan_events_response）。
+"""scan events SSE 构造（build_scan_events_response / build_single_events_response）。
 
 旧 ws-scoped GET /{ws}/events shim 已移除（Phase 2 前端切 scan-scoped
 GET /{ws}/scans/{scan_id}/events，零前端调用，联合验收确认）。scan-scoped 路由在
-api/scans.py，调本模块的 build_scan_events_response。
+api/scans.py，调本模块的 build_scan_events_response（全量归并流）；
+build_single_events_response 供 run 级 events 端点（单文件语义不变）。
 """
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
-import aiofiles
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from supernova_web.components.event_tailer import EventTailer
+from supernova_web.components.merged_event_tailer import MergedEventTailer
 
 
 async def build_scan_events_response(request: Request, scan_dir: Path) -> StreamingResponse:
-    """构造 scan events SSE StreamingResponse（tail scan_dir/events.ndjson + 孤儿对账）。
+    """构造 scan events SSE StreamingResponse（MergedEventTailer 全量归并 + 孤儿对账）。
 
-    scans.py 的 GET /{ws}/scans/{scan_id}/events 调本函数。孤儿对账 per-scan：scan 非在跑
-    + 无 scan_end -> 补 scan_end（让 SSE 立即有关流信号 + 失败原因，而非空等 idle_timeout
-    后关流再被前端重连死循环）。
+    scans.py 的 GET /{ws}/scans/{scan_id}/events 调本函数。认证(authcheck)/白盒(任务根
+    events)/黑盒(所有 run-K events)按 ts 归并为一条流，SSE id 为全源 offset 快照支持
+    Last-Event-ID 按源断点续传；wb 的 scan_end 扣发直到全 run 终态（防任务级误判提前
+    关流）。孤儿对账 per-scan：scan 非在跑 + 无 scan_end -> 补 scan_end（让 SSE 立即
+    有关流信号 + 失败原因，而非空等 idle_timeout 后关流再被前端重连死循环）。
     """
-    ndjson = scan_dir / "events.ndjson"
-
-    idx = request.app.state.indexer
-    idx.sync_active(request.app.state.scan_manager.active_pids())
     # 判活 per-scan（heartbeat），非 ws 级 pid（C1 容器无本机 pid）。
     from supernova_core.session import SessionManager
     from supernova_web.components.workspaces_indexer import _compute_status
+    idx = request.app.state.indexer
+    idx.sync_active(request.app.state.scan_manager.active_pids())
     mgr = SessionManager(scan_dir.parent)
     is_running = _compute_status(scan_dir, mgr.get_status(scan_dir)) == "running"
     if not is_running:
@@ -40,36 +40,57 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
             scan_dir, False, scan_manager=request.app.state.scan_manager)
 
     last = request.headers.get("last-event-id")
-    last_offset = int(last) if last else None
+    # wb scan_end 扣发宽限（默认 10s：覆盖「白盒收尾、run 目录未建」竞态 + 续跑缝隙；
+    # 测试/CI 可调小）。env 读取在请求期——monkeypatch 即时生效。
+    import os
+    grace = float(os.environ.get("SUPERNOVA_EVENTS_CLOSE_GRACE_SECONDS", "10"))
+    # run 源空闲兜底窗口（默认 300s：黑盒 workflow 未 finalize 且 web 收口缺失时合成
+    # run_end 关流的最后防线；run 仍在写则不触发。负值禁用）。
+    run_idle = float(os.environ.get("SUPERNOVA_EVENTS_RUN_IDLE_SECONDS", "300"))
 
     async def gen():
         queue: asyncio.Queue = asyncio.Queue()
+        tailer = MergedEventTailer(scan_dir)
 
-        # 组合扫描 precheck(auth-validation 预验证)事件在独立 authcheck-events.ndjson(刻意隔离,
-        # 见 scan_manager._run_precheck:预验证 finalize 会写 scan_end,混入主 events 会提前关流)。
-        # 先 dump 其历史让 precheck 过程在实时页可见(否则 precheck 失败/白盒未启动时实时页只剩
-        # scan_end → 空白)。authcheck 的 scan_end 必须**丢弃**:前端 useEventSource 见 scan_end 即
-        # 关流,而它是预验证 finalize 非主扫描结束;authcheck 事件不带 SSE id(重连重放,不污染主
-        # events 的 Last-Event-ID 续传)。
-        authcheck = scan_dir / "authcheck-events.ndjson"
-        if authcheck.exists():
-            async with aiofiles.open(authcheck, "rb") as fh:
-                content = (await fh.read()).decode("utf-8", "replace")
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ac_data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ac_data.get("type") == "scan_end":
-                    continue  # 丢弃 authcheck scan_end,防提前关流
-                await queue.put(EventTailer.encode_sse(ac_data, None))
+        async def on_event(data: dict, event_id: object) -> None:
+            await queue.put(EventTailer.encode_sse(data, event_id))
+            if data.get("type") == "scan_end":
+                await queue.put(None)  # sentinel：关流（仅 wb 终态 scan_end 会到这里）
 
+        task = asyncio.create_task(
+            tailer.tail(on_event, last_event_id=last, close_grace=grace,
+                        run_idle_timeout=run_idle))
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            task.cancel()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def build_single_events_response(request: Request, events_dir: Path) -> StreamingResponse:
+    """单文件 events SSE（run 级端点用）：tail events_dir/events.ndjson，见 scan_end 关流。
+
+    与归并流不同：不做多源归并/扣发（run 自己的 scan_end 即终态）、不做孤儿对账
+    （run 生命周期由任务级编排管理）。
+    """
+    ndjson = events_dir / "events.ndjson"
+    last = request.headers.get("last-event-id")
+    last_offset = int(last) if last and last.isdigit() else None
+
+    async def gen():
+        queue: asyncio.Queue = asyncio.Queue()
         tailer = EventTailer(ndjson)
 
-        async def on_event(data: dict, event_id: int):
+        async def on_event(data: dict, event_id: int) -> None:
             await queue.put(EventTailer.encode_sse(data, event_id))
             if data.get("type") == "scan_end":
                 await queue.put(None)  # sentinel：关流

@@ -27,6 +27,8 @@ const cancelRaf = (id: number): void => {
  *  - rAF 批量：onmessage 只入 pending 并调度一次，flush 时合并追加 + 重建快照
  *    （两次 flush 之间 getSnapshot 引用恒定——useSyncExternalStore 的硬要求）。
  *  - 环形缓冲：events 尾部截断至 CAP，消除逐条数组复制与无界增长。
+ *  - SSE id 去重：重连/换 URL 重开流时服务端可能重放历史事件（归并流按全源
+ *    offset 快照编 id，同事件 id 恒定），按 lastEventId 去重保证幂等。
  *  - 引用计数：订阅归零自动关连接并出 Map；StrictMode 双挂载安全。 */
 class ScanEventStore {
   private listeners = new Set<() => void>();
@@ -34,6 +36,7 @@ class ScanEventStore {
   private events: NdjsonEvent[] = [];
   private status: SseStatus = "closed";
   private lastEventId?: string;
+  private seenIds = new Set<string>();
   private snapshot: SseSnapshot = EMPTY_SNAPSHOT;
   private es: EventSource | null = null;
   private rafId = 0;
@@ -73,7 +76,13 @@ class ScanEventStore {
     es.onmessage = (e: MessageEvent) => {
       let ev: NdjsonEvent;
       try { ev = JSON.parse(String(e.data)) as NdjsonEvent; } catch { return; }
-      if (e.lastEventId) this.lastEventId = e.lastEventId;
+      if (e.lastEventId) {
+        // 幂等去重：重放事件（重连续传边界/换 URL 重开）按 id 丢弃；上限防爆内存。
+        if (this.seenIds.has(e.lastEventId)) return;
+        if (this.seenIds.size > 20000) this.seenIds.clear();
+        this.seenIds.add(e.lastEventId);
+        this.lastEventId = e.lastEventId;
+      }
       if (ev.type === this.stopType) { this.status = "closed"; es.close(); }
       this.pending.push(ev);
       this.scheduleFlush();

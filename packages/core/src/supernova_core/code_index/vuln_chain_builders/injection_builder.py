@@ -10,9 +10,10 @@ from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
+    http_route_label,
     judge_chain_verdict,
 )
-from supernova_core.code_index.models import ParameterSource
+from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.models.queue_schemas import InjectionVulnerability
@@ -41,6 +42,7 @@ async def build_injection_findings(
     llm_client: Callable[..., Awaitable[str]],
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
+    entry_points: dict[str, EntryPoint] | None = None,
 ) -> list[InjectionVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="injection", sink_call_sites=sink_call_sites,
@@ -63,6 +65,11 @@ async def build_injection_findings(
         concat_note = ""
         if chain.post_sanitize_concat:
             concat_note = "⚠️ post-sanitize concat detected — sanitizer considered ineffective"
+        # O2 前半：join entry_point 路由，path 带 "METHOD /path" 前缀（PoC 模板层
+        # derive_method_path 直接命中，省一次 gap-fill LLM）。join miss → 原样。
+        route_label = http_route_label(chain.entry_point_id, entry_points)
+        path = (f"{route_label} → {verdict.evidence_chain}"
+                if route_label else verdict.evidence_chain)
         findings.append(InjectionVulnerability(
             ID=f"INJ-GN-{i:02d}",
             vulnerability_type="injection",
@@ -70,7 +77,7 @@ async def build_injection_findings(
             confidence=verdict.confidence,
             title=verdict.title,
             source=_source_text(chain),
-            path=verdict.evidence_chain,
+            path=path,
             sink_call=chain.sink_call_site_id,
             slot_type=_SLOT_LABEL.get(chain.sink_slot, chain.sink_slot),
             concat_occurrences=concat_note or None,

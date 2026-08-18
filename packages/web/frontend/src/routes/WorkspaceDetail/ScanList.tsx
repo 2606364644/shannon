@@ -30,7 +30,8 @@ import { scanSegmentLabel } from "./ScanProgressBadge";
 import type { WsOverviewCtx } from "./";
 
 // 终态集（spec §5.1 resume 仅非终态放行，终态 422）。interrupted 等属未完成可恢复。
-const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed"]);
+// cancelled 是终态（用户主动停；后端 resume 拒 422）→ 显 查看/重跑/删除 而非恢复。
+const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed", "cancelled"]);
 
 // 运行中判定（分段过滤用）；轮询节奏由 useScans 的 SWR refreshInterval 管理。
 const isRun = (s: ScanSummary) => s.is_running || s.status === "running";

@@ -31,7 +31,7 @@ from supernova_whitebox.pipeline.activities import (
     inject_gitnexus_track_status,
     write_track_status_activity,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
-    setup_display, finalize_summary,
+    setup_display, finalize_summary, cleanup_auth_state_activity,
 )
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow, AuthValidationWorkflow, BatchAuthValidationWorkflow
 from supernova_blackbox.pipeline.activities import (
@@ -44,6 +44,7 @@ from supernova_blackbox.pipeline.activities import (
     detect_whitebox_results, write_engine_config_for_session, cleanup_engine_configs,
     setup_display as bb_setup_display, finalize_summary as bb_finalize_summary,
     run_host_proxy_setup as bb_run_host_proxy_setup, stop_host_proxy as bb_stop_host_proxy,
+    cleanup_auth_state_activity as bb_cleanup_auth_state_activity,
 )
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
@@ -71,7 +72,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             inject_gitnexus_track_status,
             write_track_status_activity,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
-            setup_display, finalize_summary,
+            setup_display, finalize_summary, cleanup_auth_state_activity,
         ],
         # P3c 阶段 3：AuditSession/LogBus/heartbeat 已 contextvar 化（按 workflow_id 隔离），
         # 多 scan 并发不再串台 → max_concurrent 放开（默认 4，env 可配）。
@@ -94,6 +95,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             write_engine_config_for_session, cleanup_engine_configs,
             bb_setup_display, bb_finalize_summary,
             bb_run_host_proxy_setup, bb_stop_host_proxy,
+            bb_cleanup_auth_state_activity,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(

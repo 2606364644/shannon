@@ -392,3 +392,45 @@ def test_fork_endpoint_requires_workspace_manager(tmp_path):
     c.app.dependency_overrides[workspace_manager] = deny
     r = c.post("/api/workspaces/ws1/auth-profiles/prof_sys/fork")
     assert r.status_code == 403
+
+
+# ---- POST cancel-test（2026-08-17 auth-test-cancel spec §3.1）----
+
+
+@pytest.mark.asyncio
+async def test_cancel_test_endpoint_calls_manager(tmp_path):
+    """POST cancel-test body {workflow_id} → cancel_auth_validation → 透传结果。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.cancel_auth_validation = AsyncMock(
+        return_value={"cancelled": "authval-batch-ws1-x"})
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/cancel-test",
+               json={"workflow_id": "authval-batch-ws1-x"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"cancelled": "authval-batch-ws1-x"}
+    sm.cancel_auth_validation.assert_awaited_once_with(
+        "ws1", "prof_1", "authval-batch-ws1-x")
+
+
+@pytest.mark.asyncio
+async def test_cancel_test_endpoint_missing_workflow_id_is_422(tmp_path):
+    """缺 workflow_id → 422（不进 manager）。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.cancel_auth_validation = AsyncMock()
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/cancel-test", json={})
+    assert r.status_code == 422
+    sm.cancel_auth_validation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_test_endpoint_value_error_is_422(tmp_path):
+    """越界 workflow_id / 未绑定档案等 ValueError → 422（对齐 test-batch 错误映射）。"""
+    c, _store = _client(tmp_path)
+    sm = c.app.state.scan_manager
+    sm.cancel_auth_validation = AsyncMock(
+        side_effect=ValueError("workflow_id 越界(必须以 authval-ws1- 或 authval-batch-ws1- 开头): evil"))
+    r = c.post("/api/workspaces/ws1/auth-profiles/prof_1/cancel-test",
+               json={"workflow_id": "evil"})
+    assert r.status_code == 422
+    assert "越界" in r.json()["detail"]

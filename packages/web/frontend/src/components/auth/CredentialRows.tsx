@@ -10,12 +10,18 @@ export const ROLE_PRESETS = ["admin", "user"] as const;
 
 /** 多角色凭据录入草稿（前端内部态，scan 页 inline + 档案 dialog 共用）。
  *  - 新建 id 空（后端分配）；编辑 id 透传原值。
- *  - password 空串 = 不改（编辑态）。 */
+ *  - password 空串 = 不改（编辑态），提交时整个键不发，后端保留原密文。
+ *  - hasPassword（编辑态）：原凭据已存密码（档案 GET 返回脱敏 "••••" 时为 true）。
+ *    为 true 且未展开修改时显示「•••• + 修改」而非空输入框——后端永不回传明文，
+ *    明示"已有密码、留空即保留"，避免用户误以为必须重输。
+ *  - pwEditing：点「修改」展开输入框；取消则收回并清空已输入。 */
 export interface CredentialDraft {
   id?: string;
   role: string;
   username: string;
   password: string;
+  hasPassword?: boolean;
+  pwEditing?: boolean;
 }
 
 interface Props {
@@ -87,7 +93,44 @@ export function CredentialRows({ value, onChange, allowMulti, lockFirstRow }: Pr
             </div>
             <div className="space-y-1">
               <Label htmlFor={`cr-pw-${i}`} className="text-[11px] text-muted-foreground">{t("scan.auth.password")}</Label>
-              <Input id={`cr-pw-${i}`} type="password" value={d.password} onChange={(e) => update(i, { password: e.target.value })} size="sm" />
+              {/* 已存密码折叠态：•••• + 修改按钮；占位「未设置」区分从未存过密码的编辑行。 */}
+              {d.hasPassword && !d.pwEditing && !d.password ? (
+                <div className="flex h-8 items-center gap-1.5">
+                  <span className="font-mono text-xs text-muted-foreground" title={t("scan.auth.passwordSavedHint")}>••••</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => update(i, { pwEditing: true })}
+                  >
+                    {t("scan.auth.changePassword")}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <Input
+                    id={`cr-pw-${i}`}
+                    type="password"
+                    value={d.password}
+                    onChange={(e) => update(i, { password: e.target.value })}
+                    placeholder={d.hasPassword ? t("scan.auth.newPasswordPlaceholder") : d.id ? t("scan.auth.passwordUnset") : undefined}
+                    size="sm"
+                    className="min-w-0"
+                  />
+                  {d.hasPassword && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-[11px]"
+                      onClick={() => update(i, { pwEditing: false, password: "" })}
+                    >
+                      {t("common.cancel")}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           {allowMulti && value.length > 1 && !(lockFirstRow && i === 0) && (
