@@ -3,11 +3,11 @@
 FROM python:3.12-slim-bookworm
 
 # ── apt：git + chromium + curl(gitnexus)/ca ──
-# HTTPS aliyun：HTTP (port 80) 阿里云 CDN 部分边缘节点对 apt UA 返 403（实测 docker 容器内
-# 182.89.193.20 / 36.250.74.132 等 edge），HTTPS 稳定。brief 原为 http sed，冒烟实测改 HTTPS。
+# HTTPS 腾讯云：mirrors.cloud.tencent.com 仅 HTTPS 稳定（brief 原为 http sed，冒烟实测改 HTTPS）。
+# 阿里云 CDN 部分边缘节点曾对 apt UA 返 403，故弃 http；切腾讯后仍统一走 HTTPS 稳妥。
 # chromium 单包：替代原先手写的 headless Chrome 运行时依赖长列表（libnss3/libatk1.0-0/...），
 # apt 自动拉全部依赖；arm64/amd64 都有此包，且规避 trixie 的 libasound2→libasound2t64 重命名雷。
-RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+RUN sed -i 's|http://deb.debian.org|https://mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
        git ca-certificates curl gnupg chromium \
     && rm -rf /var/lib/apt/lists/*
@@ -24,19 +24,19 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 
 # ── gitnexus@1.6.8 + ladybugdb native binding（白盒确定性轨）──
 # --ignore-scripts 跳 onnxruntime post-install（HTTP 302 坑）；补 @ladybugdb/core/install.js 拷 lbugjs.node。
-# 走 npmjs 官方源：npmmirror 最新仅 1.6.6（缺 1.6.8/1.6.9），brief 原 npmmirror 装不到 1.6.8。
+# 走腾讯云 npm 镜像：npmmirror 最新仅 1.6.6（缺 1.6.8/1.6.9），腾讯镜像有 1.6.8/1.6.9，可装。
 # 不用 --mount=cache：那是 BuildKit 专有语法，legacy builder（如本机 compose 退回 legacy 时）
 # 报 "the --mount option requires BuildKit" 直接构建失败。去 --mount 后 legacy/buildkit 通吃，
 # 跨机器零 BuildKit 依赖；npm 下载缓存退化为 docker 层缓存（本层不变即命中）。
-RUN npm install -g --prefix=/usr --ignore-scripts --registry=https://registry.npmjs.org gitnexus@1.6.8 \
+RUN npm install -g --prefix=/usr --ignore-scripts --registry=https://mirrors.cloud.tencent.com/npm/ gitnexus@1.6.8 \
     && node "$(npm root -g --prefix=/usr)/gitnexus/node_modules/@ladybugdb/core/install.js" \
     && gitnexus --version
 
 # ── agent-browser（黑盒默认 browser 引擎）──
 # 不跑 agent-browser install：它下载 Chrome for Testing，无 linux/arm64 build → ARM64 必失败。
 # 改用上方 apt 装的系统 chromium，运行时经 AGENT_BROWSER_EXECUTABLE_PATH env 指定（见下 ENV）。
-# npmmirror 有 agent-browser（latest 0.31.1），用 CN 镜像加速。（同样去 --mount，通吃 legacy/buildkit，见上。）
-RUN npm config set registry https://registry.npmmirror.com \
+# 腾讯云 npm 镜像有 agent-browser（latest 0.34.0），用 CN 镜像加速。（同样去 --mount，通吃 legacy/buildkit，见上。）
+RUN npm config set registry https://mirrors.cloud.tencent.com/npm/ \
     && npm install -g agent-browser@latest \
     && agent-browser --version
 
@@ -47,9 +47,9 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 # ── python：uv sync 装全部 workspace 包（含 supernova-worker）──
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+    UV_DEFAULT_INDEX=https://mirrors.cloud.tencent.com/pypi/simple/
 
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
+RUN pip install --no-cache-dir -i https://mirrors.cloud.tencent.com/pypi/simple/ uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
@@ -60,7 +60,7 @@ COPY packages ./packages
 COPY prompts ./prompts
 
 # --all-packages：强制装全部 workspace 成员（含 supernova-worker，root deps 不含它）。
-# 不用 --frozen：让 uv 走阿里源下载（与 web Dockerfile 同策略）。lockfile 仍锁版本。
+# 不用 --frozen：让 uv 走腾讯源下载（与 web Dockerfile 同策略）。lockfile 仍锁版本。
 RUN uv sync --all-packages
 
 # .venv/bin 让 supernova-worker 可解析；/usr/bin 让 gitnexus/agent-browser/node 可解析。
