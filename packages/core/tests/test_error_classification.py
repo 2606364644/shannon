@@ -303,6 +303,24 @@ class TestClassifyStringFallback:
         err = Exception(message)
         assert classify_error_for_temporal(err) == ("ConfigurationError", False)
 
+    # --- Deterministic file-missing ("not found" + location) ---
+    # tiering 迁移漏改曾致 fusion 抛 FileNotFoundError("code_index.json not found in
+    # .../deliverables/whitebox")——消息路径含 "/deliverables/" → 命中上方 "deliverable"
+    # 子串被误判 OutputValidationError retryable=True,白烧 3 次重试 ~15min。
+    # 带位置的确定性文件缺失应 fail-fast(重试不改输入);裸 "deliverable not found"
+    # (可能是并发产物未落盘)保持 retryable 语义。
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "code_index.json not found in /app/workspaces/Brightli/scans/backend-20260818-091852/deliverables/whitebox",
+            "git not found in PATH",
+            "Prompt file not found: /app/prompts/recon.txt",
+        ],
+    )
+    def test_file_missing_patterns(self, message):
+        err = Exception(message)
+        assert classify_error_for_temporal(err) == ("ConfigurationError", False)
+
     # --- Execution limits ---
 
     @pytest.mark.parametrize(

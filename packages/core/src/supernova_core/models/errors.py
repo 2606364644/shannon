@@ -145,6 +145,14 @@ def classify_error_for_temporal(error: Exception) -> tuple[str, bool]:
 
     text = str(error).lower()
 
+    # 确定性文件缺失(带位置)-> fail-fast:tiering 迁移漏改曾致 fusion 抛
+    # FileNotFoundError("code_index.json not found in .../deliverables/..."),路径含
+    # "deliverable" 子串会被下方 OutputValidationError 分支误判 retryable,白烧 3 次
+    # 重试 ~15min。精确匹配 "not found in"/"not found:"(文件已定位而缺失,重试不改
+    # 输入);裸 "deliverable not found"(可能是并发产物未落盘)保持 retryable 语义。
+    if "not found in" in text or "not found:" in text:
+        return ("ConfigurationError", False)
+
     # Billing patterns
     if "billing" in text or "spending cap" in text or "insufficient credit" in text:
         return ("BillingError", True)
