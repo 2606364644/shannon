@@ -824,13 +824,17 @@ _POC_CHECKPOINT_FILENAME = ".poc_checkpoint.json"
 
 
 def _ckpt_path(deliverables_dir: Path) -> Path:
-    return deliverables_dir / _POC_CHECKPOINT_FILENAME
+    # tiering：checkpoint 是管线状态 → 桶内 intermediate/（atomic 写自动建目录）。
+    from supernova_core.utils.paths import intermediate_path
+    return intermediate_path(deliverables_dir, _POC_CHECKPOINT_FILENAME)
 
 
 def _load_checkpoint(deliverables_dir: Path) -> dict:
-    """读 sidecar checkpoint。损坏/缺失 → 返回空(从头跑,降级不报错)。"""
-    p = _ckpt_path(deliverables_dir)
-    if not p.exists():
+    """读 sidecar checkpoint。损坏/缺失 → 返回空(从头跑,降级不报错)。
+    tiering 后先 intermediate/ 再顶层兜底（旧结构存量 checkpoint）。"""
+    from supernova_core.utils.paths import resolve_intermediate
+    p = resolve_intermediate(deliverables_dir, _POC_CHECKPOINT_FILENAME)
+    if p is None:
         return {}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))

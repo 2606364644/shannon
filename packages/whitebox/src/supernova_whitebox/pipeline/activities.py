@@ -21,7 +21,7 @@ from supernova_core.models.metrics import AgentMetrics
 from supernova_core.models.retry import agent_retry_category, retry_for
 from supernova_core.runtime.heartbeat import stop_heartbeat
 from supernova_core.utils.atomic_write import atomic_write_json
-from supernova_core.utils.paths import resolve_deliverables_path
+from supernova_core.utils.paths import intermediate_path, resolve_deliverables_path, resolve_intermediate
 from supernova_core.utils.credential_validator import validate_credentials
 from supernova_core.logging import create_activity_logger
 from supernova_core.logging.log_bus import LogBus
@@ -342,9 +342,9 @@ async def _build_vuln_prompt_variables(
     base["RECON_CONTEXT"] = recon_context
 
     # FRAMEWORK_ANALYSIS: conditional — only when inferred_endpoints non-empty
-    fw_path = deliverables / "framework_analysis.json"
+    fw_path = resolve_intermediate(deliverables, "framework_analysis.json")  # tiering 双路径
     fw_lines: list[str] = []
-    if fw_path.exists():
+    if fw_path is not None:
         try:
             fw = json.loads(fw_path.read_text("utf-8"))
             endpoints = fw.get("inferred_endpoints", []) or []
@@ -890,10 +890,10 @@ async def run_merge_sink_reports(input: ActivityInput) -> dict:
 
         async with get_audit_session().track_step("pre-recon", "merge-sinks", intent=intent_for("merge-sinks")):
             # Load deterministic sinks from code_index.json
-            code_index_path = deliverables / "code_index.json"
+            code_index_path = resolve_intermediate(deliverables, "code_index.json")  # tiering 双路径
             det_sinks: list[SinkCallSite] = []
             index = None
-            if code_index_path.exists():
+            if code_index_path is not None:
                 index = CodeIndex.model_validate_json(code_index_path.read_text())
                 det_sinks = index.sink_call_sites
 
@@ -1036,16 +1036,16 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
         async with get_audit_session().track_step("risk-scoring", "risk-scoring", intent=intent_for("risk-scoring")):
             # Load code index
-            code_index_path = deliverables / "code_index.json"
-            if not code_index_path.exists():
+            code_index_path = resolve_intermediate(deliverables, "code_index.json")  # tiering 双路径
+            if code_index_path is None:
                 return {"total_chains": 0, "tier3_count": 0, "tier2_count": 0, "tier1_count": 0}
 
             index = CodeIndex.model_validate_json(code_index_path.read_text())
 
             # Load parameter graph
-            param_graph_path = deliverables / "parameter_graph.json"
+            param_graph_path = resolve_intermediate(deliverables, "parameter_graph.json")  # tiering 双路径
             taint_flows_by_chain: dict[str, list] = {}
-            if param_graph_path.exists():
+            if param_graph_path is not None:
                 pgraph = ParameterPropagationGraph.model_validate_json(
                     param_graph_path.read_text()
                 )
@@ -1075,7 +1075,7 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
             plan = planner.plan()
 
             # Write audit plan
-            plan_path = deliverables / "audit_plan.json"
+            plan_path = intermediate_path(deliverables, "audit_plan.json")  # tiering
             plan_data = json.loads(plan.to_json())
             atomic_write_json(plan_path, plan_data)
 
@@ -1410,8 +1410,8 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         failed_classes: list[str] = []
         fail_reasons: dict[str, str] = {}
 
-        pgraph_path = deliverables / "parameter_graph.json"
-        if not pgraph_path.exists():
+        pgraph_path = resolve_intermediate(deliverables, "parameter_graph.json")  # tiering 双路径
+        if pgraph_path is None:
             try:
                 await get_audit_session().log_info(
                     "GitNexus 注入轨：parameter_graph.json 缺失 → 3 类判定失败（fail-fast，不降级）。",
@@ -1455,8 +1455,8 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         # 按 func_block_id join 给 builder，让 GN 轨漏洞带 "METHOD /path"（PoC
         # 模板层直接命中，免 gap-fill LLM）。join miss → builder 保持原样兜底。
         entry_point_map: dict[str, EntryPoint] = {}
-        code_index_path = deliverables / "code_index.json"
-        if code_index_path.exists():
+        code_index_path = resolve_intermediate(deliverables, "code_index.json")  # tiering 双路径
+        if code_index_path is not None:
             try:
                 index = CodeIndex.model_validate_json(code_index_path.read_text())
                 sink_call_sites = {s.id: s for s in index.sink_call_sites}
@@ -1589,7 +1589,7 @@ async def run_framework_analysis(input: ActivityInput) -> dict:
             # Write result as JSON deliverable
             import dataclasses
             result_data = dataclasses.asdict(result)
-            result_path = deliverables / "framework_analysis.json"
+            result_path = intermediate_path(deliverables, "framework_analysis.json")  # tiering
             atomic_write_json(result_path, result_data)
 
         return {
@@ -1620,7 +1620,7 @@ async def run_frontend_mapping(input: ActivityInput) -> dict:
             # Write result as JSON deliverable
             import dataclasses
             result_data = dataclasses.asdict(result)
-            result_path = deliverables / "frontend_mapping.json"
+            result_path = intermediate_path(deliverables, "frontend_mapping.json")  # tiering
             atomic_write_json(result_path, result_data)
 
         return {
@@ -1653,8 +1653,8 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
         async with get_audit_session().track_step("pre-recon", "route-chain-building", intent=intent_for("route-chain-building")):
             # Load framework analysis result
             framework_result = FrameworkAnalysisResult()
-            framework_path = deliverables / "framework_analysis.json"
-            if framework_path.exists():
+            framework_path = resolve_intermediate(deliverables, "framework_analysis.json")  # tiering 双路径
+            if framework_path is not None:
                 data = json.loads(framework_path.read_text())
                 endpoints = [_to_endpoint(ep) for ep in data.get("inferred_endpoints", []) if isinstance(ep, dict)]
                 framework_result = FrameworkAnalysisResult(
@@ -1664,8 +1664,8 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
 
             # Load frontend mapping result
             frontend_result = FrontendAnalysisResult()
-            frontend_path = deliverables / "frontend_mapping.json"
-            if frontend_path.exists():
+            frontend_path = resolve_intermediate(deliverables, "frontend_mapping.json")  # tiering 双路径
+            if frontend_path is not None:
                 data = json.loads(frontend_path.read_text())
                 def _to_route(d: dict) -> FrontendRoute:
                     return FrontendRoute(
@@ -1686,7 +1686,7 @@ async def run_route_chain_building(input: ActivityInput) -> dict:
 
             # Write chains
             chains_data = [dataclasses.asdict(c) for c in chains]
-            chains_path = deliverables / "route_chains.json"
+            chains_path = intermediate_path(deliverables, "route_chains.json")  # tiering
             atomic_write_json(chains_path, chains_data)
 
         return {"chain_count": len(chains)}
@@ -1754,13 +1754,13 @@ async def run_attack_chain_assembly_v2(input: ActivityInput) -> dict:
         # 2. Assemble GitNexus chains
         from supernova_core.code_index.attack_chain_assembler import assemble_attack_chains
         gn_chains = assemble_attack_chains(gn_by_class, log)
-        gn_path = deliverables / "attack_chains_gitnexus_queue.json"
+        gn_path = intermediate_path(deliverables, "attack_chains_gitnexus_queue.json")  # tiering
         atomic_write_json(gn_path, {"chains": gn_chains})
 
         # 3. LLM chains（attack-chain agent Write 落盘）
         llm_chains: list = []
-        llm_path = deliverables / "attack_chains_llm_queue.json"
-        if llm_path.exists():
+        llm_path = resolve_intermediate(deliverables, "attack_chains_llm_queue.json")  # tiering 双路径(agent self-Write 落顶层)
+        if llm_path is not None:
             try:
                 llm_chains = (
                     json.loads(llm_path.read_text("utf-8")).get("chains", []) or []
@@ -1771,7 +1771,7 @@ async def run_attack_chain_assembly_v2(input: ActivityInput) -> dict:
         # 4. Merge → attack_chains.json
         from supernova_core.code_index.dual_track_merger import merge_attack_chains
         merged = merge_attack_chains(llm_chains, gn_chains)
-        atomic_write_json(deliverables / "attack_chains.json", {"chains": merged})
+        atomic_write_json(intermediate_path(deliverables, "attack_chains.json"), {"chains": merged})
 
         return {
             "chain_count": len(merged),

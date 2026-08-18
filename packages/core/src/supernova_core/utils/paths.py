@@ -109,6 +109,7 @@ def has_valid_whitebox_results(queue_file: Path) -> bool:
 WHITEBOX_SUBDIR: str = "whitebox"
 BLACKBOX_SUBDIR: str = "blackbox"
 COMBINED_SUBDIR: str = "combined"
+INTERMEDIATE_SUBDIR: str = "intermediate"
 
 
 def whitebox_dir(deliverables_dir: Path) -> Path:
@@ -135,6 +136,32 @@ def combined_dir(deliverables_dir: Path) -> Path:
     workspaces/<session>/deliverables 根（非 workspace_path）。
     """
     return deliverables_dir / COMBINED_SUBDIR
+
+
+def intermediate_dir(track_dir: Path) -> Path:
+    """桶内中间产物子目录（写侧用）：track_dir/intermediate/。
+
+    spec 2026-08-18 tiering：管线中间产物（queue json / graph / index / gap
+    report）下沉桶内 intermediate/，交付物留桶顶层。track_dir 是
+    deliverables/{whitebox|blackbox} 桶根（executor/activities 传入的桶内路径）。
+    """
+    return Path(track_dir) / INTERMEDIATE_SUBDIR
+
+
+def intermediate_path(track_dir: Path, filename: str) -> Path:
+    """中间产物落盘路径：track_dir/intermediate/filename。"""
+    return intermediate_dir(track_dir) / filename
+
+
+def resolve_intermediate(track_dir: Path, filename: str) -> Path | None:
+    """桶内中间产物读侧 fallback（tiering 后）：先 track_dir/intermediate/{name}，
+    无则回退 track_dir/{name}（旧结构平铺），都不存在返回 None（调用方按
+    graceful degradation 处理）。track_dir 是桶根（非 deliverables 根）。
+    """
+    for candidate in (intermediate_path(track_dir, filename), Path(track_dir) / filename):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 BLACKBOX_RUNS_SUBDIR: str = "blackbox-runs"
@@ -167,14 +194,22 @@ def combined_run_dir(scan_dir: Path, run_id: str) -> Path:
 
 
 def resolve_track_deliverable(deliverables_dir: Path, track: str, filename: str) -> Path:
-    """读侧 fallback：先 deliverables_dir/{track}/filename（新结构），无则回退
-    deliverables_dir/filename（老 workspace）。两者都不存在时返回新结构路径，
-    让调用方按既定 not-found 语义处理（不在这里抛错）。
+    """读侧 fallback（spec 2026-08-18 三级链）：
 
+    1. deliverables_dir/{track}/intermediate/{name}  ← tiering 后 queue 类落点
+    2. deliverables_dir/{track}/{name}                ← 三桶平铺（md 交付物现位置）
+    3. deliverables_dir/{name}                        ← 老 workspace 平铺
+
+    三者都不存在时返回第 2 级路径，让调用方按既定 not-found 语义处理（不抛错）。
     track 取 WHITEBOX_SUBDIR / BLACKBOX_SUBDIR / COMBINED_SUBDIR。
     """
-    new = deliverables_dir / track / filename
-    if new.exists():
-        return new
+    for candidate in (
+        deliverables_dir / track / INTERMEDIATE_SUBDIR / filename,
+        deliverables_dir / track / filename,
+    ):
+        if candidate.exists():
+            return candidate
     legacy = deliverables_dir / filename
-    return legacy if legacy.exists() else new
+    if legacy.exists():
+        return legacy
+    return deliverables_dir / track / filename

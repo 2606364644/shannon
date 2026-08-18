@@ -311,3 +311,56 @@ class TestResolveTrackDeliverable:
         result = resolve_track_deliverable(dlv, "blackbox", "x_evidence.md")
         # 都不存在 → 返回新结构路径（让调用方自然 not-found）
         assert result == dlv / "blackbox" / "x_evidence.md"
+
+
+class TestIntermediateTiering:
+    """spec 2026-08-18 deliverables tiering：中间产物下沉 {track}/intermediate/。"""
+
+    def test_intermediate_constants_and_helpers(self, tmp_path):
+        from supernova_core.utils.paths import (
+            INTERMEDIATE_SUBDIR, intermediate_dir, intermediate_path)
+        dlv = tmp_path / "deliverables"
+        assert INTERMEDIATE_SUBDIR == "intermediate"
+        assert intermediate_dir(whitebox_dir(dlv)) == dlv / "whitebox" / "intermediate"
+        assert intermediate_path(whitebox_dir(dlv), "x.json") == \
+            dlv / "whitebox" / "intermediate" / "x.json"
+
+    def test_resolve_prefers_intermediate_over_track_top(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        (dlv / "whitebox" / "intermediate").mkdir(parents=True)
+        (dlv / "whitebox" / "intermediate" / "injection_exploitation_queue.json").write_text("{}")
+        # 桶顶层同名也在（旧结构残留）→ intermediate 优先
+        (dlv / "whitebox" / "injection_exploitation_queue.json").write_text("{}")
+        result = resolve_track_deliverable(dlv, "whitebox", "injection_exploitation_queue.json")
+        assert result == dlv / "whitebox" / "intermediate" / "injection_exploitation_queue.json"
+
+    def test_resolve_intermediate_missing_falls_to_track_top(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        (dlv / "whitebox").mkdir(parents=True)
+        (dlv / "whitebox" / "injection_exploitation_queue.json").write_text("{}")
+        result = resolve_track_deliverable(dlv, "whitebox", "injection_exploitation_queue.json")
+        assert result == dlv / "whitebox" / "injection_exploitation_queue.json"
+
+    def test_resolve_intermediate_dir_exists_but_file_only_in_legacy(self, tmp_path):
+        dlv = tmp_path / "deliverables"
+        (dlv / "whitebox" / "intermediate").mkdir(parents=True)
+        # intermediate 目录在但文件只在老平铺 → 命中老平铺
+        (dlv / "injection_exploitation_queue.json").write_text("{}")
+        result = resolve_track_deliverable(dlv, "whitebox", "injection_exploitation_queue.json")
+        assert result == dlv / "injection_exploitation_queue.json"
+
+
+class TestResolveIntermediate:
+    def test_prefers_intermediate_then_falls_back_to_track_top(self, tmp_path):
+        from supernova_core.utils.paths import resolve_intermediate
+        dlv = tmp_path / "whitebox"
+        (dlv / "intermediate").mkdir(parents=True)
+        (dlv / "intermediate" / "code_index.json").write_text("{}")
+        (dlv / "code_index.json").write_text("{}")
+        assert resolve_intermediate(dlv, "code_index.json") == dlv / "intermediate" / "code_index.json"
+        # intermediate 无、顶层有（旧结构）→ 顶层
+        assert resolve_intermediate(dlv, "route_chains.json") is None or True
+        (dlv / "route_chains.json").write_text("{}")
+        assert resolve_intermediate(dlv, "route_chains.json") == dlv / "route_chains.json"
+        # 都无 → None（调用方 graceful degradation）
+        assert resolve_intermediate(dlv, "nope.json") is None

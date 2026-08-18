@@ -501,22 +501,25 @@ def write_index_files(
     and (if any) rule_gap_report.json / source_gap_report.json /
     storage_gap_report.json."""
     out = Path(output_dir)
+    # tiering（spec 2026-08-18）：索引/图/缺口报告是管线中间产物 → 桶内 intermediate/。
+    from supernova_core.utils.paths import intermediate_path
     out.mkdir(parents=True, exist_ok=True)
 
-    json_path = out / "code_index.json"
+    json_path = intermediate_path(out, "code_index.json")
+    json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(index.model_dump_json(indent=2))
 
-    summary_path = out / "code_index_summary.md"
+    summary_path = intermediate_path(out, "code_index_summary.md")
     summary_path.write_text(generate_summary(index))
 
-    pgraph_path = out / "parameter_graph.json"
+    pgraph_path = intermediate_path(out, "parameter_graph.json")
     if index.parameter_graph is not None:
         pgraph_path.write_text(index.parameter_graph.model_dump_json(indent=2))
     elif pgraph_path.exists():
         pgraph_path.unlink()
 
     # 旁路: 规则缺口报告(spec §3.1 层 2, 驱动规则库迭代, 不参与 taint/verdict)
-    gap_path = out / "rule_gap_report.json"
+    gap_path = intermediate_path(out, "rule_gap_report.json")
     if rule_gaps:
         import json as _json
         gap_path.write_text(_json.dumps(
@@ -527,7 +530,7 @@ def write_index_files(
         gap_path.unlink()
 
     # 旁路: source 规则缺口报告(spec 2026-07-10 §3.1, 反哺 source_rules.yml)
-    src_gap_path = out / "source_gap_report.json"
+    src_gap_path = intermediate_path(out, "source_gap_report.json")
     if source_gaps:
         import json as _json
         src_gap_path.write_text(_json.dumps(
@@ -539,7 +542,7 @@ def write_index_files(
 
     # 旁路: storage 规则缺口报告(spec 子项⑤ §3.3, 反哺 storage_rules.yml)
     # 内容 = LLM soft anchor(reads + writes)按 pattern/medium/kind 聚合的 StorageGap 列表
-    storage_gap_path = out / "storage_gap_report.json"
+    storage_gap_path = intermediate_path(out, "storage_gap_report.json")
     if storage_gaps:
         import json as _json
         storage_gap_path.write_text(_json.dumps(

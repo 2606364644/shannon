@@ -9,6 +9,7 @@ from supernova_core.models.errors import ErrorCode, PentestError
 from supernova_core.models.metrics import AgentMetrics
 from supernova_core.utils.atomic_write import atomic_write_json
 from supernova_core.utils.billing import is_spending_cap_behavior
+from supernova_core.utils.paths import intermediate_path
 
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.validators import get_queue_filename, validate_deliverable
@@ -200,7 +201,8 @@ class AgentExecutor:
             and result.structured_output is not None
             and queue_filename
         ):
-            queue_path = deliverables / queue_filename
+            # spec 2026-08-18 tiering：queue json 下沉桶内 intermediate/（交付物留顶层）。
+            queue_path = intermediate_path(deliverables, queue_filename)
             atomic_write_json(queue_path, result.structured_output)
 
         # host 渲染写 md:有 collector 通道的 agent(Plan 1 = pre-recon)在 queue 写盘
@@ -211,7 +213,15 @@ class AgentExecutor:
         if not skip_artifact_postprocess and collector is not None:
             md = render_deliverable(agent_name, collector.get_all(), deliverables, queue_root=queue_root)
             if md is not None:
-                (deliverables / defn.deliverable_filename).write_text(md, encoding="utf-8")
+                # tiering（spec 2026-08-18）：黑盒 exploit agent 的 evidence md 落
+                # blackbox/ 桶内（修漂移——读方 coverage/rerun 一直按桶内找，靠
+                # fallback 兜根顶层）；白盒 md 留桶顶层（activities 传桶内路径）。
+                md_dir = deliverables
+                if isinstance(agent_name, AgentName) and agent_name.value.endswith("-exploit"):
+                    from supernova_core.utils.paths import blackbox_dir
+                    md_dir = blackbox_dir(deliverables)
+                    md_dir.mkdir(parents=True, exist_ok=True)
+                (md_dir / defn.deliverable_filename).write_text(md, encoding="utf-8")
 
             # exploit agent 额外写结构化 verdicts.json（补全主线缺失产物，spec 2026-08-12）。
             # 计数器数 exploited、coverage/PoC 读 accepted_ids；与 evidence.md 同源
@@ -223,8 +233,11 @@ class AgentExecutor:
                 vc = agent_name.value.removesuffix("-exploit")
                 payload = build_exploit_verdicts_payload(
                     vc, collector.get_all(), deliverables, queue_root=queue_root)
+                # tiering：verdicts 是机器交接数据 → blackbox/intermediate/（evidence
+                # 同桶，机器数据下沉子层）。读方走 resolve_track_deliverable 三级链。
                 atomic_write_json(
-                    blackbox_dir(deliverables) / f"{vc}_exploit_verdicts.json", payload)
+                    intermediate_path(blackbox_dir(deliverables), f"{vc}_exploit_verdicts.json"),
+                    payload)
 
         if not skip_artifact_postprocess:
             await validate_deliverable(deliverables, agent_name)

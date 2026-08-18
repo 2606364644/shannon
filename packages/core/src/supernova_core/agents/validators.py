@@ -7,7 +7,13 @@ async def validate_deliverable(deliverables_path: Path, agent_name: AgentName) -
     defn = AGENTS[agent_name]
     if defn.deliverable_filename is None:
         return True
+    # tiering（spec 2026-08-18）：黑盒 exploit agent 的 evidence md 落 blackbox/ 桶内
+    # （旧结构在根顶层，双路径都认）；白盒 md 在桶顶层（activities 传桶内路径）。
     deliverable_file = deliverables_path / defn.deliverable_filename
+    if agent_name.value.endswith("-exploit"):
+        from supernova_core.utils.paths import BLACKBOX_SUBDIR
+        bb_file = deliverables_path / BLACKBOX_SUBDIR / defn.deliverable_filename
+        deliverable_file = bb_file if bb_file.exists() else deliverable_file  # 桶内优先、根顶层兜底
     if not deliverable_file.exists():
         raise PentestError(
             f"Missing deliverable: {defn.deliverable_filename}",
@@ -25,7 +31,12 @@ async def validate_deliverable(deliverables_path: Path, agent_name: AgentName) -
     # "No whitebox results")。-exploit 不产此文件(TS createExploitValidator 同为 no-op),
     # 故只校验 -vuln。
     if agent_name.value.endswith("-vuln"):
-        queue_file = deliverables_path / get_queue_filename(agent_name)
+        # tiering（spec 2026-08-18）：queue 落桶内 intermediate/，旧结构平铺兜底
+        # （resume 场景 deliverables 已有旧文件时 validator 仍通过）。
+        from supernova_core.utils.paths import intermediate_path
+        queue_file = intermediate_path(deliverables_path, get_queue_filename(agent_name))
+        if not queue_file.exists():
+            queue_file = deliverables_path / get_queue_filename(agent_name)
         if not queue_file.exists():
             raise PentestError(
                 f"Missing exploitation queue for {agent_name.value}: {queue_file.name} "

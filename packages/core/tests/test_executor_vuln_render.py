@@ -148,7 +148,8 @@ async def test_injection_vuln_renders_analysis_md_and_queue_both_written(monkeyp
     assert "sqli found" in md           # collector payload 经 renderer 流到 md
 
     # ── 不变量 3:exploitation_queue.json(structured_output 通道)落盘 + 内容 round-trip
-    queue_file = deliverables / "injection_exploitation_queue.json"
+    #      （spec 2026-08-18 tiering：queue 下沉 deliverables/intermediate/）
+    queue_file = deliverables / "intermediate" / "injection_exploitation_queue.json"
     assert queue_file.exists(), (
         "exploitation_queue.json missing — dual-channel structured_output 通道断"
     )
@@ -213,8 +214,8 @@ async def test_injection_vuln_skipped_all_sections_md_written_no_raise(monkeypat
     assert "set_safe_vectors` was not called" in md
     assert "set_blind_spots` was not called" in md
 
-    # queue 通道不受 collector 通道影响(双通道独立)
-    queue_file = deliverables / "injection_exploitation_queue.json"
+    # queue 通道不受 collector 通道影响(双通道独立);tiering 后落 intermediate/
+    queue_file = deliverables / "intermediate" / "injection_exploitation_queue.json"
     assert queue_file.exists()
     assert json.loads(queue_file.read_text(encoding="utf-8")) == queue_payload
 
@@ -258,7 +259,7 @@ async def test_injection_exploit_renders_evidence_using_queue_root(monkeypatch, 
         queue_root=str(queue_root),
     )
 
-    evidence = deliverables / "injection_exploitation_evidence.md"
+    evidence = deliverables / "blackbox" / "injection_exploitation_evidence.md"
     assert evidence.exists(), "evidence.md 应由 renderer 渲染落盘"
     md = evidence.read_text(encoding="utf-8")
     assert "## Successfully Exploited" not in md  # exploited 无 section 标题（2026-08-12）
@@ -301,8 +302,8 @@ async def test_injection_exploit_writes_verdicts_json(monkeypatch, tmp_path):
         queue_root=str(queue_root),
     )
 
-    verdicts_file = deliverables / "blackbox" / "injection_exploit_verdicts.json"
-    assert verdicts_file.exists(), "verdicts.json 应落盘 deliverables/blackbox/"
+    verdicts_file = deliverables / "blackbox" / "intermediate" / "injection_exploit_verdicts.json"
+    assert verdicts_file.exists(), "verdicts.json 应落盘 blackbox/intermediate/（spec 2026-08-18 降级方案）"
     payload = json.loads(verdicts_file.read_text(encoding="utf-8"))
     assert payload["vuln_class"] == "injection"
     assert "INJ-VULN-01" in payload["accepted_ids"]

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from supernova_core.models.agents import AgentName
 from supernova_core.utils.atomic_write import atomic_write_json
 from supernova_core.utils.file_io import async_path_exists, async_read_file
-from supernova_core.utils.paths import WHITEBOX_SUBDIR, blackbox_dir, resolve_track_deliverable
+from supernova_core.utils.paths import WHITEBOX_SUBDIR, blackbox_dir, intermediate_path, resolve_track_deliverable
 from supernova_core.services.playwright_config_writer import get_session_id
 
 from supernova_core.agents.executor import AgentExecutor
@@ -113,7 +113,9 @@ class EndpointVerifyExecutor:
             return {"endpoint_verify": None, "reason": "agent produced no structured output",
                     "duration_ms": metrics.duration_ms, "cost_usd": metrics.cost_usd,
                     "cost_currency": metrics.cost_currency}
-        out_path = blackbox_dir(deliverables_path) / ENDPOINT_VERIFY_FILENAME
+        # tiering（spec 2026-08-18）：机器交接数据 → blackbox/intermediate/；
+        # 读方 exploit_executor 走 resolve_track_deliverable 三级链命中。
+        out_path = intermediate_path(blackbox_dir(deliverables_path), ENDPOINT_VERIFY_FILENAME)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(out_path, metrics.structured_output)
         return {
