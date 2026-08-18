@@ -28,6 +28,20 @@ def _ready_whitebox(scan_dir):
         '{"vulnerabilities":[{"id":1}]}')
 
 
+def test_count_nonempty_queues_reads_intermediate(tmp_path):
+    """tiering 回归：queue 是中间产物落 whitebox/intermediate/ ->
+    _count_nonempty_queues 必须数到（曾 glob 不递归数 0 -> 黑盒阶段整体被跳过）。"""
+    from supernova_core.utils.paths import INTERMEDIATE_SUBDIR
+    wb = tmp_path / "scan" / "deliverables" / "whitebox"
+    (wb / INTERMEDIATE_SUBDIR).mkdir(parents=True)
+    (wb / INTERMEDIATE_SUBDIR / "injection_exploitation_queue.json").write_text(
+        '{"vulnerabilities":[{"id":1}]}')
+
+    n = _mgr(tmp_path)._count_nonempty_queues(tmp_path / "scan")
+
+    assert n == 1, "intermediate/ 下非空 queue 应被计入"
+
+
 def _task_session(scan_dir) -> dict:
     return json.loads((scan_dir / "session.json").read_text("utf-8"))
 

@@ -894,9 +894,15 @@ def _write_checkpoint(deliverables_dir: Path, track: str,
 
 
 def _resolve_input(deliverables_dir: Path, filename: str) -> Path | None:
-    """先在 track 目录找，不存在回退 parent（兼容老平铺 session）。"""
-    p = deliverables_dir / filename
-    if p.exists():
+    """先在 track 目录找，不存在回退 parent（兼容老平铺 session）。
+
+    tiering（spec 2026-08-18）：queue/verdicts 等中间产物落 track/intermediate/，
+    resolve_intermediate 已含 intermediate/ 优先 + track 顶层兜底，parent 再兜
+    老平铺 session 根。
+    """
+    from supernova_core.utils.paths import resolve_intermediate
+    p = resolve_intermediate(deliverables_dir, filename)
+    if p is not None:
         return p
     parent = deliverables_dir.parent / filename
     if parent.exists():

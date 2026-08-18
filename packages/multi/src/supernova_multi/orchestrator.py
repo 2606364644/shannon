@@ -43,7 +43,7 @@ from supernova_core.correlation.schemas import (  # noqa: E402
 )
 from supernova_core.correlation.queue_merge import merge_exploitation_queues  # noqa: E402
 from supernova_core.correlation.drift import detect_drift  # noqa: E402
-from supernova_core.utils.paths import WHITEBOX_SUBDIR  # noqa: E402
+from supernova_core.utils.paths import INTERMEDIATE_SUBDIR, WHITEBOX_SUBDIR  # noqa: E402
 from supernova_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -140,11 +140,14 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
         dlv = deliverables_dir_for_workspace(ws_path)
         per_repo_deliverables[p.service] = dlv
         # 收集该仓所有 exploitation_queue(spec §7 合并, B1)
-        # 白盒 queue 新结构在 whitebox/ 子目录,老结构在 deliverables 根;
-        # 合并去重(whitebox/ 优先,根条目仅补白)。
+        # 白盒 queue 新结构在 whitebox/intermediate/(tiering spec 2026-08-18),
+        # 老结构在 whitebox/ 顶层或 deliverables 根;glob 不递归,三处合并去重
+        # (intermediate 优先,同名仅补白)。
         queue_files: dict[str, Path] = {}
-        for q in (dlv / WHITEBOX_SUBDIR).glob("*_exploitation_queue.json"):
+        for q in (dlv / WHITEBOX_SUBDIR / INTERMEDIATE_SUBDIR).glob("*_exploitation_queue.json"):
             queue_files[q.name] = q
+        for q in (dlv / WHITEBOX_SUBDIR).glob("*_exploitation_queue.json"):
+            queue_files.setdefault(q.name, q)
         for q in dlv.glob("*_exploitation_queue.json"):
             queue_files.setdefault(q.name, q)
         for q in queue_files.values():

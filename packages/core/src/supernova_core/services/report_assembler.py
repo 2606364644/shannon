@@ -53,8 +53,11 @@ class ReportAssembler:
         sub-section with ordered steps.  Returns empty string when the file is
         missing or contains no chains — callers just append the result.
         """
-        chains_path = deliverables_path / "attack_chains.json"
-        if not await async_path_exists(chains_path):
+        # tiering（spec 2026-08-18）：attack_chains.json 是中间产物 -> intermediate/
+        # 优先，平铺老结构兜底；None = 缺失 -> 空章节（graceful）。
+        from supernova_core.utils.paths import resolve_intermediate
+        chains_path = resolve_intermediate(deliverables_path, "attack_chains.json")
+        if chains_path is None:
             return ""
 
         try:

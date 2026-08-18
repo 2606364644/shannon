@@ -67,3 +67,28 @@ async def test_inject_model_info_inserts_after_assessment_date(tmp_path):
     content = report.read_text(encoding="utf-8")
     assert "- **Model:** glm-latest" in content
     assert content.index("Assessment Date") < content.index("**Model:**")
+
+
+@pytest.mark.asyncio
+async def test_render_attack_chains_reads_intermediate(tmp_path):
+    """tiering 回归：attack_chains.json 落 intermediate/（assembly_v2 写侧）->
+    render_attack_chains 必须读到（曾只读平铺 -> 攻击链章节静默缺失）。"""
+    deliverables = tmp_path / "deliverables"
+    (deliverables / "intermediate").mkdir(parents=True)
+    (deliverables / "intermediate" / "attack_chains.json").write_text(json.dumps({
+        "chains": [{
+            "id": "CHAIN-01",
+            "name": "auth_bypass_to_data_access",
+            "vuln_type": "auth",
+            "severity": "critical",
+            "confidence": "high",
+            "steps": [{"order": 1, "endpoint": "/api/users/1", "method": "GET",
+                       "description": "fetch other user"}],
+        }],
+    }), encoding="utf-8")
+
+    md = await ReportAssembler.render_attack_chains(deliverables)
+
+    assert md != ""
+    assert "CHAIN-01" in md
+    assert "/api/users/1" in md

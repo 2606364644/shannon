@@ -35,6 +35,7 @@ import re
 from pathlib import Path
 
 from supernova_core.i18n import Messages
+from supernova_core.utils.paths import resolve_intermediate
 
 logger = logging.getLogger(__name__)
 
@@ -156,13 +157,13 @@ def _first_field(vuln: dict, fields: tuple[str, ...]) -> str | None:
     return None
 
 
-def _read_queue(queue_path: Path) -> list[dict]:
+def _read_queue(queue_path: Path | None) -> list[dict]:
     """读白盒 ``{vt}_exploitation_queue.json`` 的 vulnerabilities 列表（过滤占位）。
 
     韧性：文件缺失 / 损坏 JSON / vulnerabilities 非列表 → 返回空列表（不抛）。
     对齐 ``has_valid_whitebox_results`` 的容错口径。
     """
-    if not queue_path.is_file():
+    if queue_path is None or not queue_path.is_file():
         return []
     try:
         data = json.loads(queue_path.read_text("utf-8", errors="replace"))
@@ -176,7 +177,7 @@ def _read_queue(queue_path: Path) -> list[dict]:
             if isinstance(v, dict) and not _is_placeholder(v)]
 
 
-def _read_verdicts(verdicts_path: Path) -> list[dict]:
+def _read_verdicts(verdicts_path: Path | None) -> list[dict]:
     """读黑盒 ``{vt}_exploit_verdicts.json`` 的 verdicts 列表。
 
     与白盒 queue 不同 stem（见 ``workspace.py:127-160``、``executor.py:221``）：
@@ -189,7 +190,7 @@ def _read_verdicts(verdicts_path: Path) -> list[dict]:
 
     韧性：文件缺失 / 损坏 JSON / verdicts 非列表 → 返回空列表（不抛）。
     """
-    if not verdicts_path.is_file():
+    if verdicts_path is None or not verdicts_path.is_file():
         return []
     try:
         data = json.loads(verdicts_path.read_text("utf-8", errors="replace"))
@@ -393,9 +394,11 @@ def render_combined_report(*, whitebox_root: Path, blackbox_root: Path,
     wb_base = Path(whitebox_root)
     bb_base = Path(blackbox_root)
 
-    queues = {vt: _read_queue(wb_base / f"{vt}_exploitation_queue.json")
+    # tiering（spec 2026-08-18）：queue/verdicts 是中间产物 -> intermediate/ 优先，
+    # 平铺老结构兜底（resolve_intermediate 返 None = 缺失 -> 空 list，韧性不变）。
+    queues = {vt: _read_queue(resolve_intermediate(wb_base, f"{vt}_exploitation_queue.json"))
               for vt in _VULN_CLASSES}
-    verdicts = {vt: _read_verdicts(bb_base / f"{vt}_exploit_verdicts.json")
+    verdicts = {vt: _read_verdicts(resolve_intermediate(bb_base, f"{vt}_exploit_verdicts.json"))
                 for vt in _VULN_CLASSES}
     status_by_id = {str(v.get("vulnerability_id")): str(v.get("status"))
                     for vs in verdicts.values() for v in vs

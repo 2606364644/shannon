@@ -396,3 +396,23 @@ def test_render_writes_to_per_run_out_dir(tmp_path: Path):
     text = out.read_text("utf-8")
     assert "| injection | 1 | 1 |" in text
     assert "### injection" in text  # 降级路径（无黑盒报告）按类详述仍在
+
+
+def test_render_reads_intermediate_queues_and_verdicts(tmp_path: Path):
+    """tiering 回归：queue/verdicts 是中间产物落桶内 intermediate/ ->
+    render_combined_report 必须读到（曾平铺拼接 -> 融合报告计数全 0）。"""
+    wb_root = tmp_path / "deliverables" / "whitebox"
+    bb_root = tmp_path / "blackbox-runs" / "run-1" / "deliverables" / "blackbox"
+    out_dir = tmp_path / "combined" / "run-1"
+    (wb_root / "intermediate").mkdir(parents=True)
+    (bb_root / "intermediate").mkdir(parents=True)
+    (wb_root / "intermediate" / "injection_exploitation_queue.json").write_text(_queue([
+        {"ID": "INJ-1", "title": "SQLi", "source": "/login"}]))
+    (bb_root / "intermediate" / "injection_exploit_verdicts.json").write_text(_verdicts([
+        {"vulnerability_id": "INJ-1", "status": "exploited", "severity": "high"}]))
+
+    out = render_combined_report(whitebox_root=wb_root, blackbox_root=bb_root,
+                                 out_dir=out_dir)
+
+    text = out.read_text("utf-8")
+    assert "| injection | 1 | 1 |" in text, "intermediate/ 下 queue/verdicts 应被读到"

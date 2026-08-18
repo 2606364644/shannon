@@ -19,7 +19,8 @@ from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
 from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 from supernova_core.session import SessionManager
 from supernova_core.utils.paths import (
-    blackbox_dir, blackbox_run_dir, combined_run_dir, whitebox_dir)
+    INTERMEDIATE_SUBDIR, blackbox_dir, blackbox_run_dir, combined_run_dir,
+    whitebox_dir)
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
@@ -2536,8 +2537,14 @@ class ScanManager:
         wb_dir = scan_dir / "deliverables" / "whitebox"
         if not wb_dir.is_dir():
             return 0
+        # tiering（spec 2026-08-18）：queue 是中间产物落 whitebox/intermediate/，
+        # 老结构在桶顶层。glob 不递归，双 glob 覆盖（intermediate 有则用之，同名
+        # 不共存于两种结构）。
+        queue_files = list(
+            (wb_dir / INTERMEDIATE_SUBDIR).glob("*_exploitation_queue.json")
+        ) or list(wb_dir.glob("*_exploitation_queue.json"))
         n = 0
-        for qf in wb_dir.glob("*_exploitation_queue.json"):
+        for qf in queue_files:
             try:
                 data = json.loads(qf.read_text("utf-8", errors="replace"))
             except (json.JSONDecodeError, OSError):
