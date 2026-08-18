@@ -30,7 +30,7 @@
 | **接力** | 技术上只能先白盒后黑盒（黑盒强依赖白盒产物），自动串行 |
 | **t0 预验证** | 提交时先用认证登一次目标站（复用 `AuthValidationWorkflow`），失败 fail-fast 不跑白盒——避免白盒白跑 1-2h 后黑盒才发现认证错 |
 | **进度** | 列表卡片**收起**显示粗略 `progress_pct` + 阶段名；**展开**显示步级详细（分段时间线 + 每段步进度）。靠 `bb_phase` 状态机切段 |
-| **报告** | 三视图：白盒报告 / 黑盒报告 / 融合报告（vuln_class 交叉 + 摘要）。漏洞类级对齐，不做单漏洞 1:1 |
+| **报告** | 三视图：白盒报告 / 黑盒报告 / 融合报告（黑盒报告主体 + 白盒脆弱代码位置/缺失防护卡片级融入 + 摘要 + 白盒独有附录） |
 | **接力机制** | 后端编排接力（scan_manager `_combined_orchestrator` await 白盒完成 → 自动提交黑盒），关浏览器也能接力 |
 | **黑盒续跑** | 黑盒阶段 failed 后，可（多次）换认证续跑黑盒，复用白盒产物不重跑 |
 | **物理形态** | 单目录三桶：组合扫描只建一个 `scans/<wb>/`，下含 `deliverables/{whitebox,blackbox,combined}/` + 单 session + 单 events |
@@ -356,7 +356,7 @@ repo-C  联合  62%  ████████████░░░░░░
 
 ---
 
-## 10. 报告三视图（vuln_class 交叉融合）
+## 10. 报告三视图（融合 = 黑盒报告主体 + 白盒字段融入）
 
 ### 10.1 三视图
 
@@ -370,29 +370,37 @@ repo-C  联合  62%  ████████████░░░░░░
 
 产物 tab（`DeliverablesTab.tsx`）同理合并展示三个桶。
 
-### 10.2 融合报告结构（vuln_class 交叉）
+### 10.2 融合报告结构（黑盒报告为主体 + 白盒字段融入）
+
+理念：基于黑盒**实测验证过**的漏洞（黑盒正式报告原文作主体），补充白盒的
+脆弱代码位置与缺失防护，让融合报告更完善。纯代码机械融合（零 LLM、零 token、
+黑盒实证内容不变形）。
 
 ```
 # 组合扫描融合报告
+> 融合说明（主体为黑盒实测报告，融入白盒字段）
 
 ## 组合摘要
-| 漏洞类 | 白盒发现 | 黑盒验证 |
-|---|---|---|
-| injection | 3 | 2 |
-| xss | 2 | 1 |
-...
+| 漏洞类 | 白盒发现 | 黑盒验证 | 双轨交叉 |
+|---|---|---|---|
+| injection | 3 | 2 | 是 |
+...（5 类含 auth）
 
-## 按漏洞类详述
-### injection
-#### 白盒视角（代码证据）
-  - <白盒 queue 项：sink/数据流/位置>
-#### 黑盒视角（利用验证）
-  - <黑盒 finding：endpoint/PoC/verdict>
-...（每个 vuln_class 一节，白盒+黑盒并列）
+<黑盒 comprehensive_security_assessment_report.md 原文>
+  —— 仅剔 H1（头部已换融合标题），其余一字不动
+  —— ### {ID}: 漏洞卡标题后插两行（按 ID 匹配白盒 queue，两边 ID 同源）：
+       - **脆弱代码位置（白盒）:** vulnerable_code_location / sink_function / path / source
+       - **缺失防护（白盒）:** missing_defense / guard_evidence / sanitization_observed / encoding_observed
+
+## 白盒独有发现（黑盒未实证）
+  - **{ID}** [verdict status | 未尝试] title @ 位置 — 缺失防护
 ```
 
-- **对齐粒度**：vuln_class（黑盒本就按 vuln_class 读白盒 queue）。不做单个漏洞 1:1。
-- **生成**：新增 `combined_report_renderer`（复用 `FindingsRenderer`/`ReportAssembler` 的读 queue 逻辑），由 `_run_blackbox_phase` 在黑盒完成后调用，产 `deliverables/combined/combined_report.md`。
+- **对齐粒度**：主体报告卡片级（黑盒卡 ↔ 白盒 queue 按 ID 1:1 注入）；摘要表仍 vuln_class 级计数（白盒 = queue 条数、黑盒 = exploited verdict 数，与 `get_workspace_vuln_counts` 同口径）。
+- **auth 纳入**交叉范围（黑盒接力同样验证 auth，真实 run 产 auth verdicts + 报告 auth 卡；5 类 = injection/xss/ssrf/authz/auth）。
+- **占位过滤**：白盒 queue 中 ID 含 `PLACEHOLDER` 的脏条目不渲染、不计数。
+- **韧性降级**：黑盒报告缺失 / 空 / 不可读 → 回退机械交叉表（按类详述 bullet），摘要表仍产出。
+- **生成**：`combined_report_renderer`（读 queue/verdicts/黑盒报告），由 `_run_blackbox_phase` 在黑盒完成后调用，产 `deliverables/combined/combined_report.md`。
 - **归属**：`combined/` 是新桶，`DeliverablesReader._infer_track`（`deliverables_reader.py`）扩展识别 `combined` track；`resolve_track_deliverable`（`paths.py`）支持 `track="combined"`；`COMBINED_SUBDIR` 常量。
 
 ---
@@ -464,7 +472,7 @@ repo-C  联合  62%  ████████████░░░░░░
 | **白盒 finalize PhaseEvent** | `combined=True` 调 `log_phase_complete`（写 PhaseEvent，非 scan_end）；`combined=False` 写 scan_end（纯白盒零回归） | whitebox finalize 单测 |
 | **黑盒续跑（D5）** | bb_phase=failed + 白盒产物在 → 换认证 → 新 workflow `-bb-rerun-1`；多次续跑 N 递增 | scan_manager 单测 |
 | **进度计算** | 给定 completed/expected → progress_pct 正确（三阶段加权）；expected 双轨/黑盒动态口径 | 单测 |
-| **融合报告** | 给定白盒+黑盒 queue 样例 → vuln_class 交叉输出 + 摘要计数 | combined_report_renderer 单测 |
+| **融合报告** | 给定黑盒报告 + 白盒 queue + 黑盒 verdicts 样例 → 主体保留 + 卡片注入 + 附录 + 降级 | combined_report_renderer 单测 |
 | **后端透传（G1）** | list_scans as_dict + _scan_detail 含 combined/bb_phase/bb_reason/progress_pct | api 单测 |
 | **前端** | 开关关=纯白盒 body；开关开=带 url+认证 + 预验证态；列表卡片收起%/展开步级；详情两段时间线；报告三子 tab | vitest 组件测试 |
 | **端到端冒烟** | 开关打开跑真实小仓 → 预验✓→白盒✓→黑盒✓→三报告齐；黑盒认证失败→续跑换认证→黑盒✓ | 真机/容器冒烟 |
