@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, ExternalLink, Square } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Square, Pencil } from "lucide-react";
 import { getAuthProfile, testBatch, cancelTest } from "@/api/authProfiles";
 import { apiErrorMessage, providerIncompleteMissing } from "@/lib/apiError";
 import type { AuthProfile, AuthProfileCredential, VerifyState } from "@/api/types";
@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { VerifyLivePanel } from "./VerifyLivePanel";
 import { HostFields } from "@/components/ScanFormFields";
 import { VerifyFailureNote } from "@/components/auth/VerifyFailureNote";
+import { AuthProfileDialog } from "@/components/AuthProfileDialog";
 import { DEFAULT_HOST } from "./ScanNewPage";
 import type { HostFormState } from "./ScanNewPage";
 
@@ -69,6 +70,7 @@ export function AuthProfileTestPage() {
   const [polling, setPolling] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [host, setHost] = useState<HostFormState>(DEFAULT_HOST);
+  const [editOpen, setEditOpen] = useState(false);
 
   // ref 同步：拉 profile effect 依赖 refreshTick（不含 polling/selectedIds），闭包经 ref 读最新值，
   // 避免 toggle role 触发多余 profile 请求。
@@ -223,13 +225,22 @@ export function AuthProfileTestPage() {
           <Card className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <h2 className="break-all font-mono text-lg font-medium">{profile.name}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="break-all font-mono text-lg font-medium">{profile.name}</h2>
+                  {/* 档案级编辑：紧贴其编辑的对象（档案名）。对齐列表页图标范式；系统档案只读隐藏。 */}
+                  {profile.scope !== "system" && (
+                    <Button variant="ghost" size="icon" aria-label={t("authProfiles.edit")}
+                      onClick={() => setEditOpen(true)} className="shrink-0 text-muted-foreground hover:text-primary">
+                      <Pencil className="size-4" />
+                    </Button>
+                  )}
+                </div>
                 <p className="break-all font-mono text-xs text-muted-foreground">{profile.login_url}</p>
                 <Badge variant="outline" className={`gap-1 font-mono ${verifyBadge(ov).cls}`}>
                   <span aria-hidden>{verifyBadge(ov).icon}</span>{t(`authProfiles.overall.${ov}`)}
                 </Badge>
               </div>
-              {/* testing（wf id 已知）→ 停止按钮；wf id 未就绪/瞬态 → 测试中占位 */}
+              {/* 右侧操作区仅保留主线测试动作（开始/停止） */}
               {testing && stopWfId ? (
                 <Button variant="destructive" onClick={onStop} className="shrink-0">
                   <Square className="size-3.5" /> {t("authProfiles.testPage.stop")}
@@ -342,6 +353,17 @@ export function AuthProfileTestPage() {
             </Card>
           )}
         </>
+      )}
+
+      {/* 档案级编辑对话框（复用列表页）：保存后重拉 profile 同步角色/凭据。system 档案仅读（readOnly 兜底）。 */}
+      {profile && (
+        <AuthProfileDialog
+          ws={workspace}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSaved={() => { setEditOpen(false); setRefreshTick((n) => n + 1); }}
+          editing={profile}
+        />
       )}
     </div>
   );

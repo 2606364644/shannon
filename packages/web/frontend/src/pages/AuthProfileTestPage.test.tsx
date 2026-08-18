@@ -147,6 +147,27 @@ describe("AuthProfileTestPage", () => {
     await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
     expect(screen.getByText("HOST 解析")).toBeInTheDocument();
   });
+
+  it("非 system 档案渲染编辑按钮 → 打开编辑对话框（预填档案名 + 全量角色）", async () => {
+    currentProf = prof;
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    const editBtn = screen.getByRole("button", { name: "编辑" });
+    expect(editBtn).toBeInTheDocument();
+    fireEvent.click(editBtn);
+    // AuthProfileDialog editing 模式：标题「编辑」+ 档案名/URL 预填；提交走 PATCH
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    expect(screen.getByText("编辑")).toBeInTheDocument();  // DialogTitle
+    expect(screen.getByLabelText("档案名")).toHaveValue("NG");
+    expect(screen.getByLabelText("登录地址")).toHaveValue("http://t/");
+  });
+
+  it("system 档案隐藏编辑按钮（只读对齐列表页）", async () => {
+    currentProf = { ...prof, scope: "system" };
+    renderPage();
+    await waitFor(() => expect(screen.getByText("NG")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+  });
 });
 
 describe("AuthProfileTestPage 失败提示（VerifyFailureNote）", () => {
