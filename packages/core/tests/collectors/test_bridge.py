@@ -130,6 +130,37 @@ async def test_openai_append_tool_invalid_json_returns_error_not_append():
     assert collector.get_all() == {}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["[null]", "[123]"])
+async def test_openai_tool_array_arguments_returns_error_not_crash(bad):
+    """合法 JSON 但不是对象（数组）→ 返错误串让模型重发，不让 dict() 崩。
+
+    回归真机 deepseek-v4-flash-coder pre-recon 收尾 Turn：模型偶发吐
+    arguments="[null]"（合法 JSON 非对象，repair 拦不住），旧逻辑透传 list
+    给 set_section，dict([None]) 抛 TypeError → SDK 包成 "Error running
+    tool ..." → activity 失败 → Temporal 重试整轮 agent 白烧成本。
+    """
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), bad)
+    assert "must be a JSON object" in str(result)
+    assert collector.get_all() == {}          # 未收空数据
+
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_array_arguments_returns_error_not_crash():
+    """append 模式同样：合法 JSON 数组不 append、返错让模型重发。"""
+    from agents import RunContextWrapper
+
+    collector = _append_collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), "[null]")
+    assert "must be a JSON object" in str(result)
+    assert collector.get_all() == {}
+
+
 # ---------- claude ----------
 
 @pytest.mark.asyncio

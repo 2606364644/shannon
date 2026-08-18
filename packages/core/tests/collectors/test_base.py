@@ -121,6 +121,31 @@ def test_set_section_rejects_append_mode_section():
         raise AssertionError("expected TypeError/ValueError when set_section on mode=append section")
 
 
+def test_set_section_non_dict_payload_raises_value_error():
+    # payload 非 dict（如合法 JSON 数组 [null]）→ 明确 ValueError，而非 dict() 的 TypeError
+    # （bridge 层已拦，此处双保险：漏网的非 dict 调用方拿到语义清晰的错误）
+    c = CollectorBase([_schema()])
+    try:
+        c.set_section("set_alpha", [None])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError when set_section payload is not a dict")
+    assert c.get_all() == {}          # 未写入半成品状态
+
+
+def test_append_section_non_dict_item_raises_value_error():
+    # item 非 dict 同理：ValueError 而非 dict() 的 TypeError
+    c = CollectorBase([_append_schema()])
+    try:
+        c.append_section("set_eps", [123])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError when append_section item is not a dict")
+    assert c.get_all() == {}
+
+
 def test_append_empty_not_in_get_all():
     # mode="append" section 未 append 过 → get_all() 不含该 key（renderer 补 placeholder）
     c = CollectorBase([_append_schema(), _schema()])

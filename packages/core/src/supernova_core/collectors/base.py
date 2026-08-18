@@ -88,6 +88,12 @@ class CollectorBase:
             raise DuplicateCallError(
                 f"{tool_name} has already been called. Each set_* tool may only be called once per run."
             )
+        # 双保险：非 dict payload（如合法 JSON 数组）明确 ValueError，而非 dict() 的
+        # TypeError（bridge 层已拦，此处兜漏网调用方，语义清晰可捕获）。
+        if payload is not None and not isinstance(payload, dict):
+            raise ValueError(
+                f"{tool_name} payload must be a dict, got {type(payload).__name__}"
+            )
         self._payloads[key] = dict(payload or {})
         self._called_tools.append(tool_name)
 
@@ -101,6 +107,11 @@ class CollectorBase:
         if schema.mode != "append":
             raise TypeError(
                 f"{tool_name} is mode={schema.mode!r}; use set_section() for set-mode sections"
+            )
+        # 双保险：非 dict item（如合法 JSON 数组）明确 ValueError，而非 dict() 的 TypeError。
+        if item is not None and not isinstance(item, dict):
+            raise ValueError(
+                f"{tool_name} item must be a dict, got {type(item).__name__}"
             )
         self._appends.setdefault(key, []).append(dict(item or {}))
         if tool_name not in self._called_tools:

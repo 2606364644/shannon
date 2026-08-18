@@ -40,7 +40,14 @@ def _make_openai_function_tool(collector: CollectorBase, schema: SectionSchema):
             if repaired is None:
                 return (f"{tool_name}: ERROR — arguments is not valid JSON. "
                         f"Resend {tool_name} with valid JSON matching the schema.")
-            collector.append_section(tool_name, json.loads(repaired))
+            # 合法 JSON 但不是对象（如 "[null]"）也是畸形形态 → 同样返错让模型重发，
+            # 不透传给 append_section（dict(list) 抛 TypeError → SDK 包成
+            # "Error running tool ..." → activity 失败白烧一轮 LLM 成本）。
+            parsed = json.loads(repaired)
+            if not isinstance(parsed, dict):
+                return (f"{tool_name}: ERROR — arguments must be a JSON object. "
+                        f"Resend {tool_name} with a JSON object matching the schema.")
+            collector.append_section(tool_name, parsed)
             items = collector.get_all().get(schema.section_key, [])
             return f"{tool_name}: recorded ({len(items)} total)"
 
@@ -54,8 +61,15 @@ def _make_openai_function_tool(collector: CollectorBase, schema: SectionSchema):
             if repaired is None:
                 return (f"{tool_name}: ERROR — arguments is not valid JSON. "
                         f"Resend {tool_name} with valid JSON matching the schema.")
+            # 合法 JSON 但不是对象（如 "[null]"）也是畸形形态 → 同样返错让模型重发，
+            # 不透传给 set_section（dict([None]) 抛 TypeError → SDK 包成
+            # "Error running tool ..." → activity 失败白烧一轮 LLM 成本）。
+            parsed = json.loads(repaired)
+            if not isinstance(parsed, dict):
+                return (f"{tool_name}: ERROR — arguments must be a JSON object. "
+                        f"Resend {tool_name} with a JSON object matching the schema.")
             try:
-                collector.set_section(tool_name, json.loads(repaired))
+                collector.set_section(tool_name, parsed)
             except DuplicateCallError:
                 return f"{tool_name}: DuplicateError — already called; first call wins"
             return f"{tool_name}: recorded"
