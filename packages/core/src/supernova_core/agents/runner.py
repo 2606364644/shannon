@@ -50,6 +50,7 @@ class ProviderConfig:
     subagent_max_turns: int | None = None     # SUPERNOVA_OPENAI_SUBAGENT_MAX_TURNS
     max_output_tokens: int | None = None      # CLAUDE_CODE_MAX_OUTPUT_TOKENS
     call_timeout: float | None = None         # SUPERNOVA_OPENAI_CALL_TIMEOUT（秒）
+    subagent_call_timeout: float | None = None  # SUPERNOVA_OPENAI_SUBAGENT_CALL_TIMEOUT（秒）
     adaptive_thinking: bool | None = None     # CLAUDE_ADAPTIVE_THINKING
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from typing import Any, TYPE_CHECKING
@@ -33,6 +34,8 @@ from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
 from .providers import BaseProvider, ProviderConfig
 from .runner import ClaudeRunResult, TokenUsage
+
+logger = logging.getLogger(__name__)
 from .tool_audit_logger import ToolAuditLogger
 from .tools_openai import ToolContext, build_tools
 
@@ -171,8 +174,12 @@ class OpenAIProvider(BaseProvider):
             # + 重试放大、worker 线程长 sleeping。env 驱动保守默认 300s/1：单次请求熔断 + 限重试，
             # stall 时更快抛 timeout -> _classify_error 判 retryable -> activity 重试，不静默 hang。
             # （非本次 OOM 真根因——OOM 是内存；本加固防 stall 类 hang，防御性。）
+            # max_retries 默认 1（对齐注释与 test_get_client_defaults_when_env_unset 锁定的
+            # 意图；曾漂移为 3）：非流式请求超时是确定性的（同样请求重发照样超），重试只放大
+            # 白烧（回归 NodeGoat-20260818-133852 xss-vuln：stall 4 次×300s≈20min 拖死主
+            # agent）。流式请求的 transient stall 由 activity 层重试兜底，不缺这一层。
             kwargs["timeout"] = float(os.getenv("SUPERNOVA_OPENAI_HTTP_TIMEOUT", "300"))
-            kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "3"))
+            kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "1"))
             self._client = _wrap_client_for_argument_sanitize(AsyncOpenAI(**kwargs))
         return self._client
 
@@ -243,6 +250,19 @@ class OpenAIProvider(BaseProvider):
             output_type=None,
         )
 
+    def _subagent_call_timeout(self) -> float:
+        """子代理 run 消费的 wall-clock 超时（秒），兜底永久 stall。
+
+        子代理体量（只读代码阅读）小于主 agent，默认 900s < 主 2400s
+        （SUPERNOVA_OPENAI_CALL_TIMEOUT）；stall 时先于主超时抛错，父 agent 收
+        [task error] 后可自行兜底，不拖满主 call_timeout 连坐整次执行
+        （回归 NodeGoat-20260818-133852：marked 子代理 stall 28min 拖死 xss-vuln）。
+        P3c 阶段 0：self.config 优先（None 回落 env）。
+        """
+        if self.config.subagent_call_timeout is not None:
+            return self.config.subagent_call_timeout
+        return float(os.getenv("SUPERNOVA_OPENAI_SUBAGENT_CALL_TIMEOUT", "900"))
+
     def _make_subagent_runner(self, model: str, cwd: str, proxy_url: str | None = None):
         """构建子代理 runner：代码阅读 Agent（read/glob/grep）跑 prompt，返回 final_output。
 
@@ -253,6 +273,12 @@ class OpenAIProvider(BaseProvider):
         子代理 ToolContext 不注入 subagent_run（防嵌套递归）。
         Task 4: ``proxy_url`` 透传给子代理 ToolContext（与主 agent 同一 per-scan 代理；
         子代理工具集仅 read/glob/grep 当前不读 proxy_url，但保持对称注入供未来扩展）。
+
+        流式 + wall-clock 兜底（回归 2026-08-18 xss-vuln）：非流式 Runner.run 生成完成前
+        零字节返回，HTTP 读超时（默认 300s）等于"整个生成必须 300s 内完成"，长分析必超时
+        且 SDK 原样重发照样超时（确定性死局，4 次×300s 白烧 28min）。对齐主 agent 的
+        run_streamed——流式 chunk 持续重置读超时，长生成扛得住；再包 wait_for 兜底
+        stream 永久 stall（此前子代理零超时，只能靠主 2400s 拖死连坐）。
         """
         from .tools_openai.exec import grep
         from .tools_openai.fs import glob, read_file
@@ -269,15 +295,35 @@ class OpenAIProvider(BaseProvider):
         max_turns = self._subagent_max_turns()
 
         async def run(prompt: str) -> str:
-            res = await Runner.run(
+            start = time.monotonic()
+            logger.info("task subagent start: %.80s", prompt.replace("\n", " "))
+            result = Runner.run_streamed(
                 subagent,
                 input=prompt,
                 context=ToolContext(cwd=cwd, proxy_url=proxy_url),  # 子代理同 cwd，无 subagent_run（防递归）
                 max_turns=max_turns,
             )
-            return str(res.final_output)
+
+            async def _consume() -> None:
+                async for _event in result.stream_events():
+                    pass  # 消费即驱动；事件形态不作断言（子代理黑盒问题由日志兜底）
+
+            await asyncio.wait_for(_consume(), timeout=self._subagent_call_timeout())
+            duration = int((time.monotonic() - start) * 1000)
+            logger.info("task subagent finish: duration_ms=%d", duration)
+            return str(result.final_output)
 
         return run
+
+    def _reparse_timeout(self) -> float:
+        """L1 reparse 的 wall-clock 超时（秒）。
+
+        reparse 在 call() 的 wait_for(call_timeout) **之外**执行，此前无任何
+        wall-clock 约束：非流式 create + client 级 max_retries 放大时（stall
+        4 次×300s≈20min）可把 agent 拖在"已出结果后的兜底步骤"上。reparse 语义
+        是轻量快速兜底（失败即弃、进 L2），独立短超时封顶。env 可配。
+        """
+        return float(os.getenv("SUPERNOVA_OPENAI_REPARSE_TIMEOUT", "120"))
 
     async def _lightweight_reparse(self, text: str, output_format: dict | None, model: str):
         """L1：L0 容错失败后，发单个轻量 chat completion 让 GLM 把分析转纯 JSON。
@@ -294,9 +340,13 @@ class OpenAIProvider(BaseProvider):
             "不要任何解释、前言或 markdown 代码围栏：\n" + text
         )
         try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
+            resp = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=self._reparse_timeout(),  # per-request 覆盖 client 300s，单次尽快失败
+                ),
+                timeout=self._reparse_timeout(),      # wall-clock 兜底（含 SDK 内部重试）
             )
         except Exception:
             return None
