@@ -87,7 +87,14 @@ export function FileStage({ ws, scanId, file, runId, onBack }: {
           {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-5 w-full" />)}
         </div>
       ) : file.kind === "md" ? (
-        <MarkdownView markdown={text} />
+        <div className="space-y-2">
+          <MarkdownView markdown={text} />
+          {isServerTruncated(text) && (
+            <div className="rounded-md border border-yellow/40 bg-yellow/10 p-2 text-xs text-yellow">
+              {t("workspaceDetail.deliverables.serverTruncated")}
+            </div>
+          )}
+        </div>
       ) : file.kind === "exploitation_queue" ? (
         <QueueView text={text} />
       ) : (
@@ -120,6 +127,11 @@ function QueueView({ text }: { text: string }) {
       {text}
     </pre>
   );
+}
+
+// 后端截断标注（spec 2026-08-18 preview_limit）：超阈文件 PlainTextResponse 返回截断 + 尾标。
+function isServerTruncated(text: string): boolean {
+  return text.includes("[truncated:");
 }
 
 /** JSON 文本格式化展示；非法 JSON 原样返回。 */

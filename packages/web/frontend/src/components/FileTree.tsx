@@ -10,18 +10,41 @@ interface TreeNode {
   file?: DeliverablesFile;
 }
 
+function insertPath(root: TreeNode, relPath: string, f: DeliverablesFile) {
+  const parts = relPath.split("/");
+  let cur = root;
+  parts.forEach((part, i) => {
+    const path = parts.slice(0, i + 1).join("/");
+    if (!cur.children.has(part)) cur.children.set(part, { name: part, path, children: new Map() });
+    cur = cur.children.get(part)!;
+    if (i === parts.length - 1) cur.file = f;
+  });
+}
+
+// tiering（spec 2026-08-18）：intermediate 文件按 tier 分流进虚拟组（不管其实际
+// 路径在新结构 intermediate/ 目录还是旧结构平铺——观感一致）；组内去掉 track
+// 首段与 intermediate/ 段（展开即见文件，不重复桶层级）。无 tier 字段（旧后端）
+// → 全进主树（兼容）。
+const INTERMEDIATE_VIRTUAL_KEY = "__intermediate__";
+const _TRACK_SEGMENTS = new Set(["whitebox", "blackbox", "combined"]);
+
 function buildTree(files: DeliverablesFile[]): TreeNode {
   const root: TreeNode = { name: "", path: "", children: new Map() };
+  let interNode: TreeNode | null = null;
   for (const f of files) {
-    const parts = f.path.split("/");
-    let cur = root;
-    parts.forEach((part, i) => {
-      const path = parts.slice(0, i + 1).join("/");
-      if (!cur.children.has(part)) cur.children.set(part, { name: part, path, children: new Map() });
-      cur = cur.children.get(part)!;
-      if (i === parts.length - 1) cur.file = f;
-    });
+    if (f.tier === "intermediate") {
+      interNode ??= { name: INTERMEDIATE_VIRTUAL_KEY, path: INTERMEDIATE_VIRTUAL_KEY, children: new Map() };
+      const rel = f.path
+        .split("/")
+        .filter((seg, i, arr) => seg !== "intermediate"
+          && !(i === 0 && arr.length > 1 && _TRACK_SEGMENTS.has(seg)))
+        .join("/");
+      insertPath(interNode, rel, f);
+    } else {
+      insertPath(root, f.path, f);
+    }
   }
+  if (interNode) root.children.set(INTERMEDIATE_VIRTUAL_KEY, interNode);
   return root;
 }
 
@@ -30,6 +53,8 @@ const TRACK_LABEL_KEYS: Record<string, string> = {
   whitebox: "fileTree.trackWhitebox",
   blackbox: "fileTree.trackBlackbox",
   combined: "fileTree.trackCombined",
+  // tiering（spec 2026-08-18）：tier=intermediate 文件统一收进该虚拟组（默认折叠）
+  __intermediate__: "fileTree.intermediate",
 };
 
 function fileIcon(kind: DeliverablesFile["kind"]) {
@@ -69,7 +94,8 @@ function NodeView({
   onSelect: (f: DeliverablesFile) => void;
   selectedPath: string | null;
 }) {
-  const [open, setOpen] = useState(depth < 1);
+  // 中间产物虚拟组默认折叠（tiering：交付物优先，排障时可展开）
+  const [open, setOpen] = useState(depth < 1 && node.name !== INTERMEDIATE_VIRTUAL_KEY);
   const { t } = useTranslation();
   const isDir = node.children.size > 0;
   const selected = !isDir && selectedPath === node.path;

@@ -187,3 +187,44 @@ describe("FileTree", () => {
     });
   });
 });
+
+describe("FileTree tiering 分组（spec 2026-08-18）", () => {
+  const mixed: DeliverablesFile[] = [
+    { path: "whitebox/comprehensive_report.md", size: 100, kind: "md", tier: "deliverable" },
+    { path: "whitebox/injection_findings.md", size: 90, kind: "md", tier: "deliverable" },
+    { path: "whitebox/intermediate/code_index.json", size: 5000, kind: "big_json", tier: "intermediate" },
+    // 旧结构平铺 queue（tier 兜底）
+    { path: "whitebox/xss_llm_queue.json", size: 50, kind: "llm_queue", tier: "intermediate" },
+  ];
+
+  it("tier=intermediate 文件收进『中间产物』虚拟组，交付物留主树", () => {
+    render(<FileTree files={mixed} onSelect={() => {}} />);
+    // 主树顶层：白盒组（含 deliverable 文件）+ 中间产物组
+    expect(screen.getByText("白盒")).toBeInTheDocument();
+    expect(screen.getByText("中间产物")).toBeInTheDocument();
+    // 交付物直接可见
+    expect(screen.getByText("comprehensive_report.md")).toBeInTheDocument();
+    expect(screen.getByText("injection_findings.md")).toBeInTheDocument();
+    // intermediate 文件默认折叠不可见
+    expect(screen.queryByText("code_index.json")).not.toBeInTheDocument();
+    expect(screen.queryByText("xss_llm_queue.json")).not.toBeInTheDocument();
+  });
+
+  it("展开中间产物组后可见组内文件（可排障）", () => {
+    render(<FileTree files={mixed} onSelect={() => {}} />);
+    fireEvent.click(screen.getByText("中间产物"));
+    expect(screen.getByText("code_index.json")).toBeInTheDocument();
+    expect(screen.getByText("xss_llm_queue.json")).toBeInTheDocument();
+  });
+
+  it("无 tier 字段（旧后端数据）→ 全部进主树，兼容", () => {
+    const legacy: DeliverablesFile[] = [
+      { path: "whitebox/a.md", size: 1, kind: "md" },
+      { path: "whitebox/xss_llm_queue.json", size: 1, kind: "llm_queue" },
+    ];
+    render(<FileTree files={legacy} onSelect={() => {}} />);
+    expect(screen.getByText("a.md")).toBeInTheDocument();
+    expect(screen.getByText("xss_llm_queue.json")).toBeInTheDocument();
+    expect(screen.queryByText("中间产物")).not.toBeInTheDocument();
+  });
+});

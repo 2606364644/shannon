@@ -750,7 +750,8 @@
       "emptyHint": "扫描未完成或无 vuln 命中",
       "fileLoadError": "文件加载失败：{{error}}",
       "emptyJson": "无数据（常态空）",
-      "bigJson": "⚠ 文件过大（{{size}} 字节），请在产物目录查看",
+      "serverTruncated": "服务端已截断大文件预览，完整内容见磁盘。",
+    "bigJson": "⚠ 文件过大（{{size}} 字节），请在产物目录查看",
       "backToAgg": "返回漏洞聚合",
       "loadAnyway": "仍要加载",
       "truncated": "…内容过长，仅显示前 {{size}} 字符",
@@ -849,7 +850,8 @@
     "large": "（大）",
     "trackWhitebox": "白盒",
     "trackBlackbox": "黑盒",
-    "trackCombined": "融合"
+    "trackCombined": "融合",
+    "intermediate": "中间产物"
   },
   "wsConfig": {
     "title": "工作区配置",

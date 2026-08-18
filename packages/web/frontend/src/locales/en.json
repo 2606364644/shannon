@@ -750,7 +750,8 @@
       "emptyHint": "Scan incomplete or no vuln hits",
       "fileLoadError": "File load failed: {{error}}",
       "emptyJson": "No data (normal empty)",
-      "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
+      "serverTruncated": "Server truncated a large file preview; full content on disk.",
+    "bigJson": "⚠ File too large ({{size}} bytes); view in deliverables directory",
       "backToAgg": "Back to vulnerability aggregation",
       "loadAnyway": "Load anyway",
       "truncated": "…Content too long; showing first {{size}} characters",
@@ -849,7 +850,8 @@
     "large": "(large)",
     "trackWhitebox": "Whitebox",
     "trackBlackbox": "Blackbox",
-    "trackCombined": "Combined"
+    "trackCombined": "Combined",
+    "intermediate": "Intermediates"
   },
   "wsConfig": {
     "title": "Workspace Config",

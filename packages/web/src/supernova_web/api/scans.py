@@ -149,17 +149,32 @@ def _read_auth_config(scan_dir: Path) -> dict | None:
 
 # ── 共享视图（scans.py 路由 + workspaces.py shim 转发共用）─────────────────────
 
-def deliverables_summary_for(scan_dir, path: str | None):
-    reader = DeliverablesReader(scan_dir)
+_PREVIEW_MAX_BYTES_DEFAULT = 2 * 1024 * 1024  # spec 2026-08-18：大文件预览截断阈值
+
+
+def _preview_max_bytes() -> int:
+    import os
+    raw = os.getenv("SUPERNOVA_DELIVERABLES_PREVIEW_MAX_BYTES")
+    try:
+        return int(raw) if raw else _PREVIEW_MAX_BYTES_DEFAULT
+    except ValueError:
+        return _PREVIEW_MAX_BYTES_DEFAULT
+
+
+def deliverables_summary_for(scan_dir, path: str | None, *, strip_track: bool = False):
+    reader = DeliverablesReader(scan_dir, strip_track_prefix="blackbox" if strip_track else None)
     if path is None:
         return reader.summary()
     parts = path.split("/", 1)
     if len(parts) == 2 and parts[0] in ("whitebox", "blackbox"):
         track, filename = parts[0], parts[1]
+    elif strip_track:
+        # run 级（展示层已剥桶前缀）：无前缀文件名按黑盒 track 读
+        track, filename = "blackbox", path
     else:
         track, filename = "whitebox", path  # legacy 兜底（无 track 前缀）
     try:
-        content = reader.read(filename, track)
+        content = reader.read(filename, track, preview_limit=_preview_max_bytes())
     except FileNotFoundError:
         raise HTTPException(404, "file not found")
     if isinstance(content, str):
@@ -170,7 +185,7 @@ def deliverables_summary_for(scan_dir, path: str | None):
 
 def deliverables_file_for(scan_dir, filename: str, track: str = "whitebox"):
     try:
-        return DeliverablesReader(scan_dir).read(filename, track)
+        return DeliverablesReader(scan_dir).read(filename, track, preview_limit=_preview_max_bytes())
     except FileNotFoundError:
         raise HTTPException(404, "file not found")
 
@@ -255,7 +270,8 @@ def _run_dir_or_404(request: Request, ws: str, scan_id: str, run_id: str) -> Pat
 async def run_deliverables_summary(ws: str, scan_id: str, run_id: str, request: Request,
                                    _: User = Depends(workspace_member),
                                    path: str | None = Query(None)):
-    return deliverables_summary_for(_run_dir_or_404(request, ws, scan_id, run_id), path)
+    return deliverables_summary_for(_run_dir_or_404(request, ws, scan_id, run_id), path,
+                                    strip_track=True)
 
 
 @router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/deliverables/{filename}")

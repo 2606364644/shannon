@@ -36,8 +36,10 @@ def test_summary(tmp_path):
     (dl / "xss_exploitation_queue.json").write_text(json.dumps({"vulnerabilities": [{}]}))
     (dl / "report.md").write_text("# r")
     s = DeliverablesReader(ws).summary()
-    assert "xss" in s["vuln_queues"]
-    assert "report.md" in s["reports"]
+    # summary schema 已收敛为 files/aggregate（不再透传 vuln_queues/reports）
+    names = [f["path"] for f in s["files"]]
+    assert "whitebox/xss_exploitation_queue.json" in names
+    assert "whitebox/report.md" in names
 
 
 def test_missing_raises(tmp_path):
@@ -104,5 +106,96 @@ def test_summary_mixed_layout_no_duplicate(tmp_path):
     (track_dir / "report.md").write_text("# track")
 
     s = DeliverablesReader(ws).summary()
-    assert s["vuln_queues"].count("xss") == 1
-    assert s["reports"].count("report.md") == 1
+    queue_paths = [f["path"] for f in s["files"] if f["path"].endswith("xss_exploitation_queue.json")]
+    assert len(queue_paths) == 2  # 两处物理文件都列出（读方按优先级取 track-scoped）
+    assert s["aggregated_vulnerabilities"] == [{}]  # 聚合去重：1 条而非 2 条
+
+
+class TestTieringFilter:
+    """spec 2026-08-18：隐藏条目排除 + tier 字段。"""
+
+    def _mk(self, tmp_path):
+        wb = tmp_path / "deliverables" / "whitebox"
+        (wb / "intermediate").mkdir(parents=True)
+        (wb / "comprehensive_security_assessment_report.md").write_text("# R")
+        (wb / "injection_findings.md").write_text("# F")
+        (wb / "intermediate" / "code_index.json").write_text("{}")
+        (wb / "intermediate" / "injection_exploitation_queue.json").write_text(
+            '{"vulnerabilities": []}')
+        return tmp_path
+
+    def test_summary_excludes_hidden_entries(self, tmp_path):
+        from supernova_web.components.deliverables_reader import DeliverablesReader
+        ws = self._mk(tmp_path)
+        wb = ws / "deliverables" / "whitebox"
+        (wb / ".whitebox-archive" / "20260818").mkdir(parents=True)
+        (wb / ".whitebox-archive" / "20260818" / "old.md").write_text("x")
+        (wb / ".blackbox-archive").mkdir()
+        (wb / ".blackbox-archive" / "old.json").write_text("{}")
+        (wb / ".poc_checkpoint.json").write_text("{}")
+        paths = [f["path"] for f in DeliverablesReader(ws).summary()["files"]]
+        assert not any(".whitebox-archive" in p or ".blackbox-archive" in p for p in paths)
+        assert not any(".poc_checkpoint" in p for p in paths)
+
+    def test_summary_tier_by_dir_and_pattern(self, tmp_path):
+        from supernova_web.components.deliverables_reader import DeliverablesReader
+        ws = self._mk(tmp_path)
+        # 旧结构平铺的 queue（无 intermediate/ 目录）→ pattern 兜底 intermediate
+        (ws / "deliverables" / "whitebox" / "xss_llm_queue.json").write_text(
+            '{"vulnerabilities": []}')
+        tiers = {f["path"]: f["tier"] for f in DeliverablesReader(ws).summary()["files"]}
+        assert tiers["whitebox/comprehensive_security_assessment_report.md"] == "deliverable"
+        assert tiers["whitebox/injection_findings.md"] == "deliverable"
+        assert tiers["whitebox/intermediate/code_index.json"] == "intermediate"
+        assert tiers["whitebox/intermediate/injection_exploitation_queue.json"] == "intermediate"
+        assert tiers["whitebox/xss_llm_queue.json"] == "intermediate"
+
+
+class TestPreviewTruncation:
+    """spec 2026-08-18：大文件预览截断（deliverables_file_for）。"""
+
+    def test_truncates_oversized_file(self, tmp_path, monkeypatch):
+        from supernova_web.api.scans import deliverables_file_for
+        monkeypatch.setenv("SUPERNOVA_DELIVERABLES_PREVIEW_MAX_BYTES", "100")
+        wb = tmp_path / "deliverables" / "whitebox"
+        wb.mkdir(parents=True)
+        (wb / "big.md").write_text("x" * 500)
+        out = deliverables_file_for(tmp_path, "big.md", track="whitebox")
+        assert isinstance(out, str)
+        assert len(out) < 200
+        assert "truncated" in out
+
+    def test_small_file_untruncated(self, tmp_path):
+        from supernova_web.api.scans import deliverables_file_for
+        wb = tmp_path / "deliverables" / "whitebox"
+        wb.mkdir(parents=True)
+        (wb / "s.md").write_text("small")
+        out = deliverables_file_for(tmp_path, "s.md", track="whitebox")
+        assert out == "small"
+
+
+class TestRunStripPrefix:
+    """spec 2026-08-18 降级方案：run 级 summary 剥 blackbox/ 前缀（展示层归一）。"""
+
+    def test_run_summary_strips_blackbox_prefix(self, tmp_path):
+        from supernova_web.components.deliverables_reader import DeliverablesReader
+        bb = tmp_path / "deliverables" / "blackbox"
+        (bb / "intermediate").mkdir(parents=True)
+        (bb / "comprehensive_security_assessment_report.md").write_text("# R")
+        (bb / "injection_exploitation_evidence.md").write_text("# E")
+        (bb / "intermediate" / "injection_exploit_verdicts.json").write_text("{}")
+        reader = DeliverablesReader(tmp_path, strip_track_prefix="blackbox")
+        paths = [f["path"] for f in reader.summary()["files"]]
+        assert paths == [
+            "comprehensive_security_assessment_report.md",
+            "injection_exploitation_evidence.md",
+            "intermediate/injection_exploit_verdicts.json",
+        ]
+
+    def test_run_read_without_prefix(self, tmp_path):
+        from supernova_web.components.deliverables_reader import DeliverablesReader
+        bb = tmp_path / "deliverables" / "blackbox"
+        bb.mkdir(parents=True)
+        (bb / "injection_exploitation_evidence.md").write_text("# E")
+        reader = DeliverablesReader(tmp_path, strip_track_prefix="blackbox")
+        assert reader.read("injection_exploitation_evidence.md") == "# E"

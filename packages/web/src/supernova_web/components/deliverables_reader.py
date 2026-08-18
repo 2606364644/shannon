@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from supernova_core.models.deliverables import classify_tier
 from supernova_core.utils.paths import COMBINED_SUBDIR, WHITEBOX_SUBDIR, resolve_track_deliverable
 
 BIG_JSON_THRESHOLD = 50_000
-_EXCLUDE_DIRS = {".git", "__pycache__", "schemas"}
+_EXCLUDE_DIRS = {"__pycache__", "schemas"}
 
 # PoC 生成器(poc_generator._POC_FILENAME)写入的产物文件名,report() 接口拼接用。
 POC_FILENAME = "exploitable_poc_collection.md"
@@ -53,18 +54,25 @@ class DeliverablesReader:
     (``deliverables/*``). md / json / log reads + summary.
     """
 
-    def __init__(self, workspace_path: Path) -> None:
+    def __init__(self, workspace_path: Path, strip_track_prefix: str | None = None) -> None:
         self._ws = Path(workspace_path)
         self._deliverables = self._ws / "deliverables"
+        # tiering 展示层归一（spec 2026-08-18 降级方案）：run 级黑盒产物物理在
+        # deliverables/blackbox/，剥掉该前缀让 run 视图树不再有冗余桶层。
+        self._strip = strip_track_prefix
 
     def _iter_files(self):
-        """扫 deliverables 所有文件,排除 .git/__pycache__/schemas(任意深度)。"""
+        """扫 deliverables 所有文件。排除 __pycache__/schemas + 一切 ``.`` 开头
+        条目（.git/.whitebox-archive/.blackbox-archive/.poc_checkpoint.json 等，
+        spec 2026-08-18：归档与管线状态不出现在产物页）。"""
         if not self._deliverables.exists():
             return
         for f in sorted(self._deliverables.rglob("*")):
             if not f.is_file():
                 continue
             if any(part in _EXCLUDE_DIRS for part in f.parts):
+                continue
+            if any(part.startswith(".") for part in f.relative_to(self._deliverables).parts):
                 continue
             yield f
 
@@ -86,9 +94,10 @@ class DeliverablesReader:
         track = self._infer_track(track)
         files = [
             {
-                "path": str(f.relative_to(self._deliverables)),  # 含 track 前缀:whitebox/xss.json
+                "path": self._display_path(f),  # scan 级含 track 前缀；run 级已剥桶层
                 "size": f.stat().st_size,
                 "kind": _classify(f),
+                "tier": classify_tier(str(f.relative_to(self._deliverables))),  # tiering
             }
             for f in self._iter_files()
         ]
@@ -104,13 +113,19 @@ class DeliverablesReader:
         }
 
     def _aggregate_vulns(self) -> list:
-        """跨 *_exploitation_queue.json 聚合 vulnerabilities(空/无效跳过)。"""
+        """跨 *_exploitation_queue.json 聚合 vulnerabilities(空/无效跳过)。
+        同名 queue 在 track-scoped 与 legacy 平铺两处共存时只计一次
+        （sorted 顺序 track 目录在前，取首个——迁移窗口防双计）。"""
         out = []
+        seen_queues: set[str] = set()
         for f in self._iter_files():
             if not f.name.endswith("_exploitation_queue.json"):
                 continue
+            if f.name in seen_queues:
+                continue
             if not _is_valid_queue_file(f):
                 continue
+            seen_queues.add(f.name)
             try:
                 data = json.loads(f.read_text("utf-8"))
                 for v in data.get("vulnerabilities", []):
@@ -142,15 +157,31 @@ class DeliverablesReader:
                     out.append(f"agents/{f.name}")
         return out
 
-    def read(self, filename: str, track: str | None = None) -> dict | list | str:
+    def _display_path(self, f: Path) -> str:
+        """summary 展示路径：strip 模式剥掉桶前缀（run 级归一），否则含 track 前缀。"""
+        rel = str(f.relative_to(self._deliverables))
+        if self._strip and rel.startswith(self._strip + "/"):
+            return rel[len(self._strip) + 1:]
+        return rel
+
+    def read(self, filename: str, track: str | None = None,
+             preview_limit: int | None = None) -> dict | list | str:
+        """读单产物。preview_limit（spec 2026-08-18）：超限文件返回截断 str + 标注
+        （跳过 json.loads，几十 MB 的 code_index.json 不再整载入/整传输）。"""
         # track=None(未指定,如 report_for)→ 像 summary/read_poc 那样按目录布局自动推断,
         # 否则黑盒扫描报告落在 blackbox/ 却按默认 whitebox track 找不到 -> 500。
         # 显式传 track(如 deliverables_file_for 从路由 query param)时尊重之。
         resolved = self._infer_track() if track is None else track
         p = resolve_track_deliverable(self._deliverables, resolved, filename)
+        if not p.exists() and self._strip:
+            # strip 模式：无前缀文件名也可能物理在 deliverables 根（老 run 结构）
+            p = self._deliverables / filename
         if not p.exists():
             raise FileNotFoundError(filename)
         text = p.read_text("utf-8")
+        if preview_limit is not None and len(text) > preview_limit:
+            return (f"{text[:preview_limit]}\n\n…[truncated: showing {preview_limit} of "
+                    f"{len(text)} characters — full file on disk]")
         if p.suffix == ".json":
             return json.loads(text) if text.strip() else []
         return text

@@ -293,6 +293,9 @@ export interface DeliverablesFile {
   size: number;
   kind: "md" | "exploitation_queue" | "llm_queue" | "gitnexus_queue"
       | "empty_json" | "big_json" | "other_json" | "other";
+  // tiering（spec 2026-08-18）：intermediate = 管线中间产物（FileTree 收进折叠组）。
+  // 旧后端数据无此字段 → 按 deliverable 处理（兼容）。
+  tier?: "deliverable" | "intermediate";
 }
 
 export interface DeliverablesSummary {
