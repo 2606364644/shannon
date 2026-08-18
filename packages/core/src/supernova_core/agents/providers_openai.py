@@ -90,14 +90,48 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
     return messages
 
 
+def _strip_tools_strict(tools: Any) -> Any:
+    """原地剥掉 tools 里每个 function 的 ``strict`` 字段。
+
+    openai-agents 的 ``function_tool`` 默认 ``strict_mode=True``，序列化后工具
+    ``function`` 带 ``"strict": true``。这是 OpenAI 原生 API 的结构化输出参数；
+    第三方 openai 兼容网关（litellm 等）会把它当作启用 grammar-constrained
+    decoding 的信号。若上游部署用了 speculative decoding（如 DFLASH），
+    grammar 约束在流中途崩（``MidStreamFallbackError: ... does not support
+    grammar-constrained decoding yet``），被 openai SDK 吞成泛化的
+    ``"An error occurred during streaming"``。strict 是 OpenAI 专有参数，第三方
+    端点普遍不认/会错配；发包前剥掉，与 ``_sanitize_messages`` 同一道防线。
+
+    回归：__legacy__ probe-d6168171（2026-08-18，llm-proxy.futuoa.com +
+    deepseek-v4-flash-coder）。决定性对照：同 key/模型/工具，``strict: true``
+    必挂，``strict: false`` / 不带均通。
+    """
+    if not isinstance(tools, list):
+        return tools
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        fn = tool.get("function")
+        if isinstance(fn, dict):
+            fn.pop("strict", None)
+    return tools
+
+
 def _wrap_client_for_argument_sanitize(client: AsyncOpenAI) -> Any:
-    """返回 client 的代理：透传所有属性，仅 ``chat.completions.create`` 发包前清洗 messages。"""
+    """返回 client 的代理：透传所有属性，仅 ``chat.completions.create`` 发包前清洗。
+
+    发包前两道防线：归一化 messages 的非法 tool_call arguments（止血 400）+
+    剥离 tools.strict（止血 litellm/DFLASH grammar 约束流中途崩）。
+    """
     original_create = client.chat.completions.create
 
     async def _sanitized_create(*args: Any, **kwargs: Any) -> Any:
         messages = kwargs.get("messages")
         if messages is not None:
             kwargs["messages"] = _sanitize_messages(messages)
+        tools = kwargs.get("tools")
+        if tools is not None:
+            kwargs["tools"] = _strip_tools_strict(tools)
         return await original_create(*args, **kwargs)
 
     completions_proxy = _AttrProxy(client.chat.completions, {"create": _sanitized_create})
@@ -385,6 +419,17 @@ class OpenAIProvider(BaseProvider):
         # AGENT_EXECUTION_FAILED 现有行为，避免破坏 RateLimit/Timeout 分类）。
         if isinstance(error, StructuredOutputParseError):
             error_code = ErrorCode.OUTPUT_VALIDATION_FAILED
+        # error 文案：openai SDK 把流内错误包成泛化 APIError（message="An error
+        # occurred during streaming"），真实根因藏在 body 属性（如 litellm
+        # MidStreamFallbackError "DFLASH speculative decoding does not support
+        # grammar-constrained decoding yet"）。str(error) 只给泛化 message，日志
+        # 无细节、排查需手挖 APIError.body。body 非空时附进文案，可观测化。
+        # 回归：__legacy__ probe-d6168171（2026-08-18）。
+        error_body = getattr(error, "body", None)
+        if error_body:
+            error_msg = f"{error} | body={error_body}"
+        else:
+            error_msg = str(error)
         # 异常时尽量从已累积的 usage 算 cost（修 error path cost 归 0）：stream 消费中途
         # 失败时 context_wrapper.usage 已累积已完成部分（SDK 无清零）。run_result 不可用
         # （调用前失败，如 build_agent 抛）→ cost 回落 0。
@@ -407,7 +452,7 @@ class OpenAIProvider(BaseProvider):
             cost=cost,
             cost_currency=cost_currency,
             model=model,
-            error=str(error),
+            error=error_msg,
             error_code=error_code,
             retryable=retryable,
         )
