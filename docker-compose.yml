@@ -47,6 +47,9 @@ services:
       - ./.env.profiles:/app/.env.profiles:ro
     env_file:
       - .env
+    # 内网 GitLab 在容器 DNS 解析不到/解析错 → clone 私仓失败；固定 hosts 映射。
+    extra_hosts:
+      - "gitlab.futunn.com:172.24.20.196"
     environment:
       - SUPERNOVA_WEB_MAX_CONCURRENT=${SUPERNOVA_WEB_MAX_CONCURRENT:-4}
       - SUPERNOVA_WEB_SCAN_TIMEOUT=${SUPERNOVA_WEB_SCAN_TIMEOUT:-0}
@@ -79,6 +82,9 @@ services:
       - ./.env.profiles:/app/.env.profiles:ro
     env_file:
       - .env
+    # 同 web：黑盒扫 gitlab.futunn.com 目标时容器内直连需固定解析。
+    extra_hosts:
+      - "gitlab.futunn.com:172.24.20.196"
     environment:
       - SUPERNOVA_TEMPORAL_HOST=temporal
       - SUPERNOVA_TEMPORAL_PORT=7233
