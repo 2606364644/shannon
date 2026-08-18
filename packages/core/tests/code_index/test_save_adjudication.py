@@ -31,7 +31,9 @@ def _make_block(name: str, file_path: str = "app.ts", start: int = 1) -> FuncBlo
 def _write_index(tmp_path: Path, index: CodeIndex) -> Path:
     d = tmp_path / "deliverables"
     d.mkdir(exist_ok=True)
-    (d / "code_index.json").write_text(index.model_dump_json(indent=2))
+    # tiering（spec 2026-08-18）：code_index.json 是中间产物 → intermediate/
+    (d / "intermediate").mkdir(exist_ok=True)
+    (d / "intermediate" / "code_index.json").write_text(index.model_dump_json(indent=2))
     return d
 
 
@@ -63,7 +65,7 @@ class TestSaveAdjudication:
         save_adjudication(str(d))
 
         result = AdjudicationResult.model_validate_json(
-            (d / "entry_points.json").read_text()
+            (d / "intermediate" / "entry_points.json").read_text()
         )
         assert len(result.adjudicated_entry_points) == 1
         aep = result.adjudicated_entry_points[0]
@@ -99,7 +101,7 @@ class TestSaveAdjudication:
         save_adjudication(str(d))
 
         result = AdjudicationResult.model_validate_json(
-            (d / "entry_points.json").read_text()
+            (d / "intermediate" / "entry_points.json").read_text()
         )
         assert len(result.adjudicated_entry_points) == 1
         assert result.adjudicated_entry_points[0].verdict == Verdict.REJECTED
@@ -126,12 +128,12 @@ class TestSaveAdjudication:
         )
 
         d = _write_index(tmp_path, index)
-        assert not (d / "entry_points.json").exists()
+        assert not (d / "intermediate" / "entry_points.json").exists()
 
         save_adjudication(str(d))
 
-        assert (d / "entry_points.json").exists()
-        data = json.loads((d / "entry_points.json").read_text())
+        assert (d / "intermediate" / "entry_points.json").exists()
+        data = json.loads((d / "intermediate" / "entry_points.json").read_text())
         assert "adjudicated_entry_points" in data
 
     def test_no_entry_points_still_writes(self, tmp_path):
@@ -153,7 +155,7 @@ class TestSaveAdjudication:
         save_adjudication(str(d))
 
         result = AdjudicationResult.model_validate_json(
-            (d / "entry_points.json").read_text()
+            (d / "intermediate" / "entry_points.json").read_text()
         )
         assert len(result.adjudicated_entry_points) == 0
 
@@ -163,7 +165,7 @@ class TestSaveAdjudication:
         d.mkdir()
         # Should not raise
         save_adjudication(str(d))
-        assert not (d / "entry_points.json").exists()
+        assert not (d / "intermediate" / "entry_points.json").exists()
 
     def test_multiple_entry_points(self, tmp_path):
         b1 = _make_block("getHandler", start=1)
@@ -202,7 +204,7 @@ class TestSaveAdjudication:
         save_adjudication(str(d))
 
         result = AdjudicationResult.model_validate_json(
-            (d / "entry_points.json").read_text()
+            (d / "intermediate" / "entry_points.json").read_text()
         )
         assert len(result.adjudicated_entry_points) == 2
         methods = {aep.http_method for aep in result.adjudicated_entry_points}

@@ -306,6 +306,28 @@ async def test_commit_index_uses_index_prefix_not_deliverable(tmp_path: Path):
     assert "code_index" not in completed
 
 
+@pytest.mark.asyncio
+async def test_commit_index_protects_intermediate_dir_from_rollback(tmp_path: Path):
+    """tiering 后中间产物落 intermediate/（整个目录未跟踪）→ commit_index 必须把
+    整个目录提交为跟踪，挺过并发 agent 失败时的 rollback(clean -fd)。固化根因 2：
+    曾只 add 平铺 code_index.json，intermediate/ 未跟踪 → rollback 清光（含
+    parameter_graph.json 等）→ run_code_index 不在重试循环、永不重生。"""
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    (deliverables / "intermediate").mkdir()
+    (deliverables / "intermediate" / "code_index.json").write_text('{"blocks": []}')
+    (deliverables / "intermediate" / "parameter_graph.json").write_text('{"nodes": []}')
+
+    await GitManager.ensure_repository(deliverables)
+    await GitManager.commit_index(deliverables)  # add 整个 intermediate/ 并提交
+
+    # 模拟并发 pre-recon agent 失败 → rollback(reset --hard + clean -fd)
+    await GitManager.rollback(deliverables, "simulated pre-recon failure")
+
+    assert (deliverables / "intermediate" / "code_index.json").exists()
+    assert (deliverables / "intermediate" / "parameter_graph.json").exists()
+
+
 # ---- ensure_repository ----
 
 

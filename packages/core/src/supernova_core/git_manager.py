@@ -159,13 +159,16 @@ class GitManager:
 
     @staticmethod
     async def commit_index(repo_path: Path) -> GitResult:
-        """把 code_index.json / code_index_summary.md 提交为跟踪 deliverable。
+        """把索引/图/缺口报告等**中间产物**提交为跟踪 deliverable。
 
         背景:run_code_index 与 pre-recon agent 在 asyncio.gather 里并发。pre-recon
-        失败时 rollback 的 ``git clean -fd`` 会删掉**未跟踪**的 code_index.json,而
-        run_code_index 已成功、不在重试循环里 → 文件永不重生,下游
+        失败时 rollback 的 ``git clean -fd`` 会删掉**未跟踪**的中间产物(intermediate/
+        整个目录),而 run_code_index 已成功、不在重试循环里 → 文件永不重生,下游
         run_entry_point_fusion 硬报 FileNotFoundError。提交为跟踪文件后,clean -fd
         不动它、reset --hard HEAD 会还原它,与 agent 自己的 deliverable 享受同等保护。
+
+        tiering(spec 2026-08-18)后中间产物落桶内 intermediate/,整个目录提交保护;
+        老平铺结构(code_index.json/code_index_summary.md 在桶根)兜底。
 
         用 ``index:`` 前缀(非 ``deliverable:``),避免 get_completed_agents 把它误当
         已完成 agent 而污染 resume 的跳过守卫。全程持 ``_git_lock``,避免与并发 agent
@@ -184,13 +187,19 @@ class GitManager:
                 await GitManager._run_git_with_retry(
                     repo_path, "commit", "--allow-empty", "-m", "Initial deliverables checkpoint",
                 )
-            # 只 add 实际存在的 index 文件,避免 pathspec 缺失报错
-            index_files = [
-                p for p in ("code_index.json", "code_index_summary.md")
-                if (repo_path / p).exists()
-            ]
-            if index_files:
-                await GitManager._run_git(repo_path, "add", "--", *index_files)
+            # 中间产物目录存在 → add 整个 intermediate/(含 code_index.json /
+            # parameter_graph.json / gap reports);老平铺结构 → 只 add 实际存在的
+            # index 文件,避免 pathspec 缺失报错。
+            intermediate_dir = repo_path / "intermediate"
+            if intermediate_dir.exists():
+                await GitManager._run_git(repo_path, "add", "--", "intermediate/")
+            else:
+                index_files = [
+                    p for p in ("code_index.json", "code_index_summary.md")
+                    if (repo_path / p).exists()
+                ]
+                if index_files:
+                    await GitManager._run_git(repo_path, "add", "--", *index_files)
             result = await GitManager._run_git_with_retry(
                 repo_path, "commit", "--allow-empty", "-m", "index: code-index",
             )

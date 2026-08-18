@@ -577,14 +577,20 @@ def run_entry_point_fusion(
     """
     from supernova_core.code_index.entry_point_fusion import parse_llm_entry_points
     from supernova_core.code_index.schema_entry_parser import parse_openapi_schema_files
+    from supernova_core.utils.paths import intermediate_path, resolve_intermediate
 
     out = Path(deliverables_dir)
-    code_index_path = out / "code_index.json"
+    # tiering（spec 2026-08-18）：code_index.json 是中间产物 → intermediate/ 优先，
+    # 平铺老结构兜底；None = 两种结构都不存在。
+    code_index_path = resolve_intermediate(out, "code_index.json")
     deliverable_path = out / "pre_recon_deliverable.md"
 
-    if not code_index_path.exists():
+    if code_index_path is None:
         logger.warning("code_index.json not found; skipping entry point fusion")
-        raise FileNotFoundError(f"code_index.json not found in {deliverables_dir}")
+        raise FileNotFoundError(
+            f"code_index.json not found in {deliverables_dir} "
+            "(checked intermediate/ and track root)"
+        )
 
     index = CodeIndex.model_validate_json(code_index_path.read_text())
 
@@ -632,8 +638,11 @@ def run_entry_point_fusion(
         "total_entry_points": len(merged_entries),
     })
 
-    # Write updated code_index.json
-    code_index_path.write_text(updated.model_dump_json(indent=2))
+    # Write updated code_index.json（写回 intermediate/，与写侧一致；下游
+    # resolve_intermediate 优先读它，保证读到的始终是融合后版本）
+    _write_back = intermediate_path(out, "code_index.json")
+    _write_back.parent.mkdir(parents=True, exist_ok=True)
+    _write_back.write_text(updated.model_dump_json(indent=2))
 
     return updated
 
@@ -648,9 +657,11 @@ def save_adjudication(deliverables_dir: str) -> None:
     """
     out = Path(deliverables_dir)
     out.mkdir(parents=True, exist_ok=True)
-    code_index_path = out / "code_index.json"
+    # tiering（spec 2026-08-18）：code_index.json 在 intermediate/ 优先，平铺老结构兜底。
+    from supernova_core.utils.paths import intermediate_path, resolve_intermediate
+    code_index_path = resolve_intermediate(out, "code_index.json")
 
-    if not code_index_path.exists():
+    if code_index_path is None:
         logger.warning("code_index.json not found; skipping adjudication")
         return
 
@@ -682,7 +693,9 @@ def save_adjudication(deliverables_dir: str) -> None:
         adjudicated_entry_points=adjudicated,
     )
 
-    entry_points_path = out / "entry_points.json"
+    # tiering（spec 2026-08-18）：entry_points.json 是机器交接的中间产物 → intermediate/。
+    entry_points_path = intermediate_path(out, "entry_points.json")
+    entry_points_path.parent.mkdir(parents=True, exist_ok=True)
     entry_points_path.write_text(result.model_dump_json(indent=2))
 
     confirmed = sum(1 for a in adjudicated if a.verdict == Verdict.CONFIRMED)

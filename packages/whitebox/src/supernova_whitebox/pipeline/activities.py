@@ -801,6 +801,17 @@ async def run_code_index(input: ActivityInput) -> dict:
                 storage_gaps=storage_gaps,
             )
 
+            # tiering 保护（git_manager.commit_index，spec 2026-08-18）：中间产物
+            # 提交为跟踪文件，防并发 pre-recon agent 失败时 rollback(clean -fd)清掉
+            # 未跟踪的 intermediate/（run_code_index 已成功、不在重试循环 → 永不重生，
+            # 下游 fusion/merge 硬报 FileNotFoundError）。commit 失败不阻断：产物仍在
+            # 盘上，读侧 resolve_intermediate 兜底。
+            try:
+                from supernova_core.git_manager import GitManager
+                await GitManager.commit_index(deliverables)
+            except Exception as exc:
+                logger.warning("commit_index failed (non-fatal): %s", exc)
+
             # 可观测性：调用图统计。chains=0 是 GitNexus 轨空壳的核心信号
             #（→ taint_flows=0 → 3 类 builder 全空 → GitNexus 轨无结果）。
             # 对齐 06-29 authz/injection-gitnexus-track-observability 的 InfoEvent 风格。

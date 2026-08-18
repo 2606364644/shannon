@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from supernova_core.code_index.models import CodeIndex, EntryPoint, FuncBlock
+from supernova_core.utils.paths import resolve_intermediate
 
 logger = logging.getLogger(__name__)
 
@@ -517,10 +518,12 @@ def build_authz_gitnexus_track(
     track runs).
     """
     out = Path(deliverables_dir)
-    ci_path = out / "code_index.json"
+    # tiering（spec 2026-08-18）：code_index.json 是中间产物 → intermediate/ 优先，
+    # 平铺老结构兜底；None = 两者皆缺（graceful：只剩 LLM 轨）。
+    ci_path = resolve_intermediate(out, "code_index.json")
 
     index: CodeIndex | None = None
-    if ci_path.exists():
+    if ci_path is not None and ci_path.exists():
         try:
             index = CodeIndex.model_validate_json(ci_path.read_text())
         except Exception as exc:  # invalid JSON / schema drift
@@ -533,7 +536,11 @@ def build_authz_gitnexus_track(
     if index is not None:
         dominance_cands = find_unguarded_sink_paths(index)
 
-    framework_cands = find_framework_idor_candidates(out / "framework_analysis.json")
+    fw_path = resolve_intermediate(out, "framework_analysis.json")
+    framework_cands = (
+        find_framework_idor_candidates(fw_path)
+        if fw_path is not None else []
+    )
 
     # 三重过滤可观测性：各阶段存活计数（source/entry/candidate），便于定位空壳根因。
     sp_list = index.source_points if index is not None else []

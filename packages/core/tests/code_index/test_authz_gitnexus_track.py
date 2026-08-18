@@ -20,7 +20,12 @@ JSON 文件 round-trip),构造最小但**真实**的 ``CodeIndex`` Python 对象
 """
 from __future__ import annotations
 
-from supernova_core.code_index.authz_gitnexus_track import find_unguarded_sink_paths
+import json
+
+from supernova_core.code_index.authz_gitnexus_track import (
+    build_authz_gitnexus_track,
+    find_unguarded_sink_paths,
+)
 from supernova_core.code_index.models import (
     CallChain,
     CodeIndex,
@@ -314,3 +319,34 @@ def test_sink_call_sites_not_consumed_by_authz_track():
         "sink_call_sites must NOT feed find_unguarded_sink_paths; side-effect detection "
         "is via _SIDE_EFFECT_SINK_RE on chain blocks only"
     )
+
+
+def test_build_track_reads_intermediate_paths(tmp_path):
+    """tiering 回归：code_index.json / framework_analysis.json 落 intermediate/
+    （写侧 write_index_files / framework_analyzer）→ build_authz_gitnexus_track 必须
+    读到，不再静默降级（曾只读平铺 → dominance/framework 候选全空 → authz GitNexus
+    轨空壳）。"""
+    index = _make_index(
+        handler_src="function getUser(req) { return persist(req.params.userId); }",
+    )
+    (tmp_path / "intermediate").mkdir()
+    (tmp_path / "intermediate" / "code_index.json").write_text(
+        index.model_dump_json(indent=2)
+    )
+    (tmp_path / "intermediate" / "framework_analysis.json").write_text(json.dumps({
+        "detected_framework": {"name": "express"},
+        "inferred_endpoints": [
+            {
+                "method": "GET", "path": "/api/users/:id",
+                "source": "framework-auto-generated",
+                "model": "User",
+                "vulnerability_indicators": ["no-ownership-check"],
+            }
+        ],
+    }))
+
+    result = build_authz_gitnexus_track(str(tmp_path))
+
+    assert len(result.dominance_candidates) == 1, "intermediate/code_index.json 应被读到"
+    assert len(result.framework_candidates) == 1, "intermediate/framework_analysis.json 应被读到"
+    assert result.entry_point_total == 1

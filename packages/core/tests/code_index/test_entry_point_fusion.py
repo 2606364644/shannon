@@ -398,6 +398,26 @@ class TestRunEntryPointFusion:
         assert len(health_entries) == 1
         assert health_entries[0].source == "code_index"  # deterministic wins
 
+    def test_fusion_reads_intermediate_code_index(self, tmp_path):
+        """tiering 主路径回归：code_index.json 落 intermediate/（write_index_files
+        写侧）→ fusion 必须能读到（曾只读平铺 → FileNotFoundError 硬挂），且融合
+        结果写回 intermediate/（下游 resolve_intermediate 优先读它）。"""
+        code_index = _make_test_code_index()
+        (tmp_path / "intermediate").mkdir()
+        (tmp_path / "intermediate" / "code_index.json").write_text(json.dumps(code_index))
+        (tmp_path / "pre_recon_deliverable.md").write_text(_make_test_deliverable())
+
+        result = run_entry_point_fusion(str(tmp_path))
+
+        assert result.total_entry_points >= 2
+        # fusion 结果写回 intermediate/，LLM-only 入口已并入
+        assert (tmp_path / "intermediate" / "code_index.json").exists()
+        persisted = json.loads(
+            (tmp_path / "intermediate" / "code_index.json").read_text()
+        )
+        sources = {ep.get("source") for ep in persisted["entry_points"]}
+        assert "llm_pre_recon" in sources
+
 
 # ---------------------------------------------------------------------------
 # Task 4B: save_adjudication confidence-based verdict tests
@@ -428,7 +448,7 @@ class TestSaveAdjudication:
         save_adjudication(str(tmp_path))
 
         result = AdjudicationResult.model_validate_json(
-            (tmp_path / "entry_points.json").read_text()
+            (tmp_path / "intermediate" / "entry_points.json").read_text()
         )
         assert result.adjudicated_entry_points[0].verdict.value == "confirmed"
 
@@ -453,7 +473,7 @@ class TestSaveAdjudication:
         save_adjudication(str(tmp_path))
 
         result = AdjudicationResult.model_validate_json(
-            (tmp_path / "entry_points.json").read_text()
+            (tmp_path / "intermediate" / "entry_points.json").read_text()
         )
         assert result.adjudicated_entry_points[0].verdict.value == "needs_review"
 
@@ -478,7 +498,7 @@ class TestSaveAdjudication:
         save_adjudication(str(tmp_path))
 
         result = AdjudicationResult.model_validate_json(
-            (tmp_path / "entry_points.json").read_text()
+            (tmp_path / "intermediate" / "entry_points.json").read_text()
         )
         assert result.adjudicated_entry_points[0].verdict.value == "rejected"
 
