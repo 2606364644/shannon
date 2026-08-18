@@ -1873,6 +1873,14 @@ async def finalize_summary(input: ActivityInput, summary: dict) -> None:
             # D1：组合扫描白盒阶段——调现有 log_phase_complete（写 PhaseEvent，非 scan_end），
             # 不写终态 status，留 scan 非终态供编排器在同目录追加黑盒阶段。
             await session.log_phase_complete("whitebox")
+            # drain-task 收尾（2026-08-18 NodeGoat 真机回归）：黑盒阶段走自己的
+            # setup_display 自建 session，白盒 session 在 combined finalize 后无人复用。
+            # 不 close 的话 clear_audit_session() 紧接着摘走 _SESSIONS 最后引用 →
+            # dispatcher drain task 成孤儿（纯 PENDING 挂 queue.get()）→ 下个 scan
+            # 期间被 GC 销毁，"Task was destroyed but it is pending!" 经 LogBus 误路由
+            # 进当时活跃 scan 的 live 页。close 会先 join 队列（phase 事件不丢）再
+            # cancel+await drain task。
+            await session.close()
         else:
             await session.log_workflow_complete(ws)
     await stop_heartbeat()  # 停 heartbeat daemon(启动于 setup_display); 终态自停兜底
