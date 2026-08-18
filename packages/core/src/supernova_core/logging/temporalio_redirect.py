@@ -71,14 +71,20 @@ def _resolve_level() -> int:
     return level
 
 
+def _resolved_handler_path(h: logging.FileHandler) -> Path | None:
+    """FileHandler 的 resolved baseFilename；resolve 失败返 None（比较时视为不匹配）。"""
+    try:
+        return Path(h.baseFilename).resolve()
+    except OSError:
+        return None
+
+
 def _has_file_handler_on(logger: logging.Logger, target: Path) -> bool:
     for h in logger.handlers:
         if isinstance(h, logging.FileHandler):
-            try:
-                if Path(h.baseFilename).resolve() == target:
-                    return True
-            except OSError:
-                continue
+            p = _resolved_handler_path(h)
+            if p is not None and p == target:
+                return True
     return False
 
 
@@ -90,7 +96,8 @@ def install_temporalio_log_redirect(log_path: Path) -> Path:
       trace; ``DEBUG`` 收 activity 执行边界日志, 排 10min 空窗之用)。
     - ``propagate=False`` → 截断到 root LogBus, DEBUG 不污染 display 流(终端干净)。
     - ``logger.setLevel(DEBUG)`` → logger 不滤, handler 按 env 决定(不丢任何 record)。
-    - 幂等: 同 logger 上同路径 FileHandler 不重复挂。
+    - 幂等: 同 logger 上同路径 FileHandler 不重复挂; 指向其它路径的旧 FileHandler
+      (上一会话残留)被摘除 + close(防双写/句柄泄漏)。
     """
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,6 +109,16 @@ def install_temporalio_log_redirect(log_path: Path) -> Path:
 
     for name in _MANAGED_LOGGERS:
         logger = logging.getLogger(name)
+        # 摘掉指向其它路径的旧 FileHandler（上一会话残留）：不摘则同一条 record 被
+        # 新旧 handler 双写（两个会话目录的 activity_failures.log 内容相同）且旧文件
+        # 句柄泄漏（2026-08-18 实测两目录 md5 相同坐实）。同路径幂等跳过保留。
+        for h in list(logger.handlers):
+            if not isinstance(h, logging.FileHandler):
+                continue
+            p = _resolved_handler_path(h)
+            if p is not None and p != target:
+                logger.removeHandler(h)
+                h.close()
         if _has_file_handler_on(logger, target):
             continue  # already installed on this path for this logger
         handler = logging.FileHandler(log_path)

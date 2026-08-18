@@ -29,38 +29,54 @@ from datetime import datetime
 from .diagnostic_log import DiagnosticLog, format_diagnostic_line
 from supernova_core.audit.session_registry import _resolve_wf_id
 
+# diagnostic.log 句柄是**进程级**单例（2026-08-18 从 per-bus 提回）：configure_logging
+# 的幂等 key（setup._configured_log_dir）本就是进程级，diagnostic 落在 per-wf bus 会
+# 语义错位——跨 wf 切换时旧 bus 的句柄无人关（fd 泄漏），bus 被 pop 后残余 emit 的
+# fallback 又变 no-op（丢日志）。模块级单例：换目录 configure 时关旧开新，天然正确。
+_DIAGNOSTIC: DiagnosticLog | None = None
+
+
+def configure_diagnostic(path) -> None:
+    """(Re)point the process-wide diagnostic.log handle; close the prior one."""
+    global _DIAGNOSTIC
+    if _DIAGNOSTIC is not None:
+        _DIAGNOSTIC.close()
+    _DIAGNOSTIC = DiagnosticLog(path)
+
+
+def write_fallback(event) -> None:
+    """Production-thread fallback: no session → write straight to diagnostic.log.
+
+    Called from ``LogBusHandler.emit`` (production thread) and from the drain
+    task's dispatch-error降级. No-op when diagnostic was never configured.
+    """
+    if _DIAGNOSTIC is None:
+        return
+    _DIAGNOSTIC.write_sync(format_diagnostic_line(event))
+
+
+def reset_diagnostic() -> None:
+    """Close and drop the diagnostic handle（测试 teardown / 进程退出收尾用）。"""
+    global _DIAGNOSTIC
+    if _DIAGNOSTIC is not None:
+        _DIAGNOSTIC.close()
+        _DIAGNOSTIC = None
+
 
 class _LogBus:
-    """Module-level singleton holding the queue, dispatcher ref, drain task, and
-    diagnostic handle. State mutated on the event-loop thread (attach/detach) and
-    read atomically (GIL) from production threads (``is_attached``)."""
+    """Per-workflow queue + dispatcher ref + drain task. State mutated on the
+    event-loop thread (attach/detach) and read atomically (GIL) from production
+    threads (``is_attached``). diagnostic 句柄不在此（进程级，见模块级 _DIAGNOSTIC）。"""
 
     def __init__(self) -> None:
         self.queue: _queue.Queue = _queue.Queue()
         self._dispatcher = None
         self._drain_task: asyncio.Task | None = None
-        self._diagnostic: DiagnosticLog | None = None
         self._attached: bool = False
 
     @property
     def is_attached(self) -> bool:
         return self._attached
-
-    def configure_diagnostic(self, path) -> None:
-        """(Re)point the diagnostic.log handle; close the prior one. Idempotent-safe."""
-        if self._diagnostic is not None:
-            self._diagnostic.close()
-        self._diagnostic = DiagnosticLog(path)
-
-    def write_fallback(self, event) -> None:
-        """Production-thread fallback: no session → write straight to diagnostic.log.
-
-        Called from ``LogBusHandler.emit`` (production thread) and from the drain
-        task's dispatch-error降级. No-op when diagnostic was never configured.
-        """
-        if self._diagnostic is None:
-            return
-        self._diagnostic.write_sync(format_diagnostic_line(event))
 
     async def attach(self, dispatcher) -> None:
         """Bind the session dispatcher and start the drain task (task 4 entry).
@@ -70,9 +86,9 @@ class _LogBus:
         FileLogRenderer no-ops on LogEvent — clean separation from workflow.log).
         """
         self._dispatcher = dispatcher
-        if self._diagnostic is not None:
+        if _DIAGNOSTIC is not None:
             from supernova_core.display.file_renderer import DiagnosticLogRenderer
-            dispatcher.add(DiagnosticLogRenderer(self._diagnostic))
+            dispatcher.add(DiagnosticLogRenderer(_DIAGNOSTIC))
         self._attached = True
         if self._drain_task is None or self._drain_task.done():
             self._drain_task = asyncio.create_task(self._drain_loop())
@@ -112,9 +128,9 @@ class _LogBus:
                     await self._dispatcher.dispatch(event)
                 except Exception:
                     # dispatch failed → degrade to file, never crash the drain loop
-                    self.write_fallback(event)
+                    write_fallback(event)
             else:
-                self.write_fallback(event)
+                write_fallback(event)
 
 
 # P3c 阶段 3：按 workflow_id 索引（替代进程级 LogBus 单例）。
@@ -133,8 +149,14 @@ async def attach(dispatcher, *, workflow_id: str | None = None) -> None:
 
 
 async def drain_and_detach(*, workflow_id: str | None = None) -> None:
+    """Final flush + detach + 从 ``_BUSES`` 摘除该 workflow 的 bus。
+
+    pop 后该 wf 的 ``LogBusHandler.emit`` 走新建占位 bus -> fallback 写**进程级**
+    diagnostic（不丢，diagnostic 已不在 bus 上）。不 pop 则 bus 对象随 ``_BUSES``
+    （setdefault 只增不减）永久累积（2026-08-18）。
+    """
     wf_id = _resolve_wf_id(workflow_id)
-    bus = _BUSES.get(wf_id)
+    bus = _BUSES.pop(wf_id, None)
     if bus is not None:
         await bus.drain_and_detach()
 
@@ -155,7 +177,31 @@ class _LogBusProxy:
     """
 
     def __getattr__(self, name):
+        if name == "drain_and_detach":
+            # 收尾必须走模块级函数（含 _BUSES.pop，防 bus 残留累积）；
+            # 直接转发实例方法会绕过 pop（2026-08-18）。
+            async def _drain_via_module() -> None:
+                await drain_and_detach()
+            return _drain_via_module
+        if name in ("configure_diagnostic", "_diagnostic"):
+            # diagnostic 已是进程级单例（不在 per-wf bus 上），转发模块级状态。
+            if name == "configure_diagnostic":
+                return configure_diagnostic
+            return _DIAGNOSTIC
         return getattr(get_log_bus(_resolve_wf_id()), name)
+
+    def __setattr__(self, name, value):
+        # set 也转发到当前 workflow 的 bus：P3c 前单例时代 ``LogBus._x = v`` 直接改
+        # 单例；改代理后若落 proxy instance __dict__ 则不触达真实 bus，且后续读命中
+        # instance dict 不再走 __getattr__ -> 状态被毒化（test_logging_setup 旧版
+        # fixture 曾因此把 LogBus._diagnostic 永久读成 None，2026-08-18）。
+        if name == "_diagnostic":
+            # diagnostic 单例的写（旧 fixture 的 ``LogBus._diagnostic = None``）转发
+            # 模块级，语义与读对齐。
+            global _DIAGNOSTIC
+            _DIAGNOSTIC = value
+            return
+        setattr(get_log_bus(_resolve_wf_id()), name, value)
 
 
 LogBus = _LogBusProxy()
@@ -207,7 +253,7 @@ class LogBusHandler(logging.handlers.QueueHandler):
             if bus.is_attached:
                 bus.queue.put_nowait(event)   # session active → queue for drain task
             else:
-                bus.write_fallback(event)      # no session → diagnostic.log
+                write_fallback(event)          # no session → diagnostic.log（进程级）
         except Exception:
             # Never raise: an unhandled record would trip logging.lastResort (stderr).
             self.handleError(record)

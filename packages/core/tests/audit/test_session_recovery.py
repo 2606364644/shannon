@@ -112,6 +112,123 @@ async def test_build_headless_audit_session_constructs_registers_and_heartbeats(
         await _stop_all_heartbeats()
 
 
+# ── build_headless_audit_session：覆盖保护 ─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_build_closes_stale_session_before_overwrite(tmp_path, monkeypatch):
+    """覆盖保护（2026-08-18）：同 wf_id 残留旧 session（setup_display 重试首次尝试
+    中断 / workflow cancel 后 finalize 未跑）时，重建前 best-effort 收尾旧的--
+    旧 dispatcher 的 drain task 必须 done，不再泄漏 pending task
+    （"Task was destroyed but it is pending!" 误路由进当时活跃 scan 的日志流）。"""
+    _patch_real_activity_info(monkeypatch)
+    old = await recov.build_headless_audit_session(_fake_input(tmp_path))
+    try:
+        old_drain = old.dispatcher._drain_task
+        assert old_drain is not None and not old_drain.done()
+
+        new = await recov.build_headless_audit_session(_fake_input(tmp_path))
+        try:
+            assert get_audit_session_for("wf-restart") is new, "重建后注册新 session"
+            assert old_drain.done(), "旧 session 的 drain task 应被收尾（非 pending 泄漏）"
+            assert old.dispatcher is None, "旧 session 应已 close（dispatcher 引用清空）"
+        finally:
+            await new.close()
+            await recov.drain_and_detach(workflow_id="wf-restart")
+            await _stop_all_heartbeats()
+    finally:
+        # 旧 session 若未被收尾（回归时）兜底清理，防泄漏到后续测试。
+        await old.close()
+        await recov.drain_and_detach(workflow_id="wf-restart")
+        await _stop_all_heartbeats()
+
+
+@pytest.mark.asyncio
+async def test_build_stale_close_failure_does_not_block_rebuild(tmp_path, monkeypatch):
+    """旧 session 收尾抛异常（如 stream 已坏）-> best-effort 吞掉，重建照常。"""
+    _patch_real_activity_info(monkeypatch)
+    old = await recov.build_headless_audit_session(_fake_input(tmp_path))
+    real_close = old.close
+
+    async def _boom():
+        raise OSError("stream already broken")
+
+    monkeypatch.setattr(old, "close", _boom)
+    try:
+        new = await recov.build_headless_audit_session(_fake_input(tmp_path))
+        assert get_audit_session_for("wf-restart") is new, \
+            "旧 session close 失败不应阻断重建"
+        await new.close()
+    finally:
+        # 用真 close 收尾旧 session（patch 的 _boom 只为模拟失败，不能用于清理）。
+        await real_close()
+        await recov.drain_and_detach(workflow_id="wf-restart")
+        await _stop_all_heartbeats()
+
+
+# ── 惰性清扫：cancel 残留（2026-08-18 修复 4）──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sweep_closes_cancelled_session_residual(tmp_path, monkeypatch):
+    """cancel 残留（session 在 _SESSIONS + heartbeat 终态自停）被后续任意 wf 的
+    ensure 入口顺手收掉：旧 drain task done、registry 条目清除（交接单修复 4）。"""
+    from supernova_core.runtime.heartbeat import _HEARTBEATS
+
+    # 预置旧 wf 残留：真实 session + 心跳已终态自停（模拟 cancel 后场景）。
+    _patch_real_activity_info(monkeypatch, wf_id="wf-old")
+    old = await recov.build_headless_audit_session(_fake_input(tmp_path))
+    old_drain = old.dispatcher._drain_task
+    assert old_drain is not None and not old_drain.done()
+    mgr = _HEARTBEATS.get("wf-old")
+    assert mgr is not None
+    mgr._stop_event.set()  # 模拟心跳终态自停
+
+    # 新 wf 的 ensure 触发清扫。
+    _patch_real_activity_info(monkeypatch, wf_id="wf-new")
+    new = None
+    try:
+        await recov.ensure_audit_session(_fake_input(tmp_path))
+        assert isinstance(get_audit_session_for("wf-old"), NullAuditSession), \
+            "wf-old 残留应被清扫（registry 条目清除）"
+        assert old_drain.done(), "残留 session 的 drain task 应被收尾（非 pending 泄漏）"
+        new = get_audit_session_for("wf-new")
+        assert not isinstance(new, NullAuditSession), "触发清扫的新 wf 不受影响"
+    finally:
+        if new is not None and not isinstance(new, NullAuditSession):
+            await new.close()
+        await old.close()  # 幂等（已被清扫则 close 是二次 no-op 或吞掉）
+        await recov.drain_and_detach(workflow_id="wf-old")
+        await recov.drain_and_detach(workflow_id="wf-new")
+        await _stop_all_heartbeats()
+
+
+@pytest.mark.asyncio
+async def test_sweep_spares_active_and_unknown_sessions(tmp_path, monkeypatch):
+    """活跃 scan（心跳在跳）与心跳句柄缺失的条目不被清扫（宁漏勿错）。"""
+    # wf-old：session 在 + 心跳在跳（活跃）。
+    _patch_real_activity_info(monkeypatch, wf_id="wf-old")
+    old = await recov.build_headless_audit_session(_fake_input(tmp_path))
+    # wf-unknown：session 在但无心跳句柄（状态未知）。
+    sentinel_unknown = MagicMock(spec=AuditSession)
+    set_audit_session(sentinel_unknown, workflow_id="wf-unknown")
+
+    _patch_real_activity_info(monkeypatch, wf_id="wf-new")
+    new = None
+    try:
+        await recov.ensure_audit_session(_fake_input(tmp_path))
+        assert get_audit_session_for("wf-old") is old, "心跳在跳的活跃 scan 不应被清"
+        assert get_audit_session_for("wf-unknown") is sentinel_unknown, \
+            "心跳句柄缺失的条目应保守跳过（宁漏勿错）"
+        new = get_audit_session_for("wf-new")
+    finally:
+        if new is not None and not isinstance(new, NullAuditSession):
+            await new.close()
+        await old.close()
+        _SESSIONS.pop("wf-unknown", None)
+        await recov.drain_and_detach(workflow_id="wf-old")
+        await recov.drain_and_detach(workflow_id="wf-new")
+        await _stop_all_heartbeats()
+
+
 # ── ensure_audit_session:重建路径 ──────────────────────────────────────────
 
 @pytest.mark.asyncio

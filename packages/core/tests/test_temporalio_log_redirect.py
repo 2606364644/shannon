@@ -49,6 +49,33 @@ def _restore_temporalio_loggers():
             logger.setLevel(orig_level)
 
 
+def test_install_removes_stale_handler_on_other_path(tmp_path):
+    """换新路径安装时摘掉旧路径 FileHandler：不摘则同一条 record 被新旧 handler 双写
+    （两个会话目录的 activity_failures.log 内容/md5 相同）+ 旧文件句柄泄漏
+    （2026-08-18 worker 容器实测：probe 目录与 scan 目录 md5 完全一致）。"""
+    old_path = tmp_path / "a" / "activity_failures.log"
+    new_path = tmp_path / "b" / "activity_failures.log"
+    install_temporalio_log_redirect(old_path)
+    stale = [h for h in logging.getLogger(_LOGGER_NAME).handlers
+             if isinstance(h, logging.FileHandler)]
+    assert stale, "预置：旧路径应已挂上 FileHandler"
+
+    install_temporalio_log_redirect(new_path)
+
+    handlers = [h for h in logging.getLogger(_LOGGER_NAME).handlers
+                if isinstance(h, logging.FileHandler)]
+    assert len(handlers) == 1, f"应只保留新路径 1 个 FileHandler，实际 {len(handlers)}"
+    assert Path(handlers[0].baseFilename).resolve() == new_path.resolve()
+    assert all(h.stream is None for h in stale), \
+        "旧路径 handler 应被 close（FileHandler.close 置 stream=None，释放句柄）"
+
+    # 同路径重复安装仍幂等：不重复挂、不误摘。
+    install_temporalio_log_redirect(new_path)
+    handlers = [h for h in logging.getLogger(_LOGGER_NAME).handlers
+                if isinstance(h, logging.FileHandler)]
+    assert len(handlers) == 1, "同路径重复安装不应堆叠"
+
+
 def test_failure_record_goes_to_file_not_stderr(tmp_path, capsys):
     log_path = tmp_path / "activity_failures.log"
     install_temporalio_log_redirect(log_path)

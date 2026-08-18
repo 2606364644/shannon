@@ -123,6 +123,20 @@ async def test_dispatchers_are_isolated_per_scan():
     assert [e.phase for e in r2.events] == ["b"]
 
 
+async def test_close_awaits_cancelled_drain_task():
+    """close 返回后 drain task 必须 done：cancel() 只请求取消，不 await 的话 task
+    可能尚未被调度就随 dispatcher 失去引用、GC 回收 pending task ->
+    "Task was destroyed but it is pending!"（2026-08-18 worker 容器实测）。"""
+    d = DisplayDispatcher([])
+    await d.start()
+    task = d._drain_task
+    assert task is not None and not task.done()
+    await d.close()
+    assert task.done(), "close 返回时 drain task 应已终止（非 pending）"
+    assert d._drain_task is None, "close 应清掉引用（防泄漏 + 二次 start 可重建）"
+    await d.close()  # 二次 close 幂等不抛
+
+
 async def test_renderer_error_does_not_break_drain_or_close():
     """单 renderer render 抛异常不能卡死 drain——否则 close().join() 死锁在
     未 task_done 的队列项上（磁盘满/权限错时 StructuredEventRenderer 会抛）。"""

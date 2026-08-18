@@ -81,6 +81,14 @@ class DisplayDispatcher:
         await self._queue.join()
         if self._drain_task is not None:
             self._drain_task.cancel()
+            # cancel() 只请求取消：不 await 的话 task 可能尚未被调度就随 dispatcher
+            # 失去外部引用，GC 回收 pending task -> "Task was destroyed but it is
+            # pending!"（2026-08-18）。写法对齐 _LogBus.drain_and_detach（log_bus.py）。
+            try:
+                await self._drain_task
+            except asyncio.CancelledError:
+                pass
+            self._drain_task = None
 
     @property
     def dropped_count(self) -> int:

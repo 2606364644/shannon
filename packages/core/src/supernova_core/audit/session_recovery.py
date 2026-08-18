@@ -47,6 +47,8 @@ from rich.console import Console
 from supernova_core.audit.session import AuditSession
 from supernova_core.audit.session_registry import (
     NullAuditSession,
+    _SESSIONS,
+    _resolve_wf_id,
     get_audit_session_for,
     set_audit_session,
 )
@@ -91,6 +93,21 @@ async def build_headless_audit_session(input: Any) -> AuditSession:
             均具备,故 core helper 不耦合具体 dataclass)。
     """
     ws_path = _ws_path(input)
+    # 覆盖保护（2026-08-18）：同 wf_id 已有残留 session（setup_display 重试首次尝试
+    # 中断 / workflow cancel 后 finalize_summary 未跑）时，先 best-effort 收尾旧的
+    # （LogBus final flush + close dispatcher drain task）。否则 ``set_audit_session``
+    # 直接覆盖 -> 旧 session->dispatcher->drain task 引用链变垃圾、task 纯 PENDING 挂在
+    # ``queue.get()`` 等 GC -> "Task was destroyed but it is pending!"（误路由进当时
+    # 活跃 scan 的日志流）。收尾失败不阻断重建（旧的最坏情况=维持泄漏现状）。
+    stale = get_audit_session_for(_resolve_wf_id())
+    if not isinstance(stale, NullAuditSession):
+        try:
+            await drain_and_detach()
+            await stale.close()
+        except Exception:  # noqa: BLE001 - best-effort 收尾
+            logger.warning(
+                "stale audit session close failed; leak persists (wf=%s)",
+                _resolve_wf_id(), exc_info=True)
     meta = SessionMetadata(
         id=input.workspace_name or ws_path.name,
         web_url=input.web_url,
@@ -108,6 +125,38 @@ async def build_headless_audit_session(input: Any) -> AuditSession:
     # heartbeat daemon 线程持续写 <ws>/heartbeat;幂等(同 wf_id+ws_dir 跳过)。
     await start_heartbeat(ws_path)
     return session
+
+
+async def _sweep_stale_sessions(current_wf_id: str) -> None:
+    """惰性清扫 ``_SESSIONS`` 残留（2026-08-18 交接单修复 4，补 workflow cancel 路径）。
+
+    workflow 被 cancel 时 finalize_summary 不执行，session（drain task + dispatcher +
+    LogStream 文件句柄）残留在 worker 进程（workflows.py CancelledError 分支有意容忍
+    「由下个 scan 的 setup_display 覆盖」，但不同 wf_id 的残留永远不会被覆盖，只累积）。
+
+    判据 = 该 wf 的 heartbeat daemon 已终态自停（``_stop_event`` set）——cancel/终态后
+    web 写 session.json 终态，心跳 ≤1 周期自停；活跃 scan 心跳在跳，绝不误清。心跳句柄
+    不在 ``_HEARTBEATS``（从未起 / finalize 正常停止并 pop）的条目**保守跳过**（宁漏
+    勿错——误清活跃 session 是事故，漏清只是泄漏）。挂在 ``ensure_audit_session`` 入口：
+    每个 activity 必经，任意后续 scan 都会触发对前序残留的清扫。
+    """
+    from supernova_core.runtime.heartbeat import _HEARTBEATS
+
+    for wf_id, session in list(_SESSIONS.items()):
+        if wf_id == current_wf_id:
+            continue
+        mgr = _HEARTBEATS.get(wf_id)
+        if mgr is None or not mgr._stop_event.is_set():
+            continue  # 活跃 scan / 状态未知：保守跳过
+        _SESSIONS.pop(wf_id, None)
+        try:
+            from supernova_core.logging.log_bus import drain_and_detach
+
+            await drain_and_detach(workflow_id=wf_id)
+            await session.close()
+        except Exception:  # noqa: BLE001 - best-effort 清扫
+            logger.warning(
+                "sweep stale audit session failed (wf=%s)", wf_id, exc_info=True)
 
 
 async def ensure_audit_session(input: Any) -> None:
@@ -132,6 +181,9 @@ async def ensure_audit_session(input: Any) -> None:
         return
     if not isinstance(wf_id, str) or not wf_id:
         return
+
+    # 惰性清扫：别的 wf 的 cancel 残留（heartbeat 终态自停者）趁本入口顺手收掉。
+    await _sweep_stale_sessions(wf_id)
 
     # 快路径:session 已存在(setup_display 已建 / 并发先到者已重建)。
     if not isinstance(get_audit_session_for(wf_id), NullAuditSession):

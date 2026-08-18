@@ -30,15 +30,14 @@ async def _restore_buses():
         if bus._drain_task is not None and not bus._drain_task.done():
             bus._drain_task.cancel()
         bus._drain_task = None
-        if bus._diagnostic is not None:
-            bus._diagnostic.close()
-            bus._diagnostic = None
         while True:
             try:
                 bus.queue.get_nowait()
             except Exception:
                 break
     _BUSES.clear()
+    from supernova_core.logging.log_bus import reset_diagnostic
+    reset_diagnostic()  # diagnostic 是进程级单例（不在 bus 上），单独重置
 
 
 def _spy():
@@ -94,6 +93,38 @@ async def test_is_attached_isolated_per_workflow():
     assert is_attached(workflow_id="wf-A")
     assert not is_attached(workflow_id="wf-B")  # B 仍未 attach
     await drain_and_detach(workflow_id="wf-A")
+
+
+@pytest.mark.asyncio
+async def test_drain_and_detach_pops_bus_and_proxy_routes_module_fn(monkeypatch):
+    """收尾后 bus 不残留（2026-08-18）：
+
+    - 模块级 ``drain_and_detach`` 从 ``_BUSES`` pop（``setdefault`` 只增不减 ->
+      每 workflow 永久残留一个 bus + diagnostic 句柄）；
+    - ``LogBus.drain_and_detach()``（proxy 属性访问）必须走模块级函数而非转发
+      实例方法，否则 pop 被绕过（finalize_summary 走的就是 proxy 路径）。
+    """
+    from supernova_core.logging.log_bus import LogBus
+
+    spy = _spy()
+    await attach(spy, workflow_id="wf-C")
+    bus_before = get_log_bus("wf-C")
+    task_before = bus_before._drain_task
+    assert task_before is not None and not task_before.done()
+    monkeypatch.setattr(
+        "supernova_core.logging.log_bus._resolve_wf_id",
+        lambda explicit=None: "wf-C",
+    )
+
+    await LogBus.drain_and_detach()  # proxy 路径（finalize_summary 同款调用）
+
+    assert task_before.done(), "旧 bus 的 drain task 应被 cancel + await 收尾"
+    bus_after = get_log_bus("wf-C")
+    assert bus_after is not bus_before, "收尾应 pop 旧 bus（后续 get 重建占位）"
+    assert not bus_after.is_attached
+    assert bus_after._dispatcher is None
+    assert bus_after._drain_task is None
+    # diagnostic 已是进程级单例（不在 bus 上）：占位 bus 天然不携带。
 
 
 @pytest.mark.asyncio
