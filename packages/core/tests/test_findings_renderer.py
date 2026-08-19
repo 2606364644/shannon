@@ -336,6 +336,39 @@ async def test_render_findings_skips_missing_queue(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_render_findings_reads_queue_from_intermediate_subdir(tmp_path):
+    """tiering 回归（2026-08-18 f70bfc1c）：executor 写 queue 落桶内
+    intermediate/（executor.py intermediate_path），白盒调用（queue_subdir=None）
+    平铺读不到 → findings.md 静默缺失 → assemble 回落 analysis_deliverable，
+    报告页出现「注入分析报告」等分节。读侧须 intermediate/ 优先 + 平铺兜底。"""
+    deliverables = tmp_path / "deliverables"
+    (deliverables / "intermediate").mkdir(parents=True)
+
+    queue = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJECTION-TIER-001", vulnerability_type="SQLi",
+            externally_exploitable=True, confidence="high",
+            source="user input", path="/api/search",
+            sink_call="db.execute",
+        ),
+    ])
+    (deliverables / "intermediate" / "injection_exploitation_queue.json").write_text(
+        queue.model_dump_json(indent=2)
+    )
+
+    await FindingsRenderer.render_findings_from_queues(deliverables)
+
+    findings = deliverables / "injection_findings.md"
+    assert findings.exists(), (
+        "queue 在 intermediate/ 时 findings.md 必须产出（否则 assemble 回落 "
+        "analysis_deliverable，报告页出现分分析报告）"
+    )
+    content = findings.read_text()
+    assert "### INJECTION-TIER-001" in content
+    assert "**Sink Call:** db.execute" in content
+
+
+@pytest.mark.asyncio
 async def test_render_findings_with_confidence_filter(tmp_path):
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()

@@ -15,7 +15,7 @@ from supernova_core.models.queue_schemas import (
     XssVulnerability,
 )
 from supernova_core.utils.file_io import async_path_exists, async_read_file, async_write_file
-from supernova_core.utils.paths import resolve_track_deliverable
+from supernova_core.utils.paths import resolve_intermediate, resolve_track_deliverable
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +301,8 @@ class FindingsRenderer:
         - ``queue_subdir``: when set, queue JSON is read via
           :func:`resolve_track_deliverable` (``deliverables_path / queue_subdir /
           filename`` with legacy root fallback). When ``None``, queues are read
-          directly under ``deliverables_path``.
+          via :func:`resolve_intermediate` — tiering 后 queue 落桶内
+          ``intermediate/``，读侧 intermediate/ 优先 + 平铺老结构兜底。
 
         Defaults (``None``/``None``) preserve the old single-positional-arg
         behaviour — existing whitebox callers are unaffected.
@@ -320,8 +321,14 @@ class FindingsRenderer:
                 queue_path = resolve_track_deliverable(
                     deliverables_path, queue_subdir, class_cfg.queue_file)
             else:
-                queue_path = deliverables_path / class_cfg.queue_file
-            if not await async_path_exists(queue_path):
+                # tiering（spec 2026-08-18）：queue 是中间产物 → 写侧落桶内
+                # intermediate/（executor.py intermediate_path），读侧须
+                # intermediate/ 优先 + 平铺老结构兜底（f4b98d38 扫尾模式同口径；
+                # 平铺直读会让 findings.md 静默缺失 → assemble 回落
+                # analysis_deliverable → 报告页出现分分析报告）。
+                queue_path = resolve_intermediate(
+                    deliverables_path, class_cfg.queue_file)
+            if queue_path is None or not await async_path_exists(queue_path):
                 continue
 
             heading = _M.get(class_cfg.heading)
