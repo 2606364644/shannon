@@ -93,7 +93,8 @@ class WorkspacesIndexer:
     def list_workspaces(self) -> list[dict]:
         """列 workspace（1 ws : N scans 后）：扫 workspaces/*/ 识别 ws（workspace.json
         优先，回退 legacy ws 根 session.json），每 ws 经 ScanStore.list_scans 聚合
-        scan_count/latest_status/latest_created_at，ws 行字段取 latest scan。
+        scan_count/latest_status/latest_created_at；ws 行状态/时间字段取 latest scan，
+        统计字段（vuln/cost/duration）取最近 completed scan（回落 latest）。
 
         空 ws（workspace.json 但无 scan）-> scan_count=0、status=completed（idle，不显
         spinner，对齐旧 POST /api/workspaces 写 status=completed 的行为）。
@@ -117,15 +118,20 @@ class WorkspacesIndexer:
             scans = store.list_scans(name)
             if scans:
                 latest = scans[0]  # list_scans 已按 created_at 倒序
+                # 统计字段取最近 completed scan：running/failed/interrupted scan 无产出
+                # （或仅部分产出），取它会掩盖上一个 completed 的已知结果（回归：
+                # Brightli 43 漏洞被新起 running scan 的 vuln_counts={} 清零）。
+                # 无 completed（failed-only ws）回落 latest，维持原行为不清零。
+                stats = next((s for s in scans if s.status == "completed"), latest)
                 out.append({
                     "name": name,
                     "scan_type": latest.scan_type,
                     "status": latest.status,
-                    "vuln_counts": latest.vuln_counts,
-                    "vuln_count": latest.vuln_count,
-                    "total_cost_usd": latest.total_cost_usd,
-                    "cost_currency": latest.cost_currency,
-                    "total_duration_ms": latest.total_duration_ms,
+                    "vuln_counts": stats.vuln_counts,
+                    "vuln_count": stats.vuln_count,
+                    "total_cost_usd": stats.total_cost_usd,
+                    "cost_currency": stats.cost_currency,
+                    "total_duration_ms": stats.total_duration_ms,
                     "links": latest.links,
                     "created_at": latest.created_at,
                     "completed_at": latest.completed_at,

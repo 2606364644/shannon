@@ -279,6 +279,64 @@ def test_list_ws_multiple_scans_aggregated(tmp_workspaces):
     assert row["latest_created_at"] == 1780003600.0
 
 
+def test_list_ws_stats_take_latest_completed_scan(tmp_workspaces):
+    """统计字段（vuln/cost/duration）取最近 completed scan，状态/时间仍取最新。
+
+    回归：Brightli 43 漏洞被新起的 running scan 清零——latest scan 无产出
+    （vuln_counts={}）不该掩盖上一个 completed scan 的已知结果。"""
+    from supernova_web.components.scan_store import ScanStore, write_workspace_meta
+    ws = tmp_workspaces / "stats-ws"
+    ws.mkdir()
+    write_workspace_meta(ws, name="stats-ws", owner="admin")
+    store = ScanStore(tmp_workspaces)
+    # 旧 scan：completed + injection queue 3 条
+    _, d1 = store.create_scan("stats-ws", "http://e", "/x")
+    s1 = json.loads((d1 / "session.json").read_text())
+    s1["status"] = "completed"; s1["created_at"] = 1780000000.0
+    (d1 / "session.json").write_text(json.dumps(s1))
+    dl = d1 / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{}] * 3}))
+    # 新 scan：interrupted（终态、无产物——不依赖 heartbeat 判活）
+    _, d2 = store.create_scan("stats-ws", "http://e", "/x")
+    s2 = json.loads((d2 / "session.json").read_text())
+    s2["status"] = "interrupted"; s2["created_at"] = 1780003600.0
+    (d2 / "session.json").write_text(json.dumps(s2))
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    row = next(r for r in rows if r["name"] == "stats-ws")
+    # 状态/时间取最新（动态）
+    assert row["status"] == "interrupted"
+    assert row["latest_status"] == "interrupted"
+    assert row["latest_created_at"] == 1780003600.0
+    # 统计取最近 completed（已知结果不被无产出新 scan 掩盖）
+    assert row["vuln_count"] == 3
+    assert row["vuln_counts"] == {"injection": 3}
+
+
+def test_list_ws_stats_fallback_latest_when_no_completed(tmp_workspaces):
+    """无 completed scan 时统计回落 latest（维持原行为，兼容 failed-only ws）。
+
+    failed scan 失败前可能有部分产出——回落 latest（而非清零）保留这些已知信息。"""
+    from supernova_web.components.scan_store import ScanStore, write_workspace_meta
+    ws = tmp_workspaces / "fallback-ws"
+    ws.mkdir()
+    write_workspace_meta(ws, name="fallback-ws", owner="admin")
+    store = ScanStore(tmp_workspaces)
+    _, d1 = store.create_scan("fallback-ws", "http://e", "/x")
+    s1 = json.loads((d1 / "session.json").read_text())
+    s1["status"] = "failed"; s1["created_at"] = 1780000000.0
+    (d1 / "session.json").write_text(json.dumps(s1))
+    dl = d1 / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "ssrf_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{}] * 2}))
+    rows = WorkspacesIndexer(tmp_workspaces).list_workspaces()
+    row = next(r for r in rows if r["name"] == "fallback-ws")
+    assert row["status"] == "failed"
+    assert row["vuln_count"] == 2  # 回落 latest（它自己），不清零
+
+
 def test_list_legacy_ws_root_session_count_1(tmp_workspaces):
     """legacy ws（ws 根 session.json，未迁移）-> scan_count=1（双源兼容）。"""
     _make_ws(tmp_workspaces, "legacy-ws", status="completed")

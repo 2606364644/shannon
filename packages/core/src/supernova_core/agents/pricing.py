@@ -137,6 +137,10 @@ def compute_cost(model: str, usage) -> CostAmount:
     key = normalize_model(model)
     table, currency = _pricing()
     if key not in table:
+        _log.warning(
+            "模型 %r 不在价目表，cost 记 0（守「不假估算」）；可经 SUPERNOVA_PRICING_OVERRIDE 补充定价",
+            key,
+        )
         return CostAmount(0.0, currency)
     p = table[key]
     inp = getattr(usage, "input_tokens", 0) or 0

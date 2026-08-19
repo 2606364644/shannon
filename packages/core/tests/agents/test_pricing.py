@@ -168,3 +168,16 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000
     assert compute_cost_usd("glm-4.5-air", usage) == pytest.approx(expected)
+
+
+def test_compute_cost_unknown_model_warns_not_silent(caplog):
+    """未知模型 → cost 0 + warning（CLAUDE.md §4 契约），非静默。
+
+    回归：deepseek-v4-flash-coder 全程 ¥0.00 无任何提示——docstring 说会打
+    warning，实际静默返回，用户无从得知 cost 为何是 0。"""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="supernova_core.agents.pricing"):
+        r = compute_cost("deepseek-v4-flash-coder", TokenUsage(input_tokens=123))
+    assert r == CostAmount(0.0, "CNY")
+    assert any("deepseek-v4-flash-coder" in rec.message for rec in caplog.records)
