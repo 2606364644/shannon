@@ -483,6 +483,14 @@ class BlackboxScanWorkflow:
                 self._state.agent_metrics[AgentName.REPORT.value] = metrics
                 self._state.current_agent = None
 
+            # 漏洞节覆盖校验+自愈（report-executive 之后）：agent 自写脚本压缩正文丢
+            # ### ID 结构节会让报告页统计全 0（2026-08-19 回归，白盒侧爆发），节数不足
+            # 则重建底稿版。无条件执行（resume 跳过 agent 时校验仍幂等有意义）。
+            await workflow.execute_activity(
+                activities.verify_report_vuln_blocks, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_policy,
+            )
             await workflow.execute_activity(
                 activities.finalize_report, act_input,
                 start_to_close_timeout=timedelta(minutes=5),

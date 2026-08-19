@@ -1,3 +1,4 @@
+import logging
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -572,6 +573,41 @@ async def run_report_agent(input: BlackboxActivityInput) -> dict:
         await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+@activity.defn
+async def verify_report_vuln_blocks(input: BlackboxActivityInput) -> None:
+    """report-executive 后校验 + 自愈(镜像 whitebox 同名防线,blackbox/ 口径)。
+
+    黑盒链路同构暴露:assemble_report 拼 blackbox/ 报告 → run_report_agent 用
+    同一份 report-executive prompt 重写——自写脚本压缩正文丢 ### ID 结构节
+    会让前端报告页统计全 0(2026-08-19 回归,combined scan 白盒侧爆发)。
+    节数不足 → 重新 assemble 覆盖 agent 版(丢执行摘要、保漏洞数据);须在
+    run_report_agent 之后、finalize_report 之前。失败不阻塞(吞异常+warning)。
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from supernova_core.models.agents import ALL_VULN_CLASSES
+        from supernova_core.services.report_assembler import ReportAssembler
+        from supernova_core.utils.file_io import async_path_exists
+
+        bb = blackbox_dir(_get_deliverables_path(input))
+        report_path = bb / "comprehensive_security_assessment_report.md"
+        if not await async_path_exists(report_path):
+            return  # 主报告不存在(agent 失败),无处校验
+        vuln_classes = list(ALL_VULN_CLASSES)  # 对齐 assemble_report 口径
+        actual, expected = await ReportAssembler.verify_vuln_block_coverage(
+            bb, vuln_classes, report_path)
+        if actual >= expected:
+            return  # 覆盖完好(含无漏洞:0 >= 0)
+        log.warning(
+            "报告漏洞节覆盖不足(actual=%d < expected=%d):report-executive 丢失结构化"
+            "漏洞节,重新 assemble 覆盖 agent 版(执行摘要丢弃,漏洞数据恢复)",
+            actual, expected,
+        )
+        await ReportAssembler.assemble(bb, vuln_classes, report_path)
+    except Exception as exc:  # noqa: BLE001 — 校验/自愈失败不阻塞主报告
+        log.warning("verify_report_vuln_blocks failed (non-blocking): %s", exc)
 
 
 @activity.defn

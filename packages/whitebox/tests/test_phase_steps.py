@@ -29,6 +29,8 @@ def test_step_names_matches_phase_steps_order():
     assert step_names("attack-chain") == ("attack-chain-assembly",)
     assert step_names("reporting") == (
         "render-findings", "assemble-report", "run-report-agent",
+        "verify-report-vuln-blocks",
+        "inject-attack-chains", "inject-gitnexus-track-status",
     )
 
 

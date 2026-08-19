@@ -1,9 +1,20 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from supernova_core.i18n import Messages, current_lang
 from supernova_core.utils.file_io import async_path_exists, async_read_file, async_write_file
+
+# 对齐前端报告页解析契约(packages/web/frontend/src/lib/vuln-block.ts 的
+# VULN_HEADING_RE = /^### ([A-Z]+)(?:-[A-Z]+)+-(\d+)\b/):统计完全依赖节级标题结构,
+# 兼容 -VULN-/-GN- 双轨 ID;小写 chain 节(### llm-chain-N)与非漏洞标题不匹配。
+VULN_HEADING_RE = re.compile(r"^### [A-Z]+(?:-[A-Z]+)+-\d+\b", re.MULTILINE)
+
+
+def count_vuln_headings(markdown: str) -> int:
+    """数独立结构化漏洞节数(### TYPE-VULN-NN / ### TYPE-GN-NN)。"""
+    return len(VULN_HEADING_RE.findall(markdown))
 
 # 报告渲染标签双语（zh/en 可配，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
 _M = Messages({
@@ -21,12 +32,15 @@ _M = Messages({
 
 class ReportAssembler:
     @staticmethod
-    async def assemble(
+    async def _assemble_sections(
         deliverables_path: Path,
         vuln_classes: list[str],
-        report_path: Path,
-        report_config: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> list[str]:
+        """拼接 per-class deliverables(evidence → findings → analysis 三级回退)为 sections 列表。
+
+        从 assemble 提取的纯读取部分,供 assemble(写盘)与 verify_vuln_block_coverage
+        (内存数节,零临时文件)共用。
+        """
         sections: list[str] = []
         for vuln_class in vuln_classes:
             evidence = deliverables_path / f"{vuln_class}_exploitation_evidence.md"
@@ -41,8 +55,40 @@ class ReportAssembler:
             elif await async_path_exists(analysis):
                 content = await async_read_file(analysis)
                 sections.append(content)
+        return sections
+
+    @staticmethod
+    async def assemble(
+        deliverables_path: Path,
+        vuln_classes: list[str],
+        report_path: Path,
+        report_config: dict[str, Any] | None = None,
+    ) -> None:
+        sections = await ReportAssembler._assemble_sections(deliverables_path, vuln_classes)
         report_content = "\n\n---\n\n".join(sections)
         await async_write_file(report_path, report_content)
+
+    @staticmethod
+    async def verify_vuln_block_coverage(
+        deliverables_path: Path,
+        vuln_classes: list[str],
+        report_path: Path,
+    ) -> tuple[int, int]:
+        """report-executive 后校验:返回 (报告实际节数, 期望节数)。
+
+        期望数 = 把同一批 per-class deliverables 重新在内存拼接(不写盘)后数节——
+        与 agent 覆盖前的底稿同源同口径(天然继承 report_config 过滤结果),幂等。
+        ``actual < expected`` 即 agent 压缩/丢失了结构化漏洞节(回归 2026-08-19:
+        report agent 自写 cleanup 脚本把正文压成模式汇总+行内 ID 引用,前端
+        splitByVulnBlocks 解析 0 节 → 报告页统计全 0、PoC 无卡片可并)。
+        调用方据此自愈(重新 assemble 覆盖 agent 版:丢执行摘要、保漏洞数据)。
+        """
+        sections = await ReportAssembler._assemble_sections(deliverables_path, vuln_classes)
+        expected = count_vuln_headings("\n\n---\n\n".join(sections))
+        if not await async_path_exists(report_path):
+            return 0, expected
+        actual = count_vuln_headings(await async_read_file(report_path))
+        return actual, expected
 
     @staticmethod
     async def render_attack_chains(deliverables_path: Path) -> str:

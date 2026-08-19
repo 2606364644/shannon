@@ -64,3 +64,32 @@ def test_reporting_phase_inject_attack_chains_after_report_agent_in_workflow() -
     assert src.find("activities.inject_attack_chains", i_report) != -1, (
         "inject_attack_chains 必须在 run-report-agent 之后执行（防 report-executive 覆盖攻击链章节）"
     )
+
+
+def test_reporting_phase_verify_blocks_after_report_agent() -> None:
+    """漏洞节覆盖校验必须在 run-report-agent 之后（注册表顺序）。
+
+    report-executive 的自写脚本压缩回归(2026-08-19)防线:节数不足自愈重建,
+    必须在 agent 覆盖报告之后校验、在 inject_attack_chains 注入之前重建
+    (否则重建会丢掉后续注入的章节)。
+    """
+    from supernova_whitebox.pipeline.step_intents import step_names
+    steps = step_names("reporting")
+    assert "verify-report-vuln-blocks" in steps
+    assert steps.index("verify-report-vuln-blocks") > steps.index("run-report-agent")
+    assert steps.index("verify-report-vuln-blocks") < steps.index("inject-attack-chains")
+
+
+def test_reporting_phase_verify_blocks_in_workflow_source() -> None:
+    """源码级硬约束：workflows.py 里 verify_report_vuln_blocks 调用必须夹在
+    run-report-agent 与 inject_attack_chains 之间（镜像 sibling 双锚定模式）。"""
+    src = _workflow_src()
+    i_report = src.find('"agent_name": "report"')
+    assert i_report != -1, "找不到 run-report-agent 调用（agent_name=report 字面量）"
+    i_verify = src.find("activities.verify_report_vuln_blocks", i_report)
+    assert i_verify != -1, (
+        "verify_report_vuln_blocks 必须在 run-report-agent 之后执行（防 report-executive 丢漏洞节）"
+    )
+    assert src.find("activities.inject_attack_chains", i_verify) != -1, (
+        "verify_report_vuln_blocks 必须在 inject_attack_chains 之前执行（重建不丢后续注入章节）"
+    )

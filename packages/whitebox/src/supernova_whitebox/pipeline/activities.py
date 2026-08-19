@@ -1168,6 +1168,42 @@ async def assemble_report(input: ActivityInput) -> None:
 
 
 @activity.defn
+async def verify_report_vuln_blocks(input: ActivityInput) -> None:
+    """report-executive 后校验 + 自愈:最终报告 ### ID 节数 vs 底稿期望数。
+
+    回归(2026-08-19 另一环境):report agent 自写 cleanup 脚本把正文压成
+    「模式汇总+行内 ID 引用」,丢掉全部结构化漏洞节——前端 splitByVulnBlocks
+    解析 0 节 → 报告页统计全 0、PoC 无卡片可并。prompt 三处锁定节格式仍被
+    绕过(SCRATCHPAD 允许 scripts 是口子),故加确定性防线:节数不足 → 重新
+    assemble 覆盖 agent 版(丢执行摘要、保漏洞数据——数据完整性 > 摘要美化),
+    后续 inject_* 照常追加。必须在 run-report-agent 之后、inject_attack_chains
+    之前运行。校验/自愈失败不阻塞主报告(吞异常 + warning)。
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from supernova_core.services.report_assembler import ReportAssembler
+        from supernova_core.utils.file_io import async_path_exists
+
+        _, deliverables, _ = _get_paths(input)
+        report_path = deliverables / "comprehensive_security_assessment_report.md"
+        if not await async_path_exists(report_path):
+            return  # 主报告不存在(agent 失败),无处校验
+        vuln_classes = input.vuln_classes or list(ALL_VULN_CLASSES)
+        actual, expected = await ReportAssembler.verify_vuln_block_coverage(
+            deliverables, vuln_classes, report_path)
+        if actual >= expected:
+            return  # 覆盖完好(含无漏洞扫描:0 >= 0)
+        log.warning(
+            "报告漏洞节覆盖不足(actual=%d < expected=%d):report-executive 丢失结构化"
+            "漏洞节,重新 assemble 覆盖 agent 版(执行摘要丢弃,漏洞数据恢复)",
+            actual, expected,
+        )
+        await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+    except Exception as exc:  # noqa: BLE001 — 校验/自愈失败不阻塞主报告
+        log.warning("verify_report_vuln_blocks failed (non-blocking): %s", exc)
+
+
+@activity.defn
 async def inject_attack_chains(input: ActivityInput) -> None:
     """报告阶段最后注入：attack_chains.json → ## 攻击链 章节追加到最终报告。
 

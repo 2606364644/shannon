@@ -19,6 +19,8 @@ Your task is to:
 IMPORTANT: You are MODIFYING an existing file, not creating a new one.
 Use the Edit tool to make targeted changes — do NOT use the Write tool to overwrite the whole file. If you must use Write (e.g., a large restructure), you MUST preserve every per-class section that the orchestrator assembled verbatim, and only add the Executive Summary at the top plus remove the extraneous meta-sections listed below. Overwriting with Write and dropping assembled content risks losing vulnerability evidence — prefer Edit.
 
+HARD CONSTRAINT — no scripted rewrites: do NOT write or run any script (Bash/python/sed/awk/etc.) that regenerates, compresses, or batch-rewrites the report body. Every modification to `comprehensive_security_assessment_report.md` must go through targeted Edit tool calls. A cleanup script rewriting the file in bulk is indistinguishable from data loss, even if vulnerability IDs survive as inline references.
+
 LANGUAGE: 用简体中文撰写你新增的所有叙述性内容(执行摘要、按类型汇总)。
 保留英文原文:漏洞编号(如 AUTH-VULN-01)、代码、命令、文件路径与行号、HTTP 方法/状态码、
 URL、请求头名、JSON 字段名、cookie 名、技术缩写(SSRF、SSTI、XSS、CSRF、RBAC、HSTS、IDOR、OAuth、JWT、PKCE)。
@@ -31,7 +33,7 @@ URL: {{WEB_URL}}
 Filesystem:
 - {{REPO_PATH}}/ (read only)
 - {{DELIVERABLES_PATH}}/ (read-write)
-- {{SCRATCHPAD_PATH}}/ (read-write) - screenshots, scripts, scratch work, etc.
+- {{SCRATCHPAD_PATH}}/ (read-write) - screenshots, scratch work, etc. (NOT for scripts that rewrite the report — see the HARD CONSTRAINT above)
 </target>
 
 <context>
@@ -101,6 +103,7 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
      * any counts in the sections
    - Preserve exact vulnerability IDs: every finding heading is now `### [TYPE]-VULN-NN: <title>` or `### [TYPE]-GN-NN: <title>` (the orchestrator already appends a one-line title after the ID). NEVER alter or drop the ID prefix (`[TYPE]-VULN-NN` / `[TYPE]-GN-NN`) — only the text after the colon is editable. If that title is missing (a bare `### [TYPE]-VULN-NN` with no colon) or is only a short category label (e.g., `SSTI`, `Reflected`) rather than a descriptive phrase, rewrite it (via Edit) to a concise human-readable descriptor derived from the finding's Vulnerable location and Overview, keeping the `### ID: ` prefix intact.
    - NEVER delete per-class vulnerability evidence: preserve every vulnerability ID (`### [TYPE]-VULN-NN` / `### [TYPE]-GN-NN`), code snippets, commands, file paths, line numbers, HTTP methods/status, and URLs exactly as the orchestrator assembled them. Cleanup only removes the meta-sections listed above (Recommendations/Conclusion/Summary/etc.) — never the evidence inside a kept section.
+   - MACHINE-PARSED FORMAT (downstream contract): a downstream parser counts vulnerabilities from standalone `### [TYPE]-VULN-NN: <title>` / `### [TYPE]-GN-NN: <title>` headings — one heading per vulnerability, unchanged. "Cleaning" must NEVER compress or merge multiple vulnerabilities into a pattern summary, and an ID mentioned inline in prose does NOT count: without its own `### ID:` heading the finding disappears from the report page statistics (shows 0 vulnerabilities). Condensed pattern summaries + inline ID references are a data-loss bug, not cleanup.
 
 4. Combine the content:
    - Place the Executive Summary and Network Reconnaissance sections at the top

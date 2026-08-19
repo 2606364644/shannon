@@ -580,6 +580,17 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=15),
                 retry_policy=retry_for("standard"),
             )
+            # 漏洞节覆盖校验+自愈（report-executive 之后）：agent 自写脚本压缩正文丢
+            # ### ID 结构节会让报告页统计全 0（2026-08-19 回归），节数不足则重建底稿版。
+            # 必须在 inject_attack_chains 之前——重建覆盖报告，先注入会被冲掉。
+            self._state.current_agent = "verify-report-vuln-blocks"
+            await workflow.execute_activity(
+                activities.verify_report_vuln_blocks,
+                ActivityInput(**{**act_input.__dict__,
+                                 "vuln_classes": [str(vt) for vt in selected_classes]}),
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
+            )
             # 攻击链章节最后注入（report-executive 之后），避免被 agent 重写覆盖丢失
             self._state.current_agent = "inject-attack-chains"
             await workflow.execute_activity(
