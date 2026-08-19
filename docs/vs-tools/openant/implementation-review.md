@@ -1,10 +1,11 @@
 # OpenAnt 实现审计结论
 
-- **检查日期**：2026-08-12
+- **检查日期**：2026-08-12（首版审计）；2026-08-19（复核修订）
 - **检查对象**：`/root/OpenAnt`
-- **检查版本**：`392de75b5d3a964285e13f586ce02a5fe673416e`（`master`）
+- **检查版本**：`2476527b9d6f929a5c987bd3d5df414da04f1eaf`（`master`，2026-08-18）
 - **检查范围**：source/sink、调用图与可达性、漏洞研判、防护判断、越权/未授权分析、白盒与动态验证
-- **验证情况**：与入口识别、可达性、Stage 2 验证、动态测试相关的 78 个回归测试通过
+- **验证情况**：首版（基线 `392de75b`）与入口识别、可达性、Stage 2 验证、动态测试相关的 78 个回归测试通过；2026-08-19 复核为源码 diff 级核对（未重跑测试套件）
+- **复核记录（2026-08-19）**：上游 `392de75b` → `2476527b`（41 commits，2026-08-13 ~ 08-18），受影响结论已就地修订：§2.1 入口识别、§3.4 可达性边界、新增 §3.5 post-LLM re-filter（首版遗漏）、§4.4 研判韧性、§6.2 Docker 隔离、§7/§8 新能力、§9 代码位置、新增 §10 与 shannon-py 的关联。总体定位判断（§1）不变。
 
 ## 1. 总体结论
 
@@ -25,6 +26,8 @@ OpenAnt 的实际定位是：
 ```
 
 具体的输入传播、校验绕过、防护有效性和攻击影响，主要依赖 Stage 1/Stage 2 的 LLM 语义判断。
+
+2026-08-13 ~ 08-18 的密集更新（41 commits）未改变该定位，但补强了 LLM 侧工具面（`get_static_dependencies` + DI 感知前向追踪，§2.1）、可达性过滤的二次环节（§3.5）、研判韧性（§4.4）与沙箱隔离（§6.2），并新增 web UI、SARIF 输出等外围能力（§7/§8）。
 
 ## 2. Source 和 Sink 识别
 
@@ -49,13 +52,26 @@ OpenAnt 的实际定位是：
 | WebSocket/IPC | `websocket.receive`、`message.data`、XPC、网络监听等 |
 | PHP 输入 | `$_GET`、`$_POST`、`$_REQUEST`、`php://input` |
 
+2026-08-13/14 上游扩充：
+
+- **Python**：自定义命名的 router routes 也会被 seed 为入口（#229）；
+- **Rust**：libFuzzer `fuzz_target!`、AFL 及别名形式的 fuzz harness 宏被**合成**为入口（`unit_type=main`，仅作 BFS seed），并标记 `synthetic_harness=True`——合成 harness 不算真实结构入口（#228/#234，语义见 §3.4 blackout）。
+
 另外，`--llm-reachability` 可以让 LLM 补充识别：
 
 - `entry_point`
 - `external_input`
 - `cross_process`
 
-但高置信度的 LLM 入口信号主要用于增加 BFS seed，并不会自动构建完整的跨进程或变量级污点图。
+高置信度的 LLM 入口信号主要用于增加 BFS seed（并触发 §3.5 的 re-filter）。2026-08-18 起（#259），agentic enhancer 的 LLM 分析流程新增 **`get_static_dependencies` 工具**（查询某函数的静态 callees/callers），prompt 流程改为：
+
+1. 先取静态依赖（`get_static_dependencies` + `read_function` 读关键 service/repository 方法）；
+2. 识别危险操作；
+3. 反向追可达（谁调用它 → 是否到达入口）；
+4. **正向追被调函数**——service 层 authz/校验/清洗、`this.someService.method()` 这类 DI 调用链（`search_definitions` 找实现）；
+5. 分类判定。
+
+判定原则是 over-seed：*callee 里的控制只有在**可证明**守护污点路径时才降级严重度；拿不准就保持 EXPLOITABLE，绝不隐藏可达 sink。注意这是 LLM 语义层的 DI 补偿（工具+提示词），**不是静态调用图补边**——静态图层面的 DI 漏报（§3.4）仍然存在。
 
 ### 2.2 Sink：没有统一的静态 Sink 规则库
 
@@ -108,7 +124,7 @@ CodeQL 在 OpenAnt 中主要是 **可选预过滤器**，不是 OpenAnt 统一�
 | 变量级 source 提取 | 没有完整实现 |
 | Sink 识别 | 主要依赖 LLM，CodeQL 可选 |
 | Source-to-sink 污点传播 | 没有统一、确定性的实现 |
-| Source/sink 数据流 | 可由 LLM 描述，但不是形式化证明 |
+| Source/sink 数据流 | 可由 LLM 描述（8-18 起有静态依赖工具辅助），但不是形式化证明 |
 
 ## 3. 调用链和可达性
 
@@ -192,17 +208,37 @@ entry point/source
 - 跨进程/异步调用
 - 复杂函数指针或运行时生成代码
 
-LLM reachability 主要是补充入口点，不能完全替代调用图补边。
+LLM reachability 主要是补充入口点，不能完全替代调用图补边。**部分缓解（2026-08-18，#259）**：LLM 侧新增 `get_static_dependencies` 工具 + DI 感知前向追踪提示（§2.1），让 Stage 前的分析 agent 能沿 `this.someService.method()` 这类 DI 链**语义地**追进 service 层——但这作用于 LLM 分析质量，静态调用图本身仍不解析这些边。
 
 #### 没有入口点时会安全降级
 
-如果没有检测到入口点，parser 不会把全部函数静默裁剪掉，而是保留全部 unit 并输出警告。因此：
+如果没有检测到入口点，parser 不会把全部函数静默裁剪掉，而是保留全部 unit 并输出警告（"blackout" keep-all 网）。因此：
 
 > “没有被判断为 reachable”不一定等价于“代码确实不可达”，可能只是入口点识别失败后触发了 pass-through。
 
+2026-08-14 起（#233/#238）该逻辑细化：
+
+- 只有**真实结构入口**（`real_entry_point_ids`，排除 `synthetic_harness=True` 的合成 fuzz harness）才计入 blackout 判定；
+- 当仅有合成 harness 入口时，keep-all 网仍会触发——不信任 harness-only 可达集，避免静默丢掉未被 BFS 覆盖的导出面；
+- blackout 警告区分“无入口”与“仅合成 harness 入口”两种原因，并显式建议 `--library-mode`；
+- 非 runtime 的 `main`（如构建生成物）不再计入结构计数（#238）。
+
 #### 库模式
 
-`library_mode` 可以把导出的公共 API 作为 reachability seed。否则纯库项目可能没有传统的 `main` 或路由入口。
+`library_mode` 可以把导出的公共 API 作为 reachability seed。否则纯库项目可能没有传统的 `main` 或路由入口。2026-08-14 起（#231）`library_mode` 会正确穿过 post-LLM re-filter（此前该 flag 在 re-filter 阶段丢失，导致库模式扫描被二次过滤回入口模式语义）。
+
+### 3.5 post-LLM re-filter：LLM 信号不止补 seed，还会再裁剪一次
+
+> 首版审计遗漏的环节（基线 `392de75b` 已存在；#231/#262 是其修复）。
+
+scanner（`core/scanner.py`）在 LLM reachability 跑完之后有一段**二次结构性过滤**：把 LLM 提升的入口单元（`is_entry_point=True`）作为额外 BFS seed，对 dataset 重新跑可达性过滤。要点：
+
+- 仅当 parser 落盘了 `call_graph.json` 才可 re-filter；是否支持靠**探测文件系统**决定，而非硬编码语言表（注释明确记录过一次“只认 Python/Zig”的陈旧清单出错）；
+- **按语言分区**：没有 call graph 的语言整段 pass-through，不再因主语言缺图而全局关闭过滤；
+- 无 call graph 的语言在 metadata 中记为 `unfilterable`，不伪造“0% 缩减”的过滤记录（#262）；
+- per-language `reachability_filter` 统计回写 dataset metadata（#262 修复前，re-filter 过的扫描会被 reporter 显示成“未过滤”）。
+
+因此“LLM reachability 只是补充入口点”的完整语义是：**补充 seed → 结构 BFS 从新 seed 集合裁出更小的可达集**。LLM 信号同时影响召回（补 seed）与精度（删不可达 unit）。
 
 ## 4. 漏洞研判和防护判断
 
@@ -277,6 +313,15 @@ Stage 2 的 `exploit_path` 要求包含：
 
 如果 Stage 2 因模型输出错误、无 tool call、达到最大迭代次数等原因无法完成，不会直接当成安全，而是标记为 `unverified` / `needs_review`。
 
+### 4.4 研判韧性与 verdict 保护（2026-08-14 ~ 08-16 新增）
+
+上游在一周内集中补了研判管线的失败处理与 verdict 一致性保护：
+
+- **Stage 1 运行中重试**：analyze 阶段对可恢复 ERROR（解析失败、空 completion）在运行内重试，不再直接放弃（#236）；reasoning-only 空 completion（模型只输出思考、无可见内容）可恢复（#242）。
+- **verdict 一致性降级保护**：exploitable finding 不允许被一致性检查降级为任何“丢披露”的 verdict（#243，Stage 2；#245 扩展到 Stage 1 一致性检查）。方向是防误降级（漏报），与 over-seed 原则一致。
+- **checkpoint 门控**：断点恢复时，checkpoint 里 LLM verdict 的采用按 backend identity 门控——换过 LLM backend 的旧 verdict 不被直接采信（#244）。
+- **prompt injection 防护**：插入 LLM prompt 的不可信内容（扫描仓库提供的源码片段、application context）加 fence 隔离，中和 prompt-line 注入（#249/#255）。
+
 ## 5. 越权和未授权漏洞
 
 ### 5.1 没有专门的越权分析器
@@ -343,7 +388,7 @@ dynamic_test = false
 4. 返回 `CONFIRMED`、`NOT_REPRODUCED`、`BLOCKED`、`INCONCLUSIVE` 或 `ERROR`；
 5. 收集文件读取、HTTP 响应、命令输出、网络捕获等证据。
 
-### 6.2 Docker 隔离
+### 6.2 Docker 隔离（2026-08-16 ~ 08-17 大幅加固）
 
 单容器执行使用：
 
@@ -355,6 +400,14 @@ dynamic_test = false
 - 1 CPU；
 - `no-new-privileges`；
 - 构建和执行超时。
+
+2026-08-16/17 加固后（#247/#253/#256，`dynamic_tester/docker_executor.py`）在此基础上追加：
+
+- **全能力丢弃**：`--cap-drop ALL`、`--pids-limit 256`；
+- **运行时断网**：单容器测试 `--network none`；多服务 compose 中每个声明的网络强制 `internal: true`（无外部网关）——服务间通信（如 attacker capture server，CWE-918 模式）保持可达，但执行中的测试无法对外渗透/回传；
+- **compose allowlist 重建**：LLM 生成的 docker-compose **不直接执行**，而是从 key allowlist（`build`/`image`/`depends_on`/`command`/`entrypoint`/`environment`/`expose`/`working_dir`/`healthcheck`/`networks`）重建并叠加上述加固——非 allowlist 的容器运行时属性（`privileged`、`cap_add`、host `volumes`、`pid`/`ipc`/`network_mode`、`devices`、`sysctls`、`env_file` 等）默认丢弃。设计注释明确指出选择 allowlist 而非 blocklist 的原因：blocklist 是非终止的（`network_mode` 就是某一轮的漏网），allowlist 默认挡住下一个未知 key；
+- **secrets scrub**：docker build/run 环境变量做 secrets 清洗，host 侧 staging path 收敛（#256）；
+- **文档化残余**：build-time `RUN` 出网仍是接受的残余风险（构建期外传/回连可能）。
 
 ### 6.3 动态验证的限制
 
@@ -396,15 +449,16 @@ vulnerable
 
 | 能力 | 评价 | 说明 |
 |---|---|---|
-| 入口/source 识别 | 中等偏强 | 框架和输入模式覆盖较丰富，但属于启发式函数级识别 |
+| 入口/source 识别 | 中等偏强 | 框架和输入模式覆盖较丰富（8 月再补 Python 自定义路由、Rust fuzz harness），但属于启发式函数级识别 |
 | Sink 识别 | 中等 | 依赖 LLM，CodeQL 可选，没有统一 sink 规则库 |
 | 直接调用可达性 | 中等偏强 | 双向调用图和 BFS 完整，直接调用场景较实用 |
-| 动态调用/跨进程可达性 | 中等偏弱 | 依赖 parser 能力和可选 LLM reachability |
+| 动态调用/跨进程可达性 | 中等偏弱 → 中等 | 静态图仍靠 parser 能力；8-18 起 LLM 侧有 `get_static_dependencies` + DI 感知前向追踪补偿（语义层，非补边） |
 | 变量级 source-to-sink | 偏弱 | 没有完整的确定性污点传播 |
-| 常见注入漏洞研判 | 中等偏强 | Stage 1 + Stage 2 能提供具体 payload 和 exploit path |
+| 常见注入漏洞研判 | 中等偏强 | Stage 1 + Stage 2 能提供具体 payload 和 exploit path；8 月补运行中重试/空响应恢复/降级保护（§4.4） |
 | 防护判断 | 中等 | 主要依赖 LLM 语义判断，不是形式化验证 |
 | 越权/未授权 | 中等偏弱 | 缺少权限模型和专门规则，依赖 threat model 与 LLM |
-| 黑盒验证 | 有，但受限 | Docker 动态复现可用，但默认关闭且不等价真实部署测试 |
+| 黑盒验证 | 有，但受限 | Docker 动态复现可用（8 月隔离大幅加固），默认关闭且不等价真实部署测试 |
+| 输出与集成 | 新增（2026-08-18） | SARIF 2.1.0 输出（`-f sarif`）、`openant serve` 本地 web UI、`--staged` diff scope（pre-commit 场景） |
 
 ## 8. 最终使用建议
 
@@ -424,23 +478,37 @@ vulnerable
 4. 让 Stage 2 明确尝试匿名用户、低权限用户、跨租户 ID 和高权限动作；
 5. 最终使用真实 API/集成环境进行黑盒验证。
 
+集成面（2026-08-18 起）：SARIF 2.1.0 输出（`-f sarif`，#34/#258）便于接入 CI / 结果聚合；`openant serve` 提供本地 web UI 展示扫描流水线（#235/#240）；`--staged` 支持 pre-commit hook 只扫暂存 diff（#53）；`generate-context` 命令显式生成 application context（要求显式 PhaseBinding，不做静默自动发现，#260）。
+
 **一句话结论：**
 
-> OpenAnt 能较好地证明“静态调用路径存在”，也能让 LLM 对攻击路径和防护进行白盒推理；但它目前不是完整的 source-to-sink 污点分析器，越权判断主要依赖 LLM，动态测试是可选的隔离复现而不是自动决定最终漏洞结论。
+> OpenAnt 能较好地证明“静态调用路径存在”，也能让 LLM 对攻击路径和防护进行白盒推理；但它目前不是完整的 source-to-sink 污点分析器，越权判断主要依赖 LLM，动态测试是可选的隔离复现而不是自动决定最终漏洞结论。2026-08 中旬的更新方向是：给 LLM 更多静态工具（DI 追踪）、堵研判管线的静默失败与误降级、把动态沙箱收紧到 allowlist 级——都是加固而非范式变化。
 
 ## 9. 关键代码位置
 
 | 文件 | 作用 |
 |---|---|
-| `utilities/agentic_enhancer/entry_point_detector.py` | 入口点和外部输入启发式识别 |
+| `utilities/agentic_enhancer/entry_point_detector.py` | 入口点和外部输入启发式识别（含 synthetic_harness 标记、`real_entry_point_ids`） |
+| `utilities/agentic_enhancer/tools.py` | agentic enhancer 工具集（8-18 起新增 `get_static_dependencies`，#259） |
 | `utilities/agentic_enhancer/reachability_analyzer.py` | reverse/forward BFS 可达性分析 |
 | `parsers/python/call_graph_builder.py` | Python 调用图构造示例 |
 | `parsers/javascript/dependency_resolver.js` | JavaScript 调用图和 middleware 边 |
-| `core/parser_adapter.py` | reachability filter 和 parser 编排 |
+| `core/parser_adapter.py` | reachability filter、blackout keep-all 网和 parser 编排 |
+| `core/scanner.py` | 扫描编排；post-LLM re-filter（per-language 二次过滤，§3.5） |
 | `prompts/vulnerability_analysis.py` | Stage 1 漏洞分析提示词 |
 | `prompts/verification_prompts.py` | Stage 2 attacker simulation 提示词 |
 | `utilities/finding_verifier.py` | Stage 2 tool loop、exploit path 和失败安全处理 |
-| `core/verifier.py` | Stage 2 结果筛选和合并 |
+| `core/verifier.py` | Stage 2 结果筛选和合并（含 exploitable 降级保护，#243/#245） |
 | `core/llm_reachability.py` | 可选 LLM reachability 补充 |
-| `utilities/dynamic_tester/` | Docker 动态 exploit 测试 |
+| `utilities/dynamic_tester/docker_executor.py` | Docker 隔离执行 + compose allowlist 重建（#247/#253/#256） |
+| `utilities/dynamic_tester/` | Docker 动态 exploit 测试（含 `DYNAMIC_TESTER_REFERENCE.md`） |
 | `report/generator.py` | 动态测试结果合并到报告 |
+| `apps/openant-cli/cmd/serve.go` + `internal/server` + `ui/` | `openant serve` 本地 web UI（#235） |
+
+（路径均相对 `libs/openant-core/`，Go CLI 侧相对 `apps/openant-cli/`。）
+
+## 10. 与 shannon-py 的关联
+
+- **论文层对照**：OpenAnt 六阶段流水线论文笔记与 GitNexus 轨优化候选 O-1~O-4 见 `docs/openant-paper-notes.md`；本文是源码实现层审计，两者互补。O-1（可达性过滤前置）对应本文 §3/§3.5——注意 OpenAnt 的 blackout/keep-all 网经验（无真实入口时宁可不裁剪）对 O-1 的安全性设计有直接参考价值。
+- **over-seed 原则**：#259 的判定原则（“callee 控制只有在可证明守护污点路径时才降级，拿不准保持 EXPLOITABLE”）与 O-3（chain_verdict 对抗性验证）方向一致，可在 GitNexus 轨 chain_verdict 判定提示词中借鉴——防误降级优先于防误报。
+- **用回归测试锁定“死路径”契约**：#247 用 `tests/test_report_html_sink_is_dead.py` 把“Python 侧 HTML 渲染 sink（原样插值不可信 remediation_html，非 XSS 安全）在生产路径不可达（生产由 Go CLI 经 bluemonday 消毒渲染）”锁进回归，防止有人无意把它接回生产。这与 deepsec 复核发现的 `ts-res-redirect` 死规则教训（`docs/vs-tools/deepsec/source-sink-rules-adoption-review.md` §5.1 的 examples 契约）互为镜像：一边锁“死路径不得复活”，一边锁“活规则不得写死”——都靠带正反例的回归测试守住契约，值得 sink 规则库建设时同步采用。

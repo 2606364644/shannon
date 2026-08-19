@@ -1,6 +1,6 @@
 # DeepSec Source/Sink 规则吸收评估
 
-- **检查日期**：2026-08-12
+- **检查日期**：2026-08-12（2026-08-19 复核：规则基线与 §3 缺口状态全部未变，建议仍有效；新发现 `ts-res-redirect` 死规则，见 §3.2）
 - **对比对象**：`/root/deepsec` 与当前项目 `/root/shannon-py`
 - **结论**：可以吸收；建议按“确定性 AST 规则、候选/LLM 规则、检测器基础能力”分层迁移，不能直接复制 DeepSec 的文件级正则 matcher。
 
@@ -31,10 +31,12 @@ packages/core/src/supernova_core/code_index/
 ├── sink_detector.py
 ├── source_discovery_llm.py
 ├── sink_discovery_llm.py
+├── storage_detector.py          # 二阶存储 taint 轨（另有 storage_discovery_llm.py）
 └── data/
     ├── source_rules.yml
     ├── sink_rules.yml
-    └── sink_candidates.yml
+    ├── sink_candidates.yml
+    └── storage_rules.yml        # 二阶存储 sink（ORM save 等），见二阶存储双轨 spec
 ```
 
 当前 AST parser 支持：
@@ -49,7 +51,8 @@ Python / Go / TypeScript(JavaScript) / Java / PHP
 |---|---:|---|
 | `source_rules.yml` | 26 | Express、Koa、Django、Flask、DRF、Gin、Spring、PHP superglobal 等 |
 | `sink_rules.yml` | 74 | SQL、command、deserialization、SSRF、template、XSS、file、redirect |
-| `sink_candidates.yml` | 20 组 | NoSQL、日志、路径穿越、泛化 SQL/命令等 LLM 补召回 |
+| `sink_candidates.yml` | 20 组 | 按语言+receiver 精确匹配的 LLM 补召回候选模式表 |
+| `storage_rules.yml` | 13 | 二阶存储 sink（Java ORM save 等），服务二阶存储 taint 双轨 |
 
 定向回归测试：
 
@@ -79,7 +82,7 @@ Python / Go / TypeScript(JavaScript) / Java / PHP
 | `document.write(x)` | 命中 | 已有规则 |
 | `el.innerHTML = x` | 未命中 | 属性赋值 detector 缺失 |
 | `node.outerHTML = x` | 未命中 | 属性赋值 detector 缺失 |
-| `res.redirect(x)` | 确定性规则未命中 | 目前只能候选/LLM 补召回 |
+| `res.redirect(x)` | 未命中 | `ts-res-redirect` 是死规则（见 §3.2），修 `receiver_pattern` 即可确定性命中 |
 | `window.location = x` | 未命中 | assignment sink 缺失 |
 | Hono `c.req.query("q")` | 未命中 | source 缺口 |
 | Next `request.nextUrl.searchParams.get(...)` | 未命中 | source 缺口 |
@@ -96,6 +99,28 @@ el.innerHTML = userInput;
 不会被抽取为 call，`callee: innerHTML` 规则无法命中真实的属性赋值场景。
 
 这不是补一条 YAML 即可解决的问题，需要新增 property assignment、JSX 属性或模板绑定 detector。
+
+### 3.2 `ts-res-redirect` 是死规则（2026-08-19 复核发现）
+
+`sink_rules.yml` 中的 `ts-res-redirect`（`callee: redirect`、`receiver_pattern: null`、`languages: [typescript]`）从 rule_id 看意图是覆盖 Express `res.redirect(url)`，但 `sink_detector._rule_matches()` 的语义是 **`receiver_pattern: null` 只匹配裸调用**：
+
+```python
+if rule.receiver_pattern is None:
+    return receiver is None   # 裸调用才命中
+```
+
+实测（TypeScriptParser + detect_sinks）：
+
+```text
+redirect(u)    -> 命中 ts-res-redirect   # TS/JS 现实中不存在这种写法
+res.redirect(u) -> 未命中                  # 真实场景 100% 带 receiver
+```
+
+也就是说这条规则在生产中**永远命不中**。连带影响：`vuln_chain_builders/ssrf_builder.py:46` 的 REDIRECT sink 过滤（防 open redirect 污染 SSRF 分类）也因无确定性 REDIRECT sink 可滤而空转。这正是 §5.1「examples 契约」要防的"规则写入 YAML、detector 实际永远命不中"的现存活案例。
+
+对照：`py-flask-redirect` 同为 `receiver_pattern: null`，但 Flask 的 `redirect(url)` 确实是裸调用（`from flask import redirect`），实测命中——同型规则在 Python 是活的。
+
+修复是一行：`receiver_pattern` 从 `null` 改为 `.+`（或收窄为 `^(res|response|ctx)$`），并按 §5.1 补正反例测试。
 
 ## 4. 建议优先吸收的规则
 
@@ -358,7 +383,7 @@ Location: req.body.next
 window.location = params.next
 ```
 
-其中 `res.redirect()` 可进入确定性 sink；`window.location`、`Location` header 应进入 assignment/header detector 或 candidate 层。
+其中 `res.redirect()` 可进入确定性 sink——且不必新写规则：修复 §3.2 的 `ts-res-redirect` 死规则（`receiver_pattern: null` → `.+`）即可命中；`window.location`、`Location` header 应进入 assignment/header detector 或 candidate 层。
 
 #### Prototype pollution / object injection
 
@@ -487,6 +512,7 @@ data/sink_rules.yml
 
 优先加入：
 
+- 修复 `ts-res-redirect` 死规则 `receiver_pattern`（一行，见 §3.2）；
 - Hono/Fastify/Nest/Next source；
 - Python/Go/Java/PHP method-style source；
 - `spawn`、`spawnSync`、`execSync`、`Function`、`vm.runInNewContext`；
