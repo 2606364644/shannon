@@ -1,0 +1,213 @@
+{
+ "repository": "/app/repos/vuln-range/NodeGoat",
+ "language": "typescript",
+ "adjudicated_entry_points": [
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/login",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/login')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/login",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/login')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/signup",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/signup')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/signup",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/signup')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/logout",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/logout')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/dashboard",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/dashboard')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/profile",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/profile')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/profile",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/profile')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/contributions",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/contributions')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/contributions",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/contributions')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/benefits",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/benefits')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/benefits",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/benefits')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/benefits",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/benefits')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/benefits",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/benefits')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/allocations/:userId",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/allocations/:userId')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/memos",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/memos')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/memos",
+   "http_method": "POST",
+   "evidence": "Express route: app.post('/memos')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/learn",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/learn')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/research",
+   "http_method": "GET",
+   "evidence": "Express route: app.get('/research')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/index.js:index:11",
+   "verdict": "needs_review",
+   "entry_type": "http_route",
+   "route": "/tutorial",
+   "http_method": "MIDDLEWARE",
+   "evidence": "Express route: app.use('/tutorial')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/tutorial.js::0",
+   "verdict": "confirmed",
+   "entry_type": "http_route",
+   "route": "/",
+   "http_method": "GET",
+   "evidence": "Express top-level route: router.get('/')",
+   "source": "code_index"
+  },
+  {
+   "func_block_id": "app/routes/allocations.js:AllocationsHandler:6",
+   "verdict": "confirmed",
+   "entry_type": "gitnexus_process",
+   "route": null,
+   "http_method": null,
+   "evidence": "GitNexus process entry: AllocationsHandler",
+   "source": "code_index"
+  }
+ ]
+}

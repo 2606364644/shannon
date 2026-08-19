@@ -2,6 +2,7 @@
 """外部可达漏洞 PoC 自动生成（curl / Burp），报告后处理。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -88,13 +89,18 @@ def resolve_host(target_url: str | None) -> str:
 
 
 def classify_confidence(vuln: Any, *, is_accepted: bool) -> ConfidenceBand:
-    """§6.3：verdict==vulnerable 或黑盒 accepted → CONFIRMED（优先于 confidence）。"""
+    """§6.3 + G2（spec §3.5，治 P0-2 置信虚标）：
+
+    - 黑盒 accepted（重放证据）→ CONFIRMED（不变）。
+    - 白盒 verdict==vulnerable **且** confidence ∉ {needs_review, low} → CONFIRMED
+      （缺省 confidence 视为可确认，向后兼容）；needs_review/low → SUSPECTED。
+    """
     if is_accepted:
         return ConfidenceBand.CONFIRMED
     verdict = (getattr(vuln, "verdict", None) or "").strip().lower()
-    if verdict == "vulnerable":
-        return ConfidenceBand.CONFIRMED
     confidence = (getattr(vuln, "confidence", None) or "").strip().lower()
+    if verdict == "vulnerable" and confidence not in ("needs_review", "low"):
+        return ConfidenceBand.CONFIRMED
     if confidence == "high":
         return ConfidenceBand.HIGH
     return ConfidenceBand.SUSPECTED
@@ -194,24 +200,49 @@ def _host_only(host: str) -> str:
     )
 
 
+def _sh_quote(value: str) -> str:
+    """POSIX 单引号安全包裹：' → '\''（G6，治 P1-7 shell 截断）。"""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _minimal_enc(value: str) -> str:
+    """请求行最小编码（G6）：空格/CR/LF/非 ASCII → percent-encode，其余符号保 raw。"""
+    out: list[str] = []
+    for ch in value:
+        if ch == " ":
+            out.append("%20")
+        elif ch == "\r":
+            out.append("%0D")
+        elif ch == "\n":
+            out.append("%0A")
+        elif ord(ch) > 0x7E:
+            out.append("".join(f"%{b:02X}" for b in ch.encode("utf-8")))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def to_curl(spec: HttpRequestSpec, host: str) -> str:
     url = host.rstrip("/") + spec.path
     if spec.query:
         url += "?" + urlencode(spec.query)
-    parts = [f"curl -i -X {spec.method} '{url}'"]
+    parts = [f"curl -i -X {spec.method} {_sh_quote(url)}"]
     for k, v in spec.headers.items():
-        parts.append(f"  -H '{k}: {v}'")
+        parts.append(f"  -H {_sh_quote(f'{k}: {v}')}")
     if spec.body:
-        parts.append(f"  --data '{spec.body}'")
+        parts.append(f"  --data {_sh_quote(spec.body)}")
     return " \\\n".join(parts)
 
 
 def to_burp_raw(spec: HttpRequestSpec, host: str) -> str:
     path = spec.path
     if spec.query:
-        path += "?" + "&".join(f"{k}={v}" for k, v in spec.query.items())  # 原始 payload
+        path += "?" + "&".join(
+            f"{k}={_minimal_enc(v)}" for k, v in spec.query.items())  # 原始 payload，最小编码
     lines = [f"{spec.method} {path} HTTP/1.1", f"Host: {_host_only(host)}"]
     for k, v in spec.headers.items():
+        if k.lower() in ("host", "content-type"):
+            continue  # Host/Content-Type 由渲染层唯一产出（G6 header 去重）
         lines.append(f"{k}: {v}")
     if spec.body:
         # LLM gap-fill 可能返回 JSON body（如 {"id_token":"forged"}），按 body 形态判定 Content-Type，
@@ -229,6 +260,66 @@ def to_burp_raw(spec: HttpRequestSpec, host: str) -> str:
     return "\n".join(lines)
 
 
+# G3/G5（spec §3.3）：输出 lint —— 写盘前统一关卡，治 P0-3 路由/方法污染与 P1-6 占位符泄漏。
+
+_PATH_OK_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~:/@%!$&+<>")
+_METHOD_WHITELIST = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+_PLACEHOLDER_RES = (
+    re.compile(r"witness_payload", re.IGNORECASE),
+    re.compile(r"\$\{[^}]*\}"),
+    re.compile(r"\{\{[^}]*\}\}"),
+)
+
+
+def _lint_path(path: str | None) -> str:
+    """path 白名单截断：从首个非法字符截（残片 `,` `;` 全角 `）` 通配 `*`），
+    不以 / 开头补 /，空落 /。"""
+    if not path:
+        return "/"
+    kept = []
+    for ch in path:
+        if ch not in _PATH_OK_CHARS:
+            break
+        kept.append(ch)
+    out = "".join(kept)
+    if not out.startswith("/"):
+        out = "/" + out
+    return out or "/"
+
+
+def _has_placeholder(value: str) -> bool:
+    return any(r.search(value) for r in _PLACEHOLDER_RES)
+
+
+def lint_spec(spec: HttpRequestSpec) -> HttpRequestSpec:
+    """原地 lint 单个 spec（幂等）：path/method 白名单、占位符黑名单、header 归一。"""
+    notes: list[str] = []
+    if spec.path is None or spec.path != (cleaned := _lint_path(spec.path)):
+        if spec.path and cleaned != spec.path:
+            notes.append(f"path 截断：{spec.path!r} → {cleaned!r}")
+        spec.path = cleaned
+    if spec.method not in _METHOD_WHITELIST:
+        original = spec.method
+        spec.method = "POST" if spec.body else "GET"
+        notes.append(f"method {original!r} 非白名单，按参数位推导为 {spec.method}")
+    for k in list(spec.headers):
+        if k.lower() in ("content-type", "host"):
+            del spec.headers[k]
+        elif _has_placeholder(spec.headers[k]):
+            notes.append(f"header {k} 含 LLM 模板占位符，已剔除，需手工补全")
+            del spec.headers[k]
+    for k in list(spec.query):
+        if _has_placeholder(spec.query[k]):
+            notes.append(f"query 参数 {k} 含 LLM 模板占位符，已剔除，需手工补全")
+            del spec.query[k]
+    if spec.body and _has_placeholder(spec.body):
+        notes.append("body 含 LLM 模板占位符，需手工补全")
+        spec.body = None
+    if notes:
+        spec.note = "；".join(filter(None, [spec.note, *notes]))
+    return spec
+
+
 # Task 4: 模板表（5 类漏洞骨架 + authz 成对 + open_redirect 分流）
 
 _OPEN_REDIRECT_HINTS = ("redirect", "open redirect", "jump", "next", "location header")
@@ -240,8 +331,10 @@ def _is_open_redirect(vuln: Any) -> bool:
 
 
 # 请求体确定性信号（source/evidence_chain 里的框架形态，小写匹配）：
-# NodeGoat/Express 'req.body.preTax'、Koa 'ctx.request.body'、Spring '@RequestBody'。
-_BODY_SIGNALS = ("req.body", "request.body", "@requestbody", "req.body[", "request.body[")
+# NodeGoat/Express 'req.body.preTax'、Koa 'ctx.request.body'、Spring '@RequestBody'、
+# LLM 轨中文 source 'POST body 字段: firstName（…表单）'（NodeGoat xss 实证）。
+_BODY_SIGNALS = ("req.body", "request.body", "@requestbody", "req.body[", "request.body[",
+                 "body 字段", "body字段")
 
 _BODY_PARAM_RE = re.compile(r"(?:req|request)\.body(?:\.|\['?)(\w+)")
 
@@ -252,6 +345,191 @@ def _extract_body_param(source: str | None) -> str | None:
         return None
     m = _BODY_PARAM_RE.search(source)
     return m.group(1) if m else None
+
+
+# G1（spec §3.1）：witness 契约与确定性解析 —— 治 P0-1「witness 自由文本整体塞 fallback 参数」。
+# 三形态按优先级：请求行 → 参数串 → 纯值；尾部中文注解先剥（进 note）。
+
+_CJK_CHAR_RE = re.compile(r"[一-鿿]")
+_ANNOTATION_TAIL_RE = re.compile(r"[（(]([^()（）]*)[)）][ \t]*$")
+_REQ_LINE_RE = re.compile(r"^(GET|POST|PUT|DELETE|PATCH)\s+(/[^\s?#]*)(\?(\S.*))?", re.IGNORECASE)
+_PARAM_SEG_RE = re.compile(r"^(\w+)=(.*)$", re.DOTALL)
+_QUERY_CJK_TAIL_RE = re.compile(r"\s(?=[一-鿿])")
+
+
+@dataclass
+class WitnessParse:
+    """parse_witness 产物：values 直接落位（placement 决定 query/body），
+    raw 为单参数值（现状语义），note 合并进 spec.note。"""
+    values: dict[str, str] = field(default_factory=dict)
+    method: str | None = None
+    path: str | None = None
+    raw: str | None = None
+    note: str | None = None
+
+    @property
+    def has_payload(self) -> bool:
+        return bool(self.values) or bool((self.raw or "").strip())
+
+
+def _strip_trailing_annotation(text: str) -> tuple[str, str | None]:
+    """剥尾部注解：末尾 （…）/(…) 且内容含 CJK（全角括号本身即 CJK 语境标志）。
+
+    ASCII-only payload 尾部括号（alert(1)）不剥（R4），须内容含 CJK 才剥。
+    """
+    m = _ANNOTATION_TAIL_RE.search(text.rstrip())
+    if m and _CJK_CHAR_RE.search(m.group(1)):
+        stripped = text.rstrip()[: m.start()].rstrip()
+        return stripped, m.group(0).strip()
+    return text, None
+
+
+def _split_param_segments(qs: str) -> dict[str, str]:
+    """'a=1&b=2' 全量展开；非 key=value 形态的段（如 '...'）丢弃。"""
+    out: dict[str, str] = {}
+    for seg in qs.split("&"):
+        m = _PARAM_SEG_RE.match(seg)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def _strip_query_cjk_tail(qs: str) -> tuple[str, str | None]:
+    """query 串尾部「空格+CJK 开头」说明段剥离（'uid=1' OR 1=1 触发报错'）。
+
+    只剥最尾部一段（从最后一个「空格且其后到串尾含 CJK」处切）；纯 ASCII 保持原样。
+    """
+    m = _QUERY_CJK_TAIL_RE.search(qs)
+    if not m:
+        return qs, None
+    head, tail = qs[: m.start()], qs[m.start():].strip()
+    if not head or not _CJK_CHAR_RE.search(tail):
+        return qs, None
+    return head, tail
+
+
+def parse_witness(witness: str | None) -> WitnessParse:
+    """确定性解析 witness_payload 三形态（spec §3.1）。
+
+    1. 请求行 `METHOD /path?k=v`：method/path/query 全量展开，剩余说明 → note。
+    2. 参数串 `a=b&c=d`（每段 key= 前缀）：展开 values。
+    3. 纯值：raw（单参数值，现状语义）。
+    尾部注解（含 CJK 的括号段）先剥。
+    """
+    if not witness or not witness.strip():
+        return WitnessParse()
+    core, note = _strip_trailing_annotation(witness.strip())
+    m = _REQ_LINE_RE.match(core)
+    if m:
+        method = m.group(1).upper()
+        path = m.group(2) or "/"
+        rest = core[m.end():].strip()
+        if rest:
+            note = f"{note}；{rest}" if note else rest
+        qs = m.group(4)
+        if qs:
+            qs, q_note = _strip_query_cjk_tail(qs)
+            if q_note:
+                note = f"{note}；{q_note}" if note else q_note
+            values = _split_param_segments(qs)
+        else:
+            values = {}
+        return WitnessParse(values=values, method=method, path=path, note=note or None)
+    segs = core.split("&")
+    if all(_PARAM_SEG_RE.match(s) for s in segs):
+        values = _split_param_segments(core)
+        if values:
+            return WitnessParse(values=values, note=note or None)
+    return WitnessParse(raw=core, note=note or None)
+
+
+# G3（spec §3.2）：RouteIndex —— entry_points.json join 补 method/route（报告层消费）。
+
+_FUNC_BLOCK_ID_RE = re.compile(r"^(.*?):([^/:]*):(\d+)$")
+
+
+def _file_basename(path: str) -> str:
+    return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+class RouteIndex:
+    """entry_points.json 的 adjudicated_entry_points 路由索引。
+
+    三级 resolve（spec §3.2 + NodeGoat 实证补充第 3 级）：
+    A. (basename, handler) 精确 join（Spring/Koa 具名 handler）
+    B. basename + 行号邻近（同文件多 handler）
+    C. basename stem ↔ route 整段匹配（Express 匿名回调：路由全挂在 router 文件
+       的 index handler 下，vuln 的 handler 文件名与路由段同名，如 contributions.js
+       ↔ /contributions；NodeGoat 23 条 entry 里 20 条挂 index.js:index:11，A/B 必 miss）
+    候选多路由时按 placement 偏好 method（body→POST，query→GET）。
+    """
+
+    def __init__(self, entry_points: list[dict] | None):
+        self._by_handler: dict[tuple[str, str], list[tuple[str | None, str]]] = {}
+        self._by_file: dict[str, list[tuple[int, str | None, str]]] = {}
+        self._all: list[tuple[str | None, str]] = []
+        for ep in entry_points or []:
+            fb = (ep.get("func_block_id") or "").strip()
+            route = (ep.get("route") or "").strip()
+            method = (ep.get("http_method") or "").strip().upper() or None
+            if not route or not route.startswith("/"):
+                continue  # 无路由信息的条目（如 xxx.js:Handler:6 | None None）
+            m = _FUNC_BLOCK_ID_RE.match(fb)
+            if m:
+                f, handler, line = _file_basename(m.group(1)), m.group(2), int(m.group(3))
+            else:
+                f, handler, line = _file_basename(fb), "", 0
+            if method in ("MIDDLEWARE",) or method and method not in (
+                    "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+                continue  # MIDDLEWARE /tutorial 等非路由方法不进索引
+            entry = (method, route)
+            self._all.append(entry)
+            if handler:
+                self._by_handler.setdefault((f, handler), []).append(entry)
+            self._by_file.setdefault(f, []).append((line, method, route))
+
+    @staticmethod
+    def _pick(candidates: list[tuple[str | None, str]],
+              placement: str | None) -> tuple[str | None, str] | None:
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        prefer = "POST" if placement == "body" else "GET"
+        for method, route in candidates:
+            if method == prefer:
+                return (method, route)
+        return candidates[0]
+
+    def _stem_candidates(self, stem: str) -> list[tuple[str | None, str]]:
+        seg = f"/{stem}"
+        out = []
+        for method, route in self._all:
+            parts = route.split("?")[0].strip("/").split("/")
+            if parts and parts[0] == stem and route.startswith(seg):
+                out.append((method, route))
+        return out
+
+    def resolve(
+        self, *, file: str | None = None, handler: str | None = None,
+        line: int | None = None, placement: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """返回 (http_method, route)；全 miss → (None, None)。"""
+        if file:
+            base = _file_basename(file)
+            if handler:
+                hit = self._pick(self._by_handler.get((base, handler), []), placement)
+                if hit and hit[0]:
+                    return hit
+            if line is not None and base in self._by_file:
+                near = min(self._by_file[base], key=lambda t: abs(t[0] - line))
+                if near[1]:
+                    return (near[1], near[2])
+            stem = base.rsplit(".", 1)[0] if "." in base else base
+            hit = self._pick(self._stem_candidates(stem), placement)
+            if hit and hit[0]:
+                return hit
+        return (None, None)
 
 
 def _infer_placement(vuln: Any, vuln_class: str) -> str:
@@ -293,44 +571,50 @@ def _base_spec(vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand
 def build_template_spec(
     vuln: Any, vuln_class: str, host: str, endpoints: dict, band: ConfidenceBand
 ) -> HttpRequestSpec | list[HttpRequestSpec] | None:
-    """返回 None = 模板无法处理（需 LLM）；list = 成对/多步。"""
+    """返回 None = 模板无法处理（需分层路径/LLM）；list = 成对/多步。
+
+    G3（spec §3.2，修 07-22 实现偏差①）：inj/xss/ssrf 分支退役——一律走
+    `_extract_deterministic → 完整? _assemble : gapped` 分层路径，缺路由不再拿
+    witness 硬拼模板（治 GET / 塌缩）。本函数仅保留 authz（成对模板）/auth（LLM）。
+    """
     if vuln_class == "authz":
         return _build_authz_pair(vuln, endpoints, band)
-    if vuln_class == "auth":
-        return None  # 默认走 LLM（§5.3）
+    return None  # auth 与 inj/xss/ssrf：分层路径（auth per-item LLM，见 _build_entry）
 
-    spec = _base_spec(vuln, vuln_class, endpoints, band)
-    witness = getattr(vuln, "witness_payload", None) or ""
-    if not witness:
-        return None  # 无 witness_payload，模板拼不出，交 LLM
 
-    if vuln_class in ("injection", "xss"):
-        param = (extract_param_name(getattr(vuln, "source", None))
-                 or _extract_body_param(getattr(vuln, "source", None))
-                 or ("id" if vuln_class == "injection" else "q"))
-        if _infer_placement(vuln, vuln_class) == "body":
-            # req.body/@RequestBody 信号：witness 放 body（模板层无 JSON 原型，
-            # form 兜底；JSON 形态由 gap-fill 的 body_template 补）。
-            if spec.method == "GET":
-                spec.method = "POST"
-            spec.body = f"{param}={witness}"
-        else:
-            spec.query = {param: witness}
-        return spec
-    if vuln_class == "ssrf":
-        if _is_open_redirect(vuln):
-            param = extract_param_name(getattr(vuln, "source", None)) or "next"
-            spec.query = {param: witness}
-            return spec
-        param = getattr(vuln, "vulnerable_parameter", None) or "url"
-        spec.method = spec.method if spec.method != "GET" else "POST"
-        spec.body = f"{param}={witness}"
-        return spec
+_AUTHZ_PATH_PARAM_RE = re.compile(r"/:(\w+)")
+_AUTHZ_REQ_PARAM_RE = re.compile(r"req\.params\.(\w+)")
+
+
+def _find_authz_resource_param(vuln: Any, path: str | None) -> tuple[str, str] | None:
+    """资源参数发现（spec §3.4）：返回 (where, name)，where ∈ {"path","body"}。
+
+    path 模板段 `:userId` 优先；次选 source 里 req.params.X（且 X 在 path 模板段）；
+    再选 req.body.X（body 字段）。都无 → None（无资源对象）。
+    """
+    seg = _AUTHZ_PATH_PARAM_RE.search(path or "")
+    if seg:
+        return ("path", seg.group(1))
+    source = getattr(vuln, "source", None) or ""
+    m = _AUTHZ_REQ_PARAM_RE.search(source)
+    if m and path and f":{m.group(1)}" in path:
+        return ("path", m.group(1))
+    m = _BODY_PARAM_RE.search(source)
+    if m:
+        return ("body", m.group(1))
     return None
 
 
-def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[HttpRequestSpec]:
-    """§4.4：A 访己（合法）/ A 访 B（越权）成对。"""
+def _build_authz_pair(
+    vuln: Any, endpoints: dict, band: ConfidenceBand
+) -> HttpRequestSpec | list[HttpRequestSpec]:
+    """§4.4：A 访己（合法）/ A 访 B（越权）成对；G4（spec §3.4）配对鉴别力升级。
+
+    资源参数命中 path 段 → legit/cross 分别替换 <OWNER_RESOURCE_ID>/<VICTIM_RESOURCE_ID>
+    （两请求在请求位真实不同）；命中 body 字段 → body 值替换。
+    无资源参数（Vertical/BFLA，如 GET /benefits）→ 诚实降单请求 + 无鉴别力标注
+    （治 P0-4「逐字节相同的成对请求」）。
+    """
     method, path = derive_method_path(vuln)
     info = find_endpoint_info(endpoints, path)
     auth_st = derive_auth_state(info)
@@ -342,8 +626,22 @@ def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[
         auth_state=auth_st, confidence_band=band,
         source_id=getattr(vuln, "ID", ""), vuln_class="authz",
     )
-    legit = HttpRequestSpec(**common, note="合法：访问自己资源（<OWNER_RESOURCE_ID>）")
-    cross = HttpRequestSpec(**common, note="越权：访问受害者资源（<VICTIM_RESOURCE_ID>）")
+    res = _find_authz_resource_param(vuln, path)
+    if not res:
+        spec = HttpRequestSpec(
+            **common, note="无资源对象：合法/越权请求无差异（角色差异在凭证），配对无鉴别力")
+        return spec
+    where, name = res
+    legit = HttpRequestSpec(**common, note=f"合法：访问自己资源（{name}=<OWNER_RESOURCE_ID>）")
+    cross = HttpRequestSpec(**common, note=f"越权：访问受害者资源（{name}=<VICTIM_RESOURCE_ID>）")
+    if where == "path":
+        legit.path = (common["path"]).replace(f":{name}", "<OWNER_RESOURCE_ID>")
+        cross.path = (common["path"]).replace(f":{name}", "<VICTIM_RESOURCE_ID>")
+    else:
+        if legit.method == "GET":
+            legit.method = cross.method = "POST"
+        legit.body = f"{name}=<OWNER_RESOURCE_ID>"
+        cross.body = f"{name}=<VICTIM_RESOURCE_ID>"
     return [legit, cross]
 
 
@@ -352,22 +650,57 @@ def _build_authz_pair(vuln: Any, endpoints: dict, band: ConfidenceBand) -> list[
 _GN_SOURCE_RE = re.compile(
     r"^(\S+)\s*\((.+?):([^/:]+):(\d+)\)\s*$"
 )
+_AT_FILE_LINE_RE = re.compile(r"@?\s*(\S+\.[A-Za-z]\w*):(\d+)\s*$")
+_PATH_AT_FILE_LINE_RE = re.compile(r"([\w./\\-]+\.[A-Za-z]\w*):(\d+)")
 
 
-def extract_gn_location(source: str | None) -> tuple[str | None, str | None, str | None]:
-    """从 GitNexus 轨 source 提取 (param_name, file_path, method)。
+def extract_gn_location(source: str | None) -> tuple[str | None, str | None, str | None, int | None]:
+    """从 GitNexus 轨 source 提取 (param_name, file_path, method, line)。
 
     GitNexus builder 的 _source_text 产 'param (file:method:line)' 形态
     （如 'payload (…/Controller.java:apiModifyClusterConfig:70)'）。
     file 可含 '/'/'.'；method 是单个标识符（不含 ':/'）；line 是纯数字。
-    非 GitNexus 格式（LLM 轨的 '@RequestBody at Foo.java:71' 等）→ (None, None, None)。
+    非 GitNexus 格式（LLM 轨的 '@RequestBody at Foo.java:71' 等）→ (None, None, None, None)。
     """
     if not source:
-        return (None, None, None)
+        return (None, None, None, None)
     m = _GN_SOURCE_RE.match(source.strip())
     if not m:
-        return (None, None, None)
-    return (m.group(1), m.group(2), m.group(3))
+        return (None, None, None, None)
+    return (m.group(1), m.group(2), m.group(3), int(m.group(4)))
+
+
+def _extract_source_location(source: str | None, path: str | None = None) -> tuple[str | None, int | None]:
+    """从 LLM 轨 source/path 提取 (file, line)（RouteIndex join 输入）。
+
+    source 尾部 '@ app/routes/contributions.js:32'；source 无则 path 流程里
+    首个裸 'file.ext:line' 引用（xss 实证：'req.body.firstName → session.js:194 …'）。
+    非 file.ext:line 形态 → (None, None)。
+    """
+    if source:
+        m = _AT_FILE_LINE_RE.search(source.strip())
+        if m:
+            return m.group(1), int(m.group(2))
+    if path:
+        m = _PATH_AT_FILE_LINE_RE.search(path)
+        if m:
+            return m.group(1), int(m.group(2))
+    return (None, None)
+
+
+_PATH_HANDLER_HEAD_RE = re.compile(r"^\s*(\w+)\s*\(")
+
+
+def _extract_handler_name(vuln: Any, gn_method: str | None) -> str | None:
+    """handler 名：GN 轨 source 第三段优先；LLM 轨 path 首 token 'handleXxx(req) → …'。"""
+    if gn_method:
+        return gn_method
+    p = getattr(vuln, "path", None)
+    if p:
+        m = _PATH_HANDLER_HEAD_RE.match(p)
+        if m:
+            return m.group(1)
+    return None
 
 
 @dataclass
@@ -375,6 +708,7 @@ class PartialSpec:
     """确定性提取的部分 PoC spec（inj/xss/ssrf 分层组装中间结构）。
 
     route/witness 任一缺失 → needs_gap_fill=True，归入按 controller 文件分组的 LLM 补缺。
+    wp 是 parse_witness 产物（G1）；source_file 是 LLM 轨 '@ file:line'（G5 file_key=None 修正）。
     """
     vuln: Any
     vuln_class: str
@@ -384,29 +718,49 @@ class PartialSpec:
     controller_file: str | None
     method: str | None
     path: str | None
-    witness: str | None
+    witness: str | None       # 兼容旧签名：原始 witness 串（wp.raw 语义）
+    wp: "WitnessParse" = field(default_factory=WitnessParse)
+    source_file: str | None = None
 
     @property
     def needs_gap_fill(self) -> bool:
-        return not self.method or not self.path or not self.witness
+        return not self.method or not self.path or not self.wp.has_payload
 
 
 def _extract_deterministic(
-    vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand
+    vuln: Any, vuln_class: str, endpoints: dict, band: ConfidenceBand,
+    route_index: "RouteIndex | None" = None,
 ) -> PartialSpec:
-    """从 vuln 确定性提取 PartialSpec（不调 LLM）。缺 route/witness 时 needs_gap_fill=True。"""
+    """从 vuln 确定性提取 PartialSpec（不调 LLM）。缺 route/witness 时 needs_gap_fill=True。
+
+    G3 统一路径（spec §3.2）：derive_method_path 提不出路由时依次
+    witness 请求行（G1）→ RouteIndex join（entry_points）兜底；都不行才 gapped。
+    """
     method, path = derive_method_path(vuln)
     source = getattr(vuln, "source", None)
     param = extract_param_name(source) or _extract_body_param(source)
-    gn_param, gn_file, _gn_method = extract_gn_location(source)
+    gn_param, gn_file, gn_method, gn_line = extract_gn_location(source)
     if not param and gn_param:
         param = gn_param
-    witness = getattr(vuln, "witness_payload", None) or None
+    wp = parse_witness(getattr(vuln, "witness_payload", None))
     placement = _infer_placement(vuln, vuln_class)
+    src_file, src_line = _extract_source_location(source, getattr(vuln, "path", None))
+    # 路由 fallback 1：witness 请求行形态自带 method/path（hk 实证）
+    if (not method or not path) and wp.method and wp.path:
+        method = method or wp.method
+        path = path or wp.path
+    # 路由 fallback 2：RouteIndex join（file+handler / 行号邻近 / stem 段匹配）
+    if (not method or not path) and route_index is not None:
+        rm, rp = route_index.resolve(
+            file=gn_file or src_file, handler=_extract_handler_name(vuln, gn_method),
+            line=gn_line if gn_file else src_line, placement=placement)
+        method = method or rm
+        path = path or rp
     return PartialSpec(
         vuln=vuln, vuln_class=vuln_class, band=band, param_name=param,
-        placement=placement, controller_file=gn_file,
-        method=method, path=path, witness=witness,
+        placement=placement, controller_file=gn_file or src_file,
+        method=method, path=path, witness=wp.raw, wp=wp,
+        source_file=src_file,
     )
 
 
@@ -417,6 +771,9 @@ def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRe
     返回 None = LLM 明确跑过（gap 非 None）却四路 route 信号全无 → 纯非 HTTP 入口 →
     调用方 skip（PoC 本就是 HTTP 请求包，非 HTTP 入口天然无 PoC）。gap=None（LLM 不可用
     /未返回该 ID）保守降级骨架，不 skip——未必非 HTTP，可能只是没跑成。
+
+    G1：witness 统一经 parse_witness 消费——values 多参数直接落位（query/body 按
+    placement），raw 单参数值走 _assemble_param；note 合并进 spec.note。
     """
     g = gap or {}
     # 不预判定——GitNexus 轨 source 是代码位置形态时 partial.method/path 为 None 但 route
@@ -431,7 +788,7 @@ def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRe
         return None  # LLM 明确补不出 route → 纯非 HTTP 入口，skip
     method = partial.method or (g.get("http_method") or "GET")
     path = partial.path or (gap_route or "/")
-    witness = partial.witness or g.get("witness_payload") or ""
+    wp = partial.wp if partial.wp.has_payload else parse_witness(g.get("witness_payload"))
     info = find_endpoint_info(endpoints, path)
     auth_st = derive_auth_state(info)
     spec = HttpRequestSpec(
@@ -440,24 +797,55 @@ def _assemble(partial: PartialSpec, gap: dict | None, endpoints: dict) -> HttpRe
         confidence_band=partial.band,
         source_id=getattr(partial.vuln, "ID", ""), vuln_class=partial.vuln_class,
     )
-    if not witness:
+    notes = [wp.note] if wp.note else []
+    if not wp.has_payload:
         spec.note = "请求形态未推断（缺 witness），需手工补全 body/参数"
         return spec
     # 参数位：LLM param_location 优先，其次 partial.placement（_extract_deterministic
-    # 的 _infer_placement 确定性信号 + 类兜底，与 build_template_spec 同一套逻辑）。
+    # 的 _infer_placement 确定性信号 + 类兜底，与历史模板同一套逻辑）。
     # ssrf open-redirect 恒 query（302 跳转参数，现状保留）。
     gap_loc = str(g.get("param_location") or "").strip().lower()
     placement = gap_loc if gap_loc in ("query", "body") else partial.placement
     if partial.vuln_class == "ssrf" and _is_open_redirect(partial.vuln):
         placement = "query"
     param = _assemble_param(partial)
-    if placement == "body":
+    if wp.values:
+        # witness 自带参数名（请求行 query / 参数串形态）——参数集直接落位
+        if placement == "body":
+            if spec.method == "GET":
+                spec.method = "POST"
+            spec.body = _build_body_from_values(wp.values, g.get("body_template")) \
+                or _build_body_from_gap(param, wp.values.get(param, ""), g.get("body_template"))
+        else:
+            spec.query = dict(wp.values)
+    elif placement == "body":
         if spec.method == "GET":
             spec.method = "POST"
-        spec.body = _build_body_from_gap(param, witness, g.get("body_template"))
+        spec.body = _build_body_from_gap(param, wp.raw or "", g.get("body_template"))
     else:
-        spec.query = {param: witness}
+        spec.query = {param: wp.raw or ""}
+    if notes:
+        spec.note = "；".join(notes) if not spec.note else f"{spec.note}；{'；'.join(notes)}"
     return spec
+
+
+def _build_body_from_values(values: dict[str, str], template: Any) -> str | None:
+    """witness 参数串 → body：body_template（dict 原型）里同名键替换，其余保留；
+    无/不识别 template → form 串拼接（'a=1&b=2'）。"""
+    if isinstance(template, str) and template.strip():
+        try:
+            loaded = json.loads(template)
+        except (json.JSONDecodeError, ValueError):
+            loaded = None
+        if isinstance(loaded, dict):
+            template = loaded
+    if isinstance(template, dict):
+        data = dict(template)
+        for k in values:
+            if k in data:
+                data[k] = values[k]
+        return _coerce_request_body(data)
+    return "&".join(f"{k}={v}" for k, v in values.items())
 
 
 def _assemble_param(partial: "PartialSpec") -> str:
@@ -615,12 +1003,15 @@ def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], r
     # witness 只能产通用 payload。现在给齐 sink/source/slot/代码位置/假设/完整
     # evidence（ssrf 有 vulnerable_code_location/exploitation_hypothesis，inj/xss
     # 自动为 None 跳过），并要求 LLM 判参数位 + 给 body 原型。
+    # G5（spec §3.8）：file_key=None 时逐条给 source_file（不再自相矛盾
+    # "Handler file: unknown … Read that file"）；recon_ctx 为空时省略该 section。
     items_desc = json.dumps([
         {k: v for k, v in {
             "ID": getattr(p.vuln, "ID", ""),
             "param": p.param_name,
             "vuln_class": p.vuln_class,
             "source": getattr(p.vuln, "source", None) or None,
+            "source_file": (p.controller_file or p.source_file) or None,
             "sink_call": (getattr(p.vuln, "sink_call", None)
                           or getattr(p.vuln, "sink_function", None) or None),
             "slot_type": getattr(p.vuln, "slot_type", None) or None,
@@ -631,13 +1022,18 @@ def _build_gapfill_prompt(file_key: str | None, partials: list["PartialSpec"], r
         }.items() if v is not None}
         for p in partials
     ], ensure_ascii=False)
-    file_line = f"Handler file: {file_key}\n" if file_key else "Handler file: unknown\n"
+    if file_key:
+        file_line = f"Handler file: {file_key}\nRead that file and find each handler method's HTTP route "
+    else:
+        file_line = ("For each item, read its \"source_file\" (if given) and find that handler's HTTP route ")
+    recon_section = (f"Recon endpoint context:\n{json.dumps(recon_ctx, ensure_ascii=False)}\n\n"
+                     if recon_ctx else "")
     return (
         f"You are reconstructing HTTP request shapes for confirmed vulnerabilities.\n\n"
-        f"{file_line}Read that file and find each handler method's HTTP route "
+        f"{file_line}"
         f"(@PostMapping / router.get / @app.route …) and a minimal witness payload.\n\n"
         f"Vulnerabilities to fill:\n{items_desc}\n\n"
-        f"Recon endpoint context:\n{json.dumps(recon_ctx, ensure_ascii=False)}\n\n"
+        f"{recon_section}"
         'For each item also decide "param_location": "query" if the tainted param '
         'is read from the query string, "body" if from the request body. '
         'When body, also give "body_template": the JSON object prototype of that '
@@ -655,26 +1051,38 @@ async def llm_fill_gaps(
 ) -> dict[str, dict]:
     """一个 controller 文件组一次 LLM 调用,返回 {ID: {http_method,route_path,witness_payload}}。
 
-    失败/不可用 → 返回 {}(调用方对缺 gap 的条目降级骨架)。
+    G5（spec §3.8，治 kol gap-fill 0/3 全败）：unparseable/缺 items 时有界重试一次
+    （prompt 加 JSON-only 强化；env SUPERNOVA_POC_GAPFILL_RETRIES 默认 1，对齐
+    fd203e12 chain_verdict 重试模式）。重试耗尽 → {}(调用方对缺 gap 的条目降级骨架)。
     """
+    retries = max(0, int(os.getenv("SUPERNOVA_POC_GAPFILL_RETRIES", "1")))
     prompt = _build_gapfill_prompt(file_key, partials, recon_ctx)
-    try:
-        result = await run_claude_prompt(
-            prompt=prompt,
-            repo_path=repo_path or "/tmp/poc-gen",
-            model_tier=model_tier,
-            # runner 现状:output_format 是主参(structured_output_schema 为别名,见 runner.py:139)。
-            # chain_verdict 的 _make_verdict_llm_client 也走 output_format,此处对齐。
-            output_format=GAPFILL_OUTPUT_SCHEMA,
-            api_key=api_key,
-            provider_config=provider_config,   # P3c 阶段 1
-            max_turns=int(os.getenv("SUPERNOVA_POC_MAX_TURNS", "10")),
-        )
-    except Exception:
+    items: list | None = None
+    for attempt in range(1 + retries):
+        try:
+            result = await run_claude_prompt(
+                prompt=prompt,
+                repo_path=repo_path or "/tmp/poc-gen",
+                model_tier=model_tier,
+                # runner 现状:output_format 是主参(structured_output_schema 为别名,见 runner.py:139)。
+                # chain_verdict 的 _make_verdict_llm_client 也走 output_format,此处对齐。
+                output_format=GAPFILL_OUTPUT_SCHEMA,
+                api_key=api_key,
+                provider_config=provider_config,   # P3c 阶段 1
+                max_turns=int(os.getenv("SUPERNOVA_POC_MAX_TURNS", "10")),
+            )
+        except Exception:
+            return {}  # 网络/引擎异常：runner 内部已有重试，这里不叠加
+        if getattr(result, "success", False) and getattr(result, "structured_output", None):
+            got = result.structured_output.get("items") or []
+            if got:
+                items = got
+                break
+        if attempt < retries:
+            prompt = (prompt + "\n\nIMPORTANT: Your previous reply was not valid. "
+                       "Reply with ONLY the JSON object, no prose, no markdown fences.")
+    if not items:
         return {}
-    if not getattr(result, "success", False) or not getattr(result, "structured_output", None):
-        return {}
-    items = result.structured_output.get("items") or []
     out: dict[str, dict] = {}
     for it in items:
         vid = it.get("ID")
@@ -689,24 +1097,65 @@ async def llm_fill_gaps(
     return out
 
 
+def _trim_recon_ctx(endpoints: dict, partials: list["PartialSpec"]) -> dict:
+    """G5（spec §3.8）recon_ctx 裁剪：按组内 source_file/controller_file basename
+    stem 匹配端点 path 段（contributions.js ↔ /contributions/…），只保留命中端点；
+    无命中/无文件信息 → {}（prompt 省略端点 section，不再全量灌入）。
+    """
+    if not endpoints:
+        return {}
+    stems = set()
+    for p in partials:
+        f = p.controller_file or p.source_file
+        if f:
+            base = _file_basename(f)
+            stem = base.rsplit(".", 1)[0] if "." in base else base
+            if stem:
+                stems.add(stem.lower())
+    if not stems:
+        return {}
+    out = {}
+    for ep, info in endpoints.items():
+        segs = [s.lower() for s in ep.strip("/").split("/") if s]
+        if any(s in segs for s in stems):
+            out[ep] = info
+    return out
+
+
 async def _batch_fill_gaps(
     partials: list["PartialSpec"], *, endpoints: dict, repo_path: str,
     api_key: str | None = None, model_tier: str = "medium",
     provider_config: dict | None = None,   # P3c 阶段 1：透传 llm_fill_gaps
+    semaphore: "asyncio.Semaphore | None" = None,   # G7：组并行共享 cap
 ) -> dict[str, dict]:
-    """编排:分组 + 逐组调 llm_fill_gaps,合并 {ID: gap}。失败的组其条目无 gap(后降级)。"""
+    """编排:分组 + 组并行调 llm_fill_gaps,合并 {ID: gap}。失败的组其条目无 gap(后降级)。
+
+    G5：recon_ctx 按组内文件 stem 裁剪（不再全量灌入端点表）。
+    G7：各组 asyncio.gather 并行（与 auth 共用 semaphore cap）。
+    """
     cap = int(os.getenv("SUPERNOVA_POC_GROUP_CAP", "8"))
     groups = _group_by_controller_file(partials, cap=cap)
-    gapmap: dict[str, dict] = {}
-    for file_key, group_partials in groups:
-        recon_ctx = {ep: info for ep, info in endpoints.items()} if endpoints else {}
-        try:
-            gapmap.update(await llm_fill_gaps(
+
+    async def _one(file_key: str | None, group_partials: list["PartialSpec"]) -> dict[str, dict]:
+        recon_ctx = _trim_recon_ctx(endpoints, group_partials)
+        async def _call() -> dict[str, dict]:
+            return await llm_fill_gaps(
                 file_key, group_partials, recon_ctx=recon_ctx,
                 repo_path=repo_path, api_key=api_key, model_tier=model_tier,
-                provider_config=provider_config))   # P3c 阶段 1
-        except Exception as exc:  # 单组失败不阻塞其余
-            logger.warning("poc: llm_fill_gaps failed for %s: %s", file_key, exc)
+                provider_config=provider_config)   # P3c 阶段 1
+        if semaphore is not None:
+            async with semaphore:
+                return await _call()
+        return await _call()
+
+    results = await asyncio.gather(
+        *(_one(f, gp) for f, gp in groups), return_exceptions=True)
+    gapmap: dict[str, dict] = {}
+    for (file_key, _), res in zip(groups, results):
+        if isinstance(res, BaseException):  # 单组失败不阻塞其余
+            logger.warning("poc: llm_fill_gaps failed for %s: %s", file_key, res)
+        elif res:
+            gapmap.update(res)
     return gapmap
 
 
@@ -720,6 +1169,13 @@ BAND_LABEL = {
 
 BAND_FULL = {
     ConfidenceBand.CONFIRMED: "已确认可复现",
+    ConfidenceBand.HIGH: "高置信",
+    ConfidenceBand.SUSPECTED: "疑似待验证",
+}
+
+# G2（spec §3.5）：白盒 CONFIRMED 是静态判定（无重放证据），文案不再声称「可复现」。
+BAND_FULL_WHITEBOX = {
+    ConfidenceBand.CONFIRMED: "已确认（静态判定）",
     ConfidenceBand.HIGH: "高置信",
     ConfidenceBand.SUSPECTED: "疑似待验证",
 }
@@ -747,13 +1203,15 @@ def _overview_row(vuln_class: str, spec: HttpRequestSpec) -> str:
     return f"| {spec.source_id} | {vuln_class} | {path_cell} | {auth} | {BAND_LABEL[spec.confidence_band]} |"
 
 
-def _detail_section(vuln_class: str, vuln: Any, spec: HttpRequestSpec, host: str) -> str:
+def _detail_section(vuln_class: str, vuln: Any, spec: HttpRequestSpec, host: str,
+                    track: str = "blackbox") -> str:
+    band_full = BAND_FULL_WHITEBOX if track == "whitebox" else BAND_FULL
     band_mark = {"confirmed": "✓", "high": "●", "suspected": "⚠"}[spec.confidence_band.value]
     auth = _AUTH_LABEL.get(spec.auth_state, "未知")
     note = f"\n> {spec.note}" if spec.note else ""
     lines = [
         f"### {band_mark} {spec.source_id} · {vuln_class} @ {spec.method} {spec.path}",
-        f"**置信度：{BAND_FULL[spec.confidence_band]}** ｜ 认证：{auth} ｜ 来源：{getattr(vuln, 'merge_source', '-')}{note}",
+        f"**置信度：{band_full[spec.confidence_band]}** ｜ 认证：{auth} ｜ 来源：{getattr(vuln, 'merge_source', '-')}{note}",
         "",
         "**curl:**",
         "```bash",
@@ -780,6 +1238,7 @@ def render_poc_md(entries, host: str, track: str) -> str:
         完整 PoC 文档 Markdown 字符串
     """
     track_cn = "白盒" if track == "whitebox" else "黑盒"
+    entries = merge_duplicate_requests(entries)  # G8：相同请求去重（渲染前关卡）
     counts = {b: 0 for b in ConfidenceBand}
     for _, _, spec_or_list in entries:
         specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
@@ -804,7 +1263,7 @@ def render_poc_md(entries, host: str, track: str) -> str:
         specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
         for i, s in enumerate(specs):
             heading = f"（请求 {i+1}/{len(specs)}）" if len(specs) > 1 else ""
-            detail.append(_detail_section(vuln_class, vuln, s, host).replace(
+            detail.append(_detail_section(vuln_class, vuln, s, host, track).replace(
                 f" · {vuln_class} @ ", f"{heading} · {vuln_class} @ "))
             detail.append("\n---\n")
     return header + "\n".join(overview) + "\n" + "\n".join(detail)
@@ -821,6 +1280,7 @@ def empty_poc_md(track: str) -> str:
 logger = logging.getLogger(__name__)
 _POC_FILENAME = "exploitable_poc_collection.md"
 _POC_CHECKPOINT_FILENAME = ".poc_checkpoint.json"
+_CKPT_VERSION = 2  # G8（spec §5）：v2 起 _load_checkpoint 校验 version+track
 
 
 def _ckpt_path(deliverables_dir: Path) -> Path:
@@ -829,16 +1289,23 @@ def _ckpt_path(deliverables_dir: Path) -> Path:
     return intermediate_path(deliverables_dir, _POC_CHECKPOINT_FILENAME)
 
 
-def _load_checkpoint(deliverables_dir: Path) -> dict:
-    """读 sidecar checkpoint。损坏/缺失 → 返回空(从头跑,降级不报错)。
-    tiering 后先 intermediate/ 再顶层兜底（旧结构存量 checkpoint）。"""
+def _load_checkpoint(deliverables_dir: Path, track: str | None = None) -> dict:
+    """读 sidecar checkpoint。损坏/缺失/version 不符/track 不符 → 返回空（从头跑）。
+
+    G8（spec §5，修 07-22 实现偏差②）：v2 起强制校验 version==2 且 track 匹配——
+    旧 v1（本次修复前的错误 spec）自动失效，修复对存量 deliverables 重跑即生效。
+    """
     from supernova_core.utils.paths import resolve_intermediate
     p = resolve_intermediate(deliverables_dir, _POC_CHECKPOINT_FILENAME)
     if p is None:
         return {}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return data.get("completed", {}) if isinstance(data, dict) else {}
+        if not isinstance(data, dict) or data.get("version") != _CKPT_VERSION:
+            return {}
+        if track is not None and data.get("track") != track:
+            return {}
+        return data.get("completed", {}) if isinstance(data.get("completed"), dict) else {}
     except Exception:
         return {}
 
@@ -885,12 +1352,81 @@ def _write_checkpoint(deliverables_dir: Path, track: str,
     p = _ckpt_path(deliverables_dir)
     tmp = p.with_suffix(p.suffix + ".tmp")
     try:
+        p.parent.mkdir(parents=True, exist_ok=True)  # intermediate/ 桶可能尚未建（测试/首写）
         tmp.write_text(json.dumps(
-            {"version": 1, "track": track, "completed": completed}, ensure_ascii=False),
-            encoding="utf-8")
+            {"version": _CKPT_VERSION, "track": track, "completed": completed},
+            ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, p)
     except Exception:
         logger.warning("poc: checkpoint write failed (non-blocking)")
+
+
+# G8（spec §3.7）：相同请求去重合并 —— 渲染前按规范化请求分组。
+
+def _request_key(spec: HttpRequestSpec) -> tuple:
+    return (
+        spec.method, spec.path,
+        tuple(sorted(spec.query.items())),
+        spec.body,
+        tuple(sorted(spec.headers.items())),
+    )
+
+
+def merge_duplicate_requests(
+    entries: list[tuple[str, Any, "HttpRequestSpec | list[HttpRequestSpec]"]],
+) -> list[tuple[str, Any, "HttpRequestSpec | list[HttpRequestSpec]"]]:
+    """按 (method, path, 规范化 query, body, headers) 分组去重（authz 成对以整个 list 为 key）。
+
+    组内 >1 → 合并一节：detail/概览一份，ID 逗连（INJ-VULN-01/02/03）。
+    NodeGoat 实证唯一率 57–72%（GN/LLM 轨同请求重复），目标 100% 唯一。
+    """
+    groups: dict[tuple, list[int]] = {}
+    for idx, (_, _, spec_or_list) in enumerate(entries):
+        specs = spec_or_list if isinstance(spec_or_list, list) else [spec_or_list]
+        key = tuple(_request_key(s) for s in specs)
+        groups.setdefault(key, []).append(idx)
+    if all(len(v) == 1 for v in groups.values()):
+        return entries  # 无重复，原样返回（含顺序）
+    out: list[tuple[str, Any, "HttpRequestSpec | list[HttpRequestSpec]"]] = []
+    for key, idxs in groups.items():
+        first_vc, first_vuln, first_spec = entries[idxs[0]]
+        if len(idxs) == 1:
+            out.append(entries[idxs[0]])
+            continue
+        ids: list[str] = []
+        for i in idxs:
+            specs = entries[i][2] if isinstance(entries[i][2], list) else [entries[i][2]]
+            for s in specs:
+                if s.source_id and s.source_id not in ids:
+                    ids.append(s.source_id)
+        joined = _join_ids(ids)
+        if isinstance(first_spec, list):
+            for s in first_spec:
+                s.source_id = joined
+        else:
+            first_spec.source_id = joined
+        note = first_spec[0].note if isinstance(first_spec, list) else first_spec.note
+        merged_note = "；".join(filter(None, [note, f"同请求合并：{joined}"]))
+        if isinstance(first_spec, list):
+            first_spec[0].note = merged_note
+        else:
+            first_spec.note = merged_note
+        out.append((first_vc, first_vuln, first_spec))
+    return out
+
+
+_ID_NUM_TAIL_RE = re.compile(r"^(.*?)(\d+)$")
+
+
+def _join_ids(ids: list[str]) -> str:
+    """同前缀编号 ID 逗连：'INJ-VULN-01','INJ-VULN-02' → 'INJ-VULN-01/02'；
+    前缀不同 → 全 ID 直接 '/' 连（不误并）。"""
+    if len(ids) <= 1:
+        return ids[0] if ids else ""
+    ms = [_ID_NUM_TAIL_RE.match(s) for s in ids]
+    if all(m and m.group(1) == ms[0].group(1) for m in ms):
+        return ms[0].group(1) + "/".join(m.group(2) for m in ms)
+    return "/".join(ids)
 
 
 def _resolve_input(deliverables_dir: Path, filename: str) -> Path | None:
@@ -1017,6 +1553,17 @@ class PoCGenerator:
         host = resolve_host(target_url)
         recon_path = _resolve_input(deliverables_dir, "recon_deliverable.md")
         endpoints = parse_recon_endpoints(recon_path) if recon_path else {}
+        # G3：RouteIndex —— entry_points.json（GitNexus 确定性入口裁决）join 补路由。
+        # 报告层消费确定性产物（与 parse_recon_endpoints 同档，不喂判定轨 prompt）。
+        # 黑盒 track / entry_points 缺失 → 空 index（resolve 全 miss，不劣于现状）。
+        ep_path = _resolve_input(deliverables_dir, "entry_points.json")
+        route_index = RouteIndex([])
+        if ep_path:
+            try:
+                _eps = json.loads(ep_path.read_text(encoding="utf-8"))
+                route_index = RouteIndex(_eps.get("adjudicated_entry_points") or [])
+            except Exception as exc:
+                logger.warning("poc: entry_points unreadable: %s", exc)
 
         # 先收集所有 externally_exploitable 漏洞，便于打 (i/N) 进度行。
         # queue 解析快（小 json），预扫一遍换可读进度，值得。
@@ -1048,9 +1595,19 @@ class PoCGenerator:
         # inj/xss/ssrf 的待补项(模板未命中),收集后按文件分组批量补缺
         gapped: list[tuple[int, "PartialSpec"]] = []
         # Fix B:断点续传 — 读 checkpoint,reuse 已完成项,retry 不从零重来
-        ckpt_completed = _load_checkpoint(deliverables_dir)
+        # G8：v2 校验 version+track（v1/异 track 丢弃，修复对存量重跑生效）
+        ckpt_completed = _load_checkpoint(deliverables_dir, track)
         ckpt_done_ids = set(ckpt_completed.keys())
 
+        # G7（spec §4）并发基础设施：auth per-item 与 gap-fill 组共用 cap；
+        # per-call 超时治单条 5m12s 空转白烧（NodeGoat 实测 auth 占阶段 82%）。
+        semaphore = asyncio.Semaphore(max(1, int(os.getenv("SUPERNOVA_POC_CONCURRENCY", "3"))))
+        auth_timeout_s = float(os.getenv("SUPERNOVA_POC_AUTH_TIMEOUT_S", "180"))
+        ckpt_lock = asyncio.Lock()
+
+        # 阶段 1：预扫分拣 —— ckpt 命中 / inj/xss/ssrf 分层快速路径（0ms）/
+        # authz+auth 收集为 per-item 任务（阶段 2 并行）。
+        per_item: list[tuple[int, str, Any, set]] = []
         for i, (vc, v, accepted) in enumerate(items, 1):
             vid = getattr(v, "ID", "?")
             label = f"({i}/{total}) {_POC_CLASS_TAG.get(vc, f'[{vc}]')} {vid}"
@@ -1065,29 +1622,25 @@ class PoCGenerator:
                         await _poc_progress(f"{label}  复用(checkpoint)")
                         continue
                 if vc in ("authz", "auth"):
-                    # authz(成对模板)/auth(量小,上游 §5.3 默认 LLM)保持既有 per-item 路径
-                    spec = await PoCGenerator._build_entry(
-                        v, vc, host, endpoints, accepted,
-                        repo_path=repo_path, api_key=api_key, model_tier=model_tier,
-                        provider_config=provider_config)   # P3c 阶段 1
-                    dt_ms = int((time.monotonic() - t0) * 1000)
-                    if spec is not None:
+                    per_item.append((i, vc, v, accepted))
+                    continue
+                # inj/xss/ssrf：G3 统一分层路径（spec §3.2）——确定性提取
+                # （derive_method_path → witness 请求行 → RouteIndex join）
+                # 完整 → _assemble 0ms；缺 route/witness → 待补桶（分组 gap-fill）。
+                band = classify_confidence(v, is_accepted=(vid in accepted))
+                partial = _extract_deterministic(v, vc, endpoints, band, route_index)
+                if not partial.needs_gap_fill:
+                    spec = _assemble(partial, None, endpoints)
+                    if spec is None:
+                        await _poc_progress(f"{label}  skip {format_duration(int((time.monotonic()-t0)*1000))}")
+                    else:
+                        lint_spec(spec)
                         entries_by_idx[i] = (vc, v, spec)
-                        await _poc_progress(f"{label}  {format_duration(dt_ms)}")
-                    else:
-                        await _poc_progress(f"{label}  skip {format_duration(dt_ms)}")
-                else:
-                    # inj/xss/ssrf:模板优先(0ms);未命中 → 收集待补
-                    band = classify_confidence(v, is_accepted=(vid in accepted))
-                    template = build_template_spec(v, vc, host, endpoints, band)
-                    if template is not None:
-                        entries_by_idx[i] = (vc, v, template)
                         await _poc_progress(f"{label}  {format_duration(int((time.monotonic()-t0)*1000))}")
-                    else:
-                        partial = _extract_deterministic(v, vc, endpoints, band)
-                        gapped.append((i, partial))
-                        await _poc_progress(f"{label}  待补缺(分组) {format_duration(int((time.monotonic()-t0)*1000))}")
-                # Fix B:增量写 checkpoint(模板/authz/auth 路径;gapped 待补项此处尚未 resolve,在分组补缺后统一写)
+                else:
+                    gapped.append((i, partial))
+                    await _poc_progress(f"{label}  待补缺(分组) {format_duration(int((time.monotonic()-t0)*1000))}")
+                # Fix B:增量写 checkpoint(分层快速路径;gapped 待补项在分组补缺后统一写)
                 if i in entries_by_idx:
                     _vc, _v, _spec = entries_by_idx[i]
                     ckpt_completed[getattr(_v, "ID", str(i))] = {
@@ -1098,19 +1651,60 @@ class PoCGenerator:
                 logger.warning("poc: build failed for %s: %s", vid, exc)
                 await _poc_progress(f"{label}  — {exc} ({format_duration(dt_ms)})")
 
-        # 分组批量补缺(GitNexus 轨缺 route/witness 的项)
+        # 阶段 2：authz/auth per-item 并行（G7）——Semaphore cap + per-call 超时。
+        # authz 本身 0ms 模板，auth 是逐条 LLM（原串行是速度唯一大头）。
+        if per_item:
+            async def _run_item(i: int, vc: str, v: Any, accepted: set) -> None:
+                vid = getattr(v, "ID", "?")
+                label = f"({i}/{total}) {_POC_CLASS_TAG.get(vc, f'[{vc}]')} {vid}"
+                t0 = time.monotonic()
+
+                async def _call() -> HttpRequestSpec | list[HttpRequestSpec] | None:
+                    async with semaphore:
+                        return await PoCGenerator._build_entry(
+                            v, vc, host, endpoints, accepted,
+                            repo_path=repo_path, api_key=api_key, model_tier=model_tier,
+                            provider_config=provider_config)   # P3c 阶段 1
+
+                try:
+                    spec = await asyncio.wait_for(_call(), timeout=auth_timeout_s)
+                except asyncio.TimeoutError:
+                    band = classify_confidence(v, is_accepted=(vid in accepted))
+                    spec = _base_spec(v, vc, endpoints, band)
+                    spec.note = "LLM 超时，需手工补全请求形态"
+                except Exception as exc:  # 单条失败不阻塞其余
+                    logger.warning("poc: build failed for %s: %s", vid, exc)
+                    spec = None
+                dt_ms = int((time.monotonic() - t0) * 1000)
+                if spec is None:
+                    await _poc_progress(f"{label}  — 失败/跳过 ({format_duration(dt_ms)})")
+                    return
+                for s in (spec if isinstance(spec, list) else [spec]):
+                    lint_spec(s)
+                entries_by_idx[i] = (vc, v, spec)
+                # Fix B：并行完成即写 checkpoint（锁保护并发写盘）
+                async with ckpt_lock:
+                    ckpt_completed[vid] = {"vuln_class": vc, "spec": _spec_to_ckpt(spec)}
+                    _write_checkpoint(deliverables_dir, track, ckpt_completed)
+                await _poc_progress(f"{label}  {format_duration(dt_ms)}")
+
+            await asyncio.gather(*(_run_item(*t) for t in per_item))
+
+        # 分组批量补缺(GitNexus 轨缺 route/witness 的项)——G7：组并行共享 cap
         if gapped:
             await _poc_progress(f"PoC 分组补缺: {len(gapped)} 条待补")
             gapmap = await _batch_fill_gaps(
                 [p for _, p in gapped], endpoints=endpoints,
                 repo_path=repo_path or "/tmp/poc-gen", api_key=api_key, model_tier=model_tier,
-                provider_config=provider_config)   # P3c 阶段 1
+                provider_config=provider_config,   # P3c 阶段 1
+                semaphore=semaphore)
             for i, partial in gapped:
                 vid = getattr(partial.vuln, "ID", "?")
                 spec = _assemble(partial, gapmap.get(vid), endpoints)
                 if spec is None:
                     await _poc_progress(f"{vid}  非 HTTP 入口,skip(拼不出 HTTP PoC)")
                     continue  # 纯非 HTTP 入口：不入 entries，不写 checkpoint
+                lint_spec(spec)
                 entries_by_idx[i] = (partial.vuln_class, partial.vuln, spec)
                 ckpt_completed[vid] = {
                     "vuln_class": partial.vuln_class, "spec": _spec_to_ckpt(spec)}

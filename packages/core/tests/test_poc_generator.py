@@ -39,16 +39,17 @@ def test_resolve_host_real_and_placeholder():
     assert resolve_host(None) == "https://TARGET[:PORT]"
 
 
-def test_classify_confidence_verdict_overrides_confidence():
+def test_classify_confidence_semantics():
+    """G2（P0-2 修复）：needs_review/low 不再被 verdict=vulnerable 压成 CONFIRMED。"""
     class V:
         verdict = "vulnerable"
         confidence = "needs_review"
-    assert classify_confidence(V(), is_accepted=False) == ConfidenceBand.CONFIRMED
+    assert classify_confidence(V(), is_accepted=False) == ConfidenceBand.SUSPECTED
 
     class H:
-        verdict = None
+        verdict = "vulnerable"
         confidence = "high"
-    assert classify_confidence(H(), is_accepted=False) == ConfidenceBand.HIGH
+    assert classify_confidence(H(), is_accepted=False) == ConfidenceBand.CONFIRMED
 
     class S:
         verdict = None
@@ -134,16 +135,17 @@ def test_to_curl_placeholder_host():
     assert "https://TARGET[:PORT]/share?" in curl
 
 
-def test_to_burp_raw_keeps_raw_payload():
+def test_to_burp_raw_minimal_encoding():
+    """G6（P1-7 修复）：query 值空格 %20 编码（请求行合法），引号等符号保 raw。"""
     spec = HttpRequestSpec(
         method="GET", path="/api/users",
         query={"id": "' OR '1'='1"},
         headers={"Authorization": "Bearer <AUTH_TOKEN>"},
     )
     raw = to_burp_raw(spec, "https://invite-code.moomoo.com")
-    assert raw.startswith("GET /api/users?id=' OR '1'='1 HTTP/1.1")
+    assert raw.startswith("GET /api/users?id='%20OR%20'1'='1 HTTP/1.1")
     assert "Host: invite-code.moomoo.com" in raw
-    assert "' OR '1'='1" in raw  # 原始未编码
+    assert "'%20OR%20'1'='1" in raw  # 空格编码、引号 raw
 
 
 def test_to_burp_raw_post_body():
@@ -177,28 +179,37 @@ def _inj(**kw):
     return SimpleNamespace(**base)
 
 
-def test_template_injection():
-    spec = build_template_spec(_inj(), "injection", "https://t.example.com", {}, ConfidenceBand.CONFIRMED)
+def test_layered_injection_query_path():
+    """build_template_spec inj/xss/ssrf 分支退役（G3 统一分层路径），行为等价断言
+    迁移到 _extract_deterministic + _assemble。"""
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    p = _extract_deterministic(_inj(), "injection", {}, ConfidenceBand.CONFIRMED)
+    assert not p.needs_gap_fill
+    spec = _assemble(p, None, {})
     assert spec.method == "GET"
     assert spec.path == "/api/users"
     assert spec.query == {"id": "' OR '1'='1"}
 
 
-def test_template_ssrf_open_redirect_subform():
+def test_layered_ssrf_open_redirect_query():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
     v = SimpleNamespace(ID="SSRF-1", externally_exploitable=True,
                         source="GET /jump?next=https://evil.com",
                         witness_payload="https://evil.com",
                         suggested_exploit_technique="open redirect via next param")
-    spec = build_template_spec(v, "ssrf", "https://t.example.com", {}, ConfidenceBand.HIGH)
+    p = _extract_deterministic(v, "ssrf", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, None, {})
     assert spec.method == "GET"
     assert spec.query == {"next": "https://evil.com"}
 
 
-def test_template_ssrf_body_subform():
+def test_layered_ssrf_body_subform():
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
     v = SimpleNamespace(ID="SSRF-2", externally_exploitable=True,
                         source="POST /api/fetch", witness_payload="http://127.0.0.1:8080",
                         vulnerable_parameter="url", suggested_exploit_technique="ssrf")
-    spec = build_template_spec(v, "ssrf", "https://t.example.com", {}, ConfidenceBand.HIGH)
+    p = _extract_deterministic(v, "ssrf", {}, ConfidenceBand.HIGH)
+    spec = _assemble(p, None, {})
     assert spec.method == "POST"
     assert spec.body == "url=http://127.0.0.1:8080"
 
@@ -208,7 +219,10 @@ def test_template_authz_returns_pair():
                         endpoint="GET /api/score/:staffId", minimal_witness="swap staffId")
     result = build_template_spec(v, "authz", "https://t.example.com", {}, ConfidenceBand.CONFIRMED)
     assert isinstance(result, list) and len(result) == 2  # 成对
-    assert all(s.path == "/api/score/:staffId" for s in result)
+    # G4：path 段被 OWNER/VICTIM 占位符替换（两请求真实不同）
+    legit, cross = result
+    assert legit.path == "/api/score/<OWNER_RESOURCE_ID>"
+    assert cross.path == "/api/score/<VICTIM_RESOURCE_ID>"
 
 
 def test_template_auth_returns_none_needs_llm():
@@ -574,27 +588,29 @@ def test_spec_from_llm_guess_str_query_does_not_crash():
 def test_extract_gn_location_java_controller():
     from supernova_core.services.poc_generator import extract_gn_location
     src = "payload (src/main/java/com/alibaba/csp/sentinel/dashboard/controller/cluster/ClusterConfigController.java:apiModifyClusterConfig:70)"
-    param, f, m = extract_gn_location(src)
+    param, f, m, line = extract_gn_location(src)
     assert param == "payload"
     assert f == "src/main/java/com/alibaba/csp/sentinel/dashboard/controller/cluster/ClusterConfigController.java"
     assert m == "apiModifyClusterConfig"
+    assert line == 70
 
 
 def test_extract_gn_location_ts_handler():
     from supernova_core.services.poc_generator import extract_gn_location
     src = "userId (src/routes/user.ts:getUser:42)"
-    param, f, m = extract_gn_location(src)
+    param, f, m, line = extract_gn_location(src)
     assert param == "userId"
     assert f == "src/routes/user.ts"
     assert m == "getUser"
+    assert line == 42
 
 
 def test_extract_gn_location_non_gn_returns_none():
     from supernova_core.services.poc_generator import extract_gn_location
     # LLM 轨格式（无括号 file:method:line）→ None
-    assert extract_gn_location("payload — @RequestBody at Foo.java:71") == (None, None, None)
-    assert extract_gn_location(None) == (None, None, None)
-    assert extract_gn_location("") == (None, None, None)
+    assert extract_gn_location("payload — @RequestBody at Foo.java:71") == (None, None, None, None)
+    assert extract_gn_location(None) == (None, None, None, None)
+    assert extract_gn_location("") == (None, None, None, None)
 
 
 def test_extract_deterministic_gn_vuln_has_gaps():
@@ -823,9 +839,9 @@ async def test_generate_checkpoint_resumes_skipping_done(tmp_path, monkeypatch):
             witness_payload=None, verdict="vulnerable"),
     ])
     (d / "injection_exploitation_queue.json").write_text(q.model_dump_json(), encoding="utf-8")
-    # 预置 checkpoint:INJ-GN-01 已完成
+    # 预置 checkpoint:INJ-GN-01 已完成（G8：v2 起校验 version+track）
     from supernova_core.services.poc_generator import _POC_CHECKPOINT_FILENAME
-    ckpt = {"version": 1, "track": "whitebox", "completed": {
+    ckpt = {"version": 2, "track": "whitebox", "completed": {
         "INJ-GN-01": {"vuln_class": "injection", "spec": {
             "method": "POST", "path": "/done", "query": {"payload": "DONE"},
             "headers": {}, "body": None, "auth_state": "unknown",
@@ -906,23 +922,26 @@ def test_extract_body_param():
     assert _extract_body_param(None) is None
 
 
-def test_template_injection_body_signal_puts_witness_in_body():
-    """req.body 信号 → 模板层 body + 参数名来自 req.body.x（修「恒 query」）。"""
-    spec = build_template_spec(_BodyVuln(), "injection", "http://t", {},
-                               ConfidenceBand.CONFIRMED)
+def test_layered_injection_body_signal_puts_witness_in_body():
+    """req.body 信号 → body + 参数名来自 req.body.x（修「恒 query」，分层路径等价迁移）。"""
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
+    p = _extract_deterministic(_BodyVuln(), "injection", {}, ConfidenceBand.CONFIRMED)
+    assert not p.needs_gap_fill
+    spec = _assemble(p, None, {})
     assert spec is not None
     assert spec.method == "POST"
     assert spec.body == "preTax=1; drop"
     assert spec.query == {}
 
 
-def test_template_injection_without_signal_keeps_query():
-    """无 body 信号 → 维持 query（历史行为）。"""
+def test_layered_injection_without_signal_keeps_query():
+    """无 body 信号 → 维持 query（历史行为，分层路径等价迁移）。"""
+    from supernova_core.services.poc_generator import _extract_deterministic, _assemble
     class V(_BodyVuln):
         source = "preTax (C.java:70)"
         path = "GET /contributions?q=1 -> render"
-    spec = build_template_spec(V(), "injection", "http://t", {},
-                               ConfidenceBand.CONFIRMED)
+    p = _extract_deterministic(V(), "injection", {}, ConfidenceBand.CONFIRMED)
+    spec = _assemble(p, None, {})
     assert spec.query == {"id": "1; drop"}   # 无 param 信号 → id 兜底
     assert spec.body is None
 

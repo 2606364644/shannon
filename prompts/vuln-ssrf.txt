@@ -106,6 +106,7 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 		"externally_exploitable": true | false,
 	  "source_endpoint": "{HTTP_METHOD} {endpoint_path}",
 	  "vulnerable_parameter": "Name of the parameter that accepts user input (e.g., 'url', 'callback', 'webhook_url').",
+	  "witness_payload": "the payload VALUE itself — no param-name prefix (NOT 'url=http://...'), no request line, no explanation text (e.g., 'http://127.0.0.1:22/', 'http://169.254.169.254/latest/meta-data/'). Where/how to deliver it goes in `notes`.",
 	  "vulnerable_code_location": "Exact file:line where the HTTP client makes the outbound request.",
 	  "missing_defense": "Concise description of the core problem (e.g., 'No URL allowlist validation', 'Missing protocol restriction').",
 	  "exploitation_hypothesis": "A clear statement describing the expected outcome of a successful exploit (e.g., 'An attacker can access internal services by providing internal URLs', 'An attacker can retrieve cloud metadata through URL manipulation').",
@@ -256,7 +257,7 @@ Confidence levels:
 
 ### **4) Documentation**
 
-- **Vulnerable paths** → add to exploitation queue, include a minimal `witness_payload` (e.g., `http://127.0.0.1:22/`).
+- **Vulnerable paths** → add to exploitation queue, include a minimal `witness_payload` — the payload VALUE only (e.g., `http://127.0.0.1:22/`), never a request line or a `param=` prefix.
 - **Safe paths** → log in "Vectors Analyzed and Confirmed Secure" in your analysis deliverable.
 
 # Confidence scoring (analysis phase; applies to all checks above)

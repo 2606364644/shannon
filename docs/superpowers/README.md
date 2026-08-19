@@ -86,7 +86,7 @@
 ### 报告增强 / PoC
 - [exploitable-poc-generation](plans/2026-07-02-exploitable-poc-generation.md) / [spec](specs/2026-07-02-exploitable-poc-generation-design.md) — 外部可达漏洞 curl/Burp PoC 自动生成（黑白盒通用）🔧
 - [poc-deterministic-layered](plans/2026-07-22-poc-deterministic-layered.md) / [spec](specs/2026-07-22-poc-deterministic-layered-design.md) — PoC 分层确定性化 + 可靠性加固（分组补缺/checkpoint/非阻塞）🔧
-- [poc-accuracy-speed-overhaul](specs/2026-08-19-poc-accuracy-speed-overhaul-design.md) — PoC 准确性+速度治理 P0+P1（witness 解析/路由 join/lint/authz 鉴别力/auth 并行/checkpoint v2）📐
+- [poc-accuracy-speed-overhaul](specs/2026-08-19-poc-accuracy-speed-overhaul-design.md) — PoC 准确性+速度治理 P0+P1（witness 解析/路由 join/lint/authz 鉴别力/auth 并行/checkpoint v2）🔧
 
 ### 认证档案 auth-profile
 - [auth-profile-vault](specs/2026-08-05-auth-profile-vault-design.md) — per-ws 加密档案库 + 独立验证 + 黑盒扫描复用 🔧

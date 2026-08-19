@@ -120,13 +120,13 @@ Structure: The vulnerability JSON object MUST follow this exact format:
 		"authentication_required": "true | false — whether login is required to reach this sink via this route. Check the route definition in the router file for authentication middleware. A route WITHOUT auth middleware means the vulnerability is exploitable WITHOUT authentication.",
 		"accessible_routes": "list ALL routes whose handlers reach this sink, with their middleware chains. Format: 'METHOD /path [middleware1, middleware2, ...]' — one entry per route.",
 		"source_detail": "For Stored XSS: the specific DB read operation and data field (e.g., 'user.find().name at controllers/profile.js:45'). For Reflected/DOM: the specific input that reaches the sink (e.g., 'req.query.search at routes/search.js:12').",
-		"path": "Complete data flow from source to sink including all transformations (e.g., 'req.query.q → searchController.process() → template.render() → innerHTML').",
+		"path": "MUST start with 'METHOD /route' of an HTTP entry when HTTP-reachable (e.g., 'GET /search?q → ...'), then the complete data flow from source to sink including all transformations.",
 		"sink_function": "The function or template construct that renders the data (e.g., 'innerHTML', 'document.write', 'React dangerouslySetInnerHTML', 'Jinja2 {{ variable }}').",
 		"render_context": "The specific location in the DOM where the data is placed. Critical for determining the correct defense. (HTML_BODY | HTML_ATTRIBUTE | JAVASCRIPT_STRING | URL_PARAM | CSS_VALUE).",
 		"encoding_observed": "Name & file:line of any encoding/sanitization functions observed (e.g., 'htmlspecialchars()', 'DOMPurify.sanitize()'). List 'None' if none found.",
 		"verdict": "vulnerable | safe.",
 		"mismatch_reason": "If vulnerable, explain why the observed encoding is wrong for the render context (e.g., 'URL encoding used in an HTML attribute context, allowing event handler injection.').",
-		"witness_payload": "A minimal, non-malicious payload that proves context control (e.g., '><script>alert(1)</script>', '" onmouseover=alert(1) ').",
+		"witness_payload": "the payload VALUE itself — no param-name prefix (NOT 'firstName=<img...>'), no request line, no explanation text (e.g., '><script>alert(1)</script>', '\" onmouseover=alert(1) '). Multi-param delivery as 'a=1&b=2' is OK. Where/how to deliver it (endpoint, param, plant-then-trigger steps for Stored XSS) goes in `notes`.",
 		"confidence": "high | med | low.",
 		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors."
 	}

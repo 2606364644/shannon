@@ -1,0 +1,37 @@
+{
+ "injection": [
+  {
+   "ID": "INJ-VULN-01",
+   "vulnerability_type": "PathTraversal",
+   "externally_exploitable": true,
+   "source": "spaceId, filename, uid @ module/deposit/server/app/controller/file.ts:77 (ctx.request.query)",
+   "path": "GET /api/v2/download-cer → file.download() → super.download(options) → FileController.download() → FossService.download(filename) → foss.simpleDownload({filename, owners})",
+   "witness_payload": "GET /api/v2/download-cer?uid=999999&spaceId=10249&filename=deposit_view_999999D7_1700000000_abcd.jpg",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "路由 router.ts:75-76 的 /api/v2/download-cer 未挂载 normalizeUid()。contrast: upload 分支 (file.ts:23-26) 有 checkUidValid 但 download 分支完全没有。底层 agudo-file-middleware foss-service.ts:46-55 对 filename 零防护。"
+  },
+  {
+   "ID": "INJ-VULN-02",
+   "vulnerability_type": "PathTraversal",
+   "externally_exploitable": true,
+   "source": "filename @ module/bankcard/server/app/middleware/download.ts:9 (ctx.query.filename)",
+   "path": "GET /api/download-img → download middleware → createDownloadMiddleware({fossConfig, filename}) → FileController.download() → FossService.download(filename) → foss.simpleDownload({filename, owners})",
+   "witness_payload": "GET /api/download-img?filename=../../../../etc/passwd",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "fossConfig 固定 (spaceId=10295)，uid 不可控 (FileController 用 ctx.user.uid)。实际路径遍历成功取决于 FOSS 后端是否将 filename 用作文件系统路径。"
+  },
+  {
+   "ID": "INJ-VULN-03",
+   "vulnerability_type": "PathTraversal",
+   "externally_exploitable": true,
+   "source": "filename @ module/pre-deposit/server/app/controller/file.ts:62 (ctx.request.query)",
+   "path": "GET /api/pre-deposit/download-cer → file.download() → super.download(options) → FileController.download() → FossService.download(filename) → foss.simpleDownload({filename})",
+   "witness_payload": "GET /api/pre-deposit/download-cer?filename=deposit_view_<other_uid>D7_1700000000_abcd.jpg",
+   "verdict": "vulnerable",
+   "confidence": "needs_review",
+   "notes": "uid 和 spaceId 硬绑定是正确安全范式。filename 风险降级因 uid 隔离限制了 IDOR。"
+  }
+ ]
+}
