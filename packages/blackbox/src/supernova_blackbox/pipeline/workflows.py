@@ -170,12 +170,16 @@ class BlackboxScanWorkflow:
 
         # Auth validation when config is present
         if input.config_path:
+            # 步骤条声明(2026-08-21):与独立 AuthValidationWorkflow 同源(SSOT)——
+            # log_milestone 工具发的 StepEvent(navigate/…/verify_session × 每凭据)与
+            # validate-authentication 的 AgentEvent 都在发,声明即推进,零新增发射器。
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 args=[
-                    BlackboxActivityInput(**{**act_input.__dict__, "phase": "auth-validation"}),
-                    [],
-                    [],
+                    BlackboxActivityInput(**{**act_input.__dict__,
+                                             "phase": AUTH_VALIDATION_PROGRESS.phase}),
+                    list(AUTH_VALIDATION_PROGRESS.step_keys),
+                    [s.intent for s in AUTH_VALIDATION_PROGRESS.steps],
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
@@ -303,12 +307,25 @@ class BlackboxScanWorkflow:
                 )
 
             if input.exploit:
+                # 步骤条声明(2026-08-21,白盒 vulnerability-analysis 的 vuln_phase_steps
+                # 同模式):endpoint-verify 仅 web_url 有值时才调度(下方 if input.web_url),
+                # {vt}-exploit 与实际调度的 exploit agent(AgentName(f"{vt}-exploit"))同名
+                # → 既有 AgentEvent(start/end) 自动推进,零新增事件发射。队列验证跳过的类
+                # 无 agent 事件 → 运行中灰显,终态由 scan_end(completed) 收敛标绿(reducer 既有)。
+                exploit_steps = (
+                    (["endpoint-verify"] if input.web_url else [])
+                    + [f"{vt}-exploit" for vt in selected_classes]
+                )
+                exploit_intents = (
+                    (["端点 live 验证与路由前缀探测"] if input.web_url else [])
+                    + [f"利用 {vt} 漏洞" for vt in selected_classes]
+                )
                 await workflow.execute_activity(
                     activities.log_phase_start_activity,
                     args=[
                         BlackboxActivityInput(**{**act_input.__dict__, "phase": "exploitation"}),
-                        [],
-                        [],
+                        exploit_steps,
+                        exploit_intents,
                     ],
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
@@ -453,12 +470,15 @@ class BlackboxScanWorkflow:
                         retry_policy=retry_for("log"),
                     )
 
+            # 步骤条声明(2026-08-21):report 与 run_report_agent 的
+            # AgentEvent(agent_name="report") 同名 → start/end 自动推进;resume 跳过
+            # agent 时由 scan_end(completed) 收敛兜底。
             await workflow.execute_activity(
                 activities.log_phase_start_activity,
                 args=[
                     BlackboxActivityInput(**{**act_input.__dict__, "phase": "reporting"}),
-                    [],
-                    [],
+                    ["report"],
+                    ["撰写黑盒报告"],
                 ],
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
