@@ -112,6 +112,43 @@ async def test_build_headless_audit_session_constructs_registers_and_heartbeats(
         await _stop_all_heartbeats()
 
 
+@pytest.mark.asyncio
+async def test_build_meta_id_uses_workspace_dir_name_combined_run(tmp_path, monkeypatch):
+    """组合接力（2026-08-21 组合扫描用时 bug 根因）：黑盒 run 的 workspace_path 是
+    blackbox-runs/run-K/ 子目录（event_file.parent），但 workspace_name 仍是任务级
+    scan_id。meta.id 必须取 ws_path.name（= run-K），MetricsTracker 的 session.json
+    才落 run-K/session.json（统一任务模型 spec「run 拥有独立 session.json」）。
+
+    旧行为 meta.id = workspace_name or ws_path.name 会把黑盒 metrics 写到
+    blackbox-runs/<scan_id>/session.json 旁路目录（真机实测存在），黑盒时长从未
+    进 run 级 session，也无从合并进任务级 → 列表用时只剩白盒段。
+
+    零回归依据：web 白盒/纯黑盒 ws_path=scan_dir（name==scan_id==workspace_name）、
+    _ws_path 回落分支 name==workspace_name，两路径 meta.id 值不变。
+    """
+    _patch_real_activity_info(monkeypatch)
+    scan_dir = tmp_path / "scans" / "NodeGoat-1"
+    run_dir = scan_dir / "blackbox-runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    inp = SimpleNamespace(
+        workspace_path=str(run_dir),   # 黑盒接力：ws_path = run-K 子目录
+        workspace_name="NodeGoat-1",   # 仍是任务级 scan_id（_submit_blackbox 传的）
+        repo_path=str(scan_dir),
+        web_url="http://t",
+        event_file=str(run_dir / "events.ndjson"),
+    )
+    session = await recov.build_headless_audit_session(inp)
+    try:
+        assert (run_dir / "session.json").exists(), \
+            "黑盒 run 的 session.json 应落 run-K/session.json"
+        assert not (scan_dir / "blackbox-runs" / "NodeGoat-1").exists(), \
+            "不应产生 blackbox-runs/<scan_id>/ 旁路目录"
+    finally:
+        await session.close()
+        await recov.drain_and_detach(workflow_id="wf-restart")
+        await _stop_all_heartbeats()
+
+
 # ── build_headless_audit_session：覆盖保护 ─────────────────────────────────
 
 @pytest.mark.asyncio

@@ -70,7 +70,7 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     from supernova_web.components.workspaces_indexer import _to_unix
     from supernova_web.components.scan_store import (
         resolve_workflow_id, _compute_progress_pct, effective_scan_status,
-        merge_latest_run_view)
+        merge_latest_run_view, combined_wallclock_ms, _is_combined_scan)
     mgr = SessionManager(scan_dir.parent)
     data = mgr.get_session_data(scan_dir)
     idx = request.app.state.indexer
@@ -86,6 +86,15 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     host_enabled = bool(host_config.get("enabled")) if isinstance(host_config, dict) else False
     host_source = host_config.get("source") if host_enabled else None
     host_mappings = host_config.get("mappings") if isinstance(host_config, dict) else {}
+    # 组合扫描用时走墙钟口径（含黑盒段），与列表 _summarize 一致；OverviewTab 读
+    # metrics.total_duration_ms，纯扫描两口径同为 metrics 值，零变化。
+    metrics = normalize_metrics(data.get("metrics", {}))
+    if _is_combined_scan(data, combined):
+        wallclock = combined_wallclock_ms(
+            data, _to_unix(mgr.get_created_at(scan_dir)),
+            _to_unix(mgr.get_completed_at(scan_dir)))
+        if wallclock is not None:
+            metrics["total_duration_ms"] = wallclock
     return {
         "web_url": mgr.get_web_url(scan_dir),
         "repo_path": data.get("repo_path"),
@@ -96,7 +105,7 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         # 服务端墙钟基准（unix 秒）：前端 offset 校正用，消除跨时钟「总耗时负数」根因。
         "server_now": time.time(),
         "links": data.get("links", {}),
-        "metrics": normalize_metrics(data.get("metrics", {})),
+        "metrics": metrics,
         "session": data.get("session", {}),
         "workflow_id": resolve_workflow_id(ws, scan_dir, scan_id),
         # 重跑预填用：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。

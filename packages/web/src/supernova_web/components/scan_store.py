@@ -37,6 +37,41 @@ def _now_local() -> datetime:
     return datetime.now()
 
 
+def combined_wallclock_ms(data: dict, created: float | None,
+                          completed: float | None) -> float | None:
+    """组合扫描墙钟用时(ms)：end = max(任务级 completed_at, 各 bb_run completed_at)，
+    无任何终态（在跑/中断）时 end=now（列表 10s 轮询下用时随时间推进）。
+
+    组合扫描的任务级 metrics.total_duration_ms 只由白盒 run 的 MetricsTracker 累积
+    （黑盒 run 的 metrics 落 run-K/session.json，从不合并进任务级），只读 metrics 会
+    显示偏小（真机 NodeGoat-20260820-174548：白盒 32.3min vs 墙钟 50.3min）。墙钟
+    口径涵盖预验证+白盒+黑盒+编排间隙=全部用时，且不依赖 metrics 合并、天然覆盖
+    历史数据（旁路目录时代的旧组合扫描也直接正确）。list(_summarize)/detail
+    (_scan_detail) 共用，保口径一致。纯白盒/纯黑盒不走本口径（仍读 metrics）。
+    """
+    if not created:
+        return None
+    ends: list[float] = []
+    if completed:
+        ends.append(completed)
+    for r in (data.get("bb_runs") or []):
+        if isinstance(r, dict):
+            ts = _to_unix(r.get("completed_at"))
+            if ts:
+                ends.append(ts)
+    end = max(ends) if ends else time.time()
+    return max(0.0, (end - created) * 1000)
+
+
+def _is_combined_scan(data: dict, combined: object) -> bool:
+    """组合扫描判据：session combined=True 或 bb_runs[] 非空（手动 _add_blackbox_run
+    亦写 combined=True，两信号取 OR 容错半写状态）。"""
+    if combined is True:
+        return True
+    runs = data.get("bb_runs")
+    return bool(runs) if isinstance(runs, list) else False
+
+
 # run_id 校验：^run-\d+$（K = per-task 单调序号，从 1 起）。get/create/list run 据此
 # 拒绝越界（../）/ 非法格式（run-x），避免路径穿越读其他目录。
 _RUN_ID_RE = re.compile(r"^run-(\d+)$")
@@ -611,6 +646,13 @@ class ScanStore:
         bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
         status = effective_scan_status(raw_status, combined, bb_phase)
         progress_pct = _compute_progress_pct(status, combined, bb_phase, progress_data)
+        # 组合扫描用时走墙钟口径（含黑盒段+预验证+间隙；metrics 只含白盒，见
+        # combined_wallclock_ms docstring）。纯白盒/纯黑盒仍读 metrics。
+        duration_ms = metrics.get("total_duration_ms")
+        if _is_combined_scan(data, combined):
+            duration_ms = combined_wallclock_ms(
+                data, _to_unix(mgr.get_created_at(scan_dir)),
+                _to_unix(mgr.get_completed_at(scan_dir)))
         return ScanSummary(
             scan_id=scan_id,
             scan_type=scan_type,
@@ -621,7 +663,7 @@ class ScanStore:
             vuln_counts=vuln_counts,
             total_cost_usd=metrics.get("total_cost_usd"),
             cost_currency=metrics.get("cost_currency"),
-            total_duration_ms=metrics.get("total_duration_ms"),
+            total_duration_ms=duration_ms,
             links=links,
             is_running=(status == "running"),
             is_correlation=(scan_type == "correlation"),

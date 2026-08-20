@@ -109,7 +109,13 @@ async def build_headless_audit_session(input: Any) -> AuditSession:
                 "stale audit session close failed; leak persists (wf=%s)",
                 _resolve_wf_id(), exc_info=True)
     meta = SessionMetadata(
-        id=input.workspace_name or ws_path.name,
+        # id 取 ws_path.name 而非 workspace_name（2026-08-21 组合扫描用时 bug）：组合接力
+        # 的黑盒 run workspace_path=blackbox-runs/run-K/ 而 workspace_name 仍是任务级
+        # scan_id，取 name 会让 MetricsTracker 的 session.json 落 blackbox-runs/<scan_id>/
+        # 旁路目录（黑盒时长从未进 run 级 session）。ws_path.name 对 web 白盒/纯黑盒
+        # （=scan_dir，name==scan_id==workspace_name）与 _ws_path 回落分支（name==
+        # workspace_name）值不变，零回归；统一任务模型 spec「run 拥有独立 session.json」。
+        id=ws_path.name,
         web_url=input.web_url,
         repo_path=input.repo_path,
         output_path=str(ws_path.parent),

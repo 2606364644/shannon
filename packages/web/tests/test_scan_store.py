@@ -504,6 +504,63 @@ def test_summarize_combined_progress_uses_latest_run_phase(tmp_path):
     assert d["bb_runs"][-1]["run_id"] == "run-1"
 
 
+# ── 组合扫描用时口径（墙钟，2026-08-21）──────────────────────────────────────
+
+def test_scan_summary_combined_duration_wallclock_completed(tmp_path):
+    """组合扫描 total_duration_ms 用墙钟口径（含黑盒段），非任务级 metrics 的白盒和。
+
+    任务级 metrics.total_duration_ms 只由白盒 run 的 MetricsTracker 累积（黑盒 run 的
+    metrics 落 run-K/session.json，从不合并进任务级）——只读 metrics 会显示偏小
+    （真机 NodeGoat-20260820-174548 实测：白盒 32.3min vs 墙钟 50.3min）。
+    口径：end = max(任务级 completed_at, 各 bb_run completed_at) - created_at。
+    """
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")
+    r1, _ = store.create_blackbox_run("WS", wb_id)
+    store.update_blackbox_run("WS", wb_id, r1, status="completed", phase="completed",
+                              completed_at="2026-08-20T18:36:03+00:00")
+    # 手写任务级 session：metrics 只有白盒和（10min）；终态时间戳早于 run 收尾。
+    sess = json.loads((wb_dir / "session.json").read_text())
+    sess["metrics"] = {"total_duration_ms": 600_000}
+    sess["created_at"] = 1_787_247_948.0
+    sess["completed_at"] = 1_787_247_948.0 + 1_800  # 任务级 30min
+    (wb_dir / "session.json").write_text(json.dumps(sess))
+    s = store.list_scans("WS")[0]
+    # run-1 completed_at(2026-08-20T18:36:03Z=1_787_250_963) > 任务级 → end 取 run：
+    assert s.total_duration_ms == pytest.approx((1_787_250_963 - 1_787_247_948) * 1000), \
+        "组合扫描用时 = 墙钟(created→最晚收尾)，非 metrics 白盒和 600000"
+
+
+def test_scan_summary_combined_duration_wallclock_running(tmp_path):
+    """组合扫描在跑（无任何终态）：end=now → 用时随时间增长（列表 10s 轮询可见推进）。"""
+    import time as _time
+    store = ScanStore(tmp_path)
+    wb_id, wb_dir = store.create_scan("WS", "http://e", "/code/x")
+    store.create_blackbox_run("WS", wb_id)
+    sess = json.loads((wb_dir / "session.json").read_text())
+    sess["metrics"] = {"total_duration_ms": 60_000}
+    sess["created_at"] = _time.time() - 120  # 2 分钟前起跑
+    (wb_dir / "session.json").write_text(json.dumps(sess))
+    s = store.list_scans("WS")[0]
+    assert s.total_duration_ms is not None
+    assert 110_000 <= s.total_duration_ms <= 130_000, \
+        "在跑组合扫描用时应 ≈ now-created（120s），非 metrics 的 60000"
+
+
+def test_scan_summary_pure_scan_duration_still_reads_metrics(tmp_path):
+    """纯白盒/纯黑盒（无 bb_runs、combined 非 True）：用时仍读 metrics（零回归）。"""
+    store = ScanStore(tmp_path)
+    _, scan_dir = store.create_scan("WS", "http://e", "/code/x")
+    sess = json.loads((scan_dir / "session.json").read_text())
+    sess["metrics"] = {"total_duration_ms": 123_456}
+    sess["created_at"] = 1_000_000.0
+    sess["completed_at"] = 1_000_900.0  # 墙钟 900s ≠ metrics 值，确保走的是 metrics
+    sess["status"] = "completed"
+    (scan_dir / "session.json").write_text(json.dumps(sess))
+    s = store.list_scans("WS")[0]
+    assert s.total_duration_ms == 123_456
+
+
 def test_list_scans_hides_legacy_tilde_n(tmp_path):
     store = ScanStore(tmp_path)
     wb_id, _ = store.create_scan("WS", "http://e", "/code/x")

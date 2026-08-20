@@ -632,6 +632,22 @@ def test_scan_detail_session_data_shape(authed_client, tmp_workspaces):
     assert "vuln_count" not in d and "is_correlation" not in d
 
 
+def test_scan_detail_combined_duration_wallclock(authed_client, tmp_workspaces):
+    """组合扫描详情 metrics.total_duration_ms 走墙钟口径（含黑盒段），与列表一致——
+    OverviewTab 读该字段，只读任务级 metrics（白盒和）会偏小（2026-08-21）。纯扫描
+    detail 的 metrics 仍原样（下一测试覆盖）。"""
+    _scan_with(tmp_workspaces, "CW", scan_id="s1", status="completed",
+        metrics={"total_duration_ms": 600_000},        # 白盒 agents 和 10min
+        combined=True,
+        bb_runs=[{"run_id": "run-1", "status": "completed",
+                  "completed_at": "2026-08-20T18:36:03+00:00"}],
+        created_at=1787247948.0,                        # 17:45:48Z
+        completed_at=1787250963.0)                      # 18:36:03Z（run 同刻收尾）
+    d = authed_client.get("/api/workspaces/CW/scans/s1").json()
+    assert d["metrics"]["total_duration_ms"] == 3015000, \
+        "created(1787247948)→end(1787250963) 墙钟 3015s，非 metrics 的 600000"
+
+
 def test_scan_detail_recently_active_running(authed_client, tmp_workspaces):
     """scan heartbeat fresh -> status=running，不 500。"""
     import time as _time
