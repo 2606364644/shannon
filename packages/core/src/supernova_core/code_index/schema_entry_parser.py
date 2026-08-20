@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from supernova_core.code_index.models import EntryPoint
+from supernova_core.code_index.path_exclusions import is_excluded_dir, is_test_file_name
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,6 @@ _OPENAPI_FILENAMES = {
     "openapi.yaml", "openapi.yml", "openapi.json",
     "swagger.yaml", "swagger.yml", "swagger.json",
 }
-_SKIP_DIRS = {"node_modules", ".git", "dist", "build", "vendor", ".venv", "__pycache__", ".next"}
 _VALID_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
 
@@ -34,9 +34,10 @@ def _find_openapi_files(repo_path: str) -> list[Path]:
     if not repo.exists():
         return found
     for root, dirs, files in os.walk(repo):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        # 共享排除名单（§4.6）：依赖/构建/测试目录不进 OpenAPI 扫描
+        dirs[:] = [d for d in dirs if not is_excluded_dir(d) and not d.startswith(".")]
         for f in files:
-            if f.lower() in _OPENAPI_FILENAMES:
+            if f.lower() in _OPENAPI_FILENAMES and not is_test_file_name(f):
                 found.append(Path(root) / f)
     return found
 

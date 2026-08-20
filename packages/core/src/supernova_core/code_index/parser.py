@@ -2,6 +2,11 @@ import logging
 from collections import Counter
 from pathlib import Path
 
+from supernova_core.code_index.path_exclusions import (
+    SKIP_DIRS,
+    is_test_file_name,
+)
+
 logger = logging.getLogger(__name__)
 
 LANGUAGE_EXTENSIONS: dict[str, list[str]] = {
@@ -11,13 +16,6 @@ LANGUAGE_EXTENSIONS: dict[str, list[str]] = {
     "java": [".java"],
     "php": [".php"],
 }
-
-SKIP_DIRS: set[str] = {
-    ".git", ".hg", ".svn", "node_modules", "vendor", "__pycache__",
-    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", ".venv",
-    "venv", "env", ".eggs", "eggs",
-}
-
 
 def detect_language(repo_root: Path) -> str:
     """Detect the primary language by counting source file extensions."""
@@ -50,7 +48,8 @@ def discover_source_files(repo_root: Path, language: str) -> list[Path]:
     for ext in extensions:
         for path in repo_root.rglob(f"*{ext}"):
             relative_path = path.relative_to(repo_root)
-            skip = False
+            # 目录级：排除名单/隐藏目录；文件名级：测试文件（§4.6 降噪）
+            skip = is_test_file_name(path.name)
             for part in relative_path.parts:
                 if part in SKIP_DIRS or part.startswith("."):
                     skip = True

@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from supernova_core.code_index.models import FileEntry, FileManifest
+from supernova_core.code_index.path_exclusions import should_skip_parts
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,7 @@ for ftype, exts in SECURITY_FILE_TYPES.items():
     for ext in exts:
         _EXT_TO_TYPE[ext] = ftype
 
-SKIP_DIRS: set[str] = {
-    ".git", ".hg", ".svn", "node_modules", "vendor", "__pycache__",
-    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build", ".venv",
-    "venv", "env", ".eggs", "eggs", ".gitnexus",
-}
+# 目录/测试文件名排除统一走 path_exclusions（§4.6）；隐藏目录由下方 startswith(".") 处理。
 
 
 def classify_security_file(suffix: str) -> str | None:
@@ -41,7 +38,7 @@ def classify_security_file(suffix: str) -> str | None:
 def discover_security_files(repo_root: Path) -> FileManifest:
     """Walk the repo and discover all security-relevant files.
 
-    Skips .git, node_modules, vendor, and other non-source directories.
+    Skips .git, node_modules, vendor, test dirs, and other non-source directories.
     """
     entries: list[FileEntry] = []
 
@@ -51,13 +48,8 @@ def discover_security_files(repo_root: Path) -> FileManifest:
 
         relative = file_path.relative_to(repo_root)
 
-        # Skip hidden/vendored directories
-        skip = False
-        for part in relative.parts:
-            if part in SKIP_DIRS or part.startswith("."):
-                skip = True
-                break
-        if skip:
+        # Skip hidden dirs + shared exclusion list (dirs & test file names, §4.6)
+        if should_skip_parts(relative.parts) or any(p.startswith(".") for p in relative.parts):
             continue
 
         file_type = classify_security_file(file_path.suffix.lower())

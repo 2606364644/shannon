@@ -4,6 +4,7 @@ import logging
 from pathlib import Path, PurePosixPath
 
 from supernova_core.code_index.models import EntryPoint, FuncBlock
+from supernova_core.code_index.path_exclusions import is_excluded_dir, is_test_file_name
 
 logger = logging.getLogger(__name__)
 
@@ -284,12 +285,12 @@ def _scan_top_level_express_routes(
     # top-level route registrations (no function declarations), so the parser
     # produces no FuncBlocks for them and they would be missed by the
     # blocks_by_file seed above.
-    _SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__"}
     for walk_root, dirnames, filenames in os.walk(repo):
-        # Prune dependency/build dirs in-place so we don't descend into them
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        # Prune dependency/build/test dirs in-place so we don't descend into them
+        # (shared exclusion list, §4.6)
+        dirnames[:] = [d for d in dirnames if not is_excluded_dir(d) and not d.startswith(".")]
         for filename in filenames:
-            if filename.endswith((".ts", ".js")):
+            if filename.endswith((".ts", ".js")) and not is_test_file_name(filename):
                 rel = (Path(walk_root) / filename).relative_to(repo).as_posix()
                 if _is_route_file(rel):
                     candidate_files.add(rel)

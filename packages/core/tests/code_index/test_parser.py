@@ -85,6 +85,43 @@ class TestDiscoverSourceFiles:
         files = discover_source_files(tmp_path, "python")
         assert len(files) == 1
 
+    # ===== §4.6 全局排除测试/构建目录 =====
+
+    def test_skips_test_dirs(self, tmp_path):
+        for d in ("tests", "__tests__", "fixtures", "spec"):
+            (tmp_path / d).mkdir()
+            (tmp_path / d / "x.py").write_text("x = 1")
+        (tmp_path / "app.py").write_text("x = 1")
+        files = discover_source_files(tmp_path, "python")
+        assert len(files) == 1
+
+    def test_skips_build_dirs(self, tmp_path):
+        for d in ("dist", "build", ".next", "target"):
+            (tmp_path / d).mkdir()
+            (tmp_path / d / "x.ts").write_text("export {}")
+        (tmp_path / "app.ts").write_text("export {}")
+        files = discover_source_files(tmp_path, "typescript")
+        assert len(files) == 1
+
+    def test_skips_test_filenames_outside_test_dirs(self, tmp_path):
+        # 测试目录之外的测试文件：jest/mocha（*.test.* / *.spec.*）、
+        # pytest（test_*.py / *_test.py）、Go（*_test.go）
+        (tmp_path / "a.test.ts").write_text("export {}")
+        (tmp_path / "b.spec.js").write_text("export {}")
+        (tmp_path / "test_c.py").write_text("x = 1")
+        (tmp_path / "d_test.py").write_text("x = 1")
+        (tmp_path / "e_test.go").write_text("package main")
+        files = discover_all_source_files(tmp_path, ["typescript", "python", "go"])
+        assert files == []
+
+    def test_keeps_normal_files_with_test_substring(self, tmp_path):
+        # 含 test 子串但不是测试文件的正常源码：tester.py / latest.go / contest.ts
+        (tmp_path / "tester.py").write_text("x = 1")
+        (tmp_path / "latest.go").write_text("package main")
+        (tmp_path / "contest.ts").write_text("export {}")
+        files = discover_all_source_files(tmp_path, ["python", "go", "typescript"])
+        assert len(files) == 3
+
 
 class TestDetectAllLanguages:
     def test_single_language(self, tmp_path):
