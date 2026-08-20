@@ -112,7 +112,7 @@ def test_does_not_override_explicit_pricing_override(tmp_path, monkeypatch):
 
 
 def test_no_pricing_json_leaves_override_unset(tmp_path, monkeypatch):
-    """profile 无对应 pricing.json → 不设 SUPERNOVA_PRICING_OVERRIDE(回落内置 GLM_PRICING_CNY)。"""
+    """profile 无对应 pricing.json → 不设 SUPERNOVA_PRICING_OVERRIDE(回落内置 BUILTIN_PRICING_CNY)。"""
     monkeypatch.delenv("SUPERNOVA_PRICING_OVERRIDE", raising=False)
     _write(tmp_path / ".env", {"SUPERNOVA_PROFILE": "glm-anthropic"})
     _write(tmp_path / ".env.profiles" / "glm-anthropic.env", {})

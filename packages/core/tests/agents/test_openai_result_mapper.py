@@ -84,16 +84,16 @@ def test_map_structured_output_list_final():
 def test_map_extracts_cache_read():
     """_usage_from 提取 input_tokens_details.cached_tokens → cache_read；cache_creation=0。"""
     rr = _run_result("hi", _usage(1000, 500, cached=300))
-    res = map_run_result(rr, duration_ms=10, model="glm-4.6", turns=1)
+    res = map_run_result(rr, duration_ms=10, model="glm-5.2", turns=1)
     assert res.tokens.cache_read_input_tokens == 300
     assert res.tokens.cache_creation_input_tokens == 0
 
 
 def test_map_cost_nonzero_for_priced_model():
     rr = _run_result("hi", _usage(1_000_000, 0))
-    res = map_run_result(rr, duration_ms=10, model="glm-4.6", turns=1)
+    res = map_run_result(rr, duration_ms=10, model="glm-5.2", turns=1)
     assert res.cost > 0.0
-    assert res.cost == compute_cost_usd("glm-4.6", res.tokens)
+    assert res.cost == compute_cost_usd("glm-5.2", res.tokens)
 
 
 def test_map_cost_zero_unknown_model_warning(caplog):

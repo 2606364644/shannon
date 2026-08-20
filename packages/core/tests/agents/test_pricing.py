@@ -2,7 +2,7 @@ import pytest
 
 from supernova_core.agents.runner import TokenUsage
 from supernova_core.agents.pricing import (
-    GLM_PRICING_CNY,
+    BUILTIN_PRICING_CNY,
     CostAmount,
     compute_cost,
     compute_cost_usd,
@@ -25,7 +25,7 @@ def test_compute_cost_returns_costamount_with_currency():
 
 def test_compute_cost_known_model_no_cache():
     """已知模型、无 cache：input/output 价直接算本币（不除汇率）。"""
-    p = GLM_PRICING_CNY["glm-4.5-air"]
+    p = BUILTIN_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=1_000_000, output_tokens=500_000)
     expected = (1_000_000 * p["input"] + 500_000 * p["output"]) / 1_000_000
     r = compute_cost("glm-4.5-air", usage)
@@ -57,7 +57,7 @@ def test_compute_cost_input_and_cache_independent():
 
     input_tokens 即 billable，cache_read 独立折价——模拟 mapper 归一后传入。
     """
-    p = GLM_PRICING_CNY["glm-4.5-air"]
+    p = BUILTIN_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=600_000, output_tokens=0, cache_read_input_tokens=400_000)
     r = compute_cost("glm-4.5-air", usage)
     expected = (600_000 * p["input"] + 400_000 * p["cache_read"]) / 1_000_000
@@ -108,6 +108,35 @@ def test_glm_53_priced_same_as_52():
     assert compute_cost("GLM-5.3[1m]", usage) == CostAmount(38.0, "CNY")
 
 
+# ---- deepseek 内置定价 + -coder 变体同价（2026-08-20）----
+
+
+def test_deepseek_v4_flash_builtin_priced():
+    """deepseek-v4-flash 入内置表：官方平时档 1/2/0.02（高峰档单一档位近似）。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    # 1M×1 + 1M×0 + 1M×0.02 + 1M×2, /1M = 3.02
+    assert compute_cost("deepseek-v4-flash", usage) == CostAmount(3.02, "CNY")
+    assert is_model_priced("deepseek-v4-flash") is True
+
+
+def test_normalize_model_strips_coder_suffix():
+    """-coder 变体归一到基础模型（约定：加 -coder 的都和原模型一个价）。"""
+    assert normalize_model("glm-5.2-coder") == "glm-5.2"
+    assert normalize_model("DeepSeek-V4-Flash-Coder") == "deepseek-v4-flash"
+    assert normalize_model("GLM-5.3-CODER[1m]") == "glm-5.3"
+    assert normalize_model("deepseek-chat") == "deepseek-chat"  # -coder 之外的词尾不受影响
+
+
+def test_coder_variant_same_cost_as_base():
+    """-coder 变体与基础模型同价、不再回落 cost 0（回归：曾全程 ¥0.00）。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=500_000)
+    assert compute_cost("deepseek-v4-flash-coder", usage) == compute_cost("deepseek-v4-flash", usage)
+    assert compute_cost("glm-5.2-coder", usage) == compute_cost("glm-5.2", usage)
+    assert is_model_priced("deepseek-v4-flash-coder") is True
+    assert is_model_priced("glm-5.2-coder") is True
+
+
 # ---- currency_symbol ----
 
 
@@ -131,7 +160,7 @@ def test_compute_cost_usd_wrapper_returns_cost():
 def test_compute_cost_ignores_usd_cny_rate(monkeypatch):
     """单 session cost 本币直达，SUPERNOVA_USD_CNY_RATE 不再参与计算（spec §4.4）。"""
     monkeypatch.setenv("SUPERNOVA_USD_CNY_RATE", "10.0")
-    p = GLM_PRICING_CNY["glm-4.5-air"]
+    p = BUILTIN_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000  # = 0.8，不除汇率
     assert compute_cost_usd("glm-4.5-air", usage) == pytest.approx(expected)
@@ -172,7 +201,7 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
     f = tmp_path / "bad.json"
     f.write_text("{not valid json")
     monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", str(f))
-    p = GLM_PRICING_CNY["glm-4.5-air"]
+    p = BUILTIN_PRICING_CNY["glm-4.5-air"]
     usage = TokenUsage(input_tokens=1_000_000)
     expected = (1_000_000 * p["input"]) / 1_000_000
     assert compute_cost_usd("glm-4.5-air", usage) == pytest.approx(expected)
@@ -181,11 +210,12 @@ def test_pricing_override_invalid_ignored(tmp_path, monkeypatch):
 def test_compute_cost_unknown_model_warns_not_silent(caplog):
     """未知模型 → cost 0 + warning（CLAUDE.md §4 契约），非静默。
 
-    回归：deepseek-v4-flash-coder 全程 ¥0.00 无任何提示——docstring 说会打
-    warning，实际静默返回，用户无从得知 cost 为何是 0。"""
+    回归（2026-08-14）：deepseek-v4-flash-coder 全程 ¥0.00 无任何提示——docstring
+    说会打 warning，实际静默返回。该模型现已入价目表（-coder 归一化），样例换成
+    真未知模型 deepseek-v6-turbo 保持契约锁定。"""
     import logging
 
     with caplog.at_level(logging.WARNING, logger="supernova_core.agents.pricing"):
-        r = compute_cost("deepseek-v4-flash-coder", TokenUsage(input_tokens=123))
+        r = compute_cost("deepseek-v6-turbo", TokenUsage(input_tokens=123))
     assert r == CostAmount(0.0, "CNY")
-    assert any("deepseek-v4-flash-coder" in rec.message for rec in caplog.records)
+    assert any("deepseek-v6-turbo" in rec.message for rec in caplog.records)
