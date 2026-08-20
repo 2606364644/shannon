@@ -357,7 +357,7 @@ git commit -m "feat(core): codex subagent 委派 + model_max_output_tokens spike
 - Test: `packages/core/tests/agents/test_providers_codex_stage0.py`
 
 **Interfaces:**
-- Produces: `CodexProvider` 类名（Task 8 充实 `call`）；provider type 字符串 `"codex_cli"`；env 前缀 `SUPERNOVA_CODEX_*`；`DEFAULT_MODELS["codex_cli"] = {"small": "glm-5-turbo", "medium": "glm-5.3", "large": "glm-5.3"}`
+- Produces: `CodexProvider` 类名（Task 8 充实 `call`）；provider type 字符串 `"codex_cli"`；env 前缀 `SUPERNOVA_CODEX_*`；`DEFAULT_MODELS["codex_cli"] = {"small": "glm-5-turbo", "medium": "glm-5.3", "large": "glm-5.3"}`；`model_caps.MODEL_CONTEXT` 补 `glm-5.3`/`glm-5-turbo` 条目
 
 - [ ] **Step 1: 写失败测试**
 
@@ -378,6 +378,17 @@ from supernova_core.config.provider_settings import PROVIDER_SETTINGS
 def test_create_provider_registers_codex_cli():
     provider = create_provider(ProviderConfig(type="codex_cli"))
     assert isinstance(provider, CodexProvider)
+    # D3 isinstance 契约(对齐 test_dual_engine_alignment 护栏精神): 第三引擎同锁 BaseProvider
+    from supernova_core.agents.providers import BaseProvider
+    assert isinstance(provider, BaseProvider)
+
+
+def test_model_caps_cover_codex_catalog_models():
+    """codex 引擎模型经 model_caps 派生 chunk threshold——缺条目会回落 128K 过保守。"""
+    from supernova_core.agents import model_caps
+    got = model_caps.get_model_context("glm-5.3")   # 函数名以 model_caps.py 实际导出为准
+    assert got == 1_048_576                          # 官方 catalog context_window
+    assert model_caps.get_model_context("glm-5-turbo") == 204_800
 
 
 def test_build_provider_config_reads_supernova_codex_env(monkeypatch):
@@ -437,7 +448,16 @@ Expected: FAIL（`ImportError: providers_codex` / ValueError 不支持的类型�
 
 3. `providers.py`：`create_provider` 的 provider_map 加 `"codex_cli": CodexProvider`（import 行加 `from .providers_codex import CodexProvider`）；`resolve_tier_model` 的 ptype 分支加 `elif ptype == "codex_cli": provider_key = "codex_cli"`；`build_provider_config` 的条件改为 `if provider_type in ("anthropic_api", "openai_compatible", "codex_cli"):`。
 
-4. 新建 `providers_codex.py` 骨架（Task 8 充实 call）：
+4. `model_caps.py` 的 `MODEL_CONTEXT` 补两条（来源=官方 models.json catalog 的 `context_window` 字段，客观值）：
+
+```python
+    "glm-5.3": 1_048_576,
+    "glm-5-turbo": 204_800,
+```
+
+（不补则 codex 引擎 pre-recon chunk threshold 派生回落 128K，过保守——chunk 数翻多、LLM 调用变多。实现时先读 `model_caps.py` 确认 dict 变量名与查询函数签名，测试断言按实际导出名对齐。）
+
+5. 新建 `providers_codex.py` 骨架（Task 8 充实 call）：
 
 ```python
 """Codex Provider（基于 openai-codex SDK，Codex app-server CLI 运行时）。
@@ -478,13 +498,13 @@ class CodexProvider(BaseProvider):
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest packages/core/tests/agents/test_providers_codex_stage0.py -v`
-Expected: 4 PASS
+Expected: 5 PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/core/src/supernova_core/agents/providers.py packages/core/src/supernova_core/agents/runner.py packages/core/src/supernova_core/agents/providers_codex.py packages/core/src/supernova_core/config/provider_settings.py packages/core/tests/agents/test_providers_codex_stage0.py
-git commit -m "feat(core): codex_cli provider type 注册 + PROVIDER_SETTINGS/DEFAULT_MODELS/build_provider_config 接线"
+git add packages/core/src/supernova_core/agents/providers.py packages/core/src/supernova_core/agents/runner.py packages/core/src/supernova_core/agents/providers_codex.py packages/core/src/supernova_core/agents/model_caps.py packages/core/src/supernova_core/config/provider_settings.py packages/core/tests/agents/test_providers_codex_stage0.py
+git commit -m "feat(core): codex_cli provider type 注册 + PROVIDER_SETTINGS/DEFAULT_MODELS/model_caps 接线"
 ```
 
 ---
@@ -1669,7 +1689,11 @@ SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json
 # SUPERNOVA_CODEX_MAX_OUTPUT_TOKENS=   # 单次生成 output 上限, 默认 64000(对齐 claude 引擎)
 ```
 
-- [ ] **Step 2: CLAUDE.md §2 注记**
+- [ ] **Step 2: pricing 内置表补 glm-5-turbo（查价补录，不假估算）**
+
+`packages/core/src/supernova_core/agents/pricing.py` 的 `GLM_PRICING_CNY` 补 `glm-5-turbo` 条目：先查智谱官网 coding plan 价页——查得到按档位填（对齐 glm-5.2 条目的核对注释风格）；查不到则只加注释行 `# glm-5-turbo: 官网未见单价(套餐内模型), cost=0 best-effort`，不填数值（守「不假估算」——cost=0 + warning 是契约内行为）。glm-5.3 内置已有（2026-08-19 双源核对），无需动。
+
+- [ ] **Step 3: CLAUDE.md §2 注记**
 
 `CLAUDE.md` 第 2 节标题下第一段改为（替换「项目拥有**双引擎**」句）：
 
@@ -1686,11 +1710,11 @@ SUPERNOVA_PRICING_OVERRIDE=.env.profiles/glm.pricing.json
 - **codex 轨运行时约定**：`CODEX_HOME` per-call 隔离（并发踩踏 session DB 会静默 no-op）；`wire_api="responses"` + `supports_websockets=false` + `model_max_output_tokens` 必须显式注入；sandbox 无条件 `danger-full-access`（对齐 bypassPermissions）；plugin lockdown（`features.plugins/remote_plugin=false`）。
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add .env.profiles.example/glm-codex.env.example CLAUDE.md
-git commit -m "docs: glm-codex profile 模板 + CLAUDE.md 三引擎注记(运行时约定)"
+git add .env.profiles.example/glm-codex.env.example CLAUDE.md packages/core/src/supernova_core/agents/pricing.py
+git commit -m "docs: glm-codex profile 模板 + CLAUDE.md 三引擎注记 + glm-5-turbo 定价补录"
 ```
 
 ---
@@ -1862,6 +1886,6 @@ git commit -m "feat(core): codex 引擎真机探针 validate_codex_task_probe �
 
 ## Self-Review 结论（计划自审已完成）
 
-1. **Spec 覆盖**：§1 接线点→Task 4/9；§2 call 七步→Task 5/8（models.json/config/env/sandbox/L0/L1/CODEX_HOME 清理）；§3 桥→Task 7；§4 错误矩阵→Task 6/8（静默失败/turn.failed 分类/L1 回落）；§5 单测清单→Task 4-8 各自 TDD、探针四断言→Task 10；§6 风险→Task 1/2/3 spike 验证点 + Phase 1 回炉闸门。无缺口。
+1. **Spec 覆盖**：§1 接线点→Task 4/9；§2 call 七步→Task 5/8（models.json/config/env/sandbox/L0/L1/CODEX_HOME 清理）；§3 桥→Task 7；§4 错误矩阵→Task 6/8（静默失败/turn.failed 分类/L1 回落）；§5 单测清单→Task 4-8 各自 TDD、探针四断言→Task 10；§6 风险→Task 1/2/3 spike 验证点 + Phase 1 回炉闸门 + 安装挂线点（Dockerfile/provision.sh）。复核补充缺口已入计划：model_caps 补 glm-5.3/glm-5-turbo（Task 4）、glm-5-turbo 定价（Task 9）、D3 isinstance 护栏扩展（Task 4）。确认无虞：executor.py 无引擎分支；web 后端经 PROVIDER_SETTINGS 数据驱动；前端 env_text 自由文本可写 codex_cli（WsSettingsTab 模板示例串仍指 openai_compatible，属示例非约束，后续 UX 任务可加 codex 模板）。
 2. **占位符扫描**：Task 5 的 GLM_MODEL_CATALOG 与 Task 8 的 SDK 调用名标注了"以 spike notes 校正"——这是显式验证步骤（代码已给出完整预期形态），非 TBD。
 3. **类型一致性**：`CodexInvocation` 字段、`build_invocation(config, model, proxy_url)` 签名、`CodexStreamCollector` 属性名（`final_text`/`silent_failure`/`usage`/`turns`/`tool_call_count`/`error`）、`replay_codex_jsonl(collector, jsonl_path) -> int`、`compose_codex_collector_mcp(collector, workdir) -> (dict, str)` 在 Task 5/6/7/8/10 间一致。
