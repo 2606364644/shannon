@@ -5,7 +5,11 @@ Asserts each of the 5 vuln-<class>.txt prompts:
   (CHUNKED WRITING / Write-tool / "synthesize into a Markdown report" patterns gone);
 - carries the MANDATORY 4 `set_*` tools instruction + a `<deliverable_tools>` block;
 - preserves interpolation markers (`{{DELIVERABLES_PATH}}` etc.) and the
-  `<exploitation_queue_format>` block (queue is a separate channel).
+  `<finding_submission>` block (queue is a separate channel).
+
+Phase 2 (spec 2026-08-19 §3.5): findings go out via per-finding `submit_finding`
+calls immediately + `finding_roster` reconciliation; the final-structured-output
+channel wording is removed (B topology).
 
 Per-class strategic-intelligence field names are asserted in their human-readable
 form (mirrors TS upstream wording); the snake_case field names live in the
@@ -180,28 +184,30 @@ def test_per_class_strategic_intel_fields():
 
 # ─── preservation: queue channel + interpolation ────────────────────────────
 
-def test_exploitation_queue_format_block_preserved():
-    """<exploitation_queue_format> block must remain (queue is a separate channel)."""
+def test_queue_format_block_renamed():
+    """Queue-format block renamed <exploitation_queue_format> → <finding_submission>."""
     for name, _, _ in VULN_PROMPTS:
         text = _read(name)
-        assert "<exploitation_queue_format>" in text, (
-            f"{name}: <exploitation_queue_format> block removed"
+        assert "<finding_submission>" in text, (
+            f"{name}: <finding_submission> block removed"
         )
-        assert "</exploitation_queue_format>" in text, (
-            f"{name}: <exploitation_queue_format> closing tag removed"
+        assert "</finding_submission>" in text, (
+            f"{name}: <finding_submission> closing tag removed"
+        )
+        assert "<exploitation_queue_format>" not in text, (
+            f"{name}: stale <exploitation_queue_format> tag still present"
         )
 
 
-def test_queue_note_preserved():
-    """The Note about exploitation queue being captured from structured output stays."""
+def test_queue_note_host_assembly():
+    """The Note says the queue is assembled by the host from submit_finding calls."""
     for name, vuln_class, _ in VULN_PROMPTS:
         text = _read(name)
-        # The Note must still tell the agent the queue is captured from final
-        # structured output (separate from set_* tools).
+        # The Note must tell the agent the queue is assembled by the host from
+        # its submit_finding calls (separate from set_* tools).
         assert (
-            "captured automatically" in text
-            and "final structured output" in text
-        ), f"{name}: queue-capture Note removed"
+            "assembled by the host from your `submit_finding` calls" in text
+        ), f"{name}: queue-assembly Note removed"
         assert (
             f"{vuln_class}_exploitation_queue.json" in text
         ), f"{name}: queue filename reference removed"
@@ -263,3 +269,40 @@ def test_your_output_line_reflects_host_rendering():
             f"{vuln_class}_analysis_deliverable.md" in text
             and f"{vuln_class}_exploitation_queue.json" in text
         ), f"{name}: 'Your Output' line missing deliverable / queue filenames"
+
+
+# ── Phase 2（spec 2026-08-19 §3.5）：submit_finding 单条上交 + roster，删 final 结构化输出 ──
+
+FINAL_OUTPUT_PATTERNS = (
+    "final structured output",
+    "structured object of the form",
+    "<exploitation_queue_format>",
+    "captured automatically",
+)
+
+
+def test_finding_submission_block_present():
+    """每个 vuln prompt：finding_submission 节 + 单条立即上交指令。"""
+    for name, vuln_class, _ in VULN_PROMPTS:
+        text = _read(name)
+        assert "<finding_submission>" in text and "</finding_submission>" in text, (
+            f"{name}: missing <finding_submission> block")
+        assert "submit_finding" in text, f"{name}: missing submit_finding tool name"
+        assert "one finding per call" in text, f"{name}: missing one-per-call rule"
+        assert "IMMEDIATELY" in text, f"{name}: missing immediacy rule"
+
+
+def test_roster_instruction_present():
+    """每个 vuln prompt：set_findings_summary 携带 finding_roster 全量名单指令。"""
+    for name, _, _ in VULN_PROMPTS:
+        text = _read(name)
+        assert "finding_roster" in text, f"{name}: missing finding_roster instruction"
+        assert "empty array" in text.lower(), f"{name}: missing empty-array semantics"
+
+
+def test_final_structured_output_gone():
+    """每个 vuln prompt：final structured output 通道表述无残留（B 拓扑）。"""
+    for name, _, _ in VULN_PROMPTS:
+        text = _read(name)
+        for pat in FINAL_OUTPUT_PATTERNS:
+            assert pat not in text, f"{name}: final-output pattern still present: {pat!r}"

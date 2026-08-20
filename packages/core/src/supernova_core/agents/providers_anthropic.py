@@ -318,8 +318,11 @@ class AnthropicProvider(BaseProvider):
         # subprocess_cli.py:400 仅当 output_format['type']=='json_schema' 才提取 schema 加
         # --json-schema(协议级结构化输出 + AJV 校验 + SDK error_max_structured_output_retries
         # 重试)。裸 schema(type='object')会被忽略 → CLI 退化为 best-effort 文本提取 →
-        # exploitation queue 概率性漏盘(NodeGoat injection 3 连跪)。业务层(_vuln_output_schema
-        # 等)返回裸 schema,这里统一包装。对齐 TS queue-schemas.ts:106 + SDK types.py:1894。
+        # 结构化输出概率性漏盘(史例:NodeGoat injection exploitation queue 3 连跪;vuln
+        # agent Phase 2 起走 collector 主通道,不经此路)。现行裸 schema 活跃用户:executor
+        # 定向重查 _RECHECK_OUTPUT_SCHEMA、authz gitnexus judge(whitebox activities 的
+        # inline schema)、chain_verdict 的 CHAIN_VERDICT_SCHEMA——这里统一包装。对齐
+        # TS queue-schemas.ts:106 + SDK types.py:1894。
         if output_format:
             options.output_format = {"type": "json_schema", "schema": output_format}
 

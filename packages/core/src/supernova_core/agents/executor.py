@@ -14,6 +14,7 @@ from supernova_core.utils.paths import intermediate_path
 
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.validators import get_queue_filename, validate_deliverable
+from supernova_core.agents.vuln_queue_reconcile import reconcile_findings
 from supernova_core.agents.progress_tool import make_progress
 from supernova_core.collectors import make_collector
 from supernova_core.git_manager import GitManager
@@ -48,6 +49,16 @@ def resolve_template_name(
     return default_template
 
 
+def _none_safe_add(a, b):
+    """None-safe 相加：两边都 None 保持 None（provider 未提），否则 None 按 0。
+
+    定向重查 result 并入主 result 的 cost/turns/tokens 时用（final review fix 1）。
+    """
+    if a is None and b is None:
+        return None
+    return (a or 0) + (b or 0)
+
+
 def _result_cost_context(result) -> dict:
     """失败路径 raise PentestError 时携带 result 的 cost/tokens，供 activities 失败
     分支记进 metrics（修 error path cost 归 0——失败 agent 也记已产生的真实 LLM 消耗）。
@@ -69,12 +80,12 @@ def _result_cost_context(result) -> dict:
     }
 
 
-def _validation_error_context(result) -> dict:
+def _validation_error_context(result, collector_counts: dict | None = None) -> dict:
     """validate_deliverable 防线 raise 时的诊断 context（spec 2026-08-19 §3.2）。
 
     现状该 raise 只带 agent_name/expected_queue，stop_reason / 文本证据 /
     通道状态全丢（网关断流排障只能猜）。合并 _result_cost_context 的
-    cost/tokens；collector 计数 Phase 2 接 collector 后有真值，当前恒 0。
+    cost/tokens；collector 计数 Phase 2 起由调用方从对账结果传入。
     """
     ctx = _result_cost_context(result)
     text = getattr(result, "text", "") or ""
@@ -83,10 +94,97 @@ def _validation_error_context(result) -> dict:
         "collected_text_len": len(text),
         "collected_text_tail": text[-200:] if text else "",
         "structured_output_present": getattr(result, "structured_output", None) is not None,
-        "collector_submitted_count": 0,  # Phase 2（submit_finding）接入
-        "collector_roster_count": 0,     # Phase 2（finding_roster）接入
+        "collector_submitted_count": (collector_counts or {}).get("submitted", 0),
+        "collector_roster_count": (collector_counts or {}).get("roster", 0),
     })
     return ctx
+
+
+# 定向重查输出 schema（spec §3.4）：宽松基线（ID required + 自由字段）——
+# 下游 parse_lenient 逐条校验；比 vuln 主 schema 宽，重查只补 ID+内容。
+_RECHECK_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "vulnerabilities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ID": {"type": "string", "minLength": 1,
+                           "description": "The missing finding's ID, exactly as given."},
+                    "title": {"type": "string", "minLength": 1},
+                    "vulnerability_type": {"type": "string"},
+                    "externally_exploitable": {"type": "boolean"},
+                    "confidence": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["ID", "title"],
+            },
+        }
+    },
+    "required": ["vulnerabilities"],
+}
+
+_RECHECK_MAX_TURNS = 60
+
+
+async def _targeted_recheck(
+    agent_name,
+    repo: str,
+    deliverables,
+    missing: list[dict],
+    model_tier: str,
+    api_key: str | None,
+    provider_config: dict | None,
+    proxy_url: str | None,
+) -> tuple[list[dict], object | None]:
+    """漏交条目的定向重查小 agent（spec 2026-08-19 §3.4）。
+
+    输入只有 LLM 自身产物（主 agent 的 deliverable md）+ repo 代码 + (ID,title)
+    线索——守双轨铁律。一轮封顶；返回 (补交条目, result)：条目空=无收获（降级由
+    调用方 warning 记录）；result 含重查 LLM 消耗（except 失败路径为 None——该轮
+    无 result 可言），调用方并入 AgentMetrics（final review fix 1：重查 cost 原被
+    丢弃，在 session 成本核算完全不可见）。
+    """
+    vc = agent_name.value.removesuffix("-vuln")
+    md_path = deliverables / f"{vc}_analysis_deliverable.md"
+    missing_lines = "\n".join(
+        f'- ID: {m["id"]} — title: {m["title"]}' for m in missing)
+    prompt = (
+        "You are a security analyst performing a TARGETED RE-SUBMISSION pass.\n"
+        f"During a prior {vc} vulnerability analysis of this repository, the "
+        "following confirmed findings were lost in transit before their "
+        "structured submissions reached the host:\n\n"
+        f"{missing_lines}\n\n"
+        "A full analysis deliverable from the prior pass is available for "
+        f"context at: {md_path}\n\n"
+        "For each missing finding above: locate the relevant code in this "
+        "repository, re-derive the finding (same ID and title), and return it "
+        "in your structured output. Return ONLY the missing findings via the "
+        'structured output {"vulnerabilities": [...]}; do not re-report '
+        "findings outside the missing list."
+    )
+    try:
+        result = await run_claude_prompt(
+            prompt=prompt,
+            repo_path=repo,
+            model_tier=model_tier,
+            api_key=api_key,
+            structured_output_schema=_RECHECK_OUTPUT_SCHEMA,
+            max_turns=_RECHECK_MAX_TURNS,
+            provider_config=provider_config,
+            proxy_url=proxy_url,
+        )
+    except Exception:
+        logger.warning("targeted recheck agent failed for %s (degraded)",
+                       agent_name.value, exc_info=True)
+        return [], None
+    so = getattr(result, "structured_output", None)
+    items = so.get("vulnerabilities") if isinstance(so, dict) else None
+    if not isinstance(items, list):
+        # 无合法 structured_output 也是消耗过的重查轮——result 照返（cost 记账）。
+        return [], result
+    return [it for it in items if isinstance(it, dict) and it.get("ID")], result
 
 
 class AgentExecutor:
@@ -220,11 +318,107 @@ class AgentExecutor:
             )
 
         queue_filename = get_queue_filename(agent_name)
+        payload_bag = collector.get_all() if collector is not None else {}
+        recheck_result = None   # 定向重查 result（cost 并账用；未触发/失败为 None）
+        still_missing: list[str] = []   # 重查后真实缺口（M-4：info 计数不再用重查前值）
         if (
+            not skip_artifact_postprocess
+            and queue_filename
+            and isinstance(agent_name, AgentName)
+            and agent_name.value.endswith("-vuln")
+            and result.structured_output is None
+        ):
+            # Phase 2 B 拓扑（spec 2026-08-19 §3.4）：vuln queue 走 collector 主通道
+            # （submit_finding 单条上交）+ finding_roster 确定性对账；
+            # structured_output 通道对 vuln 已停用（activities 停传 schema）。
+            # 过渡守卫（Task 3→6 窗口）：Task 5 改 prompt / Task 6 停传 schema 落地前，
+            # activities 仍传 schema + 旧 prompt 仍产 final structured output——此时
+            # structured_output 非 None 走下方旧通道写盘（数据不丢、不整跑重试）；
+            # Task 6 后 structured_output 恒 None，本分支（collector 对账）全面接管。
+            roster = (payload_bag.get("findings_summary") or {}).get("finding_roster")
+            rec = reconcile_findings(payload_bag.get("submitted_findings"), roster)
+            if rec.skip_write:
+                logger.warning(
+                    "agent %s: no submit_finding submissions and no finding_roster — "
+                    "queue %s NOT written (validator line will retry the whole agent)",
+                    agent_name.value, queue_filename,
+                )
+            else:
+                if rec.overwritten_ids:
+                    # M-2：submit_finding 同 ID 重复上交（后交覆盖）曾静默——warning
+                    # 留痕（模型修正场景，正常但应可观测）。
+                    logger.warning(
+                        "agent %s: %d finding id(s) resubmitted, later call "
+                        "overwrote earlier: %s",
+                        agent_name.value, len(rec.overwritten_ids),
+                        rec.overwritten_ids,
+                    )
+                if rec.extra_ids:
+                    logger.warning(
+                        "agent %s: %d submitted findings not on roster (kept, "
+                        "recall-first): %s",
+                        agent_name.value, len(rec.extra_ids), rec.extra_ids,
+                    )
+                merged_by_id: dict[str, dict] = {str(f.get("ID", "")): f for f in rec.merged}
+                if rec.missing:
+                    # 重查 prompt 引用主 agent 的 deliverable md 作上下文，但主渲染
+                    # 块在本写盘分支之后才跑——重查前先渲染一次，主渲染块幂等覆盖
+                    # （fix round 1，spec §3.4：否则首跑重查 agent 读不到 md，
+                    # 「自家 md 作重查上下文」从未生效，退化 title-only 线索）。
+                    md = render_deliverable(
+                        agent_name, collector.get_all(), deliverables,
+                        queue_root=queue_root,
+                    )
+                    if md is not None:
+                        (deliverables / defn.deliverable_filename).write_text(
+                            md, encoding="utf-8")
+                    recheck_items, recheck_result = await _targeted_recheck(
+                        agent_name, str(repo), deliverables, rec.missing,
+                        defn.model_tier, api_key, provider_config, proxy_url,
+                    )
+                    if recheck_result is not None:
+                        logger.info(
+                            "agent %s targeted recheck finished: cost=%.6f turns=%s",
+                            agent_name.value,
+                            recheck_result.cost or 0.0, recheck_result.turns,
+                        )
+                    missing_ids = {m["id"] for m in rec.missing}
+                    off_target: list[str] = []
+                    for it in recheck_items:
+                        rid = str(it.get("ID", ""))
+                        if rid and rid not in merged_by_id:
+                            merged_by_id[rid] = it  # 不覆盖已交；off-target 追加
+                            if rid not in missing_ids:
+                                off_target.append(rid)
+                    if off_target:
+                        logger.warning(
+                            "agent %s: recheck returned %d findings outside the "
+                            "missing list (appended, recall-first): %s",
+                            agent_name.value, len(off_target), off_target,
+                        )
+                    still_missing = [m["id"] for m in rec.missing if m["id"] not in merged_by_id]
+                    if still_missing:
+                        logger.warning(
+                            "agent %s: %d findings still missing after targeted "
+                            "recheck (accepted with degradation, no full retry): %s",
+                            agent_name.value, len(still_missing), still_missing,
+                        )
+                rec.merged = list(merged_by_id.values())
+                queue_path = intermediate_path(deliverables, queue_filename)
+                atomic_write_json(
+                    queue_path, {"vulnerabilities": rec.merged})
+                logger.info(
+                    "agent %s queue written from collector: submitted=%d "
+                    "roster=%d merged=%d missing=%d",
+                    agent_name.value, len(payload_bag.get("submitted_findings") or []),
+                    len(roster or []), len(rec.merged), len(still_missing),
+                )
+        elif (
             not skip_artifact_postprocess
             and result.structured_output is not None
             and queue_filename
         ):
+            # 旧通道（-exploit 等其余 agent；vuln 已由上方分支接管）。
             # spec 2026-08-18 tiering：queue json 下沉桶内 intermediate/（交付物留顶层）。
             queue_path = intermediate_path(deliverables, queue_filename)
             atomic_write_json(queue_path, result.structured_output)
@@ -276,26 +470,56 @@ class AgentExecutor:
             try:
                 await validate_deliverable(deliverables, agent_name)
             except PentestError as exc:
-                # 诊断增补（spec 2026-08-19 §3.2）：防线 raise 原地补 result 级
-                # 证据（stop_reason/文本尾巴/通道状态/cost）再上抛——不改
-                # validate_deliverable 签名（纯函数波及面大），也不吞 retryable
-                # /error_code 分类（原地 update，分类字段不动）。
-                exc.context.update(_validation_error_context(result))
+                # 诊断增补（spec 2026-08-19 §3.2/§3.4）：防线 raise 原地补 result 级
+                # 证据（stop_reason/文本尾巴/通道状态/cost）+ collector 对账计数，
+                # 再上抛——不改 validate_deliverable 签名（纯函数波及面大），也不吞
+                # retryable /error_code 分类（原地 update，分类字段不动）。
+                submitted = payload_bag.get("submitted_findings") or []
+                roster = (payload_bag.get("findings_summary") or {}).get("finding_roster")
+                exc.context.update(_validation_error_context(
+                    result,
+                    {"submitted": len(submitted),
+                     "roster": len(roster) if roster is not None else 0},
+                ))
                 raise
 
         await GitManager.commit(deliverables, agent_name)
 
+        # 定向重查 LLM 消耗并入主 result（final review fix 1）：cost/turns/tokens
+        # None-safe 相加（两边都 None 保持 None）；cost_currency 取主 result 的
+        # （同一 provider/profile，重查不换引擎）。duration_ms 只计主 agent（重查
+        # 已计入 LLM 消耗维度，时长维度不并避免误解为单 agent 耗时）。
+        cost = result.cost
+        turns = result.turns
+        input_tokens = result.tokens.input_tokens if result.tokens else None
+        output_tokens = result.tokens.output_tokens if result.tokens else None
+        cache_read = result.tokens.cache_read_input_tokens if result.tokens else None
+        cache_creation = (
+            result.tokens.cache_creation_input_tokens if result.tokens else None)
+        if recheck_result is not None:
+            rt = recheck_result.tokens
+            cost = _none_safe_add(cost, recheck_result.cost)
+            turns = _none_safe_add(turns, recheck_result.turns)
+            input_tokens = _none_safe_add(
+                input_tokens, rt.input_tokens if rt else None)
+            output_tokens = _none_safe_add(
+                output_tokens, rt.output_tokens if rt else None)
+            cache_read = _none_safe_add(
+                cache_read, rt.cache_read_input_tokens if rt else None)
+            cache_creation = _none_safe_add(
+                cache_creation, rt.cache_creation_input_tokens if rt else None)
+
         return AgentMetrics(
             duration_ms=duration_ms,
-            cost_usd=result.cost,
+            cost_usd=cost,
             cost_currency=result.cost_currency,
-            num_turns=result.turns,
+            num_turns=turns,
             model=result.model,
             structured_output=result.structured_output,
             stop_reason=result.stop_reason,
-            input_tokens=result.tokens.input_tokens if result.tokens else None,
-            output_tokens=result.tokens.output_tokens if result.tokens else None,
-            cache_read_tokens=result.tokens.cache_read_input_tokens if result.tokens else None,
-            cache_creation_tokens=result.tokens.cache_creation_input_tokens if result.tokens else None,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 

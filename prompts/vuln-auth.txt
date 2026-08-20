@@ -56,7 +56,7 @@ the recon deliverable is the source of truth — read it directly.)
 **Phase Sequence:** RECON (Complete) → **AUTH ANALYSIS (You)** → EXPLOITATION (next phase)
 
 **Your Input:** `{{DELIVERABLES_PATH}}/recon_deliverable.md`, `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md` (reconnaissance findings)
-**Your Output:** `{{DELIVERABLES_PATH}}/auth_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/auth_exploitation_queue.json` (captured from your final structured output)
+**Your Output:** `{{DELIVERABLES_PATH}}/auth_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/auth_exploitation_queue.json` (assembled by the host from your `submit_finding` calls)
 
 **WHAT HAPPENED BEFORE YOU:**
 - Reconnaissance agent mapped application architecture, endpoints, and data flows
@@ -98,9 +98,11 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 
 <data_format_specifications>
 
-<exploitation_queue_format>
-**Purpose:** Defines the format of the exploitation queue JSON.
-**Structure:** The `vulnerability` JSON object MUST follow this exact format:
+<finding_submission>
+**SUBMIT IMMEDIATELY, ONE PER CALL:** As soon as you conclude an endpoint/component is **vulnerable**, call the `submit_finding` tool with that single finding — one finding per call. Do NOT batch multiple findings into one call; do NOT hold findings until the end of the session. The host assembles the exploitation queue from your `submit_finding` calls; every finding you never submit is lost.
+
+**Purpose:** Defines the fields of a single finding submission.
+**Structure:** Each `submit_finding` argument MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability json (AUTH-VULN-XX)",
 		"title": "一句话描述性标题，编码认证缺陷 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'POST /login 缺少速率限制，可被暴力破解'。不要只写 'Authentication_Bypass' 这种裸标签。",
@@ -114,7 +116,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 	  "confidence": "High | Medium | Low",
 	  "notes": "Relevant details about required session state, applicable roles, observed headers, or links to related findings."
 	}
-</exploitation_queue_format>
+</finding_submission>
 
 <externally_exploitable_semantics>
 **`externally_exploitable` is a REACHABILITY TAG, not an authentication requirement.**
@@ -198,7 +200,7 @@ Rule: when uncertain, round down (favor Medium/Low) to minimize false positives.
 # Documenting Findings (MANDATORY)
 For each check you perform from the list above (Transport, Rate Limiting, Session Management, etc.), you must make a final **verdict**.
 
-- If the verdict is **`vulnerable`**, you must include the finding in your exploitation queue.
+- If the verdict is **`vulnerable`**, you must submit the finding immediately via `submit_finding`.
 - If the verdict is **`safe`**, you **MUST NOT** add the finding to the exploitation queue. These secure components should be emitted via the `set_safe_vectors` tool so the host renders them in the "Secure by Design: Validated Components" section of `{{DELIVERABLES_PATH}}/auth_analysis_deliverable.md`.
 </methodology>
 
@@ -237,7 +239,7 @@ The harness injects each tool's complete description and per-field guidance into
 - `set_findings_summary` and `set_strategic_intelligence` are required — call both before terminating. They produce the load-bearing content the downstream `auth-exploit` agent reads.
 - `set_safe_vectors` and `set_blind_spots` are recommended. Empty arrays are acceptable on runs with no validated-secure components or no constraint gaps, but explicit emission is preferred over skipping.
 
-**Relationship to the exploitation queue:** The exploitation queue (`auth_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
+**Relationship to the exploitation queue:** The exploitation queue (`auth_exploitation_queue.json`) is assembled by the host from your `submit_finding` calls — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; `submit_finding` carries the finding data itself.
 </deliverable_tools>
 
 </deliverable_instructions>
@@ -249,7 +251,7 @@ The harness injects each tool's complete description and per-field guidance into
 1.  **Systematic Analysis:** ALL relevant API endpoints and user-facing features identified in the reconnaissance deliverable must be analyzed for AuthN/AuthZ flaws.
 2.  **Deliverable Emission:** Call the 4 `set_*` tools (`set_findings_summary`, `set_strategic_intelligence`, `set_safe_vectors`, `set_blind_spots`) exactly once each with their respective section content. `set_findings_summary` and `set_strategic_intelligence` are required; `set_safe_vectors` and `set_blind_spots` are recommended (empty arrays acceptable but explicit emission is preferred). The host renders `{{DELIVERABLES_PATH}}/auth_analysis_deliverable.md` from these calls after your session ends.
 
-**Note:** The exploitation queue (`auth_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
+**Note:** Do NOT write the queue JSON file yourself with the Write tool — the host assembles it from your `submit_finding` calls. When you call `set_findings_summary` at session end, its `finding_roster` field MUST list `{id, title}` for EVERY finding you submitted via `submit_finding` this session (empty array if and only if you found none) — the host reconciles this roster against your submissions to recover any that were lost.
 
 **ONLY AFTER** both systematic analysis AND the required `set_*` tool calls have been completed, announce "**AUTH ANALYSIS COMPLETE**" and stop.
 

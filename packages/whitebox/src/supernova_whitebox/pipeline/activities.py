@@ -136,53 +136,18 @@ def _vuln_max_turns(agent_name: str) -> int | None:
 
 
 def _vuln_output_schema(agent_name: AgentName) -> dict | None:
-    """对齐原始 TS getOutputFormat:vuln agent(*-vuln)的结构化输出 schema。
+    """Phase 2 B 拓扑(spec 2026-08-19 §3.5):恒返 None,vuln agent 停传结构化输出。
 
-    原始 shannon 的 exploitation queue 由 agent 的 final structured output 捕获
-    (agent-execution.ts:222 把 result.structuredOutput 写盘)。PY executor.py:132-135
-    移植了同一落盘分支,但 run_agent 一直没传 schema → result.structured_output 恒为
-    None → ``{vt}_exploitation_queue.json`` 永不落盘,黑盒 preflight 永远报 "No
-    whitebox results found"。本 helper 补上这根线。
+    queue 数据通道已切换到 collector(submit_finding 单条上交 + finding_roster 对账,
+    executor 写盘);末条大 JSON 通道停用——CLI --json-schema 与 collected_text 兜底
+    对 vuln 不再激活,网关断流的原始故障形态(session 正常结束带半截 JSON)在 vuln
+    通道不复存在。历史:本函数曾补「schema 未传 → queue 永不落盘」的断线(见原
+    docstring,对齐原始 TS getOutputFormat 的 *-vuln 宽松基线 schema),Phase 2 起
+    该断线由 collector 通道接管。
 
-    schema ``{vulnerabilities: [...]}``;item 仅约束基线必填字段
-    (ID/vulnerability_type/externally_exploitable/confidence),类特定字段不约束
-    (agent 自由填,VulnerabilityQueue.parse_lenient 容错解析)。宽松基线 schema 比 TS
-    的逐类 Zod schema 兼容性风险更低;真机验证 OK 后可升级为 pydantic 具体生成。
-
-    仅 ``*-vuln`` 返回 schema(对齐 TS VULN_AGENT_QUEUE_FILENAMES 只映射 *-vuln,
-    排除 *-exploit,避免 exploit agent 的 structured_output 覆写 vuln queue)。
-
-    返回**裸 JSON Schema**(业务侧不感知引擎)。claude_agent_sdk 的信封契约
-    ``{type:'json_schema', schema:{...}}`` —— subprocess_cli.py:400 仅当
-    ``output_format['type']=='json_schema'`` 才提取 schema 并加 ``--json-schema`` 参数
-    (协议级结构化输出 + AJV 校验 + SDK error_max_structured_output_retries 重试)——
-    由 ``providers_anthropic._build_options`` 负责包装。openai 引擎直接用裸 schema
-    (``RawJsonSchemaOutputSchema``)。若 claude_agent_sdk 收到裸 schema(type='object')
-    会忽略 → CLI 退化为 best-effort 文本提取 → 概率性漏盘(NodeGoat injection 3 连跪、
-    auth attempt1 漏盘)。双引擎铁律:业务侧不感知用哪个引擎(CLAUDE.md §2)。
+    恒返 None(原 *-vuln / *-exploit 之分随之失效;exploit 仍为 None)。
     """
-    if not agent_name.value.endswith("-vuln"):
-        return None
-    return {
-        "type": "object",
-        "properties": {
-            "vulnerabilities": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": [
-                        "ID",
-                        "vulnerability_type",
-                        "externally_exploitable",
-                        "confidence",
-                        "title",
-                    ],
-                    "additionalProperties": True,
-                },
-            },
-        },
-        "required": ["vulnerabilities"],
-    }
+    return None
 
 
 @activity.defn

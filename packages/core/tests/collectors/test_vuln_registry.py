@@ -18,8 +18,9 @@ from supernova_core.collectors.pre_recon import PreReconCollector
 from supernova_core.models.agents import AgentName
 from supernova_core.renderers import render_deliverable
 
-# 与 collectors/vuln.py / renderers/vuln.py 对齐的 4 个 set_* 工具名
+# 与 collectors/vuln.py / renderers/vuln.py 对齐的 5 个工具名（submit_finding append 居首 + 4 set_*）
 EXPECTED_TOOL_NAMES = [
+    "submit_finding",
     "set_findings_summary",
     "set_strategic_intelligence",
     "set_safe_vectors",
@@ -49,6 +50,7 @@ def test_make_collector_returns_collectorbase_for_each_vuln_agent(agent, vc, _ti
 def test_make_collector_section_keys_match_vuln_contract(agent, vc, _title):
     c = make_collector(agent)
     assert [s.section_key for s in c.section_schemas] == [
+        "submitted_findings",
         "findings_summary",
         "strategic_intelligence",
         "safe_vectors",

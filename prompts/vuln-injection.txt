@@ -65,7 +65,7 @@ the recon deliverable is the source of truth — read it directly.)
 **Phase Sequence:** RECON (Complete) → **INJECTION ANALYSIS (You)** → EXPLOITATION (next phase)
 
 **Your Input:** `{{DELIVERABLES_PATH}}/recon_deliverable.md` (reconnaissance findings)
-**Your Output:** `{{DELIVERABLES_PATH}}/injection_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/injection_exploitation_queue.json` (captured from your final structured output)
+**Your Output:** `{{DELIVERABLES_PATH}}/injection_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/injection_exploitation_queue.json` (assembled by the host from your `submit_finding` calls)
 
 **WHAT HAPPENED BEFORE YOU:**
 - Reconnaissance agent mapped application architecture, attack surfaces, endpoints, input vectors
@@ -109,10 +109,12 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 
 <data_format_specifications>
 
-  <exploitation_queue_format>
-  **Purpose:** Defines the format of the exploitation queue JSON.
+  <finding_submission>
+  **SUBMIT IMMEDIATELY, ONE PER CALL:** As soon as you conclude an endpoint/component is **vulnerable**, call the `submit_finding` tool with that single finding — one finding per call. Do NOT batch multiple findings into one call; do NOT hold findings until the end of the session. The host assembles the exploitation queue from your `submit_finding` calls; every finding you never submit is lost.
 
-  **Structure:** The `vulnerability` JSON object MUST follow this exact format:
+  **Purpose:** Defines the fields of a single finding submission.
+
+  **Structure:** Each `submit_finding` argument MUST follow this exact format:
 		{
 			"ID": "unique ID for each vulnerability (e.g., INJ-VULN-XX)",
 			"title": "一句话描述性标题，编码漏洞类别 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'SQL 注入：用户搜索参数 q 进入原始查询'。不要只写 'SQLi' 这种裸标签。",
@@ -132,7 +134,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 			"confidence": "high | med | low.",
 			"notes": "assumptions, untraversed branches, anything unusual."
 		}
-  </exploitation_queue_format>
+  </finding_submission>
 
   **Source Completeness Rule:** When multiple user-controllable sources can reach the same sink, you MUST create a SEPARATE vulnerability entry for EACH source. Do NOT merge multiple sources into a single entry. For example, if both `ctx.query.bizEntity` (a URL parameter) and `ctx.user.uid` (session data) reach the same template sink, create two entries — one per source. Each entry must independently trace from its own source to the sink, with its own `authentication_required` and `accessible_routes`. The source with the easiest exploitability (e.g., URL parameter on an unauthenticated route) should appear FIRST in the queue.
 
@@ -183,7 +185,7 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
     - If concat occurred **after** sanitization, treat that sanitization as **non-effective** for this path.
     - **Cross-service sink:** a user-controlled SQL/command fragment that THIS service forwards to a DOWNSTREAM service for execution (e.g. an RPC/protobuf field whose value is a SQL fragment, or a sharded table name derived from user input) is a `vulnerable` cross-service sink with `externally_exploitable=false` — NOT `safe`. "Locally this binary doesn't execute it" is not a safe verdict when a downstream service will.
   - **6) Append to findings list (consistent fields)**
-	  -  **If the verdict is `vulnerable`:** Include the finding in your exploitation queue. Set `externally_exploitable` to `true` ONLY if exploitable via public internet without internal access. Ensure all fields in the `exploitation_queue_format`, including a minimal `witness_payload`, are populated.
+	  -  **If the verdict is `vulnerable`:** Submit the finding immediately via `submit_finding`. Set `externally_exploitable` to `true` ONLY if exploitable via public internet without internal access. Ensure all fields in the `finding_submission`, including a minimal `witness_payload`, are populated.
     - **If the verdict is `safe`:** DO NOT add the finding to the exploitation queue. These secure vectors must be emitted via the `set_safe_vectors` tool so the host renders them in the "Vectors Analyzed and Confirmed Secure" section of `{{DELIVERABLES_PATH}}/injection_analysis_deliverable.md`.
     - **If a single source is found to be vulnerable via multiple, distinct paths to different sinks, you must create a separate vulnerability entry in the exploitation queue for each unique vulnerable path.**
     - **QUEUE INCLUSION CRITERIA:** EVERY `vulnerable` finding enters the exploitation queue regardless of reachability. `externally_exploitable` is a per-entry REACHABILITY TAG, not an admission gate: `true` = reachable via public internet without internal access; `false` = internal / cross-service only. Do NOT exclude internal or cross-service findings — set their `externally_exploitable=false` and include them.
@@ -345,7 +347,7 @@ The harness injects each tool's complete description and per-field guidance into
 - `set_findings_summary` and `set_strategic_intelligence` are required — call both before terminating. They produce the load-bearing content the downstream `injection-exploit` agent reads.
 - `set_safe_vectors` and `set_blind_spots` are recommended. Empty arrays are acceptable on runs with no validated-secure vectors or no constraint gaps, but explicit emission is preferred over skipping.
 
-**Relationship to the exploitation queue:** The exploitation queue (`injection_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
+**Relationship to the exploitation queue:** The exploitation queue (`injection_exploitation_queue.json`) is assembled by the host from your `submit_finding` calls — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; `submit_finding` carries the finding data itself.
 </deliverable_tools>
 
 </deliverable_instructions>
@@ -357,7 +359,7 @@ The harness injects each tool's complete description and per-field guidance into
 1. **Todo Completion:** ALL tasks in your TodoWrite list must be marked as "completed"
 2. **Deliverable Emission:** Call the 4 `set_*` tools (`set_findings_summary`, `set_strategic_intelligence`, `set_safe_vectors`, `set_blind_spots`) exactly once each with their respective section content. `set_findings_summary` and `set_strategic_intelligence` are required; `set_safe_vectors` and `set_blind_spots` are recommended (empty arrays acceptable but explicit emission is preferred). The host renders `{{DELIVERABLES_PATH}}/injection_analysis_deliverable.md` from these calls after your session ends.
 
-**Note:** The exploitation queue (`injection_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
+**Note:** Do NOT write the queue JSON file yourself with the Write tool — the host assembles it from your `submit_finding` calls. When you call `set_findings_summary` at session end, its `finding_roster` field MUST list `{id, title}` for EVERY finding you submitted via `submit_finding` this session (empty array if and only if you found none) — the host reconciles this roster against your submissions to recover any that were lost.
 
 **ONLY AFTER** both todo completion AND the required `set_*` tool calls have been completed, announce "**INJECTION ANALYSIS COMPLETE**" and stop.
 

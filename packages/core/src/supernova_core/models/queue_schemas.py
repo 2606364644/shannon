@@ -10,7 +10,9 @@ class BaseVulnerability(BaseModel):
     externally_exploitable: bool
     confidence: str
     # 一句话概括标题（spec 2026-08-06）：报告 ### ID: title 的 title SSOT。
-    # 可选以兼容旧 queue；vuln agent 的 _vuln_output_schema 把它加进 required 强制新数据必给。
+    # 可选以兼容旧 queue；新数据的 title 由 collector submit_finding schema
+    # （collectors/vuln.py 的 _FINDING_BASE_REQUIRED）强制必给（Phase 2 B 拓扑：
+    # vuln queue 走 collector 主通道，不再有 _vuln_output_schema）。
     title: str | None = None
     notes: str | None = None
     # Spec §4.1 dual-track merge fields. All are optional for backward compatibility.

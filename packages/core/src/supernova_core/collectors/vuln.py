@@ -1,7 +1,8 @@
-"""vuln 5 class 共用 collector:3 shared section + 1 per-class strategic_intelligence。
+"""vuln 5 class 共用 collector:submit_finding(append) + 3 shared set_* + 1 per-class strategic_intelligence。
 
 移植 TS apps/worker/src/collectors/vuln-collector.ts(整个文件权威；字段对照原 schema)。
-- set_findings_summary       (§1 + §2) shared
+- submit_finding             (数据主通道, append) per-class 单条 finding, spec 2026-08-19 §3.3
+- set_findings_summary       (§1 + §2 + finding_roster) shared
 - set_strategic_intelligence (§3)      per-class, 按 vuln_class 选 5 个 schema 之一
 - set_safe_vectors           (§4)      shared
 - set_blind_spots            (§5)      shared
@@ -61,7 +62,7 @@ _PATTERN: dict = _obj(
     ["name", "description", "implication", "representative_finding_ids"],
 )
 
-# set_findings_summary (§1 + §2)
+# set_findings_summary (§1 + §2 + roster 对账声明, spec 2026-08-19 §3.3)
 FINDINGS_SUMMARY: dict = _obj(
     {
         "key_outcome": _str_field(
@@ -80,8 +81,26 @@ FINDINGS_SUMMARY: dict = _obj(
                 "that case."
             ),
         },
+        "finding_roster": {
+            "type": "array",
+            "items": _obj(
+                {
+                    "id": _str_field(
+                        'Finding ID exactly as submitted via submit_finding (e.g. "AUTH-VULN-01").'
+                    ),
+                    "title": _str_field("Finding title exactly as submitted via submit_finding."),
+                },
+                ["id", "title"],
+            ),
+            "description": (
+                "Reconciliation roster: the COMPLETE list of {id, title} for EVERY finding you "
+                "submitted via submit_finding this session — one entry per submission, IDs "
+                "matching exactly. Empty array if and only if you found no vulnerabilities. "
+                "The host reconciles this roster against your submissions to catch lost ones."
+            ),
+        },
     },
-    ["key_outcome", "patterns"],
+    ["key_outcome", "patterns", "finding_roster"],
 )
 
 # SafeVector item(对齐 TS SafeVectorInputSchema)
@@ -296,23 +315,115 @@ _STRATEGIC_INTEL_SCHEMAS: dict[str, dict] = {
 }
 
 
-def _section(tool_name: str, key: str, desc: str, schema: dict) -> SectionSchema:
+# ============================================================================
+# submit_finding per-class finding schemas（spec 2026-08-19 §3.3）
+# 单条 finding object（append item），基线 required + class 特有 optional（无 enum，
+# 宽松优先——下游 parse_lenient 容错解析，enum 反而拒收合法变体）。
+# ============================================================================
+
+def _finding_props(class_props: dict) -> dict:
+    props = {
+        "ID": _str_field('Unique ID for this finding (e.g. "AUTH-VULN-01"); '
+                         "reuse the same ID in finding_roster."),
+        "vulnerability_type": _str_field(
+            "Vulnerability subtype label for this class (free-form from the methodology, "
+            'e.g. "Authentication_Bypass", "Session_Management_Flaw").'),
+        "externally_exploitable": {
+            "type": "boolean",
+            "description": ("true if reachable from the public internet without prior "
+                            "authentication state; false for internal/cross-service only."),
+        },
+        "confidence": _str_field('"High" | "Medium" | "Low".'),
+        "title": _str_field(
+            "一句话描述性标题，编码缺陷 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），"
+            "如 'POST /login 缺少速率限制，可被暴力破解'。不要只写裸标签。"),
+        "notes": _str_field(
+            "Relevant details: required session state, applicable roles, observed headers, "
+            "links to related findings."),
+    }
+    props.update(class_props)
+    return props
+
+
+_FINDING_BASE_REQUIRED = ["ID", "vulnerability_type", "externally_exploitable",
+                          "confidence", "title"]
+
+_INJ_XSS_FINDING_PROPS: dict = {
+    "source": _str_field("The tainted input vector (parameter/field/body path)."),
+    "source_detail": _str_field("Where the input enters (route + handler)."),
+    "path": _str_field("Source→sink dataflow path summary; HTTP-reachable时以 METHOD /route 开头."),
+    "sink_function": _str_field("The dangerous sink call (function + file:line)."),
+    "render_context": _str_field("XSS-only: render context (HTML_BODY/HTML_ATTRIBUTE/JAVASCRIPT_STRING/URL_PARAM/CSS_VALUE)."),
+    "encoding_observed": _str_field("Encoding/sanitization observed on the path (or none)."),
+    "verdict": _str_field('"vulnerable" | "safe" — only vulnerable findings are submitted.'),
+    "mismatch_reason": _str_field("Why the defense fails / mismatches."),
+    "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+}
+
+_AUTH_FINDING_PROPS: dict = {
+    "source_endpoint": _str_field('"{HTTP_METHOD} {endpoint_path}".'),
+    "vulnerable_code_location": _str_field("Exact file:line of the flawed logic or missing check."),
+    "missing_defense": _str_field("Concise core problem (e.g. 'No rate limit on POST /login')."),
+    "exploitation_hypothesis": _str_field("Active attack outcome on success (not just confirmation)."),
+    "suggested_exploit_technique": _str_field("Attack pattern to attempt (e.g. 'brute_force_login')."),
+}
+
+_SSRF_FINDING_PROPS: dict = {
+    **_AUTH_FINDING_PROPS,
+    "vulnerable_parameter": _str_field("The outbound-request parameter carrying attacker-controlled input."),
+}
+
+_AUTHZ_FINDING_PROPS: dict = {
+    "endpoint": _str_field("Affected endpoint (e.g. 'POST /api/auth/logout')."),
+    "vulnerable_code_location": _str_field("Guard location (file:line)."),
+    "role_context": _str_field("Roles involved (owner/victim or role pair)."),
+    "guard_evidence": _str_field("What the guard checks vs. omits (ownership re-validation gap)."),
+    "side_effect": _str_field("State-changing effect reachable without authorization."),
+    "reason": _str_field("Why this is exploitable (missing check / broken object-level auth)."),
+    "minimal_witness": _str_field("Minimal request pair or ID substitution demonstrating the flaw."),
+}
+
+_FINDING_SCHEMAS: dict[str, dict] = {
+    "injection": _obj(_finding_props(_INJ_XSS_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "xss": _obj(_finding_props(_INJ_XSS_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "auth": _obj(_finding_props(_AUTH_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "ssrf": _obj(_finding_props(_SSRF_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "authz": _obj(_finding_props(_AUTHZ_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+}
+
+
+def _section(tool_name: str, key: str, desc: str, schema: dict,
+             mode: str = "set") -> SectionSchema:
     return SectionSchema(
-        tool_name=tool_name, section_key=key, description=desc, json_schema=schema
+        tool_name=tool_name, section_key=key, description=desc,
+        json_schema=schema, mode=mode
     )
 
 
 def make_vuln_sections(vuln_class: str) -> list[SectionSchema]:
-    """4 个 set_* section(顺序对齐 TS VULN_TOOLS)。strategic_intelligence 按 class 选 schema。"""
+    """5 个 section（spec 2026-08-19 §3.3 后）：submit_finding（append，数据主通道）居首
+    + 4 个 set_*（write-once，md 渲染通道，顺序对齐 TS VULN_TOOLS）。
+    strategic_intelligence 按 class 选 schema。"""
     if vuln_class not in _STRATEGIC_INTEL_SCHEMAS:
         raise ValueError(f"unknown vuln class: {vuln_class!r}")
     intel_schema = _STRATEGIC_INTEL_SCHEMAS[vuln_class]
+    finding_schema = _FINDING_SCHEMAS[vuln_class]
     return [
+        _section(
+            "submit_finding",
+            "submitted_findings",
+            "Submit ONE confirmed vulnerable finding IMMEDIATELY when its verdict is "
+            "vulnerable — one finding per call, never batched. The host assembles the "
+            "exploitation queue from these submissions.",
+            finding_schema,
+            mode="append",
+        ),
         _section(
             "set_findings_summary",
             "findings_summary",
-            "Headline result (Section 1) + dominant patterns (Section 2). Empty patterns array "
-            'renders "No dominant patterns identified".',
+            "Headline result (Section 1) + dominant patterns (Section 2) + finding_roster "
+            '(reconciliation roster). Empty patterns array renders "No dominant patterns '
+            'identified".',
             FINDINGS_SUMMARY,
         ),
         _section(
@@ -339,5 +450,5 @@ def make_vuln_sections(vuln_class: str) -> list[SectionSchema]:
 
 
 def make_vuln_collector(vuln_class: str) -> CollectorBase:
-    """per-vuln-class CollectorBase(4 section)。"""
+    """per-vuln-class CollectorBase(5 section: submit_finding + 4 set_*)。"""
     return CollectorBase(section_schemas=make_vuln_sections(vuln_class))

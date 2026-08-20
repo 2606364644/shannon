@@ -63,7 +63,7 @@ the recon deliverable is the source of truth — read it directly.)
 **Phase Sequence:** RECON (Complete) → **XSS ANALYSIS (You)** → EXPLOITATION (next phase)
 
 **Your Input:** `{{DELIVERABLES_PATH}}/recon_deliverable.md`, `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md` (reconnaissance findings)
-**Your Output:** `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/xss_exploitation_queue.json` (captured from your final structured output)
+**Your Output:** `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` (host-rendered from your `set_*` tool calls) + `{{DELIVERABLES_PATH}}/xss_exploitation_queue.json` (assembled by the host from your `submit_finding` calls)
 
 **WHAT HAPPENED BEFORE YOU:**
 - Reconnaissance agent mapped application architecture
@@ -108,9 +108,11 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 
 <data_format_specifications>
 
-<exploitation_queue_format>
-Purpose: Defines the structure of the agent's final structured response.
-Structure: The vulnerability JSON object MUST follow this exact format:
+<finding_submission>
+**SUBMIT IMMEDIATELY, ONE PER CALL:** As soon as you conclude an endpoint/component is **vulnerable**, call the `submit_finding` tool with that single finding — one finding per call. Do NOT batch multiple findings into one call; do NOT hold findings until the end of the session. The host assembles the exploitation queue from your `submit_finding` calls; every finding you never submit is lost.
+
+Purpose: Defines the fields of a single finding submission.
+Structure: Each `submit_finding` argument MUST follow this exact format:
 	{
 		"ID": "unique ID for each vulnerability json (XSS-VULN-XX)",
 		"title": "一句话描述性标题，编码 XSS 类型 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 '反射型 XSS：搜索参数 q 注入 /search 的 innerHTML'。不要只写 'Reflected' 这种裸标签。",
@@ -130,7 +132,7 @@ Structure: The vulnerability JSON object MUST follow this exact format:
 		"confidence": "high | med | low.",
 		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors."
 	}
-</exploitation_queue_format>
+</finding_submission>
 
 <externally_exploitable_semantics>
 **`externally_exploitable` is a REACHABILITY TAG, not an authentication requirement.**
@@ -197,13 +199,13 @@ This rulebook is used for the **Early Termination** check in Step 2.
 
 ### **6) Make the Call, Document, and Score Confidence**
 - **Vulnerable:** If a full sink-to-source path is established with a clear encoding mismatch or a missing encoder.
-- **Document Finding:** Use the `exploitation_queue_format`. For each vulnerable path, create a separate entry.
+- **Document Finding:** Use the `finding_submission` format. For each vulnerable path, submit a separate finding via `submit_finding`.
 - **Confidence:**
     - **High:** Unambiguous backward trace with a clear encoding mismatch.
     - **Medium:** Path is plausible but obscured by complex code.
     - **Low:** Suspicious sink pattern but the backward trace is incomplete.
 ### **7) Document Finding**
-- Use `exploitation_queue_format` to structure your finding for every path analyzed.  
+- Use the `finding_submission` format to structure each finding you submit via `submit_finding` for every path analyzed.  
 - **CRITICAL:** Include the complete data flow graph information:
   - The specific source or DB read operation with file:line location (in `source_detail` field)
   - The complete path from source to sink including all transformations (in `path` field)
@@ -211,7 +213,7 @@ This rulebook is used for the **Early Termination** check in Step 2.
 - Include both safe and vulnerable paths to demonstrate **full coverage**.  
 - Craft a minimal `witness_payload` that proves control over the render context.  
 - For every path analyzed, you must document the outcome. The location of the documentation depends on the verdict:
-		- If the verdict is 'vulnerable', you MUST include the finding in your final structured response's exploitation queue, including complete source-to-sink information.
+		- If the verdict is 'vulnerable', you MUST submit the finding immediately via `submit_finding`, including complete source-to-sink information.
 		- If the verdict is 'safe', you MUST NOT add it to the exploitation queue. Instead, you must emit these secure paths via the `set_safe_vectors` tool so the host renders them in the "Vectors Analyzed and Confirmed Secure" table of `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md`.
 - For vulnerable findings, craft a minimal witness_payload that proves control over the render context.
 
@@ -264,7 +266,7 @@ The harness injects each tool's complete description and per-field guidance into
 - `set_findings_summary` and `set_strategic_intelligence` are required — call both before terminating. They produce the load-bearing content the downstream `xss-exploit` agent reads.
 - `set_safe_vectors` and `set_blind_spots` are recommended. Empty arrays are acceptable on runs with no validated-secure vectors or no constraint gaps, but explicit emission is preferred over skipping.
 
-**Relationship to the exploitation queue:** The exploitation queue (`xss_exploitation_queue.json`) is captured automatically from your final structured output at session end — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; the structured-output queue follows the `exploitation_queue_format` schema documented above.
+**Relationship to the exploitation queue:** The exploitation queue (`xss_exploitation_queue.json`) is assembled by the host from your `submit_finding` calls — separate from the 4 `set_*` tools. The 4 tools produce the analysis deliverable Markdown; `submit_finding` carries the finding data itself.
 </deliverable_tools>
 
 </deliverable_instructions>
@@ -276,7 +278,7 @@ COMPLETION REQUIREMENTS (ALL must be satisfied):
 1. Systematic Analysis: ALL input vectors identified from the reconnaissance deliverable must be analyzed.
 2. **Deliverable Emission:** Call the 4 `set_*` tools (`set_findings_summary`, `set_strategic_intelligence`, `set_safe_vectors`, `set_blind_spots`) exactly once each with their respective section content. `set_findings_summary` and `set_strategic_intelligence` are required; `set_safe_vectors` and `set_blind_spots` are recommended (empty arrays acceptable but explicit emission is preferred). The host renders `{{DELIVERABLES_PATH}}/xss_analysis_deliverable.md` from these calls after your session ends.
 
-**Note:** The exploitation queue (`xss_exploitation_queue.json`) is captured automatically **from your final structured output at session end** — your session must conclude by returning a structured object of the form `{"vulnerabilities": [...]}` following the `exploitation_queue_format` above. Do NOT write the queue JSON file yourself with the Write tool; the harness captures it from your structured output.
+**Note:** Do NOT write the queue JSON file yourself with the Write tool — the host assembles it from your `submit_finding` calls. When you call `set_findings_summary` at session end, its `finding_roster` field MUST list `{id, title}` for EVERY finding you submitted via `submit_finding` this session (empty array if and only if you found none) — the host reconciles this roster against your submissions to recover any that were lost.
 
 ONLY AFTER both systematic analysis AND the required `set_*` tool calls have been completed, announce "XSS ANALYSIS COMPLETE" and stop.
 
