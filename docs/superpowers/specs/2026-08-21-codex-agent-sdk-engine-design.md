@@ -75,6 +75,15 @@ CodexProvider.call(prompt, cwd, model_tier, output_format, collector, ...)
             supports_websockets: false,         ← Codex 默认 WS transport，GLM 无 WS 会 404 重连死循环（deepsec 教训）
         }},
         model_catalog_json: "<$CODEX_HOME/models.json>",
+        model_max_output_tokens: <解析值>,     ← 对齐 claude 引擎 CLAUDE_CODE_MAX_OUTPUT_TOKENS：
+                                                  回落链 config.max_output_tokens(P3c 字段) >
+                                                  SUPERNOVA_CODEX_MAX_OUTPUT_TOKENS > 64000。
+                                                  对 codex 引擎是正确性保障而非仅调参：Codex 内置
+                                                  model family 不认识 GLM，未显式设置时 output 上限
+                                                  回落不受控默认，过低则长 JSON 分析截断(max_tokens) →
+                                                  L0 解析失败(exploitation_queue 概率性漏盘同族坑)。
+                                                  注：openai 引擎现状漏此调参(ModelSettings 未设
+                                                  max_tokens)，非本次范围
         features: {plugins: false, remote_plugin: false},  ← Codex 0.143+ 默认开 remote_plugin，
                                                              扫描 worker 绝不允许装 marketplace 插件（deepsec 教训）
       }                                          ← 编程注入，不写 ~/.codex/config.toml
@@ -186,7 +195,7 @@ whitebox activity
 
 只跑新增/相关文件（pytest 全套会 hang 的纪律）：
 
-- `_build_invocation`：config 编程注入正确（`wire_api="responses"` / `supports_websockets=false` / plugin lockdown / `model_catalog_json` 指向生成的 models.json）、env 整体替换语义、CODEX_HOME 每次 call 独立
+- `_build_invocation`：config 编程注入正确（`wire_api="responses"` / `supports_websockets=false` / plugin lockdown / `model_catalog_json` 指向生成的 models.json / `model_max_output_tokens` 回落链）、env 整体替换语义、CODEX_HOME 每次 call 独立
 - 事件映射：fake `ThreadEvent` 流 → 文本/turns/usage/审计断言
 - usage 归一：`input = max(raw - cached, 0)`
 - final 文本选择：夹叙夹议多 agent_message 时挑含 ```json 的最后一条
@@ -241,7 +250,7 @@ whitebox activity
 
 ### 已知风险（spike 验证点）
 
-1. **凭据形态**：官方文档用 `experimental_bearer_token` 内联，deepsec 用 `env_key` 走环境变量——GLM 端点对两者支持面以 spike 实测（预期都收，`env_key` 优先）。
+1. **凭据形态**：官方文档用 `experimental_bearer_token` 内联，deepsec 用 `env_key` 走环境变量——GLM 端点对两者支持面以 spike 实测（预期都收，`env_key` 优先）。同批确认 `model_max_output_tokens` 顶层注入对自定义 provider 的生效性与默认值。
 2. **worker Docker 内 codex runtime**：wheel 为 py3-none-any（76KB），runtime 二进制获取/安装方式待确认（npm `@openai/codex` 渠道 or SDK 自带解析）；worker 是 linux/amd64（ARM64 有 tree-sitter/gitnexus 前科）。⚠️ 生效须 rebuild worker。
 3. **Python SDK API 面与成熟度**：TS 有 `runStreamed` / `resumeThread` / `config` 注入，Python 对应物以 spike 实测为准；L1 修复保留 AsyncOpenAI 回落路径。
 4. **stderr 可见性**：Python SDK 是否同样吞 exit=0 的 stderr（deepsec 为此写了 wrapper sh）；spike 确认，必要时移植 wrapper 策略。
