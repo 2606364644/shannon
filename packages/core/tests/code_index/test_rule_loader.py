@@ -107,3 +107,60 @@ def test_markdown_render_sink_rule_loaded():
     marked = rules["ts-marked-render"]
     assert marked.callee == "marked"
     assert marked.category == SinkCategory.XSS
+
+
+# ===== §4.4(deepsec 吸收): examples 自动化契约 =====
+# deepsec matcher-examples.test.ts 同型:每条带 examples 的规则,正例至少命中一次,
+# 负例不命中。防「规则写了但 detector 永远命不中」(ts-res-redirect 死规则活案例)复发。
+
+def _lang_parser(language: str):
+    import importlib
+    name_map = {"typescript": "typescript_parser", "javascript": "typescript_parser",
+                "python": "python_parser", "go": "go_parser", "java": "java_parser",
+                "php": "php_parser"}
+    mod = importlib.import_module(f"supernova_core.code_index.parsers.{name_map[language]}")
+    # typescript_parser 暴露 TypeScriptParser; 各 parser 类名 = Lang+Parser
+    cls_name = {"typescript": "TypeScriptParser", "javascript": "TypeScriptParser",
+                "python": "PythonParser", "go": "GoParser", "java": "JavaParser",
+                "php": "PhpParser"}[language]
+    return getattr(mod, cls_name)()
+
+
+def _detect_with_language(src: str, language: str):
+    import tempfile, pathlib
+    from supernova_core.code_index.sink_detector import detect_sinks
+    parser = _lang_parser(language)
+    ext = {"typescript": ".ts", "javascript": ".js", "python": ".py",
+           "go": ".go", "java": ".java", "php": ".php"}[language]
+    src_bytes = src.encode("utf-8")
+    with tempfile.TemporaryDirectory() as td:
+        fpath = pathlib.Path(td) / f"a{ext}"
+        fpath.write_text(src)
+        blocks = parser.parse_file(fpath, pathlib.Path(td))
+    if not blocks:
+        return []
+    return detect_sinks(blocks, parser, source_provider=lambda b: src_bytes)
+
+
+def test_examples_contract_sink_rules():
+    """§4.4 examples 契约:每条带 examples 的 sink 规则,正例须命中、负例须不命中。
+
+    遍历 data/sink_rules.yml 中带 examples 字段的规则,用对应语言 parser 实测。
+    正例 = wrapped 在 function/method 体内命中该 rule_id;负例 = 不命中该 rule_id。
+    """
+    raw = load_yaml(DATA_DIR / "sink_rules.yml")
+    rules_with_examples = [r for r in raw["rules"] if "examples" in r]
+    assert rules_with_examples, "至少应有一条 sink 规则带 examples(§4.4 契约)"
+    failures = []
+    for r in rules_with_examples:
+        rid = r["rule_id"]
+        lang = r["languages"][0]
+        for ex in r["examples"].get("positive", []):
+            sites = _detect_with_language(ex, lang)
+            if not any(s.rule_id == rid for s in sites):
+                failures.append(f"{rid} positive '{ex}' 未命中")
+        for ex in r["examples"].get("negative", []):
+            sites = _detect_with_language(ex, lang)
+            if any(s.rule_id == rid for s in sites):
+                failures.append(f"{rid} negative '{ex}' 不应命中却命中")
+    assert not failures, "examples 契约失败:\n  " + "\n  ".join(failures)

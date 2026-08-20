@@ -115,12 +115,14 @@ candidates:
   - languages: [typescript, javascript]
     callees: [readFileSync, readFile, writeFileSync, writeFile, createReadStream, createWriteStream]
     receivers_any: [fs, fsp, filesystem]
-    note: "Node fs;juice-shop readFile(path.join) + createWriteStream(zip slip)"
+    arg_patterns: ["\\$\\{", "\\+", "req\\.", "params\\.", "query\\.", "body\\.", "\\.join\\("]
+    note: "Node fs;juice-shop readFile(path.join) + createWriteStream(zip slip) §3.3 arg_patterns:纯字面量路径排除(无穿越风险)"
 
   - languages: [go]
     callees: [ReadFile, Open, OpenFile, Create, WriteFile, ReadDir]
     receivers_any: [os, ioutil]
-    note: "Go os/ioutil"
+    arg_patterns: ["\\+", "r\\.", "c\\.", "FormValue", "Query", "Param"]
+    note: "Go os/ioutil §3.3 arg_patterns:纯字面量路径排除"
 
   - languages: [java]
     callees: [readAllBytes, newInputStream, newBufferedReader, readString]
@@ -130,3 +132,38 @@ candidates:
   - languages: [php]
     callees: [fopen, readfile, fwrite]
     note: "PHP file(file_get_contents 已归 SSRF 规则,不重复)"
+
+  # ===== §3(deepsec 吸收,context/arg 收窄模式组)=====
+  # 新字段:context_patterns(周边文本须含其一)、arg_patterns(某 arg 须命中其一)、
+  # exclude_patterns(命中即排除)。loader 编译为 IGNORECASE 子串正则。用于「callee 太
+  # 常见、危险取决于参数结构/上下文」的组 —— 收窄预筛,省 LLM 调用。
+
+  # §3.3 给既有 fs path 组(见上方 typescript/go file 组)补 arg_patterns:纯字面量路径
+  # 无穿越风险,不该送 LLM。arg 须含模板/拼接/req 引用才进候选。不新建组,改既有组。
+
+  # §3.4 原型污染 / 对象注入:Object.assign/_.merge 本身合法,危险在把 req.body 合进对象。
+  # context_patterns 收窄:须含 req./request./body 引用(暗示用户输入合入)。
+  - languages: [typescript, javascript]
+    callees: [assign, merge, mergeWith, defaultsDeep]
+    receivers_any: [Object, _, lodash]
+    context_patterns: ["req\\.", "request\\.", "ctx\\.", "body"]
+    note: "§3.4 原型污染;context 须含请求对象引用(Object.assign({}, req.body) 风味)"
+
+  # §3.6 JS unsafe yaml.load:YAML 反序列化(类比 Python py-yaml-load 规则);JS 走候选
+  - languages: [typescript, javascript]
+    callees: [load, loadAll]
+    receivers_any: [yaml, Yaml]
+    note: "§3.6 JS yaml.load 反序列化(规则覆盖 Python,JS 补召回)"
+
+  # §3.7 JSON.parse(req...):未 schema 校验对象输入候选(不自动判漏洞,供 LLM 判二次注入)
+  - languages: [typescript, javascript]
+    callees: [parse]
+    receivers_any: [JSON]
+    context_patterns: ["req\\.", "request\\.", "ctx\\.", "body", "query", "params"]
+    note: "§3.7 JSON.parse(用户输入);context 须含请求引用(排除静态 JSON.parse)"
+
+  - languages: [python]
+    callees: [loads, load]
+    receivers_any: [json]
+    context_patterns: ["request\\.", "req\\.", "args", "form", "body"]
+    note: "§3.7 Python json.loads(用户输入);context 须含请求引用"

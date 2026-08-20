@@ -18,7 +18,7 @@ rules:
   - rule_id: py-db-cursor-execute
     languages: [python]
     callee: execute
-    receiver_pattern: "^(cursor|cnx|conn|db|database)$"
+    receiver_pattern: "^(cursor|cnx|conn|db|database|session)$"   # §1.3.13 加 session:覆盖 SQLAlchemy session.execute(text(...))
     category: sql
     sink_subtype: sql_raw
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
@@ -26,7 +26,7 @@ rules:
   - rule_id: py-db-cursor-executemany
     languages: [python]
     callee: executemany
-    receiver_pattern: "^(cursor|cnx|conn|db|database)$"
+    receiver_pattern: "^(cursor|cnx|conn|db|database|session)$"
     category: sql
     sink_subtype: sql_raw
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
@@ -101,6 +101,26 @@ rules:
     needs_review_default: true   # bare callee; receiver unknown
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
+  # ===== §1.3 Python raw SQL(deepsec 吸收,matchers/py-sql-raw.ts)=====
+  - rule_id: py-django-extra
+    languages: [python]
+    callee: extra
+    receiver_pattern: ".+"   # Model.objects.extra(where=...);receiver 整链 "User.objects",.+ 兜底;extra 方法名专一
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: py-asyncpg-fetch
+    languages: [python]
+    callee: fetch
+    receiver_pattern: "^(conn|pool|connection)$"   # asyncpg conn.fetch(sql)/fetchrow/fetchval;receiver 收窄常见连接变量
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+
   - rule_id: ts-knex-raw
     languages: [typescript]
     callee: raw
@@ -130,6 +150,106 @@ rules:
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
+  # ===== §1.3 JS/TS raw SQL(deepsec 吸收,matchers/js-sql-raw.ts)=====
+  - rule_id: ts-sequelize-literal
+    languages: [typescript, javascript]
+    callee: literal
+    receiver_pattern: "^[Ss]equelize$"   # 类名 Sequelize / 实例 sequelize 双形态
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-sequelize-fn
+    languages: [typescript, javascript]
+    callee: fn
+    receiver_pattern: "^[Ss]equelize$"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true   # Sequelize.fn(cmd, val) 拼接
+    dangerous_slots: [{arg_index: 0, slot: sql_identifier}]
+
+  - rule_id: ts-knex-whereraw
+    languages: [typescript, javascript]
+    callee: whereRaw
+    receiver_pattern: "^(knex)$"   # knex.whereRaw(sql) 直调形态;链式 db('t').whereRaw() 抽出 receiver 是链式变量,由候选表补
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-knex-orderbyraw
+    languages: [typescript, javascript]
+    callee: orderByRaw
+    receiver_pattern: "^(knex)$"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-knex-havingraw
+    languages: [typescript, javascript]
+    callee: havingRaw
+    receiver_pattern: "^(knex)$"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-postgresjs-raw
+    languages: [typescript, javascript]
+    callee: raw
+    receiver_pattern: "^(sql)$"   # postgres.js sql.raw
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-postgresjs-unsafe
+    languages: [typescript, javascript]
+    callee: unsafe
+    receiver_pattern: "^(sql)$"   # postgres.js sql.unsafe
+    category: sql
+    sink_subtype: sql_raw
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-better-sqlite3-prepare
+    languages: [typescript, javascript]
+    callee: prepare
+    receiver_pattern: "^(db|database|sqlite)$"   # better-sqlite3 db.prepare(sql)
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-better-sqlite3-exec
+    languages: [typescript, javascript]
+    callee: exec
+    receiver_pattern: "^(db|database|sqlite)$"   # better-sqlite3 db.exec(sql)
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-prisma-queryraw
+    languages: [typescript, javascript]
+    callee: "$queryRaw"   # prisma.$queryRaw(sql) call 形态;tagged template `prisma.$queryRaw\`...\`` 归 §4.3
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: ts-prisma-executeraw
+    languages: [typescript, javascript]
+    callee: "$executeRaw"
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+
   - rule_id: go-gorm-raw
     languages: [go]
     callee: Raw
@@ -145,6 +265,62 @@ rules:
     category: sql
     sink_subtype: sql_raw
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  # ===== §1.3 Go raw SQL(deepsec 吸收,matchers/go-sql-raw.ts)=====
+  - rule_id: go-db-queryrow
+    languages: [go]
+    callee: QueryRow
+    receiver_pattern: ".+"   # 对齐 go-db-query(Query@.+)惯例;db.QueryRow(sql)
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: go-db-querycontext
+    languages: [go]
+    callee: QueryContext
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: sql_value}]   # arg0=ctx,arg1=sql
+
+  - rule_id: go-db-queryrowcontext
+    languages: [go]
+    callee: QueryRowContext
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: sql_value}]
+
+  - rule_id: go-db-execcontext
+    languages: [go]
+    callee: ExecContext
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: sql_value}]
+
+  - rule_id: go-sqlx-get
+    languages: [go]
+    callee: Get
+    receiver_pattern: ".+"   # sqlx db.Get(&dest, sql);Get 词泛,needs_review
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: sql_value}]
+
+  - rule_id: go-sqlx-select
+    languages: [go]
+    callee: Select
+    receiver_pattern: ".+"   # sqlx db.Select(&dest, sql)
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: sql_value}]
+
 
   - rule_id: java-jpa-createnativequery
     languages: [java]
@@ -185,10 +361,57 @@ rules:
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: sql_value}]
 
+  # ===== §1.3 Java raw SQL(deepsec 吸收,matchers/jvm-sql-raw.ts)=====
+  - rule_id: java-conn-preparestatement
+    languages: [java]
+    callee: prepareStatement
+    receiver_pattern: ".+"   # conn.prepareStatement(sql)
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-jdbctemplate-update
+    languages: [java]
+    callee: update
+    receiver_pattern: ".+"   # jdbcTemplate.update(sql);update 词泛,needs_review
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-jdbctemplate-queryforobject
+    languages: [java]
+    callee: queryForObject
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-jdbctemplate-queryforlist
+    languages: [java]
+    callee: queryForList
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+  - rule_id: java-jdbctemplate-batchupdate
+    languages: [java]
+    callee: batchUpdate
+    receiver_pattern: ".+"
+    category: sql
+    sink_subtype: sql_raw
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: sql_value}]
+
+
   - rule_id: php-laravel-whereraw
     languages: [php]
     callee: whereRaw
-    receiver_pattern: null
+    receiver_pattern: ".+"   # 修复死规则:原 null 只配裸调用,Laravel 真实写法 $q->whereRaw()/DB::whereRaw() 恒带 receiver→生产永不命中
     category: sql
     sink_subtype: sql_raw
     needs_review_default: true
@@ -267,6 +490,74 @@ rules:
     sink_subtype: command_exec
     needs_review_default: true   # callee common; receiver check via 'child_process'
     dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  # ===== §1.1 RCE(deepsec 吸收,matchers/rce.ts)=====
+  # 注:new Function("return "+body) 是 new_expression,iter_calls() 不抽取(探针验证
+  # callee 抽出为空)→ 不上规则,归 §4.2 detector 能力项(new_expression 支持)。
+  - rule_id: ts-child-process-execsync
+    languages: [typescript, javascript]
+    callee: execSync
+    receiver_pattern: null   # 裸调用;解构 import { execSync } from 'child_process' 后直调为主
+    category: command
+    sink_subtype: command_exec
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+    examples:
+      positive: ["function f(cmd){ return execSync(cmd); }"]
+      negative: ["function f(cmd){ return child.execSync(cmd); }"]
+
+  - rule_id: ts-child-process-spawn
+    languages: [typescript, javascript]
+    callee: spawn
+    receiver_pattern: null   # 裸调用;解构 import { spawn } from 'child_process' 后直调
+    category: command
+    sink_subtype: command_exec
+    needs_review_default: true   # spawn 词稍泛;裸调用语义专一(JS 无内置 spawn 全局)
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: ts-child-process-spawn-qualified
+    languages: [typescript, javascript]
+    callee: spawn
+    receiver_pattern: "^(cp|childProcess|child_process)$"   # cp.spawn(cmd) / child_process.spawn(cmd)
+    category: command
+    sink_subtype: command_exec
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: ts-child-process-spawnsync
+    languages: [typescript, javascript]
+    callee: spawnSync
+    receiver_pattern: null   # 裸调用;解构 import 后直调
+    category: command
+    sink_subtype: command_exec
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: ts-child-process-spawnsync-qualified
+    languages: [typescript, javascript]
+    callee: spawnSync
+    receiver_pattern: "^(cp|childProcess|child_process)$"
+    category: command
+    sink_subtype: command_exec
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
+
+  - rule_id: ts-vm-runinnewcontext
+    languages: [typescript, javascript]
+    callee: runInNewContext
+    receiver_pattern: "^(vm)$"   # vm.runInNewContext(code, ctx);既有 ts-vm-runincontext 是 runInContext,callee 精确匹配盖不到变体
+    category: command
+    sink_subtype: command_vm
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  - rule_id: ts-vm-runinthiscontext
+    languages: [typescript, javascript]
+    callee: runInThisContext
+    receiver_pattern: "^(vm)$"
+    category: command
+    sink_subtype: command_vm
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: generic}]
+
 
   - rule_id: go-exec-command
     languages: [go]
@@ -438,6 +729,97 @@ rules:
     sink_subtype: ssrf_axios
     dangerous_slots: [{arg_index: 0, slot: url}]
 
+  # ===== §1.2 SSRF(deepsec 吸收,matchers/ssrf.ts)===== 扩 axios 全方法 + Node 原生 http + undici/got
+  - rule_id: ts-axios-post
+    languages: [typescript, javascript]
+    callee: post
+    receiver_pattern: "^(axios)$"
+    category: ssrf
+    sink_subtype: ssrf_axios
+    dangerous_slots: [{arg_index: 0, slot: url}]
+    examples:
+      positive: ["function f(url){ return axios.post(url); }"]
+      negative: ["function f(url){ return foo.post(url); }"]
+
+  - rule_id: ts-axios-put
+    languages: [typescript, javascript]
+    callee: put
+    receiver_pattern: "^(axios)$"
+    category: ssrf
+    sink_subtype: ssrf_axios
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-axios-delete
+    languages: [typescript, javascript]
+    callee: delete
+    receiver_pattern: "^(axios)$"
+    category: ssrf
+    sink_subtype: ssrf_axios
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-axios-patch
+    languages: [typescript, javascript]
+    callee: patch
+    receiver_pattern: "^(axios)$"
+    category: ssrf
+    sink_subtype: ssrf_axios
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-axios-request
+    languages: [typescript, javascript]
+    callee: request
+    receiver_pattern: "^(axios)$"   # axios.request(config)
+    category: ssrf
+    sink_subtype: ssrf_axios
+    needs_review_default: true   # request 词泛;靠 receiver=axios 收窄
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-http-request
+    languages: [typescript, javascript]
+    callee: request
+    receiver_pattern: "^(http|https)$"   # Node 原生 http.request(url) / https.request(url)
+    category: ssrf
+    sink_subtype: ssrf_http
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-http-get
+    languages: [typescript, javascript]
+    callee: get
+    receiver_pattern: "^(http|https)$"   # http.get(url) / https.get(url)
+    category: ssrf
+    sink_subtype: ssrf_http
+    needs_review_default: true   # get 词极泛;靠 receiver=模块名收窄
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-undici-request
+    languages: [typescript, javascript]
+    callee: request
+    receiver_pattern: "^(undici)$"
+    category: ssrf
+    sink_subtype: ssrf_http
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-got-get
+    languages: [typescript, javascript]
+    callee: get
+    receiver_pattern: "^(got)$"
+    category: ssrf
+    sink_subtype: ssrf_http
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+  - rule_id: ts-got-post
+    languages: [typescript, javascript]
+    callee: post
+    receiver_pattern: "^(got)$"
+    category: ssrf
+    sink_subtype: ssrf_http
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
+
   - rule_id: go-http-get
     languages: [go]
     callee: Get
@@ -546,11 +928,14 @@ rules:
   - rule_id: ts-res-redirect
     languages: [typescript]
     callee: redirect
-    receiver_pattern: null
+    receiver_pattern: "^(res|response|ctx)$"   # 修复死规则:原 null 只配裸调用,但 TS/JS 现实中 res.redirect(u) 100% 带 receiver→生产永不命中
     category: redirect
     sink_subtype: open_redirect
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: url}]
+    examples:
+      positive: ["function f(req, res){ res.redirect(req.query.next); }", "function f(response, url){ response.redirect(url); }"]
+      negative: ["function f(req){ return redirect(req.query.next); }", "function f(foo, url){ foo.redirect(url); }"]
 
   - rule_id: py-flask-redirect
     languages: [python]
@@ -560,6 +945,18 @@ rules:
     sink_subtype: open_redirect
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: url}]
+
+  # §1.4 PHP open redirect 收尾:Laravel $response->redirect(u) method 形态;
+  # bare redirect() helper + Redirect::to 形态由候选表 redirect 组兜底送 LLM。
+  - rule_id: php-redirect
+    languages: [php]
+    callee: redirect
+    receiver_pattern: "^(response|res)$"
+    category: redirect
+    sink_subtype: open_redirect
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 0, slot: url}]
+
 
   # ===== 补充:vuln-range 三项目反哺(NodeGoat/crAPI/juice-shop 实测缺口)=====
 

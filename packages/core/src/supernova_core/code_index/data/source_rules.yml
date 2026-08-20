@@ -151,3 +151,188 @@ rules:
     languages: [go]
     pattern: "r\\.URL\\.Query\\(\\)\\.Get\\(['\"]([A-Za-z_]\\w*)['\"]\\)"
     source_type: query
+
+  # ===================================================================
+  # deepsec 吸收 §2(deepsec matchers/source-*.ts):框架 source 补召回
+  # source 是文本正则,group(1)=param_name(字段名;无字段名的方法调用用方法名/变量名占位)
+  # ===================================================================
+
+  # ===== §2.1 JS/TS Hono / Fastify / Next(原规则只覆盖 Express req.* / Koa ctx.*)=====
+  - rule_id: ts-hono-query
+    languages: [typescript, javascript]
+    pattern: "c\\.req\\.query\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: ts-hono-param
+    languages: [typescript, javascript]
+    pattern: "c\\.req\\.param\\(['\"](\\w+)['\"]\\)"
+    source_type: path
+  - rule_id: ts-hono-json
+    languages: [typescript, javascript]
+    pattern: "c\\.req\\.(json|text)\\(\\)"   # group1=方法名占位(无字段名)
+    source_type: body
+  - rule_id: ts-hono-formdata
+    languages: [typescript, javascript]
+    pattern: "c\\.req\\.(formData)\\(\\)"
+    source_type: form
+  - rule_id: ts-fastify-query
+    languages: [typescript, javascript]
+    pattern: "request\\.query\\.([A-Za-z_]\\w*)"
+    source_type: query
+  - rule_id: ts-fastify-params
+    languages: [typescript, javascript]
+    pattern: "request\\.params\\.([A-Za-z_]\\w*)"
+    source_type: path
+  - rule_id: ts-fastify-body
+    languages: [typescript, javascript]
+    pattern: "request\\.body\\.([A-Za-z_]\\w*)"
+    source_type: body
+  - rule_id: ts-fastify-headers
+    languages: [typescript, javascript]
+    pattern: "request\\.headers\\.([A-Za-z_]\\w*)"
+    source_type: header
+  - rule_id: ts-next-searchparams
+    languages: [typescript, javascript]
+    pattern: "nextUrl\\.searchParams\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: ts-next-json
+    languages: [typescript, javascript]
+    pattern: "\\brequest\\.(json)\\(\\)"   # Next route handler await request.json()
+    source_type: body
+  - rule_id: ts-next-formdata
+    languages: [typescript, javascript]
+    pattern: "\\brequest\\.(formData)\\(\\)"
+    source_type: form
+  - rule_id: ts-fetch-headers-get
+    languages: [typescript, javascript]
+    pattern: "request\\.headers\\.get\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+
+  # ===== §2.2 Python Flask method 式访问器(原规则只有索引写法 request.GET['x'])=====
+  - rule_id: py-flask-args-get
+    languages: [python]
+    pattern: "request\\.args\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: py-flask-form-get
+    languages: [python]
+    pattern: "request\\.form\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: form
+  - rule_id: py-flask-json-get
+    languages: [python]
+    pattern: "request\\.json\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: body
+  - rule_id: py-flask-get-json
+    languages: [python]
+    pattern: "request\\.(get_json)\\(\\)"   # group1=方法名占位(无字段名);request.get_json() 返回整个 body
+    source_type: body
+  - rule_id: py-flask-headers-get
+    languages: [python]
+    pattern: "request\\.headers\\.get\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+  - rule_id: py-flask-cookies-get
+    languages: [python]
+    pattern: "request\\.cookies\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: cookie
+  - rule_id: py-flask-files-get
+    languages: [python]
+    pattern: "request\\.files\\.get\\(['\"](\\w+)['\"]\\)"
+    source_type: file
+
+  # ===== §2.3 Go(原规则只有 Gin c.Query/Param/PostForm + net/http r.URL.Query)=====
+  - rule_id: go-gin-getheader
+    languages: [go]
+    pattern: "c\\.GetHeader\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+  - rule_id: go-gin-shouldbindjson
+    languages: [go]
+    pattern: "c\\.ShouldBindJSON\\(&(\\w+)\\)"   # group1=绑定变量名占位
+    source_type: body
+  - rule_id: go-net-formvalue
+    languages: [go]
+    pattern: "r\\.FormValue\\(['\"](\\w+)['\"]\\)"
+    source_type: form
+  - rule_id: go-net-postformvalue
+    languages: [go]
+    pattern: "r\\.PostFormValue\\(['\"](\\w+)['\"]\\)"
+    source_type: form
+  - rule_id: go-net-header-get
+    languages: [go]
+    pattern: "r\\.Header\\.Get\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+  - rule_id: go-net-cookie
+    languages: [go]
+    pattern: "r\\.Cookie\\(['\"](\\w+)['\"]\\)"
+    source_type: cookie
+
+  # ===== §2.4 Java 注解 + HttpServlet(原规则有 @RequestParam/@PathVariable/@RequestBody)=====
+  # 注:header/cookie 注解的 header 名可含 '-',捕获组用 [\\w-]+
+  - rule_id: j-spring-requestheader
+    languages: [java]
+    pattern: "@RequestHeader\\(['\"]?([\\w-]+)['\"]?\\)?"
+    source_type: header
+  - rule_id: j-spring-cookievalue
+    languages: [java]
+    pattern: "@CookieValue\\(['\"]?([\\w-]+)['\"]?\\)?"
+    source_type: cookie
+  - rule_id: j-spring-requestpart
+    languages: [java]
+    pattern: "@RequestPart\\(['\"]?(\\w+)['\"]?\\)?"
+    source_type: body
+  - rule_id: j-jaxrs-queryparam
+    languages: [java]
+    pattern: "@QueryParam\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: j-jaxrs-pathparam
+    languages: [java]
+    pattern: "@PathParam\\(['\"](\\w+)['\"]\\)"
+    source_type: path
+  - rule_id: j-jaxrs-headerparam
+    languages: [java]
+    pattern: "@HeaderParam\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+  - rule_id: j-jaxrs-formparam
+    languages: [java]
+    pattern: "@FormParam\\(['\"](\\w+)['\"]\\)"
+    source_type: form
+  - rule_id: j-httpservlet-getparameter
+    languages: [java]
+    pattern: "\\.getParameter\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: j-httpservlet-getheader
+    languages: [java]
+    pattern: "\\.getHeader\\(['\"]([\\w-]+)['\"]\\)"
+    source_type: header
+  - rule_id: j-httpservlet-getcookies
+    languages: [java]
+    pattern: "\\.(getCookies)\\(\\)"   # group1=方法名占位(返回 Cookie[] 整体)
+    source_type: cookie
+
+  # ===== §2.5 PHP superglobal 补齐 + Laravel(原规则只有 $_GET/$_POST/$_REQUEST)=====
+  - rule_id: php-superglobal-cookie
+    languages: [php]
+    pattern: "\\$_COOKIE\\[['\"](\\w+)['\"]\\]"
+    source_type: cookie
+  - rule_id: php-superglobal-files
+    languages: [php]
+    pattern: "\\$_FILES\\[['\"](\\w+)['\"]\\]"
+    source_type: file
+  - rule_id: php-superglobal-server
+    languages: [php]
+    pattern: "\\$_SERVER\\[['\"](\\w+)['\"]\\]"
+    source_type: header
+  - rule_id: php-laravel-input
+    languages: [php]
+    pattern: "\\$request->input\\(['\"](\\w+)['\"]\\)"
+    source_type: body
+  - rule_id: php-laravel-query
+    languages: [php]
+    pattern: "\\$request->query\\(['\"](\\w+)['\"]\\)"
+    source_type: query
+  - rule_id: php-laravel-route
+    languages: [php]
+    pattern: "\\$request->route\\(['\"](\\w+)['\"]\\)"
+    source_type: path
+  - rule_id: php-laravel-file
+    languages: [php]
+    pattern: "\\$request->file\\(['\"](\\w+)['\"]\\)"
+    source_type: file
+

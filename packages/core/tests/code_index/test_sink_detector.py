@@ -257,6 +257,28 @@ class TestSinkRuleLibrary:
             # sink 硬规则增强(Task 3+4):Java 全类别补齐 + execute 双语义
             "java-resttemplate-postforentity", "java-response-sendredirect",
             "java-url-openconnection", "java-httpclient-execute",
+            # deepsec 吸收 §1.1 RCE(deepsec matchers/rce.ts)
+            "ts-child-process-execsync", "ts-child-process-spawn",
+            "ts-child-process-spawn-qualified", "ts-child-process-spawnsync",
+            "ts-child-process-spawnsync-qualified", "ts-vm-runinnewcontext",
+            "ts-vm-runinthiscontext",
+            # deepsec 吸收 §1.2 SSRF(deepsec matchers/ssrf.ts)扩 axios 全方法 + http/undici/got
+            "ts-axios-post", "ts-axios-put", "ts-axios-delete", "ts-axios-patch",
+            "ts-axios-request", "ts-http-request", "ts-http-get",
+            "ts-undici-request", "ts-got-get", "ts-got-post",
+            # deepsec 吸收 §1.3 raw SQL(deepsec matchers/{js,py,go,jvm}-sql-raw.ts)
+            "ts-sequelize-literal", "ts-sequelize-fn", "ts-knex-whereraw",
+            "ts-knex-orderbyraw", "ts-knex-havingraw", "ts-postgresjs-raw",
+            "ts-postgresjs-unsafe", "ts-better-sqlite3-prepare", "ts-better-sqlite3-exec",
+            "ts-prisma-queryraw", "ts-prisma-executeraw",
+            "py-django-extra", "py-asyncpg-fetch",
+            "go-db-queryrow", "go-db-querycontext", "go-db-queryrowcontext",
+            "go-db-execcontext", "go-sqlx-get", "go-sqlx-select",
+            "java-conn-preparestatement", "java-jdbctemplate-update",
+            "java-jdbctemplate-queryforobject", "java-jdbctemplate-queryforlist",
+            "java-jdbctemplate-batchupdate",
+            # deepsec 吸收 §1.4 PHP open redirect 收尾
+            "php-redirect",
         }
         got = {r.rule_id for r in DEFAULT_RULES}
         assert got == expected, f"missing={expected-got} extra={got-expected}"
@@ -1084,3 +1106,520 @@ class TestOtherLangsReceiverFix:
         sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
         hit = [s for s in sites if s.rule_id == "ts-child-process-exec"]
         assert hit, "cp.exec(cmd) 应命中 ts-child-process-exec(rp ^(child_process|cp)$)"
+
+
+# ===== §0 死规则修复(deepsec 吸收 M1): ts-res-redirect + php-laravel-whereraw =====
+
+class TestDeadRuleFixRedirectAndWhereRaw:
+    """死规则修复:原 receiver_pattern: null 只匹配裸调用,但真实写法恒带 receiver
+    → 生产中永不命中。
+
+    - ts-res-redirect: TS/JS 现实中 res.redirect(u) 100% 带 receiver;原 rp=null 命不中。
+      修复 rp null→^(res|response|ctx)$。连带解锁 ssrf_builder.py REDIRECT 过滤空转。
+    - php-laravel-whereraw: Laravel 真实写法 $q->whereRaw()/DB::whereRaw() 带 receiver;
+      原 rp=null 命不中(裸 whereRaw() 极罕见)。修复 rp null→.+ (对齐 java-stmt-execute 惯例)。
+    """
+
+    def test_ts_res_redirect_qualified_hit(self):
+        """res.redirect(url) receiver=res → 命中 ts-res-redirect(原 rp=null 不命中)。"""
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = (
+            "function f(url: string, res: any) {\n"
+            "  res.redirect(url);\n"
+            "}\n"
+        )
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "ts-res-redirect"]
+        assert hit, "res.redirect(url) 应命中 ts-res-redirect(rp ^(res|response|ctx)$)"
+        assert hit[0].callee_name == "redirect"
+        assert hit[0].callee_receiver == "res"
+        assert hit[0].category == SinkCategory.REDIRECT
+
+    def test_ts_response_redirect_hit(self):
+        """response.redirect(url) receiver=response → 命中(收窄集合内)。"""
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = "function f(url: string, response: any) {\n  response.redirect(url);\n}\n"
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        assert any(s.rule_id == "ts-res-redirect" for s in sites)
+
+    def test_ts_res_redirect_bare_call_no_longer_hit(self):
+        """裸 redirect(url)(TS 现实中不存在此写法)修复后不再命中 —— rp 收窄语义锁定。
+
+        原死规则靠裸调用命中(只在测试里 exists);修复后裸调用不命中,正合语义:
+        open redirect 的危险写法是 res.redirect,不是 bare redirect。
+        """
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = "function f(url: string) {\n  return redirect(url);\n}\n"
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        assert not any(s.rule_id == "ts-res-redirect" for s in sites), \
+            "裸 redirect(url) 不应再命中 ts-res-redirect(rp 收窄后)"
+
+    def test_ts_res_redirect_non_matching_receiver_misses(self):
+        """someObj.redirect(url) receiver 不在收窄集合 → 不命中(防误报泛化)。"""
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        src = "function f(url: string) {\n  foo.redirect(url);\n}\n"
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        assert not any(s.rule_id == "ts-res-redirect" for s in sites)
+
+    def test_php_laravel_whereraw_chain_receiver_hit(self):
+        """$query->whereRaw(sql) receiver=query(php_parser lstrip $)→ 命中(原 rp=null 不命中)。"""
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.php_parser import PhpParser
+        import tempfile, pathlib
+        src = (
+            "<?php\n"
+            "function f($sql) {\n"
+            "  $query->whereRaw($sql);\n"
+            "}\n"
+        )
+        parser = PhpParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.php"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "php-laravel-whereraw"]
+        assert hit, "$query->whereRaw($sql) 应命中 php-laravel-whereraw(rp .+ 后)"
+        assert hit[0].callee_name == "whereRaw"
+        assert hit[0].callee_receiver == "query"   # lstrip $
+        assert hit[0].category == SinkCategory.SQL
+
+    def test_php_laravel_whereraw_static_db_hit(self):
+        """DB::whereRaw(sql) scoped_call receiver=DB → 命中(.+ 覆盖静态调用形态)。"""
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.php_parser import PhpParser
+        import tempfile, pathlib
+        src = (
+            "<?php\n"
+            "function f($sql) {\n"
+            "  DB::whereRaw($sql);\n"
+            "}\n"
+        )
+        parser = PhpParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "app.php"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        sites = detect_sinks(blocks, parser, source_provider=_src_provider(src))
+        hit = [s for s in sites if s.rule_id == "php-laravel-whereraw"]
+        assert hit, "DB::whereRaw($sql) 应命中 php-laravel-whereraw(scoped_call receiver=DB)"
+        assert hit[0].callee_receiver == "DB"
+
+
+# ===== §1.1 RCE(deepsec 吸收 M2a): TS/JS command exec 扩 execSync/spawn/spawnSync/vm =====
+
+class TestDeepsecRceSinks:
+    """deepsec matchers/rce.ts 吸收:execSync / spawn / spawnSync / vm.runInNew|ThisContext。
+
+    探针已验证 iter_calls 抽取正常(receiver 形态正确);new Function() 是 new_expression
+    抽不出 callee → 不上规则(归 §4.2)。
+    """
+
+    def _ts_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_execsync_bare_hit(self):
+        sites = self._ts_sites("function f(cmd: string){ return execSync(cmd); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-child-process-execsync"]
+        assert hit, "execSync(cmd) 裸调用应命中 ts-child-process-execsync"
+        assert hit[0].category == SinkCategory.COMMAND
+        assert hit[0].callee_receiver is None
+
+    def test_spawn_bare_hit(self):
+        sites = self._ts_sites("function f(cmd: string){ return spawn(cmd); }\n")
+        assert any(s.rule_id == "ts-child-process-spawn" for s in sites)
+
+    def test_spawn_qualified_hit(self):
+        sites = self._ts_sites(
+            "import * as cp from 'child_process';\n"
+            "function f(cmd: string){ return cp.spawn('sh', ['-c', cmd]); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-child-process-spawn-qualified"]
+        assert hit, "cp.spawn(...) 应命中 ts-child-process-spawn-qualified"
+        assert hit[0].callee_receiver == "cp"
+
+    def test_spawnsync_bare_hit(self):
+        sites = self._ts_sites("function f(cmd: string){ return spawnSync(cmd); }\n")
+        assert any(s.rule_id == "ts-child-process-spawnsync" for s in sites)
+
+    def test_spawnsync_qualified_hit(self):
+        sites = self._ts_sites(
+            "import * as cp from 'child_process';\n"
+            "function f(cmd: string){ return cp.spawnSync('git', ['status']); }\n")
+        assert any(s.rule_id == "ts-child-process-spawnsync-qualified" for s in sites)
+
+    def test_vm_runinnewcontext_hit(self):
+        """vm.runInNewContext(code, ctx) → ts-vm-runinnewcontext(既有 runIncontext 是不同 callee)。"""
+        sites = self._ts_sites(
+            "import * as vm from 'vm';\n"
+            "function f(code: string){ return vm.runInNewContext(code, {}); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-vm-runinnewcontext"]
+        assert hit, "vm.runInNewContext(code) 应命中 ts-vm-runinnewcontext"
+        assert hit[0].callee_receiver == "vm"
+        assert hit[0].category == SinkCategory.COMMAND
+
+    def test_vm_runinthiscontext_hit(self):
+        sites = self._ts_sites(
+            "import * as vm from 'vm';\n"
+            "function f(snippet: string){ return vm.runInThisContext(snippet); }\n")
+        assert any(s.rule_id == "ts-vm-runinthiscontext" for s in sites)
+
+    def test_vm_runincontext_distinct_from_new(self):
+        """既有 ts-vm-runincontext(runInContext)与新增 runInNewContext 各自精确匹配,不串。"""
+        sites = self._ts_sites(
+            "import * as vm from 'vm';\n"
+            "function f(c: string){ vm.runInContext(c); vm.runInNewContext(c, {}); }\n")
+        ids = {s.rule_id for s in sites if s.callee_name.startswith("runIn")}
+        assert "ts-vm-runincontext" in ids
+        assert "ts-vm-runinnewcontext" in ids
+
+    def test_new_function_not_extracted(self):
+        """new Function(...) 是 new_expression,iter_calls 抽不出 callee → 不命中任何规则。
+
+        归 §4.2 detector 能力项;此测试锁定现状,防误以为已覆盖。
+        """
+        sites = self._ts_sites(
+            "function f(b: string){ return new Function('return ' + b)(); }\n")
+        assert not [s for s in sites if s.callee_name == "Function"], \
+            "new Function() 不应被 iter_calls 抽出(归 §4.2 new_expression 支持)"
+
+
+# ===== §1.2 SSRF(deepsec 吸收 M2a): axios 全方法 + Node http/undici/got =====
+
+class TestDeepsecSsrfSinks:
+    """deepsec matchers/ssrf.ts 吸收:扩 axios 全方法 + Node 原生 http.request/get + undici/got。"""
+
+    def _ts_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_axios_post_put_delete_patch_hit(self):
+        src = (
+            "function f(u: string){ axios.post(u); axios.put(u); "
+            "axios.delete(u); axios.patch(u); }\n"
+        )
+        sites = self._ts_sites(src)
+        ids = {s.rule_id for s in sites}
+        assert "ts-axios-post" in ids
+        assert "ts-axios-put" in ids
+        assert "ts-axios-delete" in ids
+        assert "ts-axios-patch" in ids
+
+    def test_axios_request_hit(self):
+        sites = self._ts_sites("function f(u: string){ axios.request({url: u}); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-axios-request"]
+        assert hit, "axios.request(config) 应命中 ts-axios-request"
+        assert hit[0].needs_review is True  # request 词泛,标 review
+
+    def test_http_request_hit(self):
+        """http.request(url) Node 原生 → ts-http-request。"""
+        sites = self._ts_sites(
+            "import * as http from 'http';\n"
+            "function f(u: string){ http.request(u); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-http-request"]
+        assert hit, "http.request(url) 应命中 ts-http-request"
+        assert hit[0].callee_receiver == "http"
+        assert hit[0].category == SinkCategory.SSRF
+
+    def test_https_request_hit(self):
+        sites = self._ts_sites(
+            "import * as https from 'https';\n"
+            "function f(u: string){ https.request(u); }\n")
+        assert any(s.rule_id == "ts-http-request" for s in sites)
+
+    def test_http_get_hit(self):
+        sites = self._ts_sites(
+            "import * as http from 'http';\n"
+            "function f(u: string){ http.get(u); }\n")
+        hit = [s for s in sites if s.rule_id == "ts-http-get"]
+        assert hit, "http.get(url) 应命中 ts-http-get"
+        assert hit[0].needs_review is True  # get 词极泛,标 review
+
+    def test_undici_request_hit(self):
+        sites = self._ts_sites(
+            "import * as undici from 'undici';\n"
+            "function f(u: string){ undici.request(u); }\n")
+        assert any(s.rule_id == "ts-undici-request" for s in sites)
+
+    def test_got_get_post_hit(self):
+        sites = self._ts_sites(
+            "import * as got from 'got';\n"
+            "function f(u: string){ got.get(u); got.post(u); }\n")
+        ids = {s.rule_id for s in sites}
+        assert "ts-got-get" in ids
+        assert "ts-got-post" in ids
+
+    def test_axios_get_unaffected_by_new_rules(self):
+        """既有 ts-axios-get 不受新增 post/put 规则影响(get 仍命中 ts-axios-get)。"""
+        sites = self._ts_sites("function f(u: string){ axios.get(u); }\n")
+        assert any(s.rule_id == "ts-axios-get" for s in sites)
+
+    def test_non_axios_get_not_hit_ssrf(self):
+        """foo.get(u)(receiver 非 axios/http/https/got)→ 不命中 SSRF(防误报泛化)。"""
+        sites = self._ts_sites("function f(u: string){ foo.get(u); }\n")
+        ssrf = [s for s in sites if s.category == SinkCategory.SSRF]
+        assert not ssrf, "foo.get() 不应命中任何 SSRF 规则"
+
+
+# ===== §1.3-1.4 raw SQL + redirect(deepsec 吸收 M2b)=====
+
+class TestDeepsecRawSqlTs:
+    """deepsec matchers/js-sql-raw.ts 吸收:Sequelize.literal/fn、knex.*Raw、postgres.js、
+    better-sqlite3、Prisma $queryRaw/$executeRaw。"""
+
+    def _ts_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        import tempfile, pathlib
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_sequelize_literal_both_cases(self):
+        """Sequelize.literal(类名)/sequelize.literal(实例)双形态都命中。"""
+        sites = self._ts_sites(
+            "function f(sql: string){ Sequelize.literal(sql); sequelize.literal(sql); }\n")
+        lit = [s for s in sites if s.rule_id == "ts-sequelize-literal"]
+        assert len(lit) == 2, "Sequelize.literal + sequelize.literal 都应命中"
+        assert all(s.category == SinkCategory.SQL for s in lit)
+
+    def test_sequelize_fn_hit(self):
+        sites = self._ts_sites("function f(cmd: string){ Sequelize.fn(cmd, 1); }\n")
+        assert any(s.rule_id == "ts-sequelize-fn" for s in sites)
+
+    def test_knex_whereraw_orderbyraw_havingraw_hit(self):
+        src = (
+            "function f(sql: string){ knex.whereRaw(sql); "
+            "knex.orderByRaw(sql); knex.havingRaw(sql); }\n"
+        )
+        sites = self._ts_sites(src)
+        ids = {s.rule_id for s in sites}
+        assert "ts-knex-whereraw" in ids
+        assert "ts-knex-orderbyraw" in ids
+        assert "ts-knex-havingraw" in ids
+
+    def test_postgresjs_raw_unsafe_hit(self):
+        sites = self._ts_sites(
+            "import * as sql from 'postgres';\n"
+            "function f(s: string){ sql.raw(s); sql.unsafe(s); }\n")
+        ids = {s.rule_id for s in sites}
+        assert "ts-postgresjs-raw" in ids
+        assert "ts-postgresjs-unsafe" in ids
+
+    def test_better_sqlite3_prepare_exec_hit(self):
+        sites = self._ts_sites(
+            "function f(s: string){ db.prepare(s); db.exec(s); }\n")
+        ids = {s.rule_id for s in sites}
+        assert "ts-better-sqlite3-prepare" in ids
+        assert "ts-better-sqlite3-exec" in ids
+
+    def test_prisma_queryraw_executeraw_hit(self):
+        """prisma.$queryRaw(sql) call 形态命中;tagged template 形态归 §4.3(此处只测 call)。"""
+        sites = self._ts_sites(
+            "function f(s: string){ prisma.$queryRaw(s); prisma.$executeRaw(s); }\n")
+        ids = {s.rule_id for s in sites}
+        assert "ts-prisma-queryraw" in ids, "$queryRaw call 形态应命中"
+        assert "ts-prisma-executeraw" in ids
+
+    def test_knex_raw_unchanged(self):
+        """既有 ts-knex-raw(raw@knex)不受新增 whereRaw 等影响。"""
+        sites = self._ts_sites("function f(sql: string){ knex.raw(sql); }\n")
+        assert any(s.rule_id == "ts-knex-raw" for s in sites)
+
+
+class TestDeepsecRawSqlGo:
+    """deepsec matchers/go-sql-raw.ts 吸收:QueryRow/Query*Context/ExecContext/sqlx Get/Select。"""
+
+    def _go_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.go_parser import GoParser
+        import tempfile, pathlib
+        parser = GoParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.go"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_queryrow_hit(self):
+        sites = self._go_sites("package main\nfunc f(db DB, sql string){ db.QueryRow(sql) }\n")
+        assert any(s.rule_id == "go-db-queryrow" for s in sites)
+
+    def test_querycontext_arg1_hit(self):
+        """QueryContext(ctx, sql) 危险参数在 arg1(非 arg0)。"""
+        sites = self._go_sites(
+            "package main\nfunc f(db DB, ctx Ctx, sql string){ db.QueryContext(ctx, sql) }\n")
+        hit = [s for s in sites if s.rule_id == "go-db-querycontext"]
+        assert hit, "db.QueryContext(ctx, sql) 应命中 go-db-querycontext"
+        assert hit[0].dangerous_slots[0].arg_index == 1
+
+    def test_queryrowcontext_execcontext_hit(self):
+        sites = self._go_sites(
+            "package main\nfunc f(db DB, ctx Ctx, sql string){ "
+            "db.QueryRowContext(ctx, sql); db.ExecContext(ctx, sql) }\n")
+        ids = {s.rule_id for s in sites}
+        assert "go-db-queryrowcontext" in ids
+        assert "go-db-execcontext" in ids
+
+    def test_sqlx_get_select_hit(self):
+        sites = self._go_sites(
+            "package main\nfunc f(db DB, sql string){ db.Get(&u, sql); db.Select(&us, sql) }\n")
+        ids = {s.rule_id for s in sites}
+        assert "go-sqlx-get" in ids
+        assert "go-sqlx-select" in ids
+
+
+class TestDeepsecRawSqlJava:
+    """deepsec matchers/jvm-sql-raw.ts 吸收:prepareStatement/JdbcTemplate update/queryFor*/batchUpdate。"""
+
+    def _java_sites(self, body: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.java_parser import JavaParser
+        import tempfile, pathlib
+        src = f"class C {{\n  void q(String s) {{\n{body}\n  }}\n}}\n"
+        parser = JavaParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "C.java"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_preparestatement_hit(self):
+        sites = self._java_sites("    conn.prepareStatement(sql);")
+        hit = [s for s in sites if s.rule_id == "java-conn-preparestatement"]
+        assert hit, "conn.prepareStatement(sql) 应命中 java-conn-preparestatement"
+        assert hit[0].callee_receiver == "conn"
+
+    def test_jdbctemplate_update_queryforobject_queryforlist_batchupdate_hit(self):
+        sites = self._java_sites(
+            "    jdbcTemplate.update(sql);\n"
+            "    jdbcTemplate.queryForObject(sql, String.class);\n"
+            "    jdbcTemplate.queryForList(sql);\n"
+            "    jdbcTemplate.batchUpdate(sql);")
+        ids = {s.rule_id for s in sites}
+        assert "java-jdbctemplate-update" in ids
+        assert "java-jdbctemplate-queryforobject" in ids
+        assert "java-jdbctemplate-queryforlist" in ids
+        assert "java-jdbctemplate-batchupdate" in ids
+
+    def test_jdbctemplate_query_unchanged(self):
+        """既有 java-jdbctemplate-query 不受新增 update/queryFor* 影响。"""
+        sites = self._java_sites("    jdbcTemplate.query(sql);")
+        assert any(s.rule_id == "java-jdbctemplate-query" for s in sites)
+
+
+class TestDeepsecRawSqlPy:
+    """deepsec matchers/py-sql-raw.ts 吸收:django extra、asyncpg fetch、
+    + 改 py-db-cursor-execute 扩 receiver 加 session(SQLAlchemy session.execute)。"""
+
+    def _py_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.python_parser import PythonParser
+        import tempfile, pathlib
+        parser = PythonParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.py"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_session_execute_now_hits_cursor_rule(self):
+        """session.execute(sql)(SQLAlchemy)→ 改后的 py-db-cursor-execute 命中(原 receiver 无 session 不命中)。"""
+        sites = self._py_sites("def f(session, sql):\n    session.execute(sql)\n")
+        hit = [s for s in sites if s.rule_id == "py-db-cursor-execute"]
+        assert hit, "session.execute(sql) 应命中 py-db-cursor-execute(扩 receiver 加 session)"
+        assert hit[0].callee_receiver == "session"
+
+    def test_django_extra_hit(self):
+        """User.objects.extra(where=...) → py-django-extra(receiver 整链 User.objects)。"""
+        sites = self._py_sites(
+            'def f():\n    return User.objects.extra(where=["x"])\n')
+        hit = [s for s in sites if s.rule_id == "py-django-extra"]
+        assert hit, "User.objects.extra(...) 应命中 py-django-extra"
+        assert hit[0].callee_receiver == "User.objects"
+
+    def test_asyncpg_fetch_hit(self):
+        sites = self._py_sites("def f(conn, sql):\n    conn.fetch(sql)\n")
+        hit = [s for s in sites if s.rule_id == "py-asyncpg-fetch"]
+        assert hit, "conn.fetch(sql) 应命中 py-asyncpg-fetch"
+        assert hit[0].callee_receiver == "conn"
+
+    def test_cursor_execute_still_works(self):
+        """既有 cursor.execute(sql) 命中不变(回归)。"""
+        sites = self._py_sites("def f(sql):\n    cursor.execute(sql)\n")
+        assert any(s.rule_id == "py-db-cursor-execute" for s in sites)
+
+
+class TestDeepsecPhpRedirect:
+    """§1.4 PHP open redirect 收尾:$response->redirect(u) method 形态确定性命中。"""
+
+    def _php_sites(self, src: str):
+        from supernova_core.code_index.sink_detector import detect_sinks
+        from supernova_core.code_index.parsers.php_parser import PhpParser
+        import tempfile, pathlib
+        parser = PhpParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.php"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        return detect_sinks(blocks, parser, source_provider=_src_provider(src))
+
+    def test_response_redirect_hit(self):
+        sites = self._php_sites("<?php\nfunction f($u){ $response->redirect($u); }\n")
+        hit = [s for s in sites if s.rule_id == "php-redirect"]
+        assert hit, "$response->redirect($u) 应命中 php-redirect"
+        assert hit[0].callee_receiver == "response"
+        assert hit[0].category == SinkCategory.REDIRECT
+
+    def test_bare_redirect_not_hit_php_redirect_rule(self):
+        """bare redirect($u)(helper)不命中 php-redirect 规则(rp 收窄),归候选表兜底。"""
+        sites = self._php_sites("<?php\nfunction f($u){ return redirect($u); }\n")
+        assert not any(s.rule_id == "php-redirect" for s in sites)
+
+
+

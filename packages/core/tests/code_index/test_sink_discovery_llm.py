@@ -669,3 +669,110 @@ async def test_discover_sinks_threshold_default_model(monkeypatch):
     sinks, gaps = await discover_sinks_llm([sc], fake_client, model=None)
     assert len(calls) == 1  # 单 block 超阈值独立成 chunk
 
+
+
+# ===== §3(deepsec 吸收): candidate schema 扩展 context/arg/exclude patterns =====
+
+class TestDeepsecCandidateSchemaNarrowing:
+    """deepsec §3 候选 schema 扩展:context_patterns/arg_patterns/exclude_patterns 收窄。
+
+    用真实 TypeScriptParser/PythonParser 解析,验证收窄字段真的生效(省 LLM 调用)。
+    """
+
+    def _ts_suspicious(self, src):
+        import tempfile, pathlib
+        from supernova_core.code_index.parsers.typescript_parser import TypeScriptParser
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.ts"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        src_bytes = src.encode("utf-8")
+        return collect_suspicious_calls(blocks, parser,
+                                        source_provider=lambda b: src_bytes)
+
+    def _py_suspicious(self, src):
+        import tempfile, pathlib
+        from supernova_core.code_index.parsers.python_parser import PythonParser
+        parser = PythonParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = pathlib.Path(td) / "a.py"
+            fpath.write_text(src)
+            blocks = parser.parse_file(fpath, pathlib.Path(td))
+        src_bytes = src.encode("utf-8")
+        return collect_suspicious_calls(blocks, parser,
+                                        source_provider=lambda b: src_bytes)
+
+    def test_fs_readfile_with_req_reference_is_candidate(self):
+        """fs.readFile 拼了 req.body.path(arg 含 req 引用)→ §3.3 arg_patterns 收窄命中 → 候选。"""
+        src = (
+            "import * as fs from 'fs';\n"
+            "function f(req){ fs.readFile(req.body.path, cb); }\n"
+        )
+        out = self._ts_suspicious(src)
+        assert any(c.callee == "readFile" for c in out), \
+            "fs.readFile(req.body.path) 应进候选(arg 含 req 引用)"
+
+    def test_fs_readfile_literal_path_not_candidate(self):
+        """fs.readFile('/etc/passwd')(纯字面量路径,arg 不含拼接/req)→ §3.3 arg_patterns 收窄排除。"""
+        src = (
+            "import * as fs from 'fs';\n"
+            "function f(){ fs.readFile('/etc/passwd', cb); }\n"
+        )
+        out = self._ts_suspicious(src)
+        assert not any(c.callee == "readFile" for c in out), \
+            "fs.readFile(纯字面量) 不应进候选(arg_patterns 收窄排除)"
+
+    def test_object_assign_with_req_body_is_candidate(self):
+        """Object.assign({}, req.body)(context 含 req./body)→ §3.4 原型污染候选。"""
+        src = (
+            "function f(req){ Object.assign({}, req.body); }\n"
+        )
+        out = self._ts_suspicious(src)
+        assert any(c.callee == "assign" and c.receiver == "Object" for c in out), \
+            "Object.assign({}, req.body) 应进候选(context 含 req 引用)"
+
+    def test_object_assign_static_not_candidate(self):
+        """Object.assign({}, defaults)(无 req 引用)→ §3.4 context_patterns 排除。"""
+        src = "function f(){ Object.assign({}, defaults); }\n"
+        out = self._ts_suspicious(src)
+        assert not any(c.callee == "assign" for c in out), \
+            "Object.assign({}, defaults) 不应进候选(context 无 req 引用)"
+
+    def test_json_parse_with_req_is_candidate(self):
+        """JSON.parse(req.body)(context 含 req.)→ §3.7 候选(供 LLM 判二次注入)。"""
+        src = "function f(req){ const d = JSON.parse(req.body); }\n"
+        out = self._ts_suspicious(src)
+        assert any(c.callee == "parse" and c.receiver == "JSON" for c in out)
+
+    def test_json_parse_static_not_candidate(self):
+        """JSON.parse('{\"a\":1}')(无 req 引用)→ §3.7 context_patterns 排除。"""
+        src = 'function f(){ const d = JSON.parse(\'{"a":1}\'); }\n'
+        out = self._ts_suspicious(src)
+        assert not any(c.callee == "parse" for c in out)
+
+    def test_yaml_load_is_candidate(self):
+        """yaml.load(blob)(JS 反序列化,类比 Python py-yaml-load)→ §3.6 候选。"""
+        src = "import * as yaml from 'yaml';\nfunction f(blob){ yaml.load(blob); }\n"
+        out = self._ts_suspicious(src)
+        assert any(c.callee == "load" and c.receiver == "yaml" for c in out)
+
+    def test_python_json_loads_with_request_is_candidate(self):
+        """json.loads(request.body)(context 含 request.)→ §3.7 Python 候选。"""
+        src = (
+            "import json\n"
+            "def f(request):\n"
+            "    data = json.loads(request.body)\n"
+        )
+        out = self._py_suspicious(src)
+        assert any(c.callee == "loads" and c.receiver == "json" for c in out)
+
+    def test_python_json_loads_static_not_candidate(self):
+        """json.loads('{}')(无 request 引用)→ §3.7 Python context_patterns 排除。"""
+        src = (
+            "import json\n"
+            "def f():\n"
+            "    data = json.loads('{}')\n"
+        )
+        out = self._py_suspicious(src)
+        assert not any(c.callee == "loads" for c in out)

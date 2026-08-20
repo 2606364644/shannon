@@ -7,6 +7,7 @@ parser.iter_calls / destructure_call / extract_arg_expressions, 接受双遍历
 """
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Awaitable
 
@@ -93,14 +94,28 @@ class SinkCandidateGroup:
     命中(且规则库未命中)→ 送轻量 LLM 判定。只决定「要不要送 LLM」,不产 SinkCallSite。
     - callees:精确 callee 名(loader 不动大小写;匹配时按 language 决定大小写策略)。
     - receivers_any:None = 任意 receiver 命中(含裸调用);tuple = receiver 必须 ∈ 集合。
+    - context_patterns(deepsec §3 吸收):可选;调用周边文本窗口须含其一(子串,lower)。
+      用于收窄「callee 太常见、危险取决于上下文」的组(如 NoSQL $where/$regex)。
+    - arg_patterns:可选;某参数位表达式须命中其一(子串,lower)。收窄 path 拼接等。
+    - exclude_patterns:可选;周边文本命中任一即排除(降噪)。
     """
     languages: tuple[str, ...]
     callees: tuple[str, ...]
     receivers_any: tuple[str, ...] | None
+    context_patterns: tuple[re.Pattern, ...] = ()
+    arg_patterns: tuple[re.Pattern, ...] = ()
+    exclude_patterns: tuple[re.Pattern, ...] = ()
 
 
 # go/java 导出方法首字母大写是语义 → case-sensitive;其余语言不敏感。
 _CASE_SENSITIVE_LANGS = frozenset({"go", "java"})
+
+
+def _compile_patterns(items) -> tuple[re.Pattern, ...]:
+    """YAML 字符串列表 → 编译正则元组(IGNORECASE+多行,子串匹配)。空/缺省 → ()。"""
+    if not items:
+        return ()
+    return tuple(re.compile(p, re.IGNORECASE) for p in items)
 
 
 def _build_sink_candidates(raw: dict) -> tuple[SinkCandidateGroup, ...]:
@@ -111,6 +126,9 @@ def _build_sink_candidates(raw: dict) -> tuple[SinkCandidateGroup, ...]:
             languages=tuple(item.get("languages") or ()),
             callees=tuple(item.get("callees") or ()),
             receivers_any=tuple(item["receivers_any"]) if item.get("receivers_any") else None,
+            context_patterns=_compile_patterns(item.get("context_patterns")),
+            arg_patterns=_compile_patterns(item.get("arg_patterns")),
+            exclude_patterns=_compile_patterns(item.get("exclude_patterns")),
         ))
     return tuple(groups)
 
@@ -120,13 +138,25 @@ _SINK_CANDIDATES: tuple[SinkCandidateGroup, ...] = _build_sink_candidates(
     load_yaml(DATA_DIR / "sink_candidates.yml"))
 
 
-def _matches_candidate(language: str, callee: str, receiver: str | None) -> bool:
-    """按语言查候选表:callee 精确比较(语言决定大小写)+ receiver 精确集合约束。
+def _matches_candidate(
+    language: str,
+    callee: str,
+    receiver: str | None,
+    arg_exprs: list[str] | None = None,
+    context: str | None = None,
+) -> bool:
+    """按语言查候选表:callee 精确比较(语言决定大小写)+ receiver 精确集合约束
+    + 可选 context_patterns/arg_patterns/exclude_patterns 收窄。
 
     - go/java:case-sensitive(大写导出方法)。
     - 其余:case-insensitive(lower() 后比较)。
     - receivers_any 省略 → 任意 receiver 命中(含裸);给定 → receiver 必须 ∈ 集合,
       receiver=None 不命中(收窄,防裸调用误触发,如裸 format/open)。
+    - context_patterns 给定 → context 窗口须含其一(防 NoSQL 海量误报);
+      arg_patterns 给定 → 某 arg_exprs 须命中其一;
+      exclude_patterns 给定 → context 命中任一即排除。
+    旧调用点(只传 language/callee/receiver)向后兼容:arg_exprs/context 为 None 时
+    跳过对应收窄检查,行为同改前。
     """
     case_sensitive = language in _CASE_SENSITIVE_LANGS
     cmp_callee = callee if case_sensitive else callee.lower()
@@ -136,11 +166,25 @@ def _matches_candidate(language: str, callee: str, receiver: str | None) -> bool
         target = g.callees if case_sensitive else tuple(c.lower() for c in g.callees)
         if cmp_callee not in target:
             continue
-        if g.receivers_any is None:
-            return True
-        if receiver is not None and receiver in g.receivers_any:
-            return True
-        # receivers_any 给定但 receiver 不匹配 → 此组不命中,继续看下一组
+        if g.receivers_any is not None:
+            if receiver is None or receiver not in g.receivers_any:
+                continue
+        # context_patterns 收窄(需 context 窗口)
+        if g.context_patterns and context is not None:
+            if not any(p.search(context) for p in g.context_patterns):
+                continue
+        elif g.context_patterns and context is None:
+            # 候选组要求 context 但调用点没传 → 保守放行(不误杀,交 LLM 判)
+            pass
+        # arg_patterns 收窄(需 arg_exprs)
+        if g.arg_patterns and arg_exprs:
+            if not any(p.search(a) for a in arg_exprs for p in g.arg_patterns):
+                continue
+        # exclude_patterns 排除
+        if g.exclude_patterns and context is not None:
+            if any(p.search(context) for p in g.exclude_patterns):
+                continue
+        return True
     return False
 
 
@@ -192,6 +236,22 @@ def _is_rule_hit(language: str, callee: str, receiver: str | None) -> bool:
     return any(_rule_matches(rule, receiver) for rule in candidates)
 
 
+def _byte_offset(text: str, line: int) -> int:
+    """1-based line number → 该行起始的 char offset(用于取 context 窗口)。
+
+    行号超出范围时返回 len(text)(保守,窗口退化为尾部)。
+    """
+    if line <= 1:
+        return 0
+    pos = 0
+    for _ in range(line - 1):
+        nl = text.find("\n", pos)
+        if nl == -1:
+            return len(text)
+        pos = nl + 1
+    return pos
+
+
 def collect_suspicious_calls(
     blocks: "list[FuncBlock]",
     parser: "BaseParser",
@@ -204,6 +264,7 @@ def collect_suspicious_calls(
         source = source_provider(block)
         if source is None:
             continue
+        text = source.decode("utf-8", errors="replace")
         try:
             call_nodes = list(parser.iter_calls(block, source))
         except Exception:
@@ -218,12 +279,17 @@ def collect_suspicious_calls(
                 continue
             if _is_rule_hit(block.language, callee, receiver):
                 continue  # 规则已命中, detect_sinks 会产 SinkCallSite, 不重复
-            if not _matches_candidate(block.language, callee, receiver):
-                continue
             try:
                 arg_exprs = parser.extract_arg_expressions(call, source)
             except Exception:
                 arg_exprs = []
+            # context 窗口:call 附近 ±256 字符(deepsec §3 context_patterns 收窄用)
+            ctx_start = max(0, _byte_offset(text, call.line) - 256)
+            ctx_end = min(len(text), _byte_offset(text, call.line) + 256)
+            context = text[ctx_start:ctx_end]
+            if not _matches_candidate(block.language, callee, receiver,
+                                      arg_exprs=arg_exprs, context=context):
+                continue
             out.append(SuspiciousCall(
                 block=block, callee=callee, receiver=receiver, arg_exprs=arg_exprs,
                 file_path=block.file_path, line=call.line, column=call.column,

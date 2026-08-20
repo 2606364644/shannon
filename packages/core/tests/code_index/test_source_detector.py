@@ -44,6 +44,11 @@ def test_default_source_rules_externalized_stable():
     ids = {r.rule_id for r in DEFAULT_SOURCE_RULES}
     for rid in ("ts-express-path", "py-django-get", "php-get", "go-gin-query", "java-request-param"):
         assert rid in ids, f"missing source rule {rid}"
+    # deepsec 吸收 §2 代表性 source 规则(防 YAML 丢条)
+    for rid in ("ts-hono-query", "ts-fastify-query", "ts-next-searchparams",
+                "py-flask-args-get", "go-gin-getheader", "j-jaxrs-queryparam",
+                "php-superglobal-cookie", "php-laravel-input"):
+        assert rid in ids, f"missing deepsec source rule {rid}"
 
 
 def _block(file_path, func_name, start_line, source, language="typescript", params=None):
@@ -202,3 +207,234 @@ def test_koa_ctx_headers_yields_header_source():
                          source_provider=_provider_from(block))
     assert any(s.param_name == "token" and s.source_type.value == "header"
                and s.rule_id == "ts-koa-headers" for s in out)
+
+
+# ===== deepsec 吸收 §2 source 规则(deepsec matchers/source-*.ts)=====
+
+class TestDeepsecSourceTs:
+    """Hono/Fastify/Next source 补召回(原规则只覆盖 Express req.* / Koa ctx.*)。"""
+
+    def _detect(self, src, lang="typescript", params=None):
+        block = _block("a.ts", "handler", 1, src, lang, params or [])
+        return detect_sources([block], parser=None, entry_point_ids={block.id},
+                              source_provider=_provider_from(block))
+
+    def test_hono_query_param_json(self):
+        src = (
+            "function h(c){\n"
+            '  const q = c.req.query("q");\n'
+            "  const id = c.req.param('id');\n"
+            "  const body = c.req.json();\n"
+            "}\n"
+        )
+        out = self._detect(src, "typescript", ["c"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("q", "query", "ts-hono-query") in types
+        assert ("id", "path", "ts-hono-param") in types
+        assert any(s.rule_id == "ts-hono-json" and s.source_type.value == "body" for s in out)
+
+    def test_fastify_query_params_body_headers(self):
+        src = (
+            "function h(request){\n"
+            "  const q = request.query.q;\n"
+            "  const id = request.params.id;\n"
+            "  const name = request.body.name;\n"
+            "  const tok = request.headers.token;\n"
+            "}\n"
+        )
+        out = self._detect(src, "typescript", ["request"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("q", "query", "ts-fastify-query") in types
+        assert ("id", "path", "ts-fastify-params") in types
+        assert ("name", "body", "ts-fastify-body") in types
+        assert ("token", "header", "ts-fastify-headers") in types
+
+    def test_next_searchparams_json(self):
+        src = (
+            "export async function GET(request){\n"
+            '  const q = request.nextUrl.searchParams.get("q");\n'
+            "  const body = await request.json();\n"
+            "}\n"
+        )
+        out = self._detect(src, "typescript", ["request"])
+        assert any(s.param_name == "q" and s.source_type.value == "query"
+                   and s.rule_id == "ts-next-searchparams" for s in out)
+        assert any(s.rule_id == "ts-next-json" and s.source_type.value == "body" for s in out)
+
+    def test_express_rules_still_work(self):
+        """既有 Express req.* 规则不受新增影响(回归)。"""
+        src = "function f(req){ const q = req.query.q; const id = req.params.id; }\n"
+        out = self._detect(src, "typescript", ["req"])
+        types = {(s.param_name, s.rule_id) for s in out}
+        assert ("q", "ts-express-query") in types
+        assert ("id", "ts-express-path") in types
+
+
+class TestDeepsecSourcePy:
+    """Python Flask method 式访问器(原规则只有索引写法 request.GET['x'])。"""
+
+    def _detect(self, src, params=None):
+        block = _block("a.py", "view", 1, src, "python", params or [])
+        return detect_sources([block], parser=None, entry_point_ids={block.id},
+                              source_provider=_provider_from(block))
+
+    def test_flask_args_form_json_get(self):
+        src = (
+            "def view(request):\n"
+            "    q = request.args.get('q')\n"
+            "    name = request.form.get('name')\n"
+            "    data = request.json.get('k')\n"
+            "    body = request.get_json()\n"
+            "\n"
+        )
+        out = self._detect(src, ["request"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("q", "query", "py-flask-args-get") in types
+        assert ("name", "form", "py-flask-form-get") in types
+        assert ("k", "body", "py-flask-json-get") in types
+        assert any(s.rule_id == "py-flask-get-json" and s.source_type.value == "body" for s in out)
+
+    def test_flask_headers_cookies_files_get(self):
+        src = (
+            "def view(request):\n"
+            "    tok = request.headers.get('X-Token')\n"
+            "    sid = request.cookies.get('sid')\n"
+            "    f = request.files.get('upload')\n"
+            "\n"
+        )
+        out = self._detect(src, ["request"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("X-Token", "header", "py-flask-headers-get") in types
+        assert ("sid", "cookie", "py-flask-cookies-get") in types
+        assert ("upload", "file", "py-flask-files-get") in types
+
+
+class TestDeepsecSourceGo:
+    """Go Gin/net-http 访问器补召回(原规则只有 c.Query/Param/PostForm + r.URL.Query)。"""
+
+    def _detect(self, src, params=None):
+        block = _block("a.go", "handler", 1, src, "go", params or [])
+        return detect_sources([block], parser=None, entry_point_ids={block.id},
+                              source_provider=_provider_from(block))
+
+    def test_gin_getheader_shouldbindjson(self):
+        src = (
+            'func h(c Context){\n'
+            '  tok := c.GetHeader("Authorization")\n'
+            "  var body Body\n"
+            "  c.ShouldBindJSON(&body)\n"
+            "}\n"
+        )
+        out = self._detect(src, ["c"])
+        assert any(s.param_name == "Authorization" and s.source_type.value == "header"
+                   and s.rule_id == "go-gin-getheader" for s in out)
+        assert any(s.param_name == "body" and s.source_type.value == "body"
+                   and s.rule_id == "go-gin-shouldbindjson" for s in out)
+
+    def test_net_formvalue_header_cookie(self):
+        src = (
+            'func h(r *Request){\n'
+            '  id := r.FormValue("id")\n'
+            '  name := r.PostFormValue("name")\n'
+            '  tok := r.Header.Get("X-Token")\n'
+            '  sid, _ := r.Cookie("sid")\n'
+            "}\n"
+        )
+        out = self._detect(src, ["r"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("id", "form", "go-net-formvalue") in types
+        assert ("name", "form", "go-net-postformvalue") in types
+        assert ("X-Token", "header", "go-net-header-get") in types
+        assert ("sid", "cookie", "go-net-cookie") in types
+
+
+class TestDeepsecSourceJava:
+    """Java 注解 + HttpServlet 访问器补召回。"""
+
+    def _detect(self, src, params=None):
+        block = _block("a.java", "handler", 1, src, "java", params or [])
+        return detect_sources([block], parser=None, entry_point_ids={block.id},
+                              source_provider=_provider_from(block))
+
+    def test_spring_requestheader_cookievalue(self):
+        src = (
+            "@GetMapping('/h')\n"
+            'public String h(@RequestHeader("X-Token") String tok,\n'
+            "                @CookieValue('sid') String sid){ return null; }\n"
+        )
+        out = self._detect(src, ["tok", "sid"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("X-Token", "header", "j-spring-requestheader") in types
+        assert ("sid", "cookie", "j-spring-cookievalue") in types
+
+    def test_jaxrs_queryparam_pathparam_headerparam_formparam(self):
+        src = (
+            "@GET\n"
+            'public String h(@QueryParam("q") String q,\n'
+            '                @PathParam("id") String id,\n'
+            '                @HeaderParam("X-Token") String tok,\n'
+            '                @FormParam("name") String name){ return null; }\n'
+        )
+        out = self._detect(src, ["q", "id", "tok", "name"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("q", "query", "j-jaxrs-queryparam") in types
+        assert ("id", "path", "j-jaxrs-pathparam") in types
+        assert ("X-Token", "header", "j-jaxrs-headerparam") in types
+        assert ("name", "form", "j-jaxrs-formparam") in types
+
+    def test_httpservlet_getparameter_getheader_getcookies(self):
+        src = (
+            "public String h(HttpServletRequest req){\n"
+            '  String q = req.getParameter("q");\n'
+            '  String tok = req.getHeader("X-Token");\n'
+            "  Cookie[] cs = req.getCookies();\n"
+            "  return null;\n"
+            "}\n"
+        )
+        out = self._detect(src, ["req"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("q", "query", "j-httpservlet-getparameter") in types
+        assert ("X-Token", "header", "j-httpservlet-getheader") in types
+        assert any(s.rule_id == "j-httpservlet-getcookies" and s.source_type.value == "cookie"
+                   for s in out)
+
+
+class TestDeepsecSourcePhp:
+    """PHP superglobal 补齐 + Laravel(原规则只有 $_GET/$_POST/$_REQUEST)。"""
+
+    def _detect(self, src, params=None):
+        block = _block("a.php", "handler", 1, src, "php", params or [])
+        return detect_sources([block], parser=None, entry_point_ids={block.id},
+                              source_provider=_provider_from(block))
+
+    def test_superglobal_cookie_files_server(self):
+        src = (
+            "<?php\n"
+            "$sid = $_COOKIE['sid'];\n"
+            "$f = $_FILES['upload'];\n"
+            "$agent = $_SERVER['HTTP_USER_AGENT'];\n"
+            "?>\n"
+        )
+        out = self._detect(src)
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("sid", "cookie", "php-superglobal-cookie") in types
+        assert ("upload", "file", "php-superglobal-files") in types
+        assert ("HTTP_USER_AGENT", "header", "php-superglobal-server") in types
+
+    def test_laravel_input_query_route_file(self):
+        src = (
+            "<?php\n"
+            "function h($request){\n"
+            "$name = $request->input('name');\n"
+            "$q = $request->query('q');\n"
+            "$id = $request->route('id');\n"
+            "$f = $request->file('avatar');\n"
+            "}\n"
+        )
+        out = self._detect(src, ["request"])
+        types = {(s.param_name, s.source_type.value, s.rule_id) for s in out}
+        assert ("name", "body", "php-laravel-input") in types
+        assert ("q", "query", "php-laravel-query") in types
+        assert ("id", "path", "php-laravel-route") in types
+        assert ("avatar", "file", "php-laravel-file") in types
+

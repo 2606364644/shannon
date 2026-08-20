@@ -541,11 +541,13 @@ def test_collect_source_candidates_entry_point_ids_none_backward_compatible():
 def test_collect_source_candidates_catches_idor_flavor_java_get_parameter():
     """IDOR 风味: Java servlet `request.getParameter("userId")` 是对象级实体 id 取用。
 
-    回归锚点(非新 regex 的 RED→GREEN 验证):此 block 进候选是因现有 hint 的
-    `request\\.(?:GET|POST|...)` 带 `re.IGNORECASE` 命中 `request.get`(getParameter
-    的前 3 字符);ts-express-* / java-* 规则不命中(无 `@RequestParam` / `@PathVariable` /
-    点号 req.params.x)。文档化"Java IDOR 风味源不漏" —— 无论经新 regex 还是现有
-    broader hint,都应进候选送 LLM。
+    行为演进(deepsec §2.4 吸收后):`request.getParameter(...)` 现被确定性规则
+    `j-httpservlet-getparameter` 识别为 query source → block 整体不再进候选收集
+    (`_has_rule_hit` 拦截)。这是更精确的覆盖 —— 实体 id 取用已是确定性 source,
+    无需送 LLM 候选。本测试改为断言确定性命中 + 候选不再重复送 LLM。
+
+    IDOR flavor「不漏」由 `test_collect_source_candidates_catches_idor_flavor_generic_get_param`
+    (getParam("resourceId") 无规则命中)继续锚定候选路径。
     """
     src = (
         'public User getUser(HttpServletRequest req) {\n'
@@ -554,13 +556,19 @@ def test_collect_source_candidates_catches_idor_flavor_java_get_parameter():
         '}\n'
     )
     block = _block("Ctl.java", "getUser", 1, src, language="java")
+    # 确定性规则现在直接命中 → block 不进候选(已被规则接管)
     cands = collect_source_candidates(
         [block], sink_func_ids=set(),
         entry_point_ids={block.id},
         source_provider=lambda b: block.source_code.encode(),
     )
-    assert len(cands) == 1  # request.getParameter("userId") 进候选(LLM 判)
-    assert cands[0].block.id == block.id
+    assert len(cands) == 0  # request.getParameter("userId") 已被 j-httpservlet-getparameter 规则覆盖
+    # 验证确实被确定性规则识别(而非静默丢失)
+    from supernova_core.code_index.source_detector import detect_sources
+    sps = detect_sources([block], parser=None, entry_point_ids={block.id},
+                        source_provider=lambda b: block.source_code.encode())
+    assert any(s.param_name == "userId" and s.rule_id == "j-httpservlet-getparameter"
+               for s in sps)
 
 
 def test_collect_source_candidates_catches_idor_flavor_generic_get_param():
