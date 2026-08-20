@@ -29,6 +29,8 @@ from supernova_whitebox.pipeline.activities import (
     run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
     run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report, inject_attack_chains,
     inject_gitnexus_track_status,
+    run_assemble_dataflow_view,
+    verify_report_vuln_blocks,
     write_track_status_activity,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
     setup_display, finalize_summary, cleanup_auth_state_activity,
@@ -42,6 +44,7 @@ from supernova_blackbox.pipeline.activities import (
     log_phase_start_activity as bb_log_phase_start, log_phase_complete_activity as bb_log_phase_complete,
     log_info_activity as bb_log_info, load_correlation_context, resolve_blackbox_engine,
     detect_whitebox_results, write_engine_config_for_session, cleanup_engine_configs,
+    verify_report_vuln_blocks as bb_verify_report_vuln_blocks,
     setup_display as bb_setup_display, finalize_summary as bb_finalize_summary,
     run_host_proxy_setup as bb_run_host_proxy_setup, stop_host_proxy as bb_stop_host_proxy,
     cleanup_auth_state_activity as bb_cleanup_auth_state_activity,
@@ -70,6 +73,8 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             run_attack_chain_assembly_v2, run_framework_analysis, run_frontend_mapping,
             run_gitnexus_chain_verdict, run_route_chain_building, generate_poc_report, inject_attack_chains,
             inject_gitnexus_track_status,
+            run_assemble_dataflow_view,
+            verify_report_vuln_blocks,
             write_track_status_activity,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, finalize_summary, cleanup_auth_state_activity,
@@ -96,6 +101,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             bb_setup_display, bb_finalize_summary,
             bb_run_host_proxy_setup, bb_stop_host_proxy,
             bb_cleanup_auth_state_activity,
+            bb_verify_report_vuln_blocks,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(

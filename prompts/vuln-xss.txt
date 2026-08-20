@@ -130,8 +130,20 @@ Structure: Each `submit_finding` argument MUST follow this exact format:
 		"mismatch_reason": "If vulnerable, explain why the observed encoding is wrong for the render context (e.g., 'URL encoding used in an HTML attribute context, allowing event handler injection.').",
 		"witness_payload": "the payload VALUE itself — no param-name prefix (NOT 'firstName=<img...>'), no request line, no explanation text (e.g., '><script>alert(1)</script>', '\" onmouseover=alert(1) '). Multi-param delivery as 'a=1&b=2' is OK. Where/how to deliver it (endpoint, param, plant-then-trigger steps for Stored XSS) goes in `notes`.",
 		"confidence": "high | med | low.",
-		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors."
+		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors.",
+		"dataflow_steps": [
+			{"label": "UserController.list", "file": "app/controllers/userController.js", "line": 25, "protection": null},
+			{"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
+		]
 	}
+
+<dataflow_steps_guidance>
+`dataflow_steps`：按污点传播顺序，列出从 source 到 sink 经过的每个节点。
+- 每个节点给 `label`（函数名或调用点）、`file`、`line`（未知填 null）。
+- 若该节点有防护（sanitizer / 编码 / 校验），在 `protection` 填防护名；无防护填 null。
+- 防护有效则该节点之后不应再出现未防护的传播——防护被绕过则继续列后续节点。
+- 只列你实际追踪到的节点；没有完整路径时留空数组或省略。
+</dataflow_steps_guidance>
 </finding_submission>
 
 <externally_exploitable_semantics>

@@ -130,3 +130,244 @@
   --shadow-toolbar: 0 1px 2px hsl(34 40% 30% / 0.08);
   --shadow-toolbar-hover: 0 2px 4px hsl(34 40% 30% / 0.10), 0 10px 24px -8px hsl(34 40% 30% / 0.24);
 }
+
+/* —— 剪枝树（PruningTreeFig）专用动画与 class（spec 2026-08-20 §5 视觉语言）——
+   组件自研 SVG 不引可视化库；列对齐 x=step_index×COL_W，逐节点对齐。
+   打通枝=红虚线流动 / 剪断枝=绿实线至防护节点+✂残端 / sink 靶心红脉动或灰虚线 /
+   source 青色 pill / 同名函数青色点线弧。prefers-reduced-motion 全关。
+   色用 --c- 语义 channel（深浅双主题统一）；stroke-dashoffset 驱动「流动」。 */
+.branch-vuln {
+  stroke: hsl(var(--c-red));
+  stroke-width: 2.2;
+  fill: none;
+  stroke-dasharray: 7 5;
+  stroke-linecap: round;
+}
+/* 打通枝专属流动动画（.flow 组合类驱动 stroke-dashoffset；brief token.css 示例口径）*/
+.branch-vuln.flow {
+  animation: flow 1.1s linear infinite;
+}
+.branch-safe {
+  stroke: hsl(var(--c-green));
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+}
+.branch-remnant {
+  stroke: hsl(var(--c-green));
+  stroke-width: 1.6;
+  fill: none;
+  stroke-dasharray: 3 6;
+  opacity: 0.4;
+}
+.branch-unknown {
+  stroke: hsl(var(--c-amber));
+  stroke-width: 2.2;
+  fill: none;
+  stroke-dasharray: 4 4;
+  stroke-linecap: round;
+}
+.sameline {
+  stroke: hsl(var(--c-cyan));
+  stroke-width: 1.4;
+  fill: none;
+  stroke-dasharray: 1 4;
+  opacity: 0.7;
+}
+.sameline-txt {
+  fill: hsl(var(--c-cyan));
+  font-size: 10px;
+  opacity: 0.85;
+}
+.source-pill {
+  fill: hsl(var(--c-cyan) / 0.16);
+  stroke: hsl(var(--c-cyan));
+  stroke-width: 1.5;
+}
+.source-pill-txt {
+  fill: hsl(var(--c-cyan));
+  font-size: 11px;
+}
+.node-box {
+  fill: hsl(var(--card));
+  stroke: hsl(var(--border));
+  stroke-width: 1;
+}
+.node-box-vuln {
+  fill: hsl(var(--c-red) / 0.10);
+  stroke: hsl(var(--c-red) / 0.55);
+}
+.node-box-safe {
+  fill: hsl(var(--c-green) / 0.10);
+  stroke: hsl(var(--c-green) / 0.55);
+}
+.shield-yellow {
+  fill: hsl(var(--c-yellow) / 0.22);
+  stroke: hsl(var(--c-yellow));
+  stroke-width: 1.4;
+}
+.shield-green {
+  fill: hsl(var(--c-green) / 0.22);
+  stroke: hsl(var(--c-green));
+  stroke-width: 1.4;
+}
+.sink-pulse {
+  fill: none;
+  stroke: hsl(var(--c-red));
+  stroke-width: 2.4;
+  animation: sink-pulse 1.8s ease-in-out infinite;
+}
+.sink-idle {
+  fill: none;
+  stroke: hsl(var(--muted-foreground));
+  stroke-width: 1.6;
+  stroke-dasharray: 4 5;
+  opacity: 0.6;
+}
+.sink-label {
+  fill: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+.scissors-mark {
+  fill: hsl(var(--c-green));
+  font-size: 13px;
+  font-weight: 700;
+}
+.folded-safe {
+  fill: hsl(var(--c-green) / 0.12);
+  stroke: hsl(var(--c-green) / 0.5);
+  stroke-dasharray: 3 3;
+}
+/* 公共函数节点下标（spec §5「公共函数 ⟳ N 枝经过」）：青色小标，hover 说明剪断哪几条枝 */
+.pubfunc-sub {
+  fill: hsl(var(--c-cyan));
+  font-size: 9px;
+  opacity: 0.9;
+}
+/* source pill 副信息（type / METHOD route）小字 */
+.source-meta-txt {
+  fill: hsl(var(--c-cyan) / 0.8);
+  font-size: 8.5px;
+}
+/* 2ND 存储中转枝 source 标记（琥珀色，spec §5 白话「存储中转」） */
+.storage-relay-txt {
+  fill: hsl(var(--c-amber));
+  font-size: 8.5px;
+  font-weight: 600;
+}
+/* safe-only 树灰靶心下的「无输入到达」小字（spec §5 白话表） */
+.sink-noinput-txt {
+  fill: hsl(var(--muted-foreground) / 0.9);
+  font-size: 9px;
+}
+/* 图↔行联动高亮（spec §5「交互」段）：hovered=hover 查看中（枝条加粗提亮）、
+   selected=点枝条选中（coral 光晕）；SVG 枝条 path 与 BranchRow 行两侧同语义。
+   branch-row-hovered/selected 供明细行底色/描边。 */
+.branch-vuln.hovered,
+.branch-safe.hovered,
+.branch-unknown.hovered,
+.branch-vuln.selected,
+.branch-safe.selected,
+.branch-unknown.selected {
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 3px hsl(var(--primary) / 0.45));
+}
+.branch-row-hovered {
+  background: hsl(var(--accent) / 0.55);
+}
+.branch-row-selected {
+  background: hsl(var(--accent) / 0.4);
+  outline: 1px solid hsl(var(--primary) / 0.55);
+  outline-offset: -1px;
+}
+/* 枝条 g 可点（点枝条展开对应明细） */
+svg g[data-branch-id] {
+  cursor: pointer;
+}
+@keyframes flow {
+  to { stroke-dashoffset: -24; }
+}
+@keyframes sink-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); transform-box: fill-box; transform-origin: center; }
+  50% { opacity: 0.55; transform: scale(1.08); transform-box: fill-box; transform-origin: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .branch-vuln.flow { animation: none; }
+  .sink-pulse { animation: none; }
+}
+
+/* —— Task 13：认证/授权关卡链（GuardChain）+ 目录定位闪烁 ——
+   关卡三态：🟢 ok 绿边 / 🔴 missing dashed 红边 + 流动断线（污点穿过的缺口）/
+   🟡 ineffective 黄边。dataflow-flash = 目录点击 / ?tree= 深链定位的
+   目标卡 coral 描边闪烁（--primary=coral，双主题统一）。 */
+.guard-ok {
+  border-color: hsl(var(--c-green) / 0.55);
+  background: hsl(var(--c-green) / 0.06);
+}
+.guard-missing {
+  border-style: dashed;
+  border-color: hsl(var(--c-red));
+  background: hsl(var(--c-red) / 0.05);
+}
+.guard-ineffective {
+  border-color: hsl(var(--c-yellow));
+  background: hsl(var(--c-yellow) / 0.07);
+}
+/* 缺失关卡内的「流动断线」：红色渐隐虚线向 sink 方向滚动 */
+.guard-gap-flow {
+  height: 3px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, hsl(var(--c-red)) 0 7px, transparent 7px 14px);
+  animation: guard-gap-move 0.9s linear infinite;
+}
+@keyframes guard-gap-move {
+  to { background-position: 28px 0; }
+}
+/* 目录点击 / ?tree= 深链定位：目标卡 coral 描边闪烁后渐隐（残留静态描边供定位） */
+.dataflow-flash {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  animation: dataflow-flash 1.8s ease-out 1;
+}
+@keyframes dataflow-flash {
+  0%, 100% { outline-color: hsl(var(--primary) / 0); }
+  15%, 55% { outline-color: hsl(var(--primary)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guard-gap-flow { animation: none; }
+  .dataflow-flash { animation: none; }
+}
+
+/* —— [data-tooltip] 通用暗色 hover 浮层（data-tooltip 属性的全局 CSS 消费方）——
+   任何带 data-tooltip 的元素 hover 时弹出暗色浮层（纯 CSS ::after content:attr）。
+   现有受益点：剪枝树节点 / source pill / sink 靶心（spec §5「节点 hover tooltip：
+   函数+位置+防护速览，暗色浮层」）。HTML 元素浮层锚定元素上方；
+   SVG <g> 无 CSS 盒定位，::after 在该 g 的局部原点渲染——带 transform 的 g
+   （PruningTreeFig 节点/pill/靶心均带）即浮在元素自身位置，伴生规则保 SVG 文本可读。 */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: hsl(34 8% 12%);
+  color: hsl(36 10% 91%);
+  border: 1px solid hsl(34 10% 26%);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 2px 8px hsl(0 0% 0% / 0.3);
+}
+/* SVG 伴生：伪元素按 SVG 文本渲染（HTML 盒样式多半不适用），保证可读填充色 */
+svg [data-tooltip]:hover::after {
+  fill: hsl(36 10% 91%);
+  font-size: 11px;
+}

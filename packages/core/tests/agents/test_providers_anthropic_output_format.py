@@ -69,3 +69,48 @@ class TestBuildOptionsOutputFormatEnvelope:
         assert options.output_format["type"] == "json_schema"
         # 内层 schema 原样保留(同一对象,无字段丢失/改写)
         assert options.output_format["schema"] == bare
+
+
+# ── P2（dataflow-view 2026-08-20 Task 3）：bridge 双引擎 schema 一致性 ──
+
+def test_bridge_dataflow_steps_in_both_engines():
+    """P2: dataflow_steps 一份 schema 出两套工具（bridge 单点定义不变量）。
+
+    bridge 真实 API 吃 CollectorBase（非 sections 列表）：
+    - openai: ``build_openai_tools(collector)`` → FunctionTool.params_json_schema。
+    - claude: ``build_claude_mcp_server(collector)`` 返回 McpSdkServerConfig
+      （``{"type":"sdk","name",...,"instance": mcp.server.Server}`），工具 schema 经
+      SDK ``_build_schema``（type+properties → 原样透传）进入 server 注册的
+      list_tools handler——驱动该 handler 拿 Tool.inputSchema，即 CLI 实际发给
+      模型的 schema。断言两引擎同含 dataflow_steps 且内容一致。
+    """
+    import asyncio
+
+    from mcp.types import ListToolsRequest
+
+    from supernova_core.collectors.bridge import build_claude_mcp_server, build_openai_tools
+    from supernova_core.collectors.vuln import make_vuln_collector
+
+    collector = make_vuln_collector("injection")
+
+    # openai 引擎：FunctionTool（strict_json_schema=False，宽容解析）
+    oai_tools = build_openai_tools(collector)
+    oai_tool = next(t for t in oai_tools if t.name == "submit_finding")
+    oai_props = oai_tool.params_json_schema["properties"]
+    assert oai_tool.strict_json_schema is False
+
+    # claude 引擎：in-process MCP server 的 list_tools → Tool.inputSchema
+    server = build_claude_mcp_server(collector)["instance"]
+    handler = server.request_handlers[ListToolsRequest]
+    result = asyncio.run(handler(ListToolsRequest(method="tools/list")))
+    claude_tool = next(t for t in result.root.tools if t.name == "submit_finding")
+    claude_props = claude_tool.inputSchema["properties"]
+
+    assert "dataflow_steps" in oai_props
+    assert "dataflow_steps" in claude_props
+    # 同一份 dict：openai 侧 bridge 直接引用 SectionSchema.json_schema（同一对象）；
+    # claude 侧经 pydantic Tool 校验是等值拷贝，故用 == 断言内容一致。
+    section = collector.section_schemas[0]
+    assert section.tool_name == "submit_finding"
+    assert oai_tool.params_json_schema is section.json_schema
+    assert oai_props["dataflow_steps"] == claude_props["dataflow_steps"]

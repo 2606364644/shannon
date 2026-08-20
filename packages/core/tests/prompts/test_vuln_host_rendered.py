@@ -15,6 +15,7 @@ Per-class strategic-intelligence field names are asserted in their human-readabl
 form (mirrors TS upstream wording); the snake_case field names live in the
 harness-injected tool catalog, not the prompt body.
 """
+import pytest
 from pathlib import Path
 
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
@@ -306,3 +307,21 @@ def test_final_structured_output_gone():
         text = _read(name)
         for pat in FINAL_OUTPUT_PATTERNS:
             assert pat not in text, f"{name}: final-output pattern still present: {pat!r}"
+
+
+# ── 数据流视图 Task 5（P2）：taint prompt 的 dataflow_steps 提交说明 ──────────
+
+@pytest.mark.parametrize("vc", ["injection", "xss", "ssrf"])
+def test_taint_prompt_mentions_dataflow_steps(vc):
+    """inj/xss/ssrf prompt 的 finding_submission 段须引导提交 dataflow_steps。"""
+    txt = (PROMPTS_DIR / f"vuln-{vc}.txt").read_text(encoding="utf-8")
+    assert "dataflow_steps" in txt, f"{vc} prompt 未提 dataflow_steps"
+    # 出现在 finding_submission 段附近（粗校验：该段存在且含字段名）
+    assert "finding_submission" in txt or "submit_finding" in txt
+
+
+@pytest.mark.parametrize("vc", ["auth", "authz"])
+def test_control_prompt_no_dataflow_steps(vc):
+    """auth/authz 无 taint 流，不引导 dataflow_steps。"""
+    txt = (PROMPTS_DIR / f"vuln-{vc}.txt").read_text(encoding="utf-8")
+    assert "dataflow_steps" not in txt

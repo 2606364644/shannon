@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +27,7 @@ export function MergeSourceBadge({ src }: { src?: MergeSource }) {
   );
 }
 
-export function VulnCard({ v }: { v: Vulnerability }) {
+export function VulnCard({ v, dataflowTreeId }: { v: Vulnerability; dataflowTreeId?: string | null }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((o) => !o);
@@ -66,6 +67,21 @@ export function VulnCard({ v }: { v: Vulnerability }) {
             <div><b>technique:</b> <code className="font-mono text-cyan">{v.suggested_exploit_technique}</code></div>
           )}
           {v.notes && <div className="text-muted-foreground"><b>notes:</b> {v.notes}</div>}
+          {/* 数据流跳转（spec 2026-08-20 §5 路由与入口）：taint 树上的 finding 由
+              DeliverablesTab 建 finding_id → tree_id 映射传入；无映射（auth/authz、
+              树未含该 finding、无 dataflow 产物）不渲染链接。相对路由 ../dataflow
+              与本 tab（deliverables）同级；落点 = DataFlowTab ?tree= 锚点定位 + 闪烁。 */}
+          {dataflowTreeId && (
+            <div>
+              <Link
+                to={`../dataflow?tree=${encodeURIComponent(dataflowTreeId)}`}
+                data-testid="vuln-dataflow-link"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                {t("vuln.viewDataflow")} <span aria-hidden>→</span>
+              </Link>
+            </div>
+          )}
         </CardContent>
       )}
     </Card>

@@ -320,3 +320,42 @@ def test_validate_raise_context_carries_recheck_cost(tmp_path, monkeypatch):
     assert ctx["recheck_cost"] == pytest.approx(0.1)   # 重查 0.1 与主 0.1 区分可见
     assert ctx["recheck_turns"] == 2
     assert ctx["cost_usd"] == pytest.approx(0.1)       # 主 agent cost（既有键）
+
+
+# ── 数据流视图 Task 4（spec 2026-08-20 §4 P2）：pydantic dataflow_steps ──────
+
+def test_dataflow_steps_survives_model_dump_merge():
+    """P2: dataflow_steps 必须进 pydantic 模型，否则 merge model_dump() 丢字段。"""
+    from supernova_core.models.queue_schemas import InjectionVulnerability
+    f = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="injection",
+        externally_exploitable=True, confidence="high",
+        dataflow_steps=[{"label": "UserController.list", "file": "a.py", "line": 25, "protection": None}],
+    )
+    dumped = f.model_dump()
+    assert dumped["dataflow_steps"] == [{"label": "UserController.list", "file": "a.py", "line": 25, "protection": None}]
+
+
+def test_parse_lenient_normalizes_dataflow_steps_malformed():
+    """P2: 畸形 dataflow_steps 不拒收 finding——非 list→None、元素非 dict→丢弃、字段类型错→忽略该字段（按字段独立，fix round 1）。"""
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+
+    content = json.dumps({"vulnerabilities": [
+        {"ID": "V1", "vulnerability_type": "injection", "externally_exploitable": True,
+         "confidence": "high", "dataflow_steps": "not-a-list"},          # 非 list → None
+        {"ID": "V2", "vulnerability_type": "injection", "externally_exploitable": True,
+         "confidence": "high", "dataflow_steps": [{"label": "ok"}, "not-a-dict", 42]},  # 混杂 → 留 {label:ok}
+        {"ID": "V3", "vulnerability_type": "injection", "externally_exploitable": True,
+         "confidence": "high", "dataflow_steps": [{"label": 123, "file": "a.py"}]},   # label 类型错 → 忽略该字段
+        {"ID": "V4", "vulnerability_type": "injection", "externally_exploitable": True,
+         "confidence": "high", "dataflow_steps": [{"label": "x", "line": True}]},    # line bool → 忽略该字段
+    ]})
+    rec = VulnerabilityQueue.parse_lenient(content, vuln_class="injection")
+    assert len(rec.queue.vulnerabilities) == 4  # 都没被丢
+    v1, v2, v3, v4 = rec.queue.vulnerabilities
+    assert v1.dataflow_steps is None
+    assert v2.dataflow_steps == [{"label": "ok"}]  # 非 dict 元素丢弃
+    # label 类型错 → 忽略该字段（按字段独立），file 合法保留
+    assert v3.dataflow_steps == [{"file": "a.py"}]
+    # line=True（bool 是 int 子类）→ 忽略该字段，label 保留
+    assert v4.dataflow_steps == [{"label": "x"}]

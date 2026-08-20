@@ -229,6 +229,7 @@ def test_finding_schema_class_specific_fields():
     """per-class finding schema：class 特有字段各不相同（宽松 optional，无 enum）。"""
     def _props(vc):
         sub = make_vuln_sections(vc)[0]
+        # 基线字段（_finding_props，对所有 class 生效）
         return set(sub.json_schema["properties"]) - {
             "ID", "vulnerability_type", "externally_exploitable", "confidence", "title", "notes"}
 
@@ -236,21 +237,22 @@ def test_finding_schema_class_specific_fields():
         "source_endpoint", "vulnerable_code_location", "missing_defense",
         "exploitation_hypothesis", "suggested_exploit_technique"}
     assert _props("ssrf") == _props("auth") | {
-        "vulnerable_parameter", "witness_payload"}
+        "vulnerable_parameter", "witness_payload", "dataflow_steps"}
     assert _props("authz") == {
         "endpoint", "vulnerable_code_location", "role_context", "guard_evidence",
         "side_effect", "reason", "minimal_witness"}
     # injection 与 xss 是两套契约（对齐 TS 原版 queue-schemas.ts 的
     # injectionFields / xssFields）：injection=sink_call 族，xss=sink_function 族；
     # 两轨各加 prompt 增强字段 authentication_required / accessible_routes。
+    # dataflow_steps 仅三个 taint class（inj/xss/ssrf）携带（spec §2 L39）。
     assert _props("injection") == {
         "source", "authentication_required", "accessible_routes", "path",
         "sink_call", "slot_type", "sanitization_observed", "concat_occurrences",
-        "verdict", "mismatch_reason", "witness_payload"}
+        "verdict", "mismatch_reason", "witness_payload", "dataflow_steps"}
     assert _props("xss") == {
         "source", "source_detail", "authentication_required", "accessible_routes",
         "path", "sink_function", "render_context", "encoding_observed",
-        "verdict", "mismatch_reason", "witness_payload"}
+        "verdict", "mismatch_reason", "witness_payload", "dataflow_steps"}
 
 
 def test_findings_summary_roster_required():
@@ -275,3 +277,34 @@ def test_make_collector_never_none_for_vuln_agents():
     assert len(vuln_names) == 5
     for name in vuln_names:
         assert make_collector(name) is not None, name.value
+
+
+# ── P2（dataflow-view 2026-08-20 Task 3）：submit_finding dataflow_steps ──
+
+def test_submit_finding_has_dataflow_steps_field():
+    """P2: dataflow_steps 扁平数组字段进 submit_finding schema（inj/xss/ssrf）。"""
+    from supernova_core.collectors.vuln import make_vuln_sections
+    seen: dict[str, dict] = {}
+    for vc in ("injection", "xss", "ssrf"):
+        sections = make_vuln_sections(vc)
+        submit = next(s for s in sections if s.tool_name == "submit_finding")
+        props = submit.json_schema["properties"]
+        assert "dataflow_steps" in props, f"{vc} submit_finding missing dataflow_steps"
+        ds = props["dataflow_steps"]
+        assert ds["type"] == "array"
+        item = ds["items"]
+        assert set(item["properties"].keys()) >= {"label", "file", "line", "protection"}
+        # 元素全 optional（spec §4 P2①）：items 不带 required
+        assert "required" not in item
+        # 不进 required（全 optional）
+        assert "dataflow_steps" not in submit.json_schema.get("required", [])
+        seen[vc] = ds
+    # 三处引用同一 dict 对象（单一声明，别复制三份）
+    assert seen["injection"] is seen["xss"] is seen["ssrf"]
+
+
+def test_control_submit_finding_has_no_dataflow_steps():
+    for vc in ("auth", "authz"):
+        sections = make_vuln_sections(vc)
+        submit = next(s for s in sections if s.tool_name == "submit_finding")
+        assert "dataflow_steps" not in submit.json_schema["properties"], f"{vc} 不应带 dataflow_steps（无 taint 流）"

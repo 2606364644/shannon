@@ -114,8 +114,20 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 	  "exploitation_hypothesis": "A clear statement describing the expected outcome of a successful exploit (e.g., 'An attacker can access internal services by providing internal URLs', 'An attacker can retrieve cloud metadata through URL manipulation').",
 	  "suggested_exploit_technique": "The specific attack pattern to attempt, derived from the methodology (e.g., 'internal_service_access', 'cloud_metadata_retrieval', 'port_scanning', 'webhook_abuse').",
 	  "confidence": "High | Medium | Low",
-	  "notes": "Relevant details about request format, authentication requirements, observed timeouts, or links to related findings."
+	  "notes": "Relevant details about request format, authentication requirements, observed timeouts, or links to related findings.",
+	  "dataflow_steps": [
+		  {"label": "UserController.list", "file": "app/controllers/userController.js", "line": 25, "protection": null},
+		  {"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
+	  ]
 	}
+
+<dataflow_steps_guidance>
+`dataflow_steps`：按污点传播顺序，列出从 source 到 sink 经过的每个节点。
+- 每个节点给 `label`（函数名或调用点）、`file`、`line`（未知填 null）。
+- 若该节点有防护（sanitizer / 编码 / 校验），在 `protection` 填防护名；无防护填 null。
+- 防护有效则该节点之后不应再出现未防护的传播——防护被绕过则继续列后续节点。
+- 只列你实际追踪到的节点；没有完整路径时留空数组或省略。
+</dataflow_steps_guidance>
 </finding_submission>
 
 <externally_exploitable_semantics>

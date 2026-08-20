@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import useSWR from "swr";
 import { ShieldAlert } from "lucide-react";
-import { scanDeliverablesPath, blackboxRunDeliverablesPath } from "../../api/client";
+import { scanDeliverablesPath, blackboxRunDeliverablesPath, fetchDataflowView } from "../../api/client";
 import { useApiJson } from "@/api/useApiResource";
 import type { DeliverablesSummary, DeliverablesFile } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { VulnCard } from "../../components/VulnCard";
+import { buildFindingTreeMap } from "@/components/dataflow/findingTreeMap";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +37,15 @@ export function DeliverablesTab() {
     : null;
   const { data, loading, error: err } = useApiJson<DeliverablesSummary>(path);
   useEffect(() => { setSel(null); }, [path]);
+
+  // 数据流跳转映射（spec 2026-08-20 §5 路由与入口）：SWR 拉同一 dataflow API
+  // （与 DataFlowTab 同 key → 共享缓存，零额外请求），建 finding_id → tree_id 传
+  // VulnCard 展开态「查看数据流」链接。404（无产物）/ 失败 → 无映射 → 无链接（错误忽略）。
+  const { data: dataflow } = useSWR(
+    workspace && scanId ? ["dataflow", workspace, scanId] : null,
+    () => fetchDataflowView(workspace!, scanId!),
+  );
+  const treeByFindingId = useMemo(() => buildFindingTreeMap(dataflow), [dataflow]);
 
   // 三态早返回：err → ErrorState；loading → Skeleton；data → 主布局
   if (err) return <ErrorState message={t("workspaceDetail.deliverables.loadError", { error: err })} />;
@@ -78,15 +89,22 @@ export function DeliverablesTab() {
             onBack={() => setSel(null)}
           />
         ) : (
-          <AggregationView data={data} />
+          <AggregationView data={data} treeByFindingId={treeByFindingId} />
         )}
       </div>
     </div>
   );
 }
 
-/** 聚合视图：injection 标注 + VulnCard 堆叠（标题计数由左列「漏洞聚合 · N」入口承载，不重复）。 */
-function AggregationView({ data }: { data: DeliverablesSummary }) {
+/** 聚合视图：injection 标注 + VulnCard 堆叠（标题计数由左列「漏洞聚合 · N」入口承载，不重复）。
+ *  treeByFindingId：finding_id → tree_id 映射（数据流跳转链接，spec 2026-08-20 §5）。 */
+function AggregationView({
+  data,
+  treeByFindingId,
+}: {
+  data: DeliverablesSummary;
+  treeByFindingId: Map<string, string>;
+}) {
   const { t } = useTranslation();
   return (
     <div className="space-y-2" data-testid="agg-view">
@@ -109,7 +127,9 @@ function AggregationView({ data }: { data: DeliverablesSummary }) {
       {data.aggregated_vulnerabilities.length === 0 && (
         <Empty title={t("workspaceDetail.deliverables.emptyTitle")} hint={t("workspaceDetail.deliverables.emptyHint")} />
       )}
-      {data.aggregated_vulnerabilities.map((v) => <VulnCard key={v.ID} v={v} />)}
+      {data.aggregated_vulnerabilities.map((v) => (
+        <VulnCard key={v.ID} v={v} dataflowTreeId={treeByFindingId.get(v.ID) ?? null} />
+      ))}
     </div>
   );
 }

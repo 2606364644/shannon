@@ -1,5 +1,5 @@
 import type {
-  BlackboxRunSummary, FsBrowseResult, Repo, RepoDetail,
+  BlackboxRunSummary, DataflowView, FsBrowseResult, Repo, RepoDetail,
   ScanRequest, ScanSummary, SessionData,
 } from "./types";
 
@@ -240,6 +240,12 @@ export const blackboxRunDeliverablesPath = (
 /** run events SSE URL（tail run-K/events.ndjson）。 */
 export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) =>
   `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/events`;
+
+// ── 数据流视图（spec 2026-08-20 §3）───────────────────────────────────────────
+// GET /workspaces/{ws}/scans/{id}/dataflow → dataflow_view.json（写时组装产物）。
+// 全产物缺 → 后端 404（不产文件）；fetcher 抛 ApiError(404)，消费方据此显空态。
+export const fetchDataflowView = (ws: string, scanId: string) =>
+  apiGet<DataflowView>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/dataflow`);
 
 // ── 组合扫描阶段判定（live 阶段徽章 / report ?run= 用；events 流已全量归并）──────
 // 2026-08-18 起 events 端点在后端按 ts 归并 认证/白盒/所有 run-K 为一条流，前端不再

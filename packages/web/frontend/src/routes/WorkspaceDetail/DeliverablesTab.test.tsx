@@ -528,4 +528,57 @@ describe("DeliverablesTab i18n", () => {
     await i18n.changeLanguage("en");
     expect(await screen.findByText(/Deliverables load failed/)).toBeInTheDocument();
   });
+
+  // —— Fix round 1 F②：数据流跳转集成（spec 2026-08-20 §5 路由与入口）——
+  // msw /dataflow handler + VulnCard 展开态链接断言 + dataflow 端点单次请求。
+  it("VulnCard 展开态渲染「查看数据流」链接（finding_id → tree_id 映射 + dataflow 请求只发一次）", async () => {
+    let dataflowRequests = 0;
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/dataflow", () => {
+        dataflowRequests += 1;
+        return HttpResponse.json({
+          schema_version: 1,
+          summary: { total_sinks: 1, vulnerable_sinks: 1, safe_only_sinks: 0 },
+          trees: [
+            {
+              tree_id: "T-VULN-01",
+              vuln_class: "injection",
+              sink: { label: "cursor.execute", file: "app/db.py", line: 42, rule_id: null, category: null, code: null },
+              findings: [
+                { id: "INJ-VULN-01", merge_source: "both", title: "SQL 注入", confidence: "high" },
+              ],
+              branches: [],
+            },
+          ],
+          control_findings: [],
+          safe_vectors: [],
+        });
+      }),
+      http.get("/api/workspaces/:ws/scans/:scanId/deliverables", () =>
+        HttpResponse.json(
+          makeSummary({
+            aggregated_vulnerabilities: [
+              // 在 taint 树上 → 展开态有跳转链接
+              { ID: "INJ-VULN-01", vulnerability_type: "SQL_Injection", externally_exploitable: false },
+              // 不在树上（auth 类无映射）→ 无链接
+              { ID: "AUTH-01", vulnerability_type: "Missing_Authentication", externally_exploitable: false },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderAt("/p/NodeGoat/scans/scan1/deliverables");
+    // 展开 taint 卡（点 ID 文本冒泡到 header 的 toggle）
+    fireEvent.click(await screen.findByText("INJ-VULN-01"));
+    const link = (await screen.findByText(/查看数据流/)).closest("a");
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute("href") ?? "").toContain("?tree=T-VULN-01");
+    expect(link?.getAttribute("href") ?? "").toContain("dataflow");
+    // 展开无映射卡 → 不多出第二条链接（全程只有 1 个「查看数据流」）
+    fireEvent.click(screen.getByText("AUTH-01"));
+    expect(screen.getAllByText(/查看数据流/).length).toBe(1);
+    // dataflow 端点只请求一次（SWR 单 hook 去重；与 DataFlowTab 共享缓存由同 key
+    // ["dataflow", ws, id] 常量保证——两 tab 切换零额外请求）
+    expect(dataflowRequests).toBe(1);
+  });
 });

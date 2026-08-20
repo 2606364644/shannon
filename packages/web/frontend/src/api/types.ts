@@ -307,6 +307,109 @@ export interface DeliverablesSummary {
   notes?: { injection_has_no_queue?: boolean };
 }
 
+// === 数据流视图（spec 2026-08-20 §3，对齐 core services/dataflow_view.py 产出 schema）===
+// 写时组装产物：5 类 intermediate + LLM queue → dataflow_view.json（schema_version=1）。
+// 字段名与 core assemble_dataflow_view 返回值严格一致（snake_case）。
+/** taint 树中间节点（propagation step）。有故事的步（transformation 非空 / sanitizer
+ *  所在步）才存 code；纯透传步 has_code=false。LLM 枝节点无源码 → has_code:false。 */
+export interface DataflowNode {
+  func: string | null;
+  file: string | null;
+  line: number | null;
+  transformation?: string | null;
+  intermediate_vars: string[];
+  code?: string | null;
+  has_code: boolean;
+}
+/** 枝 sanitizer：effective 语义=枝 verdict（safe→有效 / vulnerable→无效 / unknown→null）。 */
+export interface DataflowSanitizer {
+  name: string | null;
+  defense_type?: string | null;
+  file?: string | null;
+  line?: number | null;
+  effective: boolean | null;
+}
+/** 枝 source（入口/存储起点）。2ND 枝 type="storage"，write 侧 file:line 并入 label。 */
+export interface DataflowSource {
+  label: string | null;
+  type: string | null;            // "storage" | entry source_type | null
+  entry?: string | null;
+  file?: string | null;
+  line?: number | null;
+}
+/** 数据流枝（一条 source→sink 传播路径）。track=gitnexus 来自 chain_verdicts；
+ *  llm 来自 exploitation_queue 自述 steps；2ND-* 枝 track=gitnexus source.type=storage。 */
+export interface DataflowBranch {
+  branch_id: string | null;
+  track: "gitnexus" | "llm";
+  verdict: "vulnerable" | "safe" | "unknown";
+  verdict_reason?: string | null;
+  source: DataflowSource;
+  nodes: DataflowNode[];
+  sanitizers: DataflowSanitizer[];
+}
+/** 漏洞聚合条目（挂在树 findings[]，跨轨去重后）。 */
+export interface DataflowFinding {
+  id: string | null;
+  merge_source?: string | null;
+  title?: string | null;
+  confidence?: string | null;
+  witness_payload?: string | null;
+  mismatch_reason?: string | null;
+}
+/** sink 元信息（树粒度=sink）。GN 侧有 rule_id/category/code；LLM 自立树只有位置。 */
+export interface DataflowSink {
+  label: string | null;
+  file: string | null;
+  line: number | null;
+  rule_id?: string | null;
+  category?: string | null;
+  code?: string | null;
+}
+/** taint 树（injection/xss/ssrf）：一个 sink 一棵树，挂 GN + LLM + 2ND 枝 + findings。 */
+export interface DataflowTree {
+  tree_id: string;
+  vuln_class: string;
+  sink: DataflowSink;
+  findings: DataflowFinding[];
+  branches: DataflowBranch[];
+}
+/** auth/authz 关卡链节点（status ∈ ok/missing/ineffective，非树形）。 */
+export interface ControlChainStep {
+  label: string | null;
+  status: "ok" | "missing" | "ineffective";
+  detail?: string | null;
+  file?: string | null;
+  line?: number | null;
+}
+/** auth/authz 防护位关卡链（control_findings，非 taint 树）。 */
+export interface ControlFinding {
+  id: string | null;
+  vuln_class: string;
+  endpoint: string | null;
+  chain: ControlChainStep[];
+}
+/** 顶层 safe_vectors 区（未匹配到 sink 树的 LLM 安全向量，去重后）。 */
+export interface SafeVector {
+  subject: string | null;
+  location: string | null;
+  defense_mechanism: string | null;
+  render_context?: string | null;
+}
+/** 数据流视图顶层 schema（GET /workspaces/{ws}/scans/{id}/dataflow）。
+ *  全产物缺 → 后端 404（不产文件）；有任一产物 → schema_version=1 + summary/trees/... */
+export interface DataflowView {
+  schema_version: number;
+  summary: {
+    total_sinks: number;
+    vulnerable_sinks: number;     // findings 非空的树数
+    safe_only_sinks: number;     // branches 非空但 findings 空的树数
+  };
+  trees: DataflowTree[];
+  control_findings: ControlFinding[];
+  safe_vectors: SafeVector[];
+}
+
 /** 黑盒登录配置（对齐 core Authentication schema：models/config.py:29-45）。
  *  字段名（snake_case）与后端 pydantic 模型一致——scan_manager Authentication.model_validate 校验。*/
 export interface ScanAuthentication {

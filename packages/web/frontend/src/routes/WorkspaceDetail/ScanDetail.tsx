@@ -24,6 +24,7 @@ const SCAN_TABS = [
   { value: "overview", labelKey: "workspaceDetail.tabs.overview" },
   { value: "report", labelKey: "workspaceDetail.tabs.report" },
   { value: "deliverables", labelKey: "workspaceDetail.tabs.deliverables" },
+  { value: "dataflow", labelKey: "workspaceDetail.tabs.dataflow" },
   { value: "logs", labelKey: "workspaceDetail.tabs.logs" },
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
 ] as const;
@@ -213,8 +214,8 @@ export default function ScanDetail() {
   // live/logs tab：根容器走 flex 链，高度 = 视口 - 固定的 TopBar(h-12=3rem) + main(py-5=2.5rem) = 5.5rem
   // （这俩不换行、精确可靠，非对 header 的估值）；header/时间线/sticky 进度块用 shrink-0 保持自然高
   // （窄屏 flex-wrap 换行也由 flex 自动吸收），Outlet 容器 flex-1 min-h-0 吃剩余空间 -> tab 内容动态
-  // 填满、不溢出视口、无外层滚动条。其余 tab（overview/report/deliverables）保持 space-y-4 流式
-  // （依赖 window 滚，如 ReportTab TOC scroll-spy），进度概览+tabs 走 sticky 固定（见下）。
+  // 填满、不溢出视口、无外层滚动条。其余 tab（overview/report/deliverables/dataflow）保持 space-y-4 流式
+  // （依赖 window 滚，如 ReportTab TOC scroll-spy / DataFlowTab 两栏），进度概览+tabs 走 sticky 固定（见下）。
   const isFlexLayout = current === "live" || current === "logs";
 
   return (

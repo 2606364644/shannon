@@ -190,6 +190,27 @@ def deliverables_file_for(scan_dir, filename: str, track: str = "whitebox"):
         raise HTTPException(404, "file not found")
 
 
+def _dataflow_view_for(scan_dir: Path):
+    """读 deliverables/whitebox/intermediate/dataflow_view.json（tier fallback
+    桶平铺）-> dict。缺产物 / 解析失败 -> 404 "dataflow view not generated"。
+
+    用 resolve_intermediate（spec 2026-08-18 tiering 读侧 fallback）：先
+    intermediate/ 再桶平铺，都不存在返 None。不经 DeliverablesReader——端点返
+    JSON（非 text/plain 截断），且 dataflow_view.json 是结构化视图产物，
+    透传原始 JSON 由 FastAPI 序列化，避免 preview_limit 截断成 str。
+    """
+    import json
+    from supernova_core.utils.paths import resolve_intermediate, WHITEBOX_SUBDIR
+    wb_dir = scan_dir / "deliverables" / WHITEBOX_SUBDIR
+    path = resolve_intermediate(wb_dir, "dataflow_view.json")
+    if path is None or not path.exists():
+        raise HTTPException(404, "dataflow view not generated")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(404, "dataflow view not generated")
+
+
 def report_for(scan_dir, track: str | None = None) -> str:
     """读 scan_dir 的综合报告 md（+ PoC 拼接）。
 
@@ -391,6 +412,15 @@ async def scan_report(ws: str, scan_id: str, request: Request, _: User = Depends
     """综合报告（text/plain）。track 可选（spec §10.1 三视图）：whitebox/blackbox/combined
     取该桶报告；不传则 auto-infer（纯白盒/纯黑盒零回归）。"""
     return report_for(_scan_dir_or_404(request, ws, scan_id), track)
+
+
+@router.get("/{ws}/scans/{scan_id}/dataflow")
+async def scan_dataflow(ws: str, scan_id: str, request: Request,
+                        _: User = Depends(workspace_member)):
+    """P5: 数据流视图（dataflow_view.json）。读 whitebox intermediate 产物，
+    缺 -> 404 "dataflow view not generated"。对齐 scan_report 鉴权（workspace_member）。
+    """
+    return _dataflow_view_for(_scan_dir_or_404(request, ws, scan_id))
 
 
 @router.get("/{ws}/scans/{scan_id}/logs")

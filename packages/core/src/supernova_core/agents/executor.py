@@ -199,6 +199,24 @@ async def _targeted_recheck(
     return [it for it in items if isinstance(it, dict) and it.get("ID")], result
 
 
+def _dump_safe_vectors(deliverables: Path, vc: str, payload_bag: dict) -> None:
+    """P3: 同步落 intermediate/{vc}_safe_vectors.json（组装器需结构化源）。
+
+    空/缺失不落盘。门控由调用方（execute 的 collector 分支）保证。
+    atomic_write_json / intermediate_path 复用模块级 import。
+    """
+    sv = payload_bag.get("safe_vectors")
+    if not sv:
+        return
+    vectors = sv.get("vectors") if isinstance(sv, dict) else sv
+    if not vectors:
+        return
+    atomic_write_json(
+        intermediate_path(deliverables, f"{vc}_safe_vectors.json"),
+        {"vectors": vectors},
+    )
+
+
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
         self.prompt_manager = prompt_manager
@@ -427,6 +445,10 @@ class AgentExecutor:
                     agent_name.value, len(payload_bag.get("submitted_findings") or []),
                     len(roster or []), len(rec.merged), len(still_missing),
                 )
+            # P3（数据流视图）：queue 落盘同步落 {vc}_safe_vectors.json——
+            # 组装器需结构化源（safe_vectors 目前只渲染进 md）。空/缺失不落盘。
+            _dump_safe_vectors(deliverables, agent_name.value.removesuffix("-vuln"),
+                               payload_bag)
         elif (
             not skip_artifact_postprocess
             and result.structured_output is not None

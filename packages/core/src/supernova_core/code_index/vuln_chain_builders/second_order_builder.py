@@ -162,6 +162,8 @@ async def build_second_order_findings(
             witness_payload=read_verdict.witness_payload,
             source_track="gitnexus",
             evidence_chain=read_verdict.evidence_chain,
+            flow_id=cand.read_side_chain.flow_id,
+            sanitizer_annotations=cand.read_side_chain.sanitizer_annotations,
         ))
 
     await emitter.finalize(

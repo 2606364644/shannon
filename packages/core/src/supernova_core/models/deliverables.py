@@ -62,6 +62,9 @@ INTERMEDIATE_FILE_PATTERNS: tuple[str, ...] = (
     "gitnexus_track_status.json",
     "audit_plan.json",
     ".*checkpoint*.json",
+    "dataflow_view.json",
+    "*_chain_verdicts.json",
+    "*_safe_vectors.json",
 )
 
 TIER_DELIVERABLE = "deliverable"

@@ -86,6 +86,8 @@ async def build_injection_findings(
             witness_payload=verdict.witness_payload,
             source_track="gitnexus",
             evidence_chain=verdict.evidence_chain,
+            flow_id=chain.flow_id,
+            sanitizer_annotations=chain.sanitizer_annotations,
         ))
     await emitter.finalize(
         f"{len(findings)} vulnerable · {len(candidates)} candidates judged")

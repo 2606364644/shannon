@@ -40,6 +40,7 @@ function renderAt(path: string) {
             <Route path="overview" element={<div>ov-content</div>} />
             <Route path="report" element={<div>rp-content</div>} />
             <Route path="deliverables" element={<div>dl-content</div>} />
+            <Route path="dataflow" element={<div>df-content</div>} />
             <Route path="logs" element={<div>lg-content</div>} />
             <Route path="live" element={<div>lv-content</div>} />
           </Route>
@@ -50,11 +51,13 @@ function renderAt(path: string) {
 }
 
 describe("ScanDetail per-scan 视图", () => {
-  it("渲染 scan_id + 5 scan tabs + 返回 ws 链接", () => {
+  it("渲染 scan_id + 6 scan tabs（overview/report/deliverables/dataflow/logs/live）+ 返回 ws 链接", () => {
     renderAt("/p/ws/scans/s1/live");
     expect(screen.getByText("s1")).toBeInTheDocument();
     expect(screen.getByRole("tablist")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
+    // dataflow tab 已注册
+    expect(screen.getByRole("tab", { name: "数据流" })).toBeInTheDocument();
     // 返回 ws 概览链接（/p/ws）
     expect(screen.getByRole("link", { name: /返回工作区/ }).getAttribute("href")).toBe("/p/ws");
   });

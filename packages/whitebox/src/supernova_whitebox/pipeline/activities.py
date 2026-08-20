@@ -1010,6 +1010,30 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_assemble_dataflow_view(input: ActivityInput) -> dict:
+    """P4: 组装 dataflow_view.json（spec 2026-08-20 §3；失败不阻塞扫描）。
+
+    读 merge 后 SSOT queue + chain_verdicts 等 intermediate 产物，调 Task 7
+    纯函数 assemble_dataflow_view 组装数据流视图，落
+    intermediate/dataflow_view.json（报告页数据流视图用）。non-fatal 报告增强：
+    全产物缺 → skipped 不落盘；任何异常 → logger.warning + skipped 返回值，
+    **不抛 ApplicationFailure**（区别于本文件 fatal 活动惯例）。
+    """
+    try:
+        from supernova_core.services.dataflow_view import assemble_dataflow_view
+
+        _repo, deliverables, _ws = _get_paths(input)
+        view = assemble_dataflow_view(deliverables)
+        if view is None:
+            return {"status": "skipped", "reason": "no products"}
+        atomic_write_json(intermediate_path(deliverables, "dataflow_view.json"), view)
+        return {"status": "ok", "trees": len(view.get("trees", []))}
+    except Exception as exc:  # noqa: BLE001 — non-blocking（报告增强，绝不阻塞扫描）
+        logger.warning("run_assemble_dataflow_view failed (non-blocking): %s", exc)
+        return {"status": "skipped", "reason": str(exc)}
+
+
+@activity.defn
 async def run_risk_scoring(input: ActivityInput) -> dict:
     """Score call chains and produce tiered audit plan."""
     from supernova_whitebox.audit.session_registry import get_audit_session
@@ -1398,6 +1422,77 @@ def _make_gitnexus_progress_cb(session):
     return cb
 
 
+def _ann_to_dict(item):
+    """sanitizer_annotations 元素归一为可 JSON 序列化的 dict。
+
+    真实数据流：CandidateChain.sanitizer_annotations 的元素是
+    SanitizerAnnotation（sanitizer_library.py:33，frozen dataclass，字段
+    rule_id/defense_type/applies_to/code_location/matched_text），finding 的
+    原始属性存的是这些实例——原样塞 json.dumps 抛 TypeError（Fix round 2：
+    safe 链才带 sanitizer → 恰好 safe 链炸掉整个 chain_verdicts.json 产物）。
+    注意 gitnexus_queue 路径不受影响（f.model_dump() 会自动转 dict），只有
+    本 dump 的 raw getattr 路径需要归一。
+
+    防御顺序：dict 原样保留 → pydantic model_dump() → stdlib dataclass
+    asdict() → str() 最终兜底（不崩，保留可读 repr）。
+    """
+    if isinstance(item, dict):
+        return item
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    import dataclasses
+    if dataclasses.is_dataclass(item) and not isinstance(item, type):
+        return dataclasses.asdict(item)
+    return str(item)
+
+
+def _dump_chain_verdicts(
+    deliverables: Path,
+    vc: str,
+    findings: list,
+) -> None:
+    """落 intermediate/{vc}_chain_verdicts.json；safe 链也进。零 finding 不落盘。
+
+    findings 已含 safe 链（builder 对所有 candidate 都产 finding，safe 的
+    externally_exploitable=False/verdict='safe'）。shape 对齐 spec 2026-08-20 §4
+    P1 + Task 7 组装器读 ``verdicts.get("verdicts", [])``。
+
+    finding→dump 字段映射（防御 getattr 兜底，适配三类 taint finding 不同字段名）：
+    - flow_id: 三类均补（Task 2）；缺失降级空串。
+    - sink_call_site_id: injection/xss 取 sink_call；ssrf 无 sink_call →
+      降级 vulnerable_code_location（builder 写的即 chain.sink_call_site_id）→ 空。
+    - verdict/mismatch_reason/confidence: 三类 builder 均从 ChainVerdict 复制。
+    - reason: inj/xss 走 mismatch_reason；ssrf 无 mismatch_reason → 兜底取
+      missing_defense（ssrf_builder 把 verdict.mismatch_reason 写进 missing_defense）。
+    - sanitizer_annotations: 三类 builder 均从 CandidateChain.sanitizer_annotations
+      复制进 finding（Task 2 Fix F2）；元素经 _ann_to_dict 归一（SanitizerAnnotation
+      dataclass 实例 → dict，Fix round 2）；降级空 list（spec §6 容忍旧 finding）。
+    """
+    if not findings:
+        return
+    rows = []
+    for f in findings:
+        rows.append({
+            "flow_id": getattr(f, "flow_id", "") or "",
+            "sink_call_site_id": (
+                getattr(f, "sink_call", "") or getattr(f, "vulnerable_code_location", "") or ""
+            ),
+            "vuln_class": vc,
+            "verdict": getattr(f, "verdict", "") or "",
+            "reason": (
+                getattr(f, "mismatch_reason", "") or getattr(f, "missing_defense", "") or ""
+            ),
+            "sanitizer_annotations": [
+                _ann_to_dict(a) for a in (getattr(f, "sanitizer_annotations", []) or [])
+            ],
+            "confidence": getattr(f, "confidence", "") or "",
+        })
+    atomic_write_json(
+        intermediate_path(deliverables, f"{vc}_chain_verdicts.json"),
+        {"verdicts": rows},
+    )
+
+
 @activity.defn
 async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
     """GitNexus-track chain verdict for injection/xss/ssrf (spec §5.4-5.6).
@@ -1564,6 +1659,11 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                         {"vulnerabilities": [f.model_dump() for f in findings]},
                     )
                     per_class[vc] = len(findings)
+                # 数据流视图（spec 2026-08-20 §4 P1）：落 chain_verdicts
+                # 产物（safe 链也进），供 P4 组装器按 flow_id 拼 GitNexus 枝。
+                # 与 gitnexus_queue 同条件（有 findings 才落盘），零 finding
+                # 不产空文件。
+                _dump_chain_verdicts(deliverables, vc, findings or [])
 
             taint_flows_count = len(pgraph.taint_flows)
             sink_call_sites_count = len(sink_call_sites)

@@ -19,6 +19,7 @@ const ScanDetail = lazy(() => import("./routes/WorkspaceDetail/ScanDetail"));
 const OverviewTab = lazy(() => import("./routes/WorkspaceDetail/OverviewTab").then(m => ({ default: m.OverviewTab })));
 const ReportTab = lazy(() => import("./routes/WorkspaceDetail/ReportTab").then(m => ({ default: m.ReportTab })));
 const DeliverablesTab = lazy(() => import("./routes/WorkspaceDetail/DeliverablesTab").then(m => ({ default: m.DeliverablesTab })));
+const DataFlowTab = lazy(() => import("./routes/WorkspaceDetail/DataFlowTab").then(m => ({ default: m.DataFlowTab })));
 const LogsTab = lazy(() => import("./routes/WorkspaceDetail/LogsTab").then(m => ({ default: m.LogsTab })));
 const LiveTab = lazy(() => import("./routes/WorkspaceDetail/LiveTab"));
 const ReposTab = lazy(() => import("./routes/WorkspaceDetail/ReposTab").then(m => ({ default: m.ReposTab })));
@@ -114,6 +115,7 @@ export const router = createBrowserRouter([
           { path: "overview", element: <OverviewTab /> },
           { path: "report", element: <ReportTab /> },
           { path: "deliverables", element: <DeliverablesTab /> },
+          { path: "dataflow", element: <DataFlowTab /> },
           { path: "logs", element: <LogsTab /> },
           { path: "live", element: <LiveTab /> },
         ],

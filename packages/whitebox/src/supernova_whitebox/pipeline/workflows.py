@@ -484,6 +484,25 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry_for("standard"),
             )
+            # === P4 数据流视图组装（merge 后；non-fatal 报告增强，失败不阻塞） ===
+            # 读 merge 后 SSOT 产物组装 intermediate/dataflow_view.json。activity
+            # 内部已吞异常返 skipped，外层 try/except 双保险（对齐 attack-chain 套路；
+            # timeout 等 runtime cancel 是 activity 内 try 抓不到的，须 workflow 兜）。
+            try:
+                await workflow.execute_activity(
+                    activities.run_assemble_dataflow_view, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"dataflow view assembly failed (non-fatal): {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             await workflow.execute_activity(
                 activities.log_phase_complete_activity,
                 ActivityInput(**{**act_input.__dict__, "phase": "vulnerability-analysis"}),

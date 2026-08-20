@@ -348,6 +348,26 @@ def _finding_props(class_props: dict) -> dict:
 _FINDING_BASE_REQUIRED = ["ID", "vulnerability_type", "externally_exploitable",
                           "confidence", "title"]
 
+# P2 dataflow_steps（spec 2026-08-20 dataflow-view §2 L39 / §4 P2①）：扁平数组
+# （压缩 GLM 结构化输出失败面）。仅三个 taint class（inj/xss/ssrf）携带——
+# auth/authz 无 taint 流不加；三处引用同一 dict 对象（单一声明，非复制三份，
+# 保持 bridge 双引擎「同一份 dict」语义）。元素全 optional：items 无 required 键，
+# 与 description 自洽；下游 _normalize_dataflow_steps（Task 4）对 label 缺失/类型
+# 错宽容（留元素不丢）。
+_DATAFLOW_STEPS_FIELD: dict = {
+    "type": "array",
+    "description": "按传播顺序列 source→sink 经过的节点；防护节点标 protection。元素全 optional。",
+    "items": {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "minLength": 1, "description": "函数名或调用点描述"},
+            "file": {"type": "string", "description": "文件路径"},
+            "line": {"anyOf": [{"type": "integer"}, {"type": "null"}], "description": "行号，未知填 null"},
+            "protection": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "该节点防护（sanitizer 名）；无防护填 null"},
+        },
+    },
+}
+
 # injection / xss 是两套字段契约（对齐 TS 原版 queue-schemas.ts 的
 # injectionFields / xssFields，2026-08-20 follow-up 拆分）：injection=sink_call 族，
 # xss=sink_function 族；两轨各含 prompt 移植增强字段 authentication_required /
@@ -378,6 +398,7 @@ _INJECTION_FINDING_PROPS: dict = {
     "mismatch_reason": _str_field("Why the defense fails / mismatches (1–2 lines)."),
     "witness_payload": _str_field(
         "Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
 _XSS_FINDING_PROPS: dict = {
@@ -397,6 +418,7 @@ _XSS_FINDING_PROPS: dict = {
     "verdict": _str_field('"vulnerable" | "safe" — only vulnerable findings are submitted.'),
     "mismatch_reason": _str_field("Why the defense fails / mismatches."),
     "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
 _AUTH_FINDING_PROPS: dict = {
@@ -411,6 +433,7 @@ _SSRF_FINDING_PROPS: dict = {
     **_AUTH_FINDING_PROPS,
     "vulnerable_parameter": _str_field("The outbound-request parameter carrying attacker-controlled input."),
     "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
 _AUTHZ_FINDING_PROPS: dict = {

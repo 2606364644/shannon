@@ -132,8 +132,20 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 			"mismatch_reason": "if vulnerable, 1–2 lines in plain language.",
 			"witness_payload": "the payload VALUE itself — no param-name prefix (NOT 'id=1'), no request line (NOT 'GET /x?id=1'), no explanation text. Examples: ' for SQLi, ; ls -la for Command Injection, ../../../../etc/passwd for LFI, {{7*7}} for SSTI. Multi-param delivery as 'a=1&b=2' is OK. Where/how to deliver it (endpoint, param, multi-step notes) goes in `notes`.",
 			"confidence": "high | med | low.",
-			"notes": "assumptions, untraversed branches, anything unusual."
+			"notes": "assumptions, untraversed branches, anything unusual.",
+			"dataflow_steps": [
+				{"label": "UserController.list", "file": "app/controllers/userController.js", "line": 25, "protection": null},
+				{"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
+			]
 		}
+
+  <dataflow_steps_guidance>
+  `dataflow_steps`：按污点传播顺序，列出从 source 到 sink 经过的每个节点。
+  - 每个节点给 `label`（函数名或调用点）、`file`、`line`（未知填 null）。
+  - 若该节点有防护（sanitizer / 编码 / 校验），在 `protection` 填防护名；无防护填 null。
+  - 防护有效则该节点之后不应再出现未防护的传播——防护被绕过则继续列后续节点。
+  - 只列你实际追踪到的节点；没有完整路径时留空数组或省略。
+  </dataflow_steps_guidance>
   </finding_submission>
 
   **Source Completeness Rule:** When multiple user-controllable sources can reach the same sink, you MUST create a SEPARATE vulnerability entry for EACH source. Do NOT merge multiple sources into a single entry. For example, if both `ctx.query.bizEntity` (a URL parameter) and `ctx.user.uid` (session data) reach the same template sink, create two entries — one per source. Each entry must independently trace from its own source to the sink, with its own `authentication_required` and `accessible_routes`. The source with the easiest exploitability (e.g., URL parameter on an unauthenticated route) should appear FIRST in the queue.

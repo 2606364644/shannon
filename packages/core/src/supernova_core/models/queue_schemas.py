@@ -19,6 +19,11 @@ class BaseVulnerability(BaseModel):
     source_track: str | None = None
     evidence_chain: str | None = None
     merge_source: str | None = None
+    # 数据流视图（spec 2026-08-20 §4 P1）：GitNexus 轨 taint finding 关联
+    # 候选链 sanitizer_annotations（CandidateChain.sanitizer_annotations），
+    # 精确标注随之落盘（spec §4 P1 原文「不再用完即丢」）。放基类对所有子类
+    # 生效（append-only，roster 对账按 ID 不按字段，与 Phase 2 无冲突）。
+    sanitizer_annotations: list | None = None
 
 class InjectionVulnerability(BaseVulnerability):
     # injection 输出契约 = TS 原版 injectionFields（sink_call 族，vuln-injection.txt
@@ -42,6 +47,16 @@ class InjectionVulnerability(BaseVulnerability):
     sink_function: str | None = None
     render_context: str | None = None
     encoding_observed: str | None = None
+    # 数据流视图（spec 2026-08-20 §4 P1）：GitNexus 轨 taint finding 关联
+    # 候选链 flow_id，供 P4 组装器按 flow_id 拼接 GitNexus 枝。仅 GitNexus
+    # 轨 inj/xss/ssrf 有意义（append-only，不破坏现有契约）。
+    flow_id: str | None = None
+    # P2 dataflow_steps：LLM 轨 taint 专属（spec §2 仅 inj/xss/ssrf）。
+    # LLM 枝节点扁平数组（元素 {label:str, file:str, line:int|None,
+    # protection:str|None}，全 optional），P4 组装器经 finding.dataflow_steps
+    # 读 LLM 枝。Task 3 review 裁决不放基类（spec §2 L39：auth/authz 无
+    # taint 流不加；collector schema 已同步收窄）。
+    dataflow_steps: list[dict] | None = None
 
 class XssVulnerability(BaseVulnerability):
     source: str | None = None
@@ -55,6 +70,11 @@ class XssVulnerability(BaseVulnerability):
     verdict: str | None = None
     mismatch_reason: str | None = None
     witness_payload: str | None = None
+    # 数据流视图（spec 2026-08-20 §4 P1）：见 InjectionVulnerability 同名字段注释。
+    flow_id: str | None = None
+    # P2 dataflow_steps：LLM 轨 taint 专属（spec §2 仅 inj/xss/ssrf）——
+    # 见 InjectionVulnerability 同名字段注释。
+    dataflow_steps: list[dict] | None = None
 
 class AuthVulnerability(BaseVulnerability):
     source_endpoint: str | None = None
@@ -75,6 +95,11 @@ class SsrfVulnerability(BaseVulnerability):
     path: str | None = None
     verdict: str | None = None
     witness_payload: str | None = None
+    # 数据流视图（spec 2026-08-20 §4 P1）：见 InjectionVulnerability 同名字段注释。
+    flow_id: str | None = None
+    # P2 dataflow_steps：LLM 轨 taint 专属（spec §2 仅 inj/xss/ssrf）——
+    # 见 InjectionVulnerability 同名字段注释。
+    dataflow_steps: list[dict] | None = None
 
 class AuthzVulnerability(BaseVulnerability):
     endpoint: str | None = None
@@ -115,6 +140,53 @@ class LenientParseResult:
     queue: "VulnerabilityQueue"
     warnings: list[str] = field(default_factory=list)
     original_form: str = "object"  # object | bare_list | object_no_key | invalid_json
+
+
+def _normalize_dataflow_steps(entry: dict) -> None:
+    """P2: dataflow_steps 宽容归一——畸形不拒收 finding（spec §4 P2③）。
+
+    在 parse_lenient 的 adapter.validate_python(entry) 之前原地清理 entry：
+    - 键不存在 / None → 不动（pydantic 默认 None）；
+    - 非 list → 删键（当作未提供）；
+    - 元素非 dict → 丢弃**该元素**（spec 显式点名元素宾语）；
+    - 字段类型错 → 忽略**该字段**（元素保留；spec 不点名元素宾语——
+      按字段独立校验，字段间不联动。fix round 1 controller 裁决：label
+      畸形但 file/line 合法时保留 file/line，P4 组装器按末节点 file:line
+      定位 sink（spec §3 规则 2）依赖此信息）；
+    - 各字段独立校验：label 非空 str 才留；file str 才留；line int 非
+      bool（bool 是 int 子类，line=True 忽略）或 None 才留；protection
+      str 或 None 才留；未提供的键不物化（缺席时不补 None）；
+    - 全部元素清空后 → None（kept or None）。
+    """
+    if "dataflow_steps" not in entry:
+        return
+    raw = entry["dataflow_steps"]
+    if raw is None:
+        return
+    if not isinstance(raw, list):
+        del entry["dataflow_steps"]  # 非 list → 当作未提供
+        return
+    kept: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue  # 非 dict 元素丢弃
+        clean: dict = {}
+        label = item.get("label")
+        if isinstance(label, str) and label:
+            clean["label"] = label
+        file_ = item.get("file")
+        if isinstance(file_, str):
+            clean["file"] = file_
+        if "line" in item:
+            line = item["line"]
+            if line is None or (isinstance(line, int) and not isinstance(line, bool)):
+                clean["line"] = line
+        if "protection" in item:
+            prot = item["protection"]
+            if prot is None or isinstance(prot, str):
+                clean["protection"] = prot
+        kept.append(clean)
+    entry["dataflow_steps"] = kept or None
 
 
 class VulnerabilityQueue(BaseModel):
@@ -194,6 +266,7 @@ class VulnerabilityQueue(BaseModel):
             if not isinstance(entry, dict):
                 dropped += 1
                 continue
+            _normalize_dataflow_steps(entry)  # P2 宽容归一：畸形 dataflow_steps 不拒收 finding
             try:
                 vulns.append(adapter.validate_python(entry))
             except Exception:
