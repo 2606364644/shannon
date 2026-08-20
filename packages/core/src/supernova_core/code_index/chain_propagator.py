@@ -505,7 +505,18 @@ def produce_intra_first_taint_flows(
 
     source 是 ``llm-discovered-source`` → ``needs_review=True``(下游 chain_verdict 复核)。
     sink_slot / tainted_arg_index 透传(防 _route_for 拒 inj/ssrf,同 backward 契约)。
+
+    spec 2026-08-21 修复点 A —— 表达式回退:intra 缺失/空判定/sink 未命中时,用
+    ``dangerous_slots[].expression`` 直接匹配 SourcePoint 产 flow(对齐 backward 的
+    ``_tainted_params_reaching_sink`` 回退)。NodeGoat 断链根因:参数提取不含嵌套
+    arrow 的 req → intra LLM 对"db 到 eval(req.body.preTax)"返回合法空判定(不触发
+    fallback)→ intra-first 双重门全断。回退 flow 一律 needs_review + 低置信,字面量
+    表达式(常量 sink)不产。
     """
+    from supernova_core.code_index.llm_taint_analyzer import _is_literal_expression
+
+    _EXPR_FALLBACK_CONFIDENCE = 0.5  # 对齐 _INDIRECT_HIT_CONFIDENCE(间接命中档)
+
     sinks_by_caller: dict[str, list["SinkCallSite"]] = defaultdict(list)
     for s in sink_call_sites:
         sinks_by_caller[s.caller_id].append(s)
@@ -513,32 +524,60 @@ def produce_intra_first_taint_flows(
     flows: list[TaintFlow] = []
     for func_id, sinks in sinks_by_caller.items():
         intra = intra_results.get(func_id)
-        if intra is None:
-            continue
-        # _source_points_matching 推广到 sink 所在函数:source 补召回产的 SourcePoint
-        # entry_point_id = 该函数 id,故 substring 匹配能命中。
-        matching = _source_points_matching(func_id, intra.tainted_params, source_points)
-        if not matching:
-            continue
-        for sp in matching:
+        produced: set[tuple[str, str]] = set()  # (source_param, sink.id) 主路径已产
+        if intra is not None and intra.tainted_params:
+            # _source_points_matching 推广到 sink 所在函数:source 补召回产的 SourcePoint
+            # entry_point_id = 该函数 id,故 substring 匹配能命中。
+            matching = _source_points_matching(func_id, intra.tainted_params, source_points)
+            for sp in matching:
+                for sink in sinks:
+                    if sink.id not in intra.hits:
+                        continue  # intra 没判定该 sink 命中 → 跳过
+                    steps = [s for s in intra.local_steps if s.to_param == sink.id]
+                    primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
+                    flows.append(TaintFlow(
+                        flow_id=f"{sp.entry_point_id}->{sink.id}",
+                        entry_point_id=sp.entry_point_id,
+                        source_param=sp.param_name,
+                        source_type=sp.source_type,
+                        propagation_steps=steps,
+                        sink_call_site_id=sink.id,
+                        sink_slot=primary.slot if primary else SlotContext.GENERIC,
+                        tainted_arg_index=primary.arg_index if primary else -1,
+                        confidence=intra.hits.get(sink.id, 0.9),
+                        needs_review=(sp.rule_id == "llm-discovered-source"),
+                        notes="intra-first",
+                    ))
+                    produced.add((sp.param_name, sink.id))
+
+        # ---- spec 2026-08-21 修复点 A: 表达式回退 ----
+        # 仅当 intra 对该函数无有效信息(缺失/空判定,即"问错问题"场景)才回退;
+        # intra 有非空 tainted_params 但该 sink 不在 hits = LLM 有依据的否定,
+        # 尊重判定不回退(守 test_intra_first_skips_sink_not_in_intra_hits 语义)。
+        intra_informative = intra is not None and bool(intra.tainted_params)
+        if not intra_informative:
             for sink in sinks:
-                if sink.id not in intra.hits:
-                    continue  # intra 没判定该 sink 命中 → 跳过
-                steps = [s for s in intra.local_steps if s.to_param == sink.id]
-                primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
-                flows.append(TaintFlow(
-                    flow_id=f"{sp.entry_point_id}->{sink.id}",
-                    entry_point_id=sp.entry_point_id,
-                    source_param=sp.param_name,
-                    source_type=sp.source_type,
-                    propagation_steps=steps,
-                    sink_call_site_id=sink.id,
-                    sink_slot=primary.slot if primary else SlotContext.GENERIC,
-                    tainted_arg_index=primary.arg_index if primary else -1,
-                    confidence=intra.hits.get(sink.id, 0.9),
-                    needs_review=(sp.rule_id == "llm-discovered-source"),
-                    notes="intra-first",
-                ))
+                exprs = [slot.expression for slot in (sink.dangerous_slots or [])
+                         if slot.expression and not _is_literal_expression(slot.expression)]
+                if not exprs:
+                    continue  # 无非常量表达式(纯字面量 sink,如 redirect("/login"))→ 零噪音
+                for sp in _source_points_matching(func_id, set(exprs), source_points):
+                    if (sp.param_name, sink.id) in produced:
+                        continue  # 主路径已产,不叠加
+                    primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
+                    flows.append(TaintFlow(
+                        flow_id=f"{sp.entry_point_id}->{sink.id}",
+                        entry_point_id=sp.entry_point_id,
+                        source_param=sp.param_name,
+                        source_type=sp.source_type,
+                        propagation_steps=[],
+                        sink_call_site_id=sink.id,
+                        sink_slot=primary.slot if primary else SlotContext.GENERIC,
+                        tainted_arg_index=primary.arg_index if primary else -1,
+                        confidence=_EXPR_FALLBACK_CONFIDENCE,
+                        needs_review=True,  # 未经 intra 证实 → 一律复核(chain_verdict 轻判)
+                        notes="intra-first-expr-fallback",
+                    ))
     return flows
 
 

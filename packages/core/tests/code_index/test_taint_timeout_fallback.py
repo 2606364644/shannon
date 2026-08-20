@@ -194,3 +194,68 @@ def test_analyze_taint_llm_parse_failure_falls_back_to_deterministic():
     assert result.tainted_params == {"app", "ip", "port", "pprofPort"}, \
         "LLM 返回但解析失败时应 fallback 全参 tainted,而非空(避免 false negative)"
     assert sink.id in result.hits
+
+
+# ── spec 2026-08-21 修复点 F: intra 全空观测性告警 ──
+
+def _hint_sink(caller_id, line=8):
+    """直达污点 sink(slot.is_entry_hint=True,如 eval(req.body.preTax))。"""
+    return SinkCallSite(
+        id=f"{caller_id}::eval::{line}:0", caller_id=caller_id, callee_name="eval",
+        callee_receiver=None, category=SinkCategory.COMMAND, sink_subtype="js_eval",
+        file_path="a.js", line=line, column=0,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.CMD_ARGUMENT,
+            expression="req.body.preTax", is_entry_hint=True)],
+        rule_id="ts-eval", needs_review=False,
+    )
+
+
+class TestWarnAllEmptyIntra:
+    def test_warns_when_all_empty_with_entry_hint_sink(self, caplog):
+        """全部 intra tainted_params 空 + 存在 is_entry_hint 直达 sink → warning
+        (NodeGoat 真因场景的观测性:5/5 全 0 当时只在进度条显示 0)。"""
+        import logging
+        from supernova_core.code_index import warn_all_empty_intra
+        blk = _blk("a.js:h:1", "...", ["db"])
+        sink = _hint_sink(blk.id)
+        items = [(blk.id, [sink])]
+        intra = {blk.id: IntraResult(tainted_params=set(), hits={}, local_steps=[])}
+        with caplog.at_level(logging.WARNING, logger="supernova_core.code_index"):
+            fired = warn_all_empty_intra(intra, items)
+        assert fired is True
+        assert any("intra" in r.message and "空" in r.message for r in caplog.records)
+
+    def test_no_warn_when_intra_has_taint(self, caplog):
+        """任一函数 tainted_params 非空 → 正常,不告。"""
+        import logging
+        from supernova_core.code_index import warn_all_empty_intra
+        blk = _blk("a.js:h:1", "...", ["req"])
+        sink = _hint_sink(blk.id)
+        items = [(blk.id, [sink])]
+        intra = {blk.id: IntraResult(tainted_params={"req"}, hits={}, local_steps=[])}
+        with caplog.at_level(logging.WARNING, logger="supernova_core.code_index"):
+            fired = warn_all_empty_intra(intra, items)
+        assert fired is False
+        assert not caplog.records
+
+    def test_no_warn_without_entry_hint_sink(self, caplog):
+        """全空但无 is_entry_hint sink(纯间接变量)→ 不足以判异常,不告。"""
+        import logging
+        from supernova_core.code_index import warn_all_empty_intra
+        blk = _blk("a.js:h:1", "...", ["a"])
+        sink = _ssrf_sink(blk.id)  # is_entry_hint=False(局部变量)
+        items = [(blk.id, [sink])]
+        intra = {blk.id: IntraResult(tainted_params=set(), hits={}, local_steps=[])}
+        with caplog.at_level(logging.WARNING, logger="supernova_core.code_index"):
+            fired = warn_all_empty_intra(intra, items)
+        assert fired is False
+
+    def test_no_warn_on_empty_intra_map(self, caplog):
+        """零函数被分析(intra_results 空 dict)→ 无从判异常,不告。"""
+        import logging
+        from supernova_core.code_index import warn_all_empty_intra
+        blk = _blk("a.js:h:1", "...", ["a"])
+        with caplog.at_level(logging.WARNING, logger="supernova_core.code_index"):
+            fired = warn_all_empty_intra({}, [(blk.id, [_hint_sink(blk.id)])])
+        assert fired is False

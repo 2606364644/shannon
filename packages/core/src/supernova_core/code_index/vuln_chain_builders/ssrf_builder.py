@@ -43,22 +43,20 @@ async def build_ssrf_findings(
     # findings + double LLM cost). Gap A fix.
     candidates = [c for c in candidates
                   if c.source_type != ParameterSource.STORAGE.value]
-    # Open-redirect sinks (category=REDIRECT, e.g. res.redirect(url)) are a
-    # browser-side 302 (OWASP A10), NOT a server-side request forgery. Their url
-    # slot matches _SSRF_SLOTS so they'd otherwise be mislabeled URL_Manipulation,
-    # polluting the ssrf bucket and breaking dual-track dedup (LLM track labels
-    # these Open_Redirect -> merger dedup key differs -> duplicate finding).
-    if sink_call_sites:
-        candidates = [
-            c for c in candidates
-            if not (scs := sink_call_sites.get(c.sink_call_site_id))
-            or scs.category != SinkCategory.REDIRECT
-        ]
+    # spec 2026-08-21 修复点 E: REDIRECT sink(原有意过滤)改产 Open_Redirect 子型。
+    # 原过滤的开轨假设——LLM 轨会以 Open_Redirect 报、GitNexus 报 URL_Manipulation
+    # 会 dedup key 不一致——在关轨时破产(LLM 轨静默 + 本轨丢弃 = 双轨全盲,
+    # NodeGoat /learn 漏报)。vuln-ssrf.txt §8/枚举本就含 Open_Redirect(URL 大类),
+    # GitNexus 产同枚举后 merger _finding_key(含 vulnerability_type)天然对齐。
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[SsrfVulnerability] = []
     for i, chain in enumerate(candidates, start=1):
         verdict = await judge_chain_verdict(chain, llm_client=llm_client)
         is_vuln = (verdict.verdict == "vulnerable")
+        scs = (sink_call_sites or {}).get(chain.sink_call_site_id)
+        vtype = ("Open_Redirect"
+                 if scs is not None and scs.category == SinkCategory.REDIRECT
+                 else "URL_Manipulation")
         detail = None
         if is_vuln:
             detail = (f"SSRF-GN-{i:02d} vulnerable: source={chain.source_param} "
@@ -71,7 +69,7 @@ async def build_ssrf_findings(
                 if route_label else verdict.evidence_chain)
         findings.append(SsrfVulnerability(
             ID=f"SSRF-GN-{i:02d}",
-            vulnerability_type="URL_Manipulation",
+            vulnerability_type=vtype,
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
             title=verdict.title,

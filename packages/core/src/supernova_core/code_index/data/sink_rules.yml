@@ -480,7 +480,10 @@ rules:
     receiver_pattern: null
     category: command
     sink_subtype: js_eval
-    dangerous_slots: [{arg_index: 0, slot: generic}]
+    # spec 2026-08-21 修复点 C: generic→cmd_argument —— eval 实参语义即待执行代码,
+    # 与 ts-child-process-exec 同类;generic 不在 _INJECTION_SLOTS 导致 eval flow
+    # 路由不进 injection builder(NodeGoat contributions eval 漏报断点 3 前半)。
+    dangerous_slots: [{arg_index: 0, slot: cmd_argument}]
 
   - rule_id: ts-child-process-exec
     languages: [typescript]
@@ -896,6 +899,19 @@ rules:
     sink_subtype: xss_dom
     needs_review_default: true
     dangerous_slots: [{arg_index: 0, slot: generic}]
+
+  # spec 2026-08-21 修复点 D: 服务端模板渲染 XSS(Express/Swig/EJS/Handlebars)。
+  # 污点在 arg1 的 locals 对象(arg0 是模板名);autoescape 开启时 res.render 本身
+  # 安全 → needs_review_default,由 chain_verdict 结合上下文判定(NodeGoat Swig
+  # autoescape:false 模板 XSS 整类不可见,断点 3 后半)。receiver 必配(死规则教训)。
+  - rule_id: ts-res-render
+    languages: [typescript]
+    callee: render
+    receiver_pattern: "^(res|response|ctx)$"
+    category: xss
+    sink_subtype: xss_server_render
+    needs_review_default: true
+    dangerous_slots: [{arg_index: 1, slot: generic}]
 
   # ===== File =====
   - rule_id: php-file-put-contents

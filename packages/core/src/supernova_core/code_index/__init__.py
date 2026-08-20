@@ -58,6 +58,32 @@ from supernova_core.code_index.storage_discovery_llm import (
 logger = logging.getLogger(__name__)
 
 
+def warn_all_empty_intra(intra_results: dict, taint_items) -> bool:
+    """spec 2026-08-21 修复点 F: intra 全空观测性告警(纯观测不改行为)。
+
+    全部含 sink 函数的 intra tainted_params 均空 **且** 存在任一 sink 的
+    dangerous_slot is_entry_hint=True(直达污点,如 eval(req.body.preTax))→
+    "有直达污点却判全空"是矛盾信号(参数提取错位/模型集体失灵),发 warning
+    留第一现场。NodeGoat 2026-08-20 事件中 5/5 全 0 仅在进度条显示 0,无告警。
+
+    Returns: 是否触发了告警(供测试断言)。
+    """
+    if not intra_results:
+        return False  # 零函数被分析,无从判异常
+    if any(r.tainted_params for r in intra_results.values()):
+        return False  # 有任一非空判定 → 正常
+    n_hint = sum(
+        1 for _, func_sinks in taint_items for s in func_sinks
+        if any(slot.is_entry_hint for slot in (s.dangerous_slots or [])))
+    if n_hint == 0:
+        return False  # 无直达污点 sink,全空不足以判异常
+    logger.warning(
+        "GitNexus intra taint 全空但存在 %d 个直达污点 sink(is_entry_hint)——"
+        "疑似参数提取/模型异常,GitNexus 轨召回可能受损(修复点 A 表达式回退已兜底 flow, "
+        "但 sanitizer 标注缺失,建议复查)。", n_hint)
+    return True
+
+
 def backfill_skipped_taint_fallback(taint_items, taint_pairs, blocks_by_id):
     """LLM 超时/异常跳过的 sink 函数走确定性兜底(CLAUDE.md §1 "LLM 不可用档不浪费")。
 
@@ -352,6 +378,8 @@ async def build_code_index_with_gitnexus(
     # 超时/异常跳过的 sink 函数走确定性兜底(CLAUDE.md §1 "不浪费"),否则 backward
     # 拿不到 seed -> 跨函数 taint flow 全丢(如 SSRF controller->service)。
     intra_results = backfill_skipped_taint_fallback(taint_items, taint_pairs, blocks_by_id)
+    # spec 2026-08-21 修复点 F: intra 全空 + 直达污点 sink → 观测性告警(不改行为)。
+    warn_all_empty_intra(intra_results, taint_items)
 
     # ⑧b source detection（平行 ③ sink detect，独立不依赖 sink；主路径扫 entry_point）
     #    entry_point_ids 已在 ⑦(③b 后)提前算出, 此处直接引用(原 :295 行删除, 解耦子项①)。

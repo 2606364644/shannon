@@ -167,12 +167,13 @@ async def test_build_ssrf_accepts_sink_call_sites_param():
 
 
 @pytest.mark.asyncio
-async def test_build_ssrf_excludes_open_redirect_sink():
-    """Open-redirect sinks (category=REDIRECT, e.g. res.redirect(url)) must NOT
-    be reported by the SSRF track. A redirect is a browser-side 302 (OWASP A10),
-    not a server-side request forgery; routing it as SSRF pollutes the ssrf bucket
-    and breaks dual-track dedup (LLM track labels these Open_Redirect, GitNexus
-    hardcodes URL_Manipulation -> merger dedup key differs -> duplicate finding).
+async def test_build_ssrf_open_redirect_sink_reports_open_redirect_subtype():
+    """spec 2026-08-21 修复点 E: REDIRECT sink 不再过滤,改产 Open_Redirect 子型。
+
+    原行为(过滤丢弃)的开轨假设——LLM 轨会以 Open_Redirect 报——在关轨时破产:
+    两轨同时静默(NodeGoat /learn res.redirect(req.query.url) 漏报,断点 4)。
+    merger dedup key 含 vulnerability_type(_finding_key),GitNexus 产
+    Open_Redirect 与 LLM 轨枚举(vuln-ssrf.txt:107)对齐,开轨不重复。
     """
     sid = "app.py:proxy:fetch:5:0"
     redirect_sink = SinkCallSite(
@@ -195,7 +196,39 @@ async def test_build_ssrf_excludes_open_redirect_sink():
 
     findings = await build_ssrf_findings(
         pgraph, llm_client=fake_llm, sink_call_sites={sid: redirect_sink})
-    assert findings == [], "open-redirect sink must not be reported as SSRF"
+    assert len(findings) == 1, "REDIRECT 候选须产出(不再过滤)"
+    f = findings[0]
+    assert f.vulnerability_type == "Open_Redirect", \
+        "REDIRECT sink 产 Open_Redirect 子型(对齐 LLM 轨枚举 + merger dedup key)"
+    assert f.verdict == "vulnerable"
+
+
+@pytest.mark.asyncio
+async def test_build_ssrf_non_redirect_keeps_url_manipulation():
+    """非 REDIRECT(真 SSRF fetch)保持 vulnerability_type=URL_Manipulation,不混淆。"""
+    sid = "app.py:proxy:fetch:5:0"
+    fetch_sink = SinkCallSite(
+        id=sid, caller_id="app.py:proxy", callee_name="get",
+        callee_receiver="needle", category=SinkCategory.SSRF,
+        sink_subtype="ssrf_needle", file_path="app.py", line=16, column=10,
+        dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL, expression="url",
+            is_entry_hint=False)],
+        rule_id="ts-needle-get",
+    )
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow()], language_coverage=["javascript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"http://169.254.169.254/",'
+                '"evidence_chain":"url->needle.get","mismatch_reason":"no allowlist",'
+                '"confidence":"high"}')
+
+    findings = await build_ssrf_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: fetch_sink})
+    assert len(findings) == 1
+    assert findings[0].vulnerability_type == "URL_Manipulation"
 
 
 @pytest.mark.asyncio

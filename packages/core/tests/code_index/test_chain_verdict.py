@@ -480,3 +480,18 @@ def test_http_route_label_miss_variants():
         "app.py:h:1", {"app.py:h:1": _route_ep(http_method=None)}) is None  # 无 method
     assert http_route_label(
         "app.py:x:9", {"app.py:h:1": _route_ep()}) is None                  # join miss
+
+
+# ===== spec 2026-08-21 修复点 D 配套: xss_server_render render_context =====
+
+def test_render_context_for_server_template_render():
+    """xss_server_render(ts-res-render)→server_template:服务端模板 locals 渲染,
+    verdict LLM 需知道判定面是模板 autoescape 而非 DOM innerHTML。"""
+    from supernova_core.code_index.chain_verdict import _render_context_for
+    assert _render_context_for("xss_server_render") == "server_template"
+
+
+def test_render_context_for_dom_subtypes_unchanged():
+    """既有 DOM 子型映射不回归(xss_dom→html_body 默认)。"""
+    from supernova_core.code_index.chain_verdict import _render_context_for
+    assert _render_context_for("xss_dom") == "html_body"

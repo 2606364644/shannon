@@ -255,6 +255,10 @@ def _render_context_for(sink_subtype: str) -> str:
     effectiveness; this is annotation only.
     """
     s = (sink_subtype or "").lower()
+    if "server" in s and "render" in s:
+        # spec 2026-08-21 修复点 D 配套: 服务端模板渲染(res.render 类)——判定面是
+        # 模板 autoescape/locals 转义,非 DOM innerHTML。
+        return "server_template"
     if "attribute" in s or "attr" in s:
         return "html_attribute"
     if "script" in s or "javascript" in s or "eval" in s:

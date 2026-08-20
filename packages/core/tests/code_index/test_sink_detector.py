@@ -248,6 +248,8 @@ class TestSinkRuleLibrary:
             "ts-child-process-exec", "ts-db-query", "ts-document-write", "ts-eval",
             "ts-fetch", "ts-innerhtml", "ts-knex-raw", "ts-orm-model-query",
             "ts-res-redirect",
+            # spec 2026-08-21 修复点 D: 服务端模板渲染 XSS(Express res.render)
+            "ts-res-render",
             "ts-sequelize-query",
             # 补充(vuln-range 三项目反哺):RestTemplate SSRF / vm / Pug / Angular XSS / needle / marked
             "java-resttemplate-exchange", "java-resttemplate-getforobject",

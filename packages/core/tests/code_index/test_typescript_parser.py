@@ -86,3 +86,68 @@ class TestTypescriptParserIterCalls:
                 assert "SELECT" in args[0]
                 return
         assert False, "query call not found"
+
+
+# ===== spec 2026-08-21 修复点 B: 嵌套函数形参并入 block.parameters =====
+
+class TestNestedFnParamsMerge:
+    """NodeGoat 形态根因修复:constructor 内 `this.handler = (req, res) => {}` 的
+    req/res 原本不进参数集 → intra LLM 问"db 能否到 sink"问错问题(断点 1)。"""
+
+    def _parse(self, src: str):
+        import tempfile
+        parser = TypeScriptParser()
+        with tempfile.TemporaryDirectory() as td:
+            fpath = Path(td) / "handler.js"
+            fpath.write_text(src)
+            return parser.parse_file(fpath, Path(td))
+
+    def test_constructor_arrow_params_merged(self):
+        """function Handler(db) + this.display=(req,res)=>{} → ['db','req','res']。"""
+        blocks = self._parse(
+            "function ResearchHandler(db) {\n"
+            "  this.displayResearch = (req, res) => {\n"
+            "    return res.render('x', {});\n"
+            "  };\n"
+            "}\n"
+        )
+        assert len(blocks) == 1
+        assert blocks[0].parameters == ["db", "req", "res"]
+
+    def test_nested_function_expression_params_merged(self):
+        """嵌套 function 表达式形参同样并入。"""
+        blocks = self._parse(
+            "function Handler(db) {\n"
+            "  this.run = function (req, res) {\n"
+            "    return req.query.x;\n"
+            "  };\n"
+            "}\n"
+        )
+        assert blocks[0].parameters == ["db", "req", "res"]
+
+    def test_outer_params_priority_and_dedup(self):
+        """嵌套形参与外层同名不重复;外层序优先。"""
+        blocks = self._parse(
+            "function f(req) {\n"
+            "  const g = (req, res) => req;\n"
+            "}\n"
+        )
+        assert blocks[0].parameters == ["req", "res"]
+
+    def test_plain_function_without_nested_unchanged(self):
+        """无嵌套函数时参数集不变(零副作用)。"""
+        blocks = self._parse(
+            "function f(a, b) {\n"
+            "  return a + b;\n"
+            "}\n"
+        )
+        assert blocks[0].parameters == ["a", "b"]
+
+    def test_named_top_level_arrow_params_extracted(self):
+        """const handler = (req, res) => {} 顶层命名 arrow:参数原本恒为 [](连带修复)。"""
+        blocks = self._parse(
+            "const handler = (req, res) => {\n"
+            "  return req.query.x;\n"
+            "};\n"
+        )
+        assert blocks[0].parameters == ["req", "res"]

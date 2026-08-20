@@ -59,6 +59,10 @@ class TypeScriptParser(BaseParser):
         end_line = node.end_point[0] + 1
         func_source = source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
         parameters = self._extract_parameters(node, source)
+        # spec 2026-08-21 修复点 B: 并入嵌套 arrow/function 表达式形参 —— JS 惯用
+        # `function Handler(db) { this.h = (req, res) => {...} }` 形态下 req/res
+        # 不进参数集,intra 分析从源头问错问题(NodeGoat 断点 1)。只并参数不动切分。
+        parameters += self._collect_nested_fn_params(node, source, skip=parameters)
 
         return FuncBlock(
             id=f"{rel_path}:{func_name}:{start_line}",
@@ -92,7 +96,9 @@ class TypeScriptParser(BaseParser):
             start_line=start_line,
             end_line=end_line,
             source_code=func_source,
-            parameters=[],
+            # spec 2026-08-21 修复点 B(连带): 顶层命名 arrow 原本恒 parameters=[],
+            # 补签名提取(与 _extract_func_block 同款)。
+            parameters=self._extract_parameters(node, source),
             language="typescript",
         )
 
@@ -116,6 +122,28 @@ class TypeScriptParser(BaseParser):
             elif child.type == "identifier":
                 params.append(child.text.decode("utf-8"))
         return params
+
+    def _collect_nested_fn_params(
+        self, func_node, source: bytes, *, skip: list[str],
+    ) -> list[str]:
+        """收集函数体内嵌套 arrow/function 表达式的形参(去重,外层已有者跳过)。
+
+        spec 2026-08-21 修复点 B:NodeGoat 形态 `this.h = (req, res) => {}` 的
+        req/res 只存在于嵌套函数签名,顶层签名提取拿不到 → intra prompt 参数集
+        缺污点参数。只并入名字,不改变块切分/调用归属。
+        """
+        collected: list[str] = []
+        seen = set(skip)
+        for node in _walk(func_node):
+            if node is func_node:
+                continue
+            if node.type not in ("arrow_function", "function_expression"):
+                continue
+            for p in self._extract_parameters(node, source):
+                if p not in seen:
+                    seen.add(p)
+                    collected.append(p)
+        return collected
 
     def iter_calls(self, block: FuncBlock, source: bytes):
         yield from self._iter_calls_cached(block, source)

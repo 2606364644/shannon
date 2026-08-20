@@ -199,3 +199,98 @@ def test_pipeline_intra_first_rescues_handler_not_in_entry_point():
         # intra-first 产 TaintFlow(同函数 source→sink,不经 chain;NodeGoat 全空根因修复)
         assert len(index.parameter_graph.taint_flows) > 0, \
             f"intra-first 应对 handler 产 TaintFlow, got {index.parameter_graph.taint_flows}"
+
+
+# ===== spec 2026-08-21 修复点 A: intra-first 表达式回退(断点 2) =====
+
+class TestIntraFirstExprFallback:
+    """intra 空时(NodeGoat 真因:LLM 对'参数 db 到 eval(req.body.preTax)'返回合法
+    空判定,不触发 fallback)→ 用 dangerous_slots[].expression 直接匹配 SourcePoint
+    产 flow,对齐 backward 的 _tainted_params_reaching_sink 回退。"""
+
+    def _research_setup(self):
+        """NodeGoat research 形态:sink expr=局部变量 url,SourcePoint param=url。"""
+        handler = _blk(
+            "a.js:ResearchHandler:7",
+            "function ResearchHandler(db){ this.display = (req, res) => {"
+            " const url = req.query.url + req.query.symbol;"
+            " return needle.get(url, cb); }; }",
+            ["db"])
+        sink = SinkCallSite(
+            id="a.js:ResearchHandler:7::get:16:0", caller_id=handler.id,
+            callee_name="get", callee_receiver="needle",
+            category=SinkCategory.SSRF, sink_subtype="ssrf_needle",
+            file_path="a.js", line=16, column=0,
+            dangerous_slots=[DangerousSlot(
+                arg_index=0, slot=SlotContext.URL, expression="url",
+                is_entry_hint=False)],
+            rule_id="ts-needle-get", needs_review=False)
+        sp = _source(handler.id, "url", ParameterSource.QUERY_PARAM, "req.query.url")
+        return handler, sink, sp
+
+    def test_expr_fallback_when_intra_returns_empty(self):
+        """intra 合法空判定(tainted_params=空,hits 空)→ 回退用 slot expr 匹配
+        SourcePoint 产 flow(NodeGoat research SSRF 断链场景)。"""
+        handler, sink, sp = self._research_setup()
+        empty_intra = {handler.id: IntraResult(tainted_params=set(), hits={},
+                                               local_steps=[])}
+        flows = produce_intra_first_taint_flows([sink], empty_intra, [sp], [handler])
+        assert len(flows) == 1
+        f = flows[0]
+        assert f.sink_call_site_id == sink.id
+        assert f.source_param == "url"
+        assert f.sink_slot == SlotContext.URL
+        assert f.needs_review is True, "回退 flow 须复核(未经 intra 证实)"
+        assert f.confidence <= 0.5, "回退 flow 低置信(0.5 档)"
+        assert "fallback" in f.notes, "notes 标注回退来源(可观测)"
+
+    def test_expr_fallback_when_intra_missing(self):
+        """intra_results 缺该函数(超时被跳过等)→ 同样回退(backward 有,intra-first 对齐)。"""
+        handler, sink, sp = self._research_setup()
+        flows = produce_intra_first_taint_flows([sink], {}, [sp], [handler])
+        assert len(flows) == 1
+        assert flows[0].source_param == "url"
+
+    def test_expr_fallback_direct_taint_expression(self):
+        """slot expr 直为污点表达式 req.body.preTax → SourcePoint param=preTax
+        substring 命中(contributions eval 场景)。"""
+        handler = _blk("a.js:ContributionsHandler:7", "...", ["db"])
+        sink = _sink(handler.id, dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.CMD_ARGUMENT,
+            expression="req.body.preTax", is_entry_hint=True)])
+        sp = _source(handler.id, "preTax", ParameterSource.BODY_FIELD, "req.body.preTax")
+        flows = produce_intra_first_taint_flows([sink], {}, [sp], [handler])
+        assert len(flows) == 1
+        assert flows[0].source_param == "preTax"
+
+    def test_expr_fallback_skips_literal_expressions(self):
+        """字面量 slot expr(redirect("/login"))→ 不产 flow(零常量噪音)。"""
+        handler = _blk("a.js:SessionHandler:8", "...", ["db"])
+        sink = _sink(handler.id, dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL, expression='"/login"',
+            is_entry_hint=False)])
+        sp = _source(handler.id, "url", ParameterSource.QUERY_PARAM, "req.query.url")
+        flows = produce_intra_first_taint_flows([sink], {}, [sp], [handler])
+        assert flows == []
+
+    def test_expr_fallback_no_source_match_no_flow(self):
+        """非字面量但无匹配 SourcePoint(局部变量无 source 补召回)→ 不产。"""
+        handler = sink = sp = None
+        handler = _blk("a.js:h:1", "...", ["a"])
+        sink = _sink(handler.id, dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL, expression="someLocalVar",
+            is_entry_hint=False)])
+        flows = produce_intra_first_taint_flows([sink], {}, [], [handler])  # 无 source
+        assert flows == []
+
+    def test_intra_hit_takes_priority_over_fallback(self):
+        """intra 正常命中 → 走原路径(notes=intra-first,confidence 沿用 intra hits),
+        不叠加回退 flow。"""
+        handler = _blk("a.js:handler:1",
+                       "function handler(req){ eval(req.body.preTax); }", ["req"])
+        sink = _sink(handler.id)
+        intra = {handler.id: _intra(handler.id, sink.id, tainted_param="req")}
+        sp = _source(handler.id, "preTax", ParameterSource.BODY_FIELD, "req.body.preTax")
+        flows = produce_intra_first_taint_flows([sink], intra, [sp], [handler])
+        assert len(flows) == 1
+        assert flows[0].notes == "intra-first"
