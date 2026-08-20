@@ -19,7 +19,7 @@
 - **sandbox**：`danger-full-access` 无条件（对齐 claude 引擎 `bypassPermissions` 无条件语义）；`approval_policy=never`；不禁网（blackbox/PoC 需出网——与 deepsec 有意分歧）。
 - **A2 契约**：`ClaudeRunResult` 字段语义不变（success 真实反映、error_code+retryable 分类、structured_output 产出义务、cost best-effort 经 `pricing.compute_cost`）。
 - **双轨铁律**：不改任何 vuln/recon prompt，不喂确定性产物给 LLM 轨。
-- **worker Docker 适配不在本计划**（runtime 获取方式在 Task 1/2 记录，Dockerfile 改动随 NodeGoat 冒烟另起任务）；本计划验收 = host 真机探针。
+- **worker Docker 适配不在本计划**（runtime 获取方式在 Task 1 记录；若走 npm，Dockerfile/provision.sh 的具体加行内容记入 spike notes，改动随 NodeGoat 冒烟另起任务）；本计划验收 = host 真机探针。
 - 每个 Task 结束一 commit，信息用中文（对齐仓库风格）。
 
 ---
@@ -82,7 +82,7 @@ print(inspect.getdoc(openai_codex.CodexConfig) or 'no doc')
 4. resume 方法名（预期 `thread_resume`/`resume_thread`）与签名
 5. `CodexConfig` 字段（`codex_bin`？cwd？env？config 覆盖？）
 6. TurnResult / ThreadEvent 类型定义位置与字段
-7. runtime 二进制解析：`uv run python -c "import openai_codex, pathlib; p = pathlib.Path(openai_codex.__file__).parent; print(p); [print(x) for x in sorted(p.rglob('*codex*'))[:20]]"`——记录 wheel 是否自带二进制 / 是否找系统 `codex`（worker Docker 适配依据）
+7. runtime 二进制解析：`uv run python -c "import openai_codex, pathlib; p = pathlib.Path(openai_codex.__file__).parent; print(p); [print(x) for x in sorted(p.rglob('*codex*'))[:20]]"`——记录 wheel 是否自带二进制 / 是否找系统 `codex`。**若走 npm 渠道：在 notes 记录两处挂线内容（本计划不改这两个文件，作为 NodeGoat 冒烟任务输入）**——`packages/worker/Dockerfile` 加一行类比 gitnexus@1.6.8（Dockerfile:31）的 `npm install -g @openai/codex`；`scripts/provision.sh` 的 install_* 序列（provision.sh:186-189）加 install_codex_system 步骤。
 
 - [ ] **Step 4: 写 spike notes**
 

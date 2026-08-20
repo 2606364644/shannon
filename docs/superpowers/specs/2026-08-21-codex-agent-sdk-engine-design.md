@@ -251,6 +251,6 @@ whitebox activity
 ### 已知风险（spike 验证点）
 
 1. **凭据形态**：官方文档用 `experimental_bearer_token` 内联，deepsec 用 `env_key` 走环境变量——GLM 端点对两者支持面以 spike 实测（预期都收，`env_key` 优先）。同批确认 `model_max_output_tokens` 顶层注入对自定义 provider 的生效性与默认值。
-2. **worker Docker 内 codex runtime**：wheel 为 py3-none-any（76KB），runtime 二进制获取/安装方式待确认（npm `@openai/codex` 渠道 or SDK 自带解析）；worker 是 linux/amd64（ARM64 有 tree-sitter/gitnexus 前科）。⚠️ 生效须 rebuild worker。
+2. **worker Docker 内 codex runtime**：wheel 为 py3-none-any（76KB），runtime 二进制获取/安装方式待确认（npm `@openai/codex` 渠道 or SDK 自带解析）；worker 是 linux/amd64（ARM64 有 tree-sitter/gitnexus 前科）。⚠️ 生效须 rebuild worker。**挂线点（spike 确认后填入 notes，NodeGoat 冒烟任务执行）**：Python 包本身经 `packages/worker/Dockerfile` 的 `uv sync --all-packages` 自动装入，无需改；若 runtime 走 npm，Dockerfile 需加一行类比 `gitnexus@1.6.8`（Dockerfile:31）的 `npm install -g @openai/codex`；host 直跑（非 Docker）场景 `scripts/provision.sh` 同理需要 codex 安装步骤（provision.sh:186-189 的 install_* 序列）。`scripts/up.sh` 纯 compose 编排，无需改动。
 3. **Python SDK API 面与成熟度**：TS 有 `runStreamed` / `resumeThread` / `config` 注入，Python 对应物以 spike 实测为准；L1 修复保留 AsyncOpenAI 回落路径。
 4. **stderr 可见性**：Python SDK 是否同样吞 exit=0 的 stderr（deepsec 为此写了 wrapper sh）；spike 确认，必要时移植 wrapper 策略。
