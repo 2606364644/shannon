@@ -4,6 +4,8 @@
 产出语义一致的 ClaudeRunResult 关键字段（success / error_code / retryable /
 structured_output 非 None）。两 provider 各自 mock 各自 SDK，但断言字段对齐。
 """
+import logging
+
 import pytest
 
 
@@ -151,3 +153,58 @@ def test_both_engines_same_cost_for_same_usage():
     assert claude_res.cost == openai_res.cost
     assert claude_res.cost_currency == openai_res.cost_currency == "CNY"
     assert claude_res.cost > 0
+
+
+def test_truncated_final_text_recovered_both_engines(caplog):
+    """截断修复双引擎对称（spec 2026-08-19 §3.1）：半截最终文本 →
+    structured_output 救回 N-1 条。anthropic _extract_result 与 openai
+    map_run_result 的兜底分支同生共死，必须一起接入；两引擎兜底各自发
+    truncation repair warning（engine 标识 + recovered_items——spec §3.1
+    排障第一现场是 agents/*.log），一并用 caplog 锁定。"""
+    import json
+    from unittest.mock import MagicMock
+    from supernova_core.agents.providers_anthropic import AnthropicProvider
+    from supernova_core.agents.openai_result_mapper import map_run_result
+    from supernova_core.agents.runner import ProviderConfig
+
+    full = json.dumps({"vulnerabilities": [
+        {"ID": f"AUTH-VULN-{i:02d}", "title": f"t{i}"} for i in range(1, 13)]})
+    truncated = full[: full.index('"AUTH-VULN-12"') + 5]  # 第 12 条 ID 字符串中途
+
+    # anthropic 侧：_extract_result 兜底分支（collected_text）
+    provider = AnthropicProvider(ProviderConfig(type="anthropic_api"))
+    rm = MagicMock()
+    rm.collected_text = truncated
+    rm.result = ""
+    rm.content = []
+    rm.structured_output = None  # SDK 第一道（--json-schema）解析失败
+    rm.usage = {"input_tokens": 1, "output_tokens": 1,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    rm.result_is_error = False
+    rm.result_subtype = None
+    rm.stop_reason = None
+    with caplog.at_level(logging.WARNING,
+                         logger="supernova_core.agents.providers_anthropic"):
+        claude_res = provider._extract_result(
+            rm, duration=10, model="m", turn_count=1, output_format={"type": "object"})
+    assert claude_res.structured_output is not None
+    assert len(claude_res.structured_output["vulnerabilities"]) == 11
+    assert claude_res.structured_output["vulnerabilities"][-1]["ID"] == "AUTH-VULN-11"
+    assert any("truncation repair" in r.getMessage() and "anthropic engine" in r.getMessage()
+               and "recovered_items" in r.getMessage()
+               for r in caplog.records)
+
+    # openai 侧：map_run_result 兜底分支（final_output 纯文本）
+    o_usage = MagicMock(input_tokens=1, output_tokens=1, input_tokens_details=None)
+    rr = MagicMock()
+    rr.final_output = truncated
+    rr.context_wrapper.usage = o_usage
+    with caplog.at_level(logging.WARNING,
+                         logger="supernova_core.agents.openai_result_mapper"):
+        openai_res = map_run_result(
+            rr, duration_ms=10, model="m", turns=1, output_format={"type": "object"})
+    assert openai_res.structured_output is not None
+    assert openai_res.structured_output == claude_res.structured_output
+    assert any("truncation repair" in r.getMessage() and "openai engine" in r.getMessage()
+               and "recovered_items" in r.getMessage()
+               for r in caplog.records)

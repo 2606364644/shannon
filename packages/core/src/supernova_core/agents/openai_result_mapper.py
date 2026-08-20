@@ -7,7 +7,7 @@ from typing import Any
 
 from agents import RunResult
 
-from .llm_json import _extract_json_payload
+from .llm_json import _extract_json_payload, repair_truncated_json
 from .pricing import compute_cost, is_model_priced, normalize_model
 from .runner import ClaudeRunResult, TokenUsage
 
@@ -82,7 +82,23 @@ def map_run_result(
                 try:
                     structured_output = json.loads(candidate)
                 except (json.JSONDecodeError, ValueError):
-                    structured_output = None
+                    # 截断修复兜底（spec 2026-08-19 §3.1）：与 anthropic 引擎
+                    # _extract_result 兜底对称（双引擎一致铁律）。
+                    repaired = repair_truncated_json(candidate)
+                    if repaired is not None:
+                        structured_output = json.loads(repaired)
+                        items = (structured_output.get("vulnerabilities")
+                                 if isinstance(structured_output, dict)
+                                 else structured_output)
+                        _log.warning(
+                            "structured_output recovered via truncation repair "
+                            "(openai engine): payload_len=%d repaired_len=%d "
+                            "recovered_items=%s",
+                            len(candidate), len(repaired),
+                            len(items) if isinstance(items, (list, dict)) else "?",
+                        )
+                    else:
+                        structured_output = None
 
     # B1: max_turns 对齐 Claude subtype=error_max_turns → 失败 + 不可重试（spec §1.2）
     is_max_turns = stop_reason == "max_turns"

@@ -19,6 +19,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from supernova_core.models.errors import classify_error_for_temporal
 
+from .llm_json import repair_truncated_json
 from .narration import narration_directive
 from .openai_output_schema import _extract_json_payload
 from .pricing import compute_cost
@@ -448,8 +449,25 @@ class AnthropicProvider(BaseProvider):
             if payload:
                 try:
                     structured_output = json.loads(payload)
-                except json.JSONDecodeError:
-                    structured_output = None
+                except (json.JSONDecodeError, ValueError):
+                    # 截断修复兜底（spec 2026-08-19 §3.1）：网关流中断在最终
+                    # 消息尾部时，从半截 JSON 救回 N-1 条完整元素，避免
+                    # structured_output=None → 静默漏盘 → 整轨报废三轮重跑。
+                    repaired = repair_truncated_json(payload)
+                    if repaired is not None:
+                        structured_output = json.loads(repaired)
+                        items = (structured_output.get("vulnerabilities")
+                                 if isinstance(structured_output, dict)
+                                 else structured_output)
+                        logger.warning(
+                            "structured_output recovered via truncation repair "
+                            "(anthropic engine): payload_len=%d repaired_len=%d "
+                            "recovered_items=%s",
+                            len(payload), len(repaired),
+                            len(items) if isinstance(items, (list, dict)) else "?",
+                        )
+                    else:
+                        structured_output = None
                 else:
                     logger.info(
                         "structured_output recovered from collected_text fallback "

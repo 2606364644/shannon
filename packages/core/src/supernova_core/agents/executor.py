@@ -1,3 +1,4 @@
+import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,6 +24,9 @@ from supernova_core.services.validate_authentication import auth_state_path
 if TYPE_CHECKING:
     from supernova_core.logging.activity_logger import ActivityLogger
     from supernova_core.agents.tool_audit_logger import ToolAuditLogger
+
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_template_name(
@@ -63,6 +67,26 @@ def _result_cost_context(result) -> dict:
         "cache_read_tokens": tokens.cache_read_input_tokens if tokens else None,
         "cache_creation_tokens": tokens.cache_creation_input_tokens if tokens else None,
     }
+
+
+def _validation_error_context(result) -> dict:
+    """validate_deliverable 防线 raise 时的诊断 context（spec 2026-08-19 §3.2）。
+
+    现状该 raise 只带 agent_name/expected_queue，stop_reason / 文本证据 /
+    通道状态全丢（网关断流排障只能猜）。合并 _result_cost_context 的
+    cost/tokens；collector 计数 Phase 2 接 collector 后有真值，当前恒 0。
+    """
+    ctx = _result_cost_context(result)
+    text = getattr(result, "text", "") or ""
+    ctx.update({
+        "stop_reason": getattr(result, "stop_reason", None),
+        "collected_text_len": len(text),
+        "collected_text_tail": text[-200:] if text else "",
+        "structured_output_present": getattr(result, "structured_output", None) is not None,
+        "collector_submitted_count": 0,  # Phase 2（submit_finding）接入
+        "collector_roster_count": 0,     # Phase 2（finding_roster）接入
+    })
+    return ctx
 
 
 class AgentExecutor:
@@ -204,6 +228,15 @@ class AgentExecutor:
             # spec 2026-08-18 tiering：queue json 下沉桶内 intermediate/（交付物留顶层）。
             queue_path = intermediate_path(deliverables, queue_filename)
             atomic_write_json(queue_path, result.structured_output)
+        elif not skip_artifact_postprocess and queue_filename:
+            # 诊断（spec 2026-08-19 §3.2）：现状此分支零日志静默跳过，网关断流
+            # 排障全靠猜；warning 留第一现场（validate 防线随后 raise 补 context）。
+            logger.warning(
+                "agent %s produced no structured output — queue %s NOT written "
+                "(text_len=%d, stop_reason=%r)",
+                agent_name.value, queue_filename,
+                len(getattr(result, "text", "") or ""), result.stop_reason,
+            )
 
         # host 渲染写 md:有 collector 通道的 agent(Plan 1 = pre-recon)在 queue 写盘
         # 之后、validate 之前,用 collector payload 确定性渲染 deliverable md。这样
@@ -240,7 +273,15 @@ class AgentExecutor:
                     payload)
 
         if not skip_artifact_postprocess:
-            await validate_deliverable(deliverables, agent_name)
+            try:
+                await validate_deliverable(deliverables, agent_name)
+            except PentestError as exc:
+                # 诊断增补（spec 2026-08-19 §3.2）：防线 raise 原地补 result 级
+                # 证据（stop_reason/文本尾巴/通道状态/cost）再上抛——不改
+                # validate_deliverable 签名（纯函数波及面大），也不吞 retryable
+                # /error_code 分类（原地 update，分类字段不动）。
+                exc.context.update(_validation_error_context(result))
+                raise
 
         await GitManager.commit(deliverables, agent_name)
 

@@ -107,3 +107,92 @@ def repair_json_arguments(args: str | None) -> str | None:
     except (json.JSONDecodeError, ValueError):
         return None
     return candidate
+
+
+def repair_truncated_json(payload: str | None) -> str | None:
+    """尾部截断的 JSON 补闭合修复；救不回返 None（spec 2026-08-19 §3.1）。
+
+    只处理「尾部不完整」一种畸形（网关流中断在 LLM 最终消息的实际形态），
+    不做任意畸形修复。loads 当裁判：任何产出必须能 json.loads 通过才返回；
+    完整 JSON / 空串 / 救不回 → None（调用方走 validator 防线重试）。
+
+    算法（转义感知栈扫描，语义等同 spec 描述的 raw_decode 定位失败点）：
+
+    1. ``json.loads`` 能过 → None（不归本函数管）。
+    2. 单遍扫描记录候选点（``}``/``]`` pop 时刻）及该位置的嵌套栈快照；
+       **只记录元素完整/根层边界候选**——元素完整边界（pop 后栈顶是数组
+       容器，该元素是数组直接子元素且刚完整闭合）或根层 key-value 边界
+       （pop 后栈深 1，根 object 的一个 value 刚完整闭合）。元素内嵌套
+       容器闭合点不记录：那种 candidate 补全后会救出缺字段的部分元素，
+       违反「元素内部截断连同残缺元素丢弃」。
+    3. 候选 1（从晚到早）：截到候选点 + 按栈快照补闭合 → loads 验证。
+       截断在元素内部（字符串中途/字段残缺）时，残缺元素连同其后内容被
+       丢弃——回溯到上一个完整元素边界，救回 N-1 条。
+    4. 候选 2（末尾补全）：扫描结束不在字符串字面量内时，按末尾栈整体补
+       闭合（object 根尾部值完整、只缺 ``}`` 的形态）。字符串内截断不猜
+       （补 ``"`` 会静默截短 notes 内容）。
+
+    前缀垃圾容忍：输入带围栏/叙述前缀（未闭合 ```json fence 半截直连）
+    时，从首个结构性 ``{``/``[`` 起参与扫描与裁判——前缀留在裁判串里会让
+    所有 candidate 必然 loads 失败。真实链路调用方传入 ``_extract_json_payload``
+    的 payload 子串（本就无前缀），此步对既有输入是幂等 no-op。
+    """
+    if not payload or not payload.strip():
+        return None
+    s = payload.strip()
+    # 前缀垃圾容忍（见 docstring）：从首个结构性 {/[ 起。
+    first_obj, first_arr = s.find("{"), s.find("[")
+    starts = [p for p in (first_obj, first_arr) if p != -1]
+    if starts:
+        s = s[min(starts):]
+    try:
+        json.loads(s)
+        return None
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    candidates: list[tuple[int, list[str]]] = []  # (cut_pos, stack_snapshot)
+    for i, ch in enumerate(s):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            # 元素完整边界（pop 后栈顶是数组容器——该元素是数组直接子元素且已完整闭合）
+            # 或根层 key-value 边界（pop 后栈深 1——根 object 的一个 value 刚完整闭合）。
+            # 排除「元素内嵌套容器闭合点」：那种 candidate 补全后会救出缺字段的部分元素，
+            # 违反 spec「元素内部截断连同残缺元素丢弃」。
+            if stack and stack[-1] == "[" or len(stack) == 1:
+                candidates.append((i + 1, list(stack)))
+
+    for cut, st in reversed(candidates):
+        closer = "".join("}" if o == "{" else "]" for o in reversed(st))
+        candidate = s[:cut] + closer
+        try:
+            json.loads(candidate)
+            return candidate
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    if not in_string:
+        closer = "".join("}" if o == "{" else "]" for o in reversed(stack))
+        candidate = s + closer
+        try:
+            json.loads(candidate)
+            return candidate
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return None
