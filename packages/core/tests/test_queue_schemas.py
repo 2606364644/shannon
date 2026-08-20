@@ -317,9 +317,10 @@ def test_title_inherited_by_all_subclasses():
 
 
 def test_injection_vulnerability_accepts_llm_output_fields():
-    """InjectionVulnerability 必须接受 LLM 实际输出的 XSS 风格字段
-    (sink_function/render_context/encoding_observed/source_detail),
-    否则按-class parse 后这些信息会被 pydantic 丢弃。"""
+    """InjectionVulnerability 同时接受两族字段：TS 原版 sink_call 族（prompt
+    字段表所教，2026-08-20 follow-up 后是产出主族）与 XSS 风格
+    (sink_function/render_context/encoding_observed/source_detail，
+    _vuln_output_schema 时代的历史产出)，否则按-class parse 后信息被丢弃。"""
     v = InjectionVulnerability(
         ID="INJ-VULN-01",
         vulnerability_type="SQLi",
@@ -340,3 +341,50 @@ def test_injection_vulnerability_accepts_llm_output_fields():
     # 旧字段仍保留(兼容 GitNexus 轨未来输出 / 现有测试)
     assert v.sink_call is None
 
+
+
+def test_injection_vulnerability_keeps_prompt_taught_fields():
+    """injection prompt 字段表（TS 原版 injectionFields + 移植增强）教的
+    sink_call 族字段 + authentication_required / accessible_routes 必须被
+    pydantic 保留——此前两增强字段不在模型上，按-class parse 时被静默丢弃
+    （2026-08-20 follow-up 根因修复）。"""
+    v = InjectionVulnerability(
+        ID="INJ-VULN-01",
+        vulnerability_type="SQLi",
+        externally_exploitable=True,
+        confidence="high",
+        title="SQL 注入：搜索参数 q 进入原始查询",
+        source="q @ controllers/search.js:88",
+        authentication_required="false",
+        accessible_routes="GET /search []",
+        path="GET /search → handleSearch → sequelize.query",
+        sink_call="models/search.js:31 sequelize.query",
+        slot_type="SQL-val",
+        sanitization_observed="escape @ controllers/search.js:90",
+        concat_occurrences="models/search.js:31 (after sanitization)",
+        verdict="vulnerable",
+        witness_payload="' UNION SELECT 1--",
+    )
+    assert v.sink_call == "models/search.js:31 sequelize.query"
+    assert v.slot_type == "SQL-val"
+    assert v.sanitization_observed == "escape @ controllers/search.js:90"
+    assert v.concat_occurrences.startswith("models/search.js:31")
+    assert v.authentication_required == "false"
+    assert v.accessible_routes == "GET /search []"
+
+
+def test_xss_vulnerability_keeps_prompt_taught_fields():
+    """xss prompt 增强字段 authentication_required / accessible_routes 同样
+    不丢（与 injection 对齐）。"""
+    v = XssVulnerability(
+        ID="XSS-VULN-01",
+        vulnerability_type="Reflected",
+        externally_exploitable=True,
+        confidence="high",
+        authentication_required="true",
+        accessible_routes="GET /profile [authGuard]",
+        sink_function="res.send",
+    )
+    assert v.authentication_required == "true"
+    assert v.accessible_routes == "GET /profile [authGuard]"
+    assert v.sink_function == "res.send"

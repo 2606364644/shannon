@@ -266,3 +266,57 @@ def test_recheck_output_outside_missing_appended_with_warning(tmp_path, monkeypa
     assert any("outside the missing list" in r.getMessage()
                and "AUTH-VULN-99" in r.getMessage()
                for r in caplog.records)
+
+
+def test_recheck_receives_audit_loggers(tmp_path, monkeypatch):
+    """F2（2026-08-20 follow-up）：定向重查 agent 与主 agent 同参穿线
+    audit_logger / tool_audit_logger——重查此前零观测（排障时不知道它
+    跑没跑、跑了多久、调了哪些工具）。"""
+    submitted = [{"ID": "AUTH-VULN-01", "title": "t1"}]
+    roster = [{"id": "AUTH-VULN-01", "title": "t1"},
+              {"id": "AUTH-VULN-02", "title": "lost"}]
+    c = _prefilled_collector(submitted, roster)
+    ax, exec_mod, deliverables = _setup(tmp_path, monkeypatch, c)
+
+    captured: list[dict] = []
+
+    async def fake_run(**kw):
+        captured.append(kw)
+        return _R() if len(captured) == 1 else _RecheckR()
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    audit, tool_audit = object(), object()
+    _run(ax.execute(
+        agent_name=exec_mod.AgentName.AUTH_VULN,
+        repo_path=str(deliverables), deliverables_path=str(deliverables),
+        audit_logger=audit, tool_audit_logger=tool_audit,
+    ))
+    assert len(captured) == 2
+    assert captured[0].get("audit_logger") is audit  # 主 agent（现状已传）
+    assert captured[1].get("audit_logger") is audit  # 重查（F2 修复面）
+    assert captured[1].get("tool_audit_logger") is tool_audit
+
+
+def test_validate_raise_context_carries_recheck_cost(tmp_path, monkeypatch):
+    """F4（2026-08-20 follow-up）：validate 防线 raise 时 AgentMetrics 无法
+    返回，位于 validate 之后的重查 cost 并账段不执行——重查消耗须并入
+    raise 的 exc.context（对齐 _validation_error_context 的诊断契约），
+    否则诊断只见主 agent cost，重查白烧不可见。"""
+    submitted = [{"ID": "AUTH-VULN-01", "title": "t1"}]
+    roster = [{"id": "AUTH-VULN-01", "title": "t1"},
+              {"id": "AUTH-VULN-02", "title": "lost"}]
+    c = _prefilled_collector(submitted, roster)
+    ax, exec_mod, deliverables = _setup(tmp_path, monkeypatch, c)
+    _setup_recheck(monkeypatch, _RecheckR(), expect_clues=("AUTH-VULN-02", "lost"))
+
+    async def broken_validate(*a, **k):
+        raise PentestError("auth deliverable missing required sections",
+                           "validation", retryable=True)
+
+    monkeypatch.setattr(exec_mod, "validate_deliverable", broken_validate)
+    with pytest.raises(PentestError) as ei:
+        _execute(ax, exec_mod, deliverables)
+    ctx = ei.value.context
+    assert ctx["recheck_cost"] == pytest.approx(0.1)   # 重查 0.1 与主 0.1 区分可见
+    assert ctx["recheck_turns"] == 2
+    assert ctx["cost_usd"] == pytest.approx(0.1)       # 主 agent cost（既有键）

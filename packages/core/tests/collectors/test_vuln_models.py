@@ -235,14 +235,22 @@ def test_finding_schema_class_specific_fields():
     assert _props("auth") == {
         "source_endpoint", "vulnerable_code_location", "missing_defense",
         "exploitation_hypothesis", "suggested_exploit_technique"}
-    assert _props("ssrf") == _props("auth") | {"vulnerable_parameter"}
+    assert _props("ssrf") == _props("auth") | {
+        "vulnerable_parameter", "witness_payload"}
     assert _props("authz") == {
         "endpoint", "vulnerable_code_location", "role_context", "guard_evidence",
         "side_effect", "reason", "minimal_witness"}
-    # injection 与 xss 共用 XSS 风格字段（对齐 queue_schemas.py 注释：两轨同 schema）
-    assert _props("injection") == _props("xss") == {
-        "source", "source_detail", "path", "sink_function", "render_context",
-        "encoding_observed", "verdict", "mismatch_reason", "witness_payload"}
+    # injection 与 xss 是两套契约（对齐 TS 原版 queue-schemas.ts 的
+    # injectionFields / xssFields）：injection=sink_call 族，xss=sink_function 族；
+    # 两轨各加 prompt 增强字段 authentication_required / accessible_routes。
+    assert _props("injection") == {
+        "source", "authentication_required", "accessible_routes", "path",
+        "sink_call", "slot_type", "sanitization_observed", "concat_occurrences",
+        "verdict", "mismatch_reason", "witness_payload"}
+    assert _props("xss") == {
+        "source", "source_detail", "authentication_required", "accessible_routes",
+        "path", "sink_function", "render_context", "encoding_observed",
+        "verdict", "mismatch_reason", "witness_payload"}
 
 
 def test_findings_summary_roster_required():
@@ -254,3 +262,16 @@ def test_findings_summary_roster_required():
     # 空数组合法（= 声明无漏洞）
     assert props["finding_roster"]["type"] == "array"
     assert props["finding_roster"].get("minItems") is None
+
+
+def test_make_collector_never_none_for_vuln_agents():
+    """F3（2026-08-20 follow-up）：executor 的 vuln 对账写盘分支直接调
+    collector.get_all()（分支条件不含 collector None 守卫）——make_collector
+    对 5 个 vuln agent 恒非 None 是该分支的结构前提，锁定契约防回归。"""
+    from supernova_core.collectors import make_collector
+    from supernova_core.models.agents import AgentName
+
+    vuln_names = [n for n in AgentName if n.value.endswith("-vuln")]
+    assert len(vuln_names) == 5
+    for name in vuln_names:
+        assert make_collector(name) is not None, name.value

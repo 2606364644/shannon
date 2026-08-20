@@ -80,12 +80,16 @@ def _result_cost_context(result) -> dict:
     }
 
 
-def _validation_error_context(result, collector_counts: dict | None = None) -> dict:
+def _validation_error_context(result, collector_counts: dict | None = None,
+                              recheck_result=None) -> dict:
     """validate_deliverable 防线 raise 时的诊断 context（spec 2026-08-19 §3.2）。
 
     现状该 raise 只带 agent_name/expected_queue，stop_reason / 文本证据 /
     通道状态全丢（网关断流排障只能猜）。合并 _result_cost_context 的
     cost/tokens；collector 计数 Phase 2 起由调用方从对账结果传入。
+    recheck_result（2026-08-20 follow-up）：raise 路径 AgentMetrics 无法返回，
+    位于 validate 之后的重查 cost 并账段不执行——定向重查的 LLM 消耗在此
+    并入 context，否则重查白烧在诊断链路不可见。
     """
     ctx = _result_cost_context(result)
     text = getattr(result, "text", "") or ""
@@ -97,6 +101,9 @@ def _validation_error_context(result, collector_counts: dict | None = None) -> d
         "collector_submitted_count": (collector_counts or {}).get("submitted", 0),
         "collector_roster_count": (collector_counts or {}).get("roster", 0),
     })
+    if recheck_result is not None:
+        ctx["recheck_cost"] = recheck_result.cost or 0.0
+        ctx["recheck_turns"] = recheck_result.turns
     return ctx
 
 
@@ -137,6 +144,8 @@ async def _targeted_recheck(
     api_key: str | None,
     provider_config: dict | None,
     proxy_url: str | None,
+    audit_logger=None,
+    tool_audit_logger=None,
 ) -> tuple[list[dict], object | None]:
     """漏交条目的定向重查小 agent（spec 2026-08-19 §3.4）。
 
@@ -174,6 +183,9 @@ async def _targeted_recheck(
             max_turns=_RECHECK_MAX_TURNS,
             provider_config=provider_config,
             proxy_url=proxy_url,
+            # 2026-08-20 follow-up（F2）：与主 agent 同参穿线——重查此前零观测。
+            audit_logger=audit_logger,
+            tool_audit_logger=tool_audit_logger,
         )
     except Exception:
         logger.warning("targeted recheck agent failed for %s (degraded)",
@@ -375,6 +387,8 @@ class AgentExecutor:
                     recheck_items, recheck_result = await _targeted_recheck(
                         agent_name, str(repo), deliverables, rec.missing,
                         defn.model_tier, api_key, provider_config, proxy_url,
+                        audit_logger=audit_logger,
+                        tool_audit_logger=tool_audit_logger,
                     )
                     if recheck_result is not None:
                         logger.info(
@@ -480,6 +494,7 @@ class AgentExecutor:
                     result,
                     {"submitted": len(submitted),
                      "roster": len(roster) if roster is not None else 0},
+                    recheck_result=recheck_result,
                 ))
                 raise
 

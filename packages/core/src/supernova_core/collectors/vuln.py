@@ -348,12 +348,51 @@ def _finding_props(class_props: dict) -> dict:
 _FINDING_BASE_REQUIRED = ["ID", "vulnerability_type", "externally_exploitable",
                           "confidence", "title"]
 
-_INJ_XSS_FINDING_PROPS: dict = {
+# injection / xss 是两套字段契约（对齐 TS 原版 queue-schemas.ts 的
+# injectionFields / xssFields，2026-08-20 follow-up 拆分）：injection=sink_call 族，
+# xss=sink_function 族；两轨各含 prompt 移植增强字段 authentication_required /
+# accessible_routes（此前不在 schema，模型按 prompt 交出后 pydantic 静默丢弃）。
+# prompt 字段表（vuln-*.txt <finding_submission>）是契约权威——schema 与其一致性
+# 由 tests/prompts/test_vuln_prompt_schema_contract.py 锁定，漂移即红。
+_INJECTION_FINDING_PROPS: dict = {
+    "source": _str_field(
+        "Tainted input param name & file:line — a SINGLE source per finding."),
+    "authentication_required": _str_field(
+        '"true" | "false" — whether login is required to reach this sink via this '
+        "route (check the router file for auth middleware)."),
+    "accessible_routes": _str_field(
+        "All routes reaching this sink with middleware chains, one per line: "
+        "'METHOD /path [middleware1, middleware2, ...]'."),
+    "path": _str_field(
+        "Source→sink hop list; MUST start with 'METHOD /route' when HTTP-reachable."),
+    "sink_call": _str_field("Sink file:line and function/method."),
+    "slot_type": _str_field(
+        "Sink slot label (SQL-val | SQL-like | SQL-num | SQL-enum | SQL-ident | "
+        "CMD-argument | CMD-part-of-string | FILE-path | FILE-include | "
+        "TEMPLATE-expression | DESERIALIZE-object | PATH-component)."),
+    "sanitization_observed": _str_field(
+        "Sanitizers on this path: name & file:line, all of them, in order."),
+    "concat_occurrences": _str_field(
+        "Each concat/format/join with file:line; flag those after sanitization."),
+    "verdict": _str_field('"vulnerable" — only vulnerable findings are submitted.'),
+    "mismatch_reason": _str_field("Why the defense fails / mismatches (1–2 lines)."),
+    "witness_payload": _str_field(
+        "Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+}
+
+_XSS_FINDING_PROPS: dict = {
     "source": _str_field("The tainted input vector (parameter/field/body path)."),
     "source_detail": _str_field("Where the input enters (route + handler)."),
-    "path": _str_field("Source→sink dataflow path summary; HTTP-reachable时以 METHOD /route 开头."),
+    "authentication_required": _str_field(
+        '"true" | "false" — whether login is required to reach this sink via this '
+        "route (check the router file for auth middleware)."),
+    "accessible_routes": _str_field(
+        "All routes reaching this sink with middleware chains, one per line: "
+        "'METHOD /path [middleware1, middleware2, ...]'."),
+    "path": _str_field(
+        "Source→sink dataflow path summary; HTTP-reachable时以 METHOD /route 开头."),
     "sink_function": _str_field("The dangerous sink call (function + file:line)."),
-    "render_context": _str_field("XSS-only: render context (HTML_BODY/HTML_ATTRIBUTE/JAVASCRIPT_STRING/URL_PARAM/CSS_VALUE)."),
+    "render_context": _str_field("Render context (HTML_BODY/HTML_ATTRIBUTE/JAVASCRIPT_STRING/URL_PARAM/CSS_VALUE)."),
     "encoding_observed": _str_field("Encoding/sanitization observed on the path (or none)."),
     "verdict": _str_field('"vulnerable" | "safe" — only vulnerable findings are submitted.'),
     "mismatch_reason": _str_field("Why the defense fails / mismatches."),
@@ -371,6 +410,7 @@ _AUTH_FINDING_PROPS: dict = {
 _SSRF_FINDING_PROPS: dict = {
     **_AUTH_FINDING_PROPS,
     "vulnerable_parameter": _str_field("The outbound-request parameter carrying attacker-controlled input."),
+    "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
 }
 
 _AUTHZ_FINDING_PROPS: dict = {
@@ -384,8 +424,8 @@ _AUTHZ_FINDING_PROPS: dict = {
 }
 
 _FINDING_SCHEMAS: dict[str, dict] = {
-    "injection": _obj(_finding_props(_INJ_XSS_FINDING_PROPS), _FINDING_BASE_REQUIRED),
-    "xss": _obj(_finding_props(_INJ_XSS_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "injection": _obj(_finding_props(_INJECTION_FINDING_PROPS), _FINDING_BASE_REQUIRED),
+    "xss": _obj(_finding_props(_XSS_FINDING_PROPS), _FINDING_BASE_REQUIRED),
     "auth": _obj(_finding_props(_AUTH_FINDING_PROPS), _FINDING_BASE_REQUIRED),
     "ssrf": _obj(_finding_props(_SSRF_FINDING_PROPS), _FINDING_BASE_REQUIRED),
     "authz": _obj(_finding_props(_AUTHZ_FINDING_PROPS), _FINDING_BASE_REQUIRED),

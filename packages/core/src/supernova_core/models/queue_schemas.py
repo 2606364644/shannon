@@ -21,27 +21,33 @@ class BaseVulnerability(BaseModel):
     merge_source: str | None = None
 
 class InjectionVulnerability(BaseVulnerability):
-    # LLM 轨实际输出字段(injection vuln agent 与 xss 共用同一套输出 schema,
-    # 故字段名是 XSS 风格——见 collectors/vuln.py)。
+    # injection 输出契约 = TS 原版 injectionFields（sink_call 族，vuln-injection.txt
+    # 字段表所教，2026-08-20 follow-up 起与 collector schema 一致——见
+    # collectors/vuln.py 与 tests/prompts/test_vuln_prompt_schema_contract.py）。
     source: str | None = None
-    source_detail: str | None = None
+    authentication_required: str | None = None
+    accessible_routes: str | None = None
     path: str | None = None
-    sink_function: str | None = None
-    render_context: str | None = None
-    encoding_observed: str | None = None
-    verdict: str | None = None
-    mismatch_reason: str | None = None
-    witness_payload: str | None = None
-    # 旧字段保留兼容(GitNexus 轨未来可能输出;当前 LLM 不产出)。
-    combined_sources: str | None = None
     sink_call: str | None = None
     slot_type: str | None = None
     sanitization_observed: str | None = None
     concat_occurrences: str | None = None
+    verdict: str | None = None
+    mismatch_reason: str | None = None
+    witness_payload: str | None = None
+    # XSS 风格字段保留兼容(_vuln_output_schema 时代的历史产出;
+    # GitNexus 轨未来可能输出)。
+    combined_sources: str | None = None
+    source_detail: str | None = None
+    sink_function: str | None = None
+    render_context: str | None = None
+    encoding_observed: str | None = None
 
 class XssVulnerability(BaseVulnerability):
     source: str | None = None
     source_detail: str | None = None
+    authentication_required: str | None = None
+    accessible_routes: str | None = None
     path: str | None = None
     sink_function: str | None = None
     render_context: str | None = None
