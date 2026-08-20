@@ -86,8 +86,8 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
 3. Clean the per-class report sections in `{{DELIVERABLES_PATH}}/comprehensive_security_assessment_report.md` by applying these rules:
    - KEEP these specific section headings:
      NOTE: these sections will contain vulnerability lists with IDs matching pattern `### [TYPE]-VULN-[NUMBER]`
-     * `# [Type] {{REPORT_VULN_HEADING}}`
-     * `## {{REPORT_VULN_SUBHEADING}}`
+     * `# [Type] {per-class report heading}` (e.g. `# 注入分析报告` / `# Injection Analysis Report`)
+     * `## {vulnerability list subsection}` — do NOT invent a redundant per-type subheading (e.g. 「已确认漏洞」 / "Confirmed Vulnerabilities"): the per-class `#` heading already carries the type
      * `{{ATTACK_CHAIN_HEADING}}` — deterministically rendered from attack_chains.json; preserve as-is, do NOT clean or modify
 {{REPORT_FILTER_RULES}}
    - REMOVE ANY OTHER SECTIONS (even if they contain vulnerability IDs), such as:
