@@ -31,6 +31,8 @@ _log = logging.getLogger(__name__)
 # 阶梯精确计费需扩展 pricing.py。cache_creation 对 GLM/openai 协议恒 0（无此概念）。
 GLM_PRICING_CNY: dict[str, dict[str, float]] = {
     "glm-5.2": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
+    # glm-5.3 与 glm-5.2 同价（2026-08-19 上线未调价；JPMorgan 研报 + 上线报道双源核对）
+    "glm-5.3": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
     "glm-4.5-air": {"input": 0.8, "output": 6.0, "cache_read": 0.16, "cache_creation": 0.0},
 }
 

@@ -100,6 +100,14 @@ def test_compute_cost_normalizes_model():
     assert compute_cost("GLM-5.2[1m]", usage) == compute_cost("glm-5.2", usage)
 
 
+def test_glm_53_priced_same_as_52():
+    """glm-5.3 与 glm-5.2 官方同价（8/28/2）→ 同 usage cost 一致，非 0 回落。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    assert compute_cost("glm-5.3", usage) == CostAmount(38.0, "CNY")
+    assert compute_cost("GLM-5.3[1m]", usage) == CostAmount(38.0, "CNY")
+
+
 # ---- currency_symbol ----
 
 
