@@ -489,3 +489,117 @@ describe("图↔行 hover 双向联动 + 点枝条展开（spec §5 交互）", 
     expect(tokensCss).toContain(".branch-row-selected");
   });
 });
+
+// ===== 真实数据布局回归（2026-08-21 报告：其他环境真实数据下图错乱）=====
+// 旧 fixture 全是短标签 + 剪断点恰在末节点，覆盖不到真实形态：
+// - LLM dataflow_steps 的 label 常为长串（含路径/中文描述），列宽 180 固定 → 文字互相重叠；
+// - GitNexus safe 枝防护在中途节点 → 主 path 画到枝尾再折回剪断点 + 剪断点后节点照画 → 连线错乱；
+// - 深链树（多列）svg width=100% 等比压缩进容器 → 字号缩到不可读（文字「缺失」）。
+describe("PruningTreeFig — 真实数据布局回归（长标签/深链/中途剪断）", () => {
+  // 中途剪断：4 节点，effective sanitizer 在第 2 节点（line=30）→ cutStep=2
+  const midCutTree: DataflowTree = {
+    tree_id: "T-MIDCUT-01",
+    vuln_class: "injection",
+    sink: {
+      label: "cursor.execute", file: "app/db.py", line: 42,
+      rule_id: "py-sql-execute-raw", category: "sql", code: "cursor.execute(query)",
+    },
+    findings: [],
+    branches: [
+      {
+        branch_id: "F-MIDCUT",
+        track: "gitnexus",
+        verdict: "safe",
+        verdict_reason: "shlex.quote 覆盖拼接值",
+        source: { label: "req.query.name", type: "query", entry: "GET /api/users", file: "app/routes.ts", line: 10 },
+        nodes: [
+          { func: "UserController.list", file: "app/controllers/user.ts", line: 25, transformation: null, intermediate_vars: [], code: null, has_code: false },
+          { func: "sanitize", file: "app/sanitize.ts", line: 30, transformation: "sanitize_hint:shlex.quote", intermediate_vars: [], code: null, has_code: false },
+          { func: "DBLayer.run", file: "app/db.ts", line: 50, transformation: null, intermediate_vars: [], code: null, has_code: false },
+          { func: "cursor.execute", file: "app/db.py", line: 42, transformation: null, intermediate_vars: [], code: null, has_code: false },
+        ],
+        sanitizers: [{ name: "shlex.quote", defense_type: "shlex_quote", file: "app/sanitize.ts", line: 30, effective: true }],
+      },
+    ],
+  };
+
+  // 长标签：LLM 轨真实形态（自然语言 label + 长 entry + 长 sink 名）
+  const LONG_FUNC = "handleProfileUpdate 接收 req.body 并拼接 MongoDB 更新文档";
+  const LONG_SOURCE = "req.body.profile.displayName（用户资料昵称字段）";
+  const LONG_ENTRY = "POST /api/profile/:id/update-settings";
+  const LONG_SINK = "MongoClient.db.collection.insertOne";
+  const longLabelTree: DataflowTree = {
+    ...vulnerableTree,
+    tree_id: "T-LONG-01",
+    sink: { ...vulnerableTree.sink, label: LONG_SINK },
+    branches: [
+      {
+        ...vulnerableTree.branches[0],
+        branch_id: "F-LONG",
+        source: { label: LONG_SOURCE, type: "body", entry: LONG_ENTRY, file: "app/routes.ts", line: 10 },
+        nodes: [
+          { ...vulnerableTree.branches[0].nodes[0], func: LONG_FUNC },
+          { ...vulnerableTree.branches[0].nodes[1], func: "db.collection.insertOne" },
+        ],
+      },
+    ],
+  };
+
+  it("中途剪断枝：主 path 不折返（x 单调），剪断点之后节点不渲染", () => {
+    const { container } = render(<PruningTreeFig trees={[midCutTree]} />);
+    // 剪断点（step 2）之后的节点（step 3/4）不渲染——spec §5：绿实线至防护节点 + 残端，不到 sink
+    const nodeSteps = [...container.querySelectorAll('[data-branch="safe"] [data-node]')].map((el) =>
+      el.getAttribute("data-node"),
+    );
+    expect(nodeSteps).toEqual(["0", "1", "2"]);
+    // 主 path 的 x 坐标不出现剪断点之后的列（COL_W=180：xOf(3)=540、xOf(4)=720）——无折返
+    const d = container.querySelector('path[data-branch="safe"]')?.getAttribute("d") ?? "";
+    expect(d).not.toContain("540");
+    expect(d).not.toContain("720");
+  });
+
+  it("节点长函数名按列宽截断加 …，data-tooltip 保留全名", () => {
+    const { container } = render(<PruningTreeFig trees={[longLabelTree]} />);
+    const label = container.querySelector('[data-node="1"] [data-node-label]');
+    expect(label).toBeTruthy();
+    const shown = label?.textContent ?? "";
+    expect(shown.length).toBeLessThan(LONG_FUNC.length);
+    expect(shown).toContain("…");
+    // 全名进 tooltip（hover 可见完整函数描述）
+    const nodeG = container.querySelector('[data-node="1"]');
+    expect(nodeG?.getAttribute("data-tooltip") ?? "").toContain(LONG_FUNC);
+  });
+
+  it("source 长 label / 长 entry 截断；sink 长 label 截断且全名可见", () => {
+    const { container } = render(<PruningTreeFig trees={[longLabelTree]} />);
+    const srcLabel = container.querySelector("[data-source] [data-source-label]");
+    expect(srcLabel).toBeTruthy();
+    expect((srcLabel?.textContent ?? "").length).toBeLessThan(LONG_SOURCE.length);
+    expect(srcLabel?.textContent ?? "").toContain("…");
+    // 副行（type · entry）同样受列宽约束
+    const srcMeta = container.querySelector("[data-source] [data-source-meta]");
+    expect((srcMeta?.textContent ?? "").length).toBeLessThanOrEqual(LONG_ENTRY.length);
+    // sink label 截断（不出右边界），全名在 tooltip/title
+    const sinkLabel = container.querySelector("[data-sink-target] [data-sink-label]");
+    expect(sinkLabel).toBeTruthy();
+    expect((sinkLabel?.textContent ?? "").length).toBeLessThan(LONG_SINK.length);
+    expect(sinkLabel?.textContent ?? "").toContain("…");
+    const sinkG = container.querySelector("[data-sink-target]");
+    expect(sinkG?.getAttribute("data-tooltip") ?? "").toContain(LONG_SINK);
+  });
+
+  it("svg 按像素宽渲染（宽树不整图压缩致文字不可读），viewBox 覆盖 pill 左缘与 sink 右侧", () => {
+    const { container } = render(<PruningTreeFig trees={[midCutTree]} />);
+    const svg = container.querySelector("svg");
+    // width 是像素数（非 100%）：深链树不再被等比压进容器、字号不再缩到不可读
+    const w = svg?.getAttribute("width") ?? "";
+    expect(w).not.toBe("100%");
+    expect(w).toMatch(/^\d+(\.\d+)?$/);
+    // viewBox：minX < 0（容纳 source pill 左缘 -6 与盾外圈）；宽度 ≥ sink x + 0.9 列（容纳 sink 靶心+label）
+    const vb = (svg?.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
+    expect(vb.length).toBe(4);
+    expect(vb[0]).toBeLessThan(0);
+    const sinkX = 5 * COL_W; // midCutTree sinkCol = 4+1
+    expect(vb[0] + vb[2]).toBeGreaterThanOrEqual(sinkX + COL_W * 0.9);
+  });
+});

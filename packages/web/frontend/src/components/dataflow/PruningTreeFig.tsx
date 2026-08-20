@@ -12,7 +12,7 @@ import { BranchRow } from "./BranchRow";
 export const COL_W = 180;
 /** 行高：每条枝纵向占用空间。 */
 const ROW_H = 76;
-const PAD_X = 0; // viewBox 左边距（step_index=0 → source 列 x=0；列对齐 x = step_index × COL_W）
+const PAD_X = 16; // viewBox 左边距（容纳 source pill 左缘 -6 与盾外圈，不裁切）
 const PAD_Y = 28; // viewBox 上内边距
 const FOLD_THRESHOLD = 4; // 剪断枝 >4 折叠（spec §5）
 const NODE_R = 11; // 节点圆半径
@@ -21,12 +21,37 @@ export interface PruningTreeFigProps {
   trees: DataflowTree[];
 }
 
-/** 节点列 x（全局列对齐）。step_index=0 → source；step_index=N → 第 N 步节点；sink 列单独。 */
+/** 节点列 x（全局列对齐）。step_index=0 → source；step_index=N → 第 N 步节点；sink 列单独。
+ *  列对齐语义基于「列序号 × COL_W」的相对结构，PAD_X 只作 viewBox 整体左边距（不进 xOf，
+ *  保持 data-node 列位断点语义与 xOf(step)=step×COL_W 的可读性）。 */
 function xOf(stepIndex: number): number {
-  return PAD_X + stepIndex * COL_W;
+  return stepIndex * COL_W;
 }
 function yOf(rowIdx: number): number {
   return PAD_Y + rowIdx * ROW_H + ROW_H / 2;
+}
+
+/** 估算文本显示宽（px，fontSize≈10：全角/中文 10px、半角 5.6px）——SVG text 无自动换行/省略，
+ *  真实数据 label（LLM dataflow_steps 的自然语言描述、长函数名）必须按列宽预算手工截断，
+ *  否则溢出到邻列与相邻节点文字重叠（2026-08-21 真实数据布局回归）。 */
+function textWidthPx(s: string): number {
+  let w = 0;
+  for (const ch of s) w += ch.charCodeAt(0) > 0xff ? 10 : 5.6;
+  return w;
+}
+/** 按像素预算截断标签：超出加「…」保留前缀（全名进 data-tooltip）。 */
+function fitLabel(s: string, budgetPx: number): string {
+  if (textWidthPx(s) <= budgetPx) return s;
+  const ellipsis = 10;
+  let w = 0;
+  let out = "";
+  for (const ch of s) {
+    const cw = ch.charCodeAt(0) > 0xff ? 10 : 5.6;
+    if (w + cw > budgetPx - ellipsis) return out + "…";
+    w += cw;
+    out += ch;
+  }
+  return out;
 }
 
 /** sink 列索引（= 最大中间节点数 + 1，保证 sink 在最右统一列）。 */
@@ -78,7 +103,9 @@ interface SameLineArc {
   to: { x: number; y: number };
 }
 
-/** 构建同名函数弧（跨枝同名节点对，按 step 对齐成弧）。 */
+/** 构建同名函数弧（跨枝同名节点对）。按 func 分组（不带 step 序号——同名函数在不同枝
+ *  出现在不同深度是真实数据常态，按 `func#step` 分组会让绝大多数同名对连不上弧）；
+ *  多点位时链式连相邻对（点 1↔2、2↔3……）。 */
 function buildSameLineArcs(layouts: BranchLayout[]): SameLineArc[] {
   const shared = sharedFuncNames(layouts.map((l) => l.branch));
   if (shared.size === 0) return [];
@@ -86,17 +113,16 @@ function buildSameLineArcs(layouts: BranchLayout[]): SameLineArc[] {
   for (const l of layouts) {
     l.branch.nodes.forEach((n, i) => {
       if (n.func && shared.has(n.func)) {
-        const key = `${n.func}#${i + 1}`;
-        const arr = map.get(key) ?? [];
+        const arr = map.get(n.func) ?? [];
         arr.push({ x: xOf(i + 1), y: yOf(l.rowIdx) });
-        map.set(key, arr);
+        map.set(n.func, arr);
       }
     });
   }
   const arcs: SameLineArc[] = [];
-  for (const [key, pts] of map) {
-    if (pts.length >= 2) {
-      arcs.push({ func: key, from: pts[0], to: pts[1] });
+  for (const [fn, pts] of map) {
+    for (let i = 1; i < pts.length; i++) {
+      arcs.push({ func: fn, from: pts[i - 1], to: pts[i] });
     }
   }
   return arcs;
@@ -222,7 +248,10 @@ function TreeCard({
   const sinkY = layouts.length > 1
     ? PAD_Y + (rows - 1) * ROW_H / 2 + ROW_H / 2
     : yOf(0);
-  const svgWidth = sinkX + COL_W * 0.8 + PAD_X;
+  // 图区尺寸：sink 右边距一整列（靶心 r16 + 截断 label + 余量）；
+  // svg 用像素宽（非 100%）——深链树（多列）不再被等比压进容器致字号缩到不可读，
+  // 横向看全貌交给 ZoomViewport 的滚动/缩放平移（spec §5「图区缩放平移」）。
+  const svgWidth = sinkX + COL_W;
   const svgHeight = PAD_Y * 2 + rows * ROW_H;
   const sharedArcs = useMemo(() => buildSameLineArcs(layouts), [layouts]);
   // 公共函数统计：func → { count, cutBranches }（spec §5「公共函数 ⟳ N 枝经过」）
@@ -237,7 +266,7 @@ function TreeCard({
       <TreeHeader tree={tree} t={t} vulnCount={vulnCount} safeCount={safeCount} hasVuln={hasVuln} />
       <ZoomViewport maxHeight={520}>
         <svg
-          width="100%"
+          width={svgWidth + PAD_X}
           viewBox={`${-PAD_X} 0 ${svgWidth + PAD_X} ${svgHeight}`}
           role="img"
           aria-label={t("workspaceDetail.dataflow.pruningTreeAria", {
@@ -392,21 +421,34 @@ function BranchPath({
   const reachesSink = verdict === "vulnerable" || verdict === "unknown";
   const sourceX = xOf(0);
 
-  // 剪断点 step（effective sanitizer 所在节点 step）
+  // 剪断点 step（effective sanitizer 所在节点 step）。匹配加 file 校验——
+  // 真实数据不同文件 line 巧合相同会误定位剪断点到错误列。
   const effSan = branch.sanitizers.find((s) => s.effective === true);
   let cutStep = -1;
   if (effSan && verdict === "safe") {
-    const idx = branch.nodes.findIndex((n) => n.line != null && effSan.line != null && n.line === effSan.line);
+    const idx = branch.nodes.findIndex(
+      (n) =>
+        n.line != null &&
+        effSan.line != null &&
+        n.line === effSan.line &&
+        (effSan.file == null || n.file == null || n.file === effSan.file),
+    );
     cutStep = idx >= 0 ? idx + 1 : branch.nodes.length;
   }
+
+  // 剪断枝只画到剪断点（spec §5：绿实线至防护节点 + 残端，不到 sink）——
+  // 剪断点之后的节点不渲染、path 不延伸：否则主 path 先画到枝尾再折回剪断点、
+  // 后续节点与残端叠在一起（2026-08-21 真实数据「连线错乱」根因；防护在中途是常态）。
+  // 剪断点之后的传播信息不丢失——明细行（BranchRow）仍列全部节点。
+  const lastStep = !reachesSink && cutStep > 0 ? cutStep : branch.nodes.length;
 
   // 主 path 终点：打通枝 → sink 靶心；剪断枝 → 剪断点节点
   const endX = reachesSink ? sinkX : (cutStep > 0 ? xOf(cutStep) : xOf(branch.nodes.length));
   const endY = reachesSink ? sinkY : y;
 
-  // 构造 path d：source → 节点链 → 终点（同枝节点同 y；最后一段汇入 sink 用贝塞尔）
+  // 构造 path d：source → 节点链（至 lastStep）→ 终点（同枝节点同 y；最后一段汇入 sink 用贝塞尔）
   const pts: { x: number; y: number }[] = [{ x: sourceX, y }];
-  branch.nodes.forEach((_, i) => pts.push({ x: xOf(i + 1), y }));
+  for (let i = 0; i < lastStep; i++) pts.push({ x: xOf(i + 1), y });
   pts.push({ x: endX, y: endY });
   let d = "";
   for (let i = 1; i < pts.length; i++) {
@@ -452,8 +494,8 @@ function BranchPath({
         crossTreeTip={crossTreeSourceTip(branch.source, treeId)}
         t={t}
       />
-      {/* 节点 + 防护盾 + 公共函数下标 */}
-      {branch.nodes.map((node, i) => {
+      {/* 节点 + 防护盾 + 公共函数下标（剪断枝只渲染到剪断点 lastStep） */}
+      {branch.nodes.slice(0, lastStep).map((node, i) => {
         const step = i + 1;
         const isCut = !reachesSink && step === cutStep;
         const san = branch.sanitizers.find((s) => s.line != null && node.line === s.line);
@@ -511,10 +553,18 @@ function SourcePill({
   // 副信息行：METHOD /route（storage 的 type 不直译进副行——用白话标记行承载）
   const metaParts = [isStorage ? null : source.type, source.entry].filter(Boolean);
   const hasMeta = metaParts.length > 0;
-  // pill 主文本：label
-  const w = Math.min(COL_W - 8, Math.max(56, label.length * 6 + 16));
-  // tooltip：存储中转白话（2ND 枝）+ 跨树提示（并存拼接）；都无 → source 基本描述
+  // 主/副文本按列宽预算截断（真实数据 label/entry 长串会溢出到邻列与节点文字重叠）
+  const shownLabel = fitLabel(label, COL_W - 28);
+  const shownMeta = fitLabel(metaParts.join(" · "), COL_W - 20);
+  const labelCut = shownLabel !== label;
+  const metaCut = shownMeta !== metaParts.join(" · ");
+  // pill 宽度按截断后文本实宽（不再用 length×6 粗估——中文/全角宽度低估同样溢出）
+  const w = Math.min(COL_W - 8, Math.max(56, textWidthPx(shownLabel) + 16));
+  // tooltip：截断全名（主/副各自补）+ 存储中转白话（2ND 枝）+ 跨树提示（并存拼接）；
+  // 都无 → source 基本描述
   const tipParts: string[] = [];
+  if (labelCut) tipParts.push(label);
+  if (metaCut) tipParts.push(metaParts.join(" · "));
   if (isStorage) tipParts.push(t("workspaceDetail.dataflow.storageRelayFull"));
   if (crossTreeTip) tipParts.push(t("workspaceDetail.dataflow.crossTreeTooltip", { sinks: crossTreeTip }));
   const tooltip =
@@ -533,13 +583,13 @@ function SourcePill({
       data-tooltip={tooltip}
     >
       <rect x={-6} y={-12} width={w} height={24} rx={12} className="source-pill" />
-      <text x={2} y={4} className="source-pill-txt" textAnchor="start">
-        {label}
+      <text x={2} y={4} className="source-pill-txt" textAnchor="start" data-source-label="">
+        {shownLabel}
       </text>
       {/* 副信息行：type · METHOD /route（spec §5 source 行要求） */}
       {hasMeta && (
-        <text x={2} y={15} className="source-meta-txt" textAnchor="start">
-          {metaParts.join(" · ")}
+        <text x={2} y={15} className="source-meta-txt" textAnchor="start" data-source-meta="">
+          {shownMeta}
         </text>
       )}
       {/* 存储中转白话标记（2ND 枝 source.type=storage）：琥珀色，tooltip 含完整白话 */}
@@ -593,10 +643,14 @@ function NodeView({
         })
       : t("workspaceDetail.dataflow.pubFuncTooltipNone", { count: pubFuncStat!.count })
     : undefined;
+  // 函数名按列宽预算截断（真实 label 长串溢出列界与邻列文字重叠），全名进 tooltip
+  const fullFunc = node.func ?? "?";
+  const shownFunc = fitLabel(fullFunc, COL_W - 24);
+  const nodeTooltip = pubTooltip ?? (shownFunc !== fullFunc ? fullFunc : undefined);
   return (
     /* transform 平移局部坐标系到 (x,y)：data-tooltip 的 CSS ::after 浮层在局部原点
        渲染（SVG 伪元素无 CSS 盒定位），带 transform 即浮在节点自身位置。 */
-    <g data-node={step} x={x} transform={`translate(${x} ${y})`} data-tooltip={pubTooltip}>
+    <g data-node={step} x={x} transform={`translate(${x} ${y})`} data-tooltip={nodeTooltip}>
       <circle cx={0} cy={0} r={NODE_R} className={boxClass} />
       {/* 防护盾（外圈）：绿=有效 / 黄=绕过 */}
       {hasShield && (shieldEff || shieldBypass) && (
@@ -614,9 +668,16 @@ function NodeView({
           ✂
         </text>
       )}
-      {/* 函数名 + line 标签 */}
-      <text x={0} y={NODE_R + 14} className="fill-[hsl(var(--foreground))]" fontSize={10} textAnchor="middle">
-        {node.func ?? "?"}
+      {/* 函数名 + line 标签（函数名截断，全名 hover tooltip） */}
+      <text
+        x={0}
+        y={NODE_R + 14}
+        className="fill-[hsl(var(--foreground))]"
+        fontSize={10}
+        textAnchor="middle"
+        data-node-label=""
+      >
+        {shownFunc}
       </text>
       {node.line != null && (
         <text x={0} y={NODE_R + 26} className="fill-[hsl(var(--muted-foreground))]" fontSize={9} textAnchor="middle">
@@ -698,19 +759,23 @@ function SinkTarget({
 }) {
   const sinkCls = hasVuln ? "sink-pulse" : "sink-idle";
   const noInputTip = hasVuln ? undefined : t("workspaceDetail.dataflow.sinkNoInput");
+  // sink 名按列宽预算截断（长名溢出 viewBox 右界被裁=「文字缺失」），全名进 tooltip
+  const shownLabel = fitLabel(label, COL_W - 24);
+  const labelCut = shownLabel !== label;
+  const tooltip = [labelCut ? label : null, noInputTip].filter(Boolean).join(" · ") || undefined;
   return (
     <g
       data-sink-target={hasVuln ? "vuln" : "safe"}
       transform={`translate(${x} ${y})`}
       className={sinkCls}
-      data-tooltip={noInputTip}
+      data-tooltip={tooltip}
     >
-      {/* 原生 SVG tooltip（hover 教读图） */}
-      {noInputTip && <title>{noInputTip}</title>}
+      {/* 原生 SVG tooltip（hover 教读图；截断时含全名） */}
+      {tooltip && <title>{tooltip}</title>}
       <circle r={16} className={sinkCls} />
       <circle r={6} fill={hasVuln ? "hsl(var(--c-red))" : "hsl(var(--muted-foreground))"} opacity={hasVuln ? 0.8 : 0.4} />
-      <text x={0} y={30} className="sink-label" textAnchor="middle">
-        {label}
+      <text x={0} y={30} className="sink-label" textAnchor="middle" data-sink-label="">
+        {shownLabel}
       </text>
       {!hasVuln && (
         <text x={0} y={44} className="sink-noinput-txt" textAnchor="middle" data-sink-noinput="">
