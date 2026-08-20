@@ -65,13 +65,18 @@ class _AttrProxy:
 
 
 def _sanitize_messages(messages: list[dict]) -> list[dict]:
-    """原地清洗 messages：把 assistant tool_call 的非法 JSON arguments 修好或兜底 ``"{}"``。
+    """原地清洗 messages：把 assistant tool_call 的非法 arguments 修好或兜底 ``"{}"``。
 
     第三方 openai 兼容端点（火山方舟 ARK 等）消费侧校验 ``tool_call.function.arguments``
     必须是合法 JSON；GLM 偶发吐残缺/markdown 串，openai-agents 的 Chat Completions 模式
     无状态全量重发，会把它原样塞回 history 再次发送 → 端点 400 ``Invalid request body``。
     本函数在请求发出前把非法串修好（复用 ``repair_json_arguments``），修不好兜底 ``"{}"``
     （探针确认 ARK 接受 ``{}``）止血 400。合法 arguments 与无 tool_calls 的消息原样不动。
+
+    契约不止「合法 JSON 串」，而是「合法 JSON **object**」：端点 parse arguments 后调
+    ``.items()`` 要求 dict，根为 list/str/number/bool 的合法 JSON（如 ``"[]"``）同样 400
+    （回归 __legacy__ NodeGoat-20260820-162849 pre-recon，'list' object has no
+    attribute 'items'）。与防线1（bridge 09770734 的「合法 JSON 非对象」拒收）跨层同契约。
 
     与防线1（``bridge._on_invoke_set`` 在工具层让模型重发）互补：这里只管发包不 400，
     不负责语义对错（参考 "Your LLM JSON Is Valid — And Still Wrong"）。
@@ -87,9 +92,15 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
                 continue
             args = fn.get("arguments")
             if not isinstance(args, str) or not args.strip():
+                # 空串/非串（同族畸形形态）一并归一，不留网关 parse 失败入口。
+                fn["arguments"] = "{}"
                 continue
             repaired = repair_json_arguments(args)
-            fn["arguments"] = repaired if repaired is not None else "{}"
+            if repaired is None:
+                fn["arguments"] = "{}"
+                continue
+            # repair 契约保证返回值可 json.loads；根非 object 同样兜 "{}"。
+            fn["arguments"] = repaired if isinstance(json.loads(repaired), dict) else "{}"
     return messages
 
 

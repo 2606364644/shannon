@@ -44,6 +44,31 @@ def test_sanitize_leaves_valid_arguments_unchanged():
     assert msgs[0]["tool_calls"][0]["function"]["arguments"] == '{"a": 1}'
 
 
+# ---- 「合法 JSON 非 object」根类型兜底（回归 __legacy__ NodeGoat-20260820-162849）----
+
+
+@pytest.mark.parametrize("bad_args", ["[]", "[null]", '"text"', "123", "true", ""])
+def test_sanitize_fallbacks_when_valid_json_root_is_not_object(bad_args):
+    """合法 JSON 但根非 object（或空串）→ 兜 "{}"。
+
+    回归真机 NodeGoat-20260820-162849 pre-recon：deepseek-v4-flash 一批 7 个
+    set_* 并行调用中 set_xss_sinks arguments 退化为 "[]"；防线1 bridge 正确
+    拒收让模型重发，但防线2 只验「合法 JSON 串」原样放行 → 网关 parse 后
+    .items() 于 list → 400 'list' object has no attribute 'items' → 整跑阵亡。
+    """
+    msgs = [_assistant_with_tool_call(bad_args)]
+    _sanitize_messages(msgs)
+    assert msgs[0]["tool_calls"][0]["function"]["arguments"] == "{}"
+
+
+def test_sanitize_valid_object_with_nested_array_still_unchanged():
+    """收紧契约不误伤：object 根（值里含数组/null）原样保留。"""
+    good = '{"sinks": [{"a": 1}], "n": null}'
+    msgs = [_assistant_with_tool_call(good)]
+    _sanitize_messages(msgs)
+    assert msgs[0]["tool_calls"][0]["function"]["arguments"] == good
+
+
 def test_sanitize_leaves_non_tool_messages_untouched():
     msgs = [{"role": "user", "content": "hi"},
             {"role": "assistant", "content": "ok"},
