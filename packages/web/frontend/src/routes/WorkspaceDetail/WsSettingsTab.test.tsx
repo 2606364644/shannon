@@ -152,7 +152,10 @@ describe("WsSettingsTab", () => {
     expect(screen.getByText("GITLAB_TOKEN")).toBeInTheDocument();
     // 进程级（仅全局生效）
     expect(screen.getByText("SUPERNOVA_MAX_CONCURRENT")).toBeInTheDocument();
-    expect(screen.getByText("CLAUDE_CODE_MAX_OUTPUT_TOKENS")).toBeInTheDocument();
+    // CLAUDE_CODE_MAX_OUTPUT_TOKENS 已从词典移除：后端代码默认 64000（providers_anthropic）
+    // 覆盖所有在用模型（最小上限 96K），无工作区配置价值；误写入 env_text 仍由后端
+    // INEFFECTIVE_KEYS 警告兜底。
+    expect(screen.queryByText("CLAUDE_CODE_MAX_OUTPUT_TOKENS")).toBeNull();
   });
 
   it("点击「填入模板」→ 注入与预填同源的推荐模板（真实默认值 + 凭据注释行）", async () => {

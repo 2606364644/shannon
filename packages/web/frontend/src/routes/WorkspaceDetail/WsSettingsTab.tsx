@@ -84,10 +84,12 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
   },
 ];
 
-// 启动期：worker main() 启动时读一次，ws 覆盖不生效（需全局配）。与 INEFFECTIVE_KEYS 对齐。
+// 启动期：worker main() 启动时读一次，ws 覆盖不生效（需全局配）。
+// 后端 INEFFECTIVE_KEYS（ws_env_codec）仍含 CLAUDE_CODE_MAX_OUTPUT_TOKENS——用户误写入
+// env_text 时警告兜底，但词典不再展示：后端代码默认 64000（providers_anthropic）对全部
+// 在用模型安全（最小上限 GLM-4.5-Air 96K），无工作区配置价值，展示反而误导（旧标签 32000）。
 const PROCESS_KEYS: CfgKey[] = [
   { key: "SUPERNOVA_MAX_CONCURRENT", kind: "str", defaultValue: "4" },
-  { key: "CLAUDE_CODE_MAX_OUTPUT_TOKENS", kind: "str", defaultValue: "32000" },
 ];
 
 // 推荐模板：遍历生效配置组（prefill!==false），非凭据/空值键填真实默认值（保存即生效），
