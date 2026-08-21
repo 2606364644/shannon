@@ -100,6 +100,32 @@ describe("ScanList 扫描列表", () => {
       "/p/ws/scans/s1/live",
     );
   });
+
+  it("仓库格显示 repo@branch（分支快照），commit 前 8 位进 title；无快照行不显示 @", async () => {
+    // spec 2026-08-21 §4：切分支后同一仓扫不同分支，报告靠快照区分来源。
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+        { ...completed, scan_id: "with-snap", repo: "app", repo_url: "https://x/app.git",
+          repo_branch: "dev", repo_commit: "abc123def456" },
+        { ...completed, scan_id: "no-snap", repo: "old", repo_branch: null, repo_commit: null },
+      ])),
+    );
+    renderList();
+    // repo 与 @branch 分属两个 span（样式分档），默认 text matcher 只看单文本节点 →
+    // 用 textContent 函数匹配
+    const repoCell = await waitFor(() => {
+      const hits = screen.getAllByText((_, el) => el?.textContent === "app@dev");
+      expect(hits.length).toBeGreaterThan(0);
+      const td = hits[0].closest("td");
+      expect(td).not.toBeNull();
+      return td as HTMLElement;
+    });
+    // commit 前 8 位 hover 可见（title 属性）
+    expect(repoCell).toHaveAttribute("title", "abc123de");
+    // 存量报告（无快照）不显示 @ 分支
+    expect(screen.getByText("old")).toBeInTheDocument();
+    expect(screen.queryByText((_, el) => (el?.textContent ?? "").includes("old@"))).not.toBeInTheDocument();
+  });
 });
 
 describe("ScanList 卡片操作按钮按 status 显隐", () => {

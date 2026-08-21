@@ -174,6 +174,10 @@ export interface ScanSummary {
   // repo_url=git 来源地址（session.web_url）。旧后端不返 -> 可选，消费方 '—' 兜底。
   repo?: string | null;
   repo_url?: string | null;
+  // 分支快照（spec 2026-08-21 §4）：提交扫描时仓库当前 branch/commit。切分支后
+  // 同一仓扫不同分支靠此区分来源；存量报告/黑盒不返 -> 可选，消费方不显示。
+  repo_branch?: string | null;
+  repo_commit?: string | null;
 }
 
 export interface SessionMetrics {

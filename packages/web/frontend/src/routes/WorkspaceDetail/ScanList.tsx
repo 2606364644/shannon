@@ -391,8 +391,18 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
             {label}
           </Link>
         </TableCell>
-        <TableCell className="max-w-0" title={scan.repo_url ?? undefined}>
-          <span className="block truncate text-[13px] font-medium">{scan.repo ?? "—"}</span>
+        {/* 仓库格：repo@branch（分支快照，spec 2026-08-21 §4）——切分支后同一仓扫不同
+            分支靠此区分；commit 前 8 位进 title hover；无快照（存量/黑盒）只显 repo 名 */}
+        <TableCell
+          className="max-w-0"
+          title={scan.repo_commit ? scan.repo_commit.slice(0, 8) : scan.repo_url ?? undefined}
+        >
+          <span className="block truncate text-[13px] font-medium">
+            {scan.repo ?? "—"}
+            {scan.repo_branch && (
+              <span className="font-mono text-[11px] text-muted-foreground">@{scan.repo_branch}</span>
+            )}
+          </span>
           {scan.repo_url && (
             <span className="block truncate font-mono text-[10.5px] text-muted-foreground/80">{compactUrl(scan.repo_url)}</span>
           )}
