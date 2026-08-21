@@ -12,6 +12,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MCP_READ_TIMEOUT = 30
+# initialize 握手的读超时（独立于查询级 MCP_READ_TIMEOUT）。`gitnexus mcp` 是 node
+# 子进程，并发负载下（真机 NodeGoat-20260821-044404：pre-recon LLM subagent 抢 CPU）
+# 冷启动 >30s 才完成内部初始化（stderr 'server starting' 在 initialize 30s 读超时
+# 之后 1s 才到；空闲实测 1.5s）。查询级 30s 罩 initialize 会把冷启动余量误杀——
+# 本窗口只给握手留余量，握手后的查询仍按 30s 坏连接口径处理。
+MCP_INIT_TIMEOUT = 120
 # Grace period after SIGTERM before escalating to SIGKILL when stopping the
 # MCP subprocess. See GitNexusMCPClient.stop().
 MCP_STOP_TIMEOUT = 5
@@ -115,12 +121,13 @@ class GitNexusMCPClient:
             ) from exc
         # 后台转发 stderr -> logger(见 _drain_stderr)。
         self._stderr_task = asyncio.create_task(self._drain_stderr())
-        # Send MCP initialize request
+        # Send MCP initialize request（读超时用 MCP_INIT_TIMEOUT：node 子进程冷启动
+        # 在并发负载下 >30s，与查询级 30s 分离，见常量注释）
         await self._send_request("initialize", {
             "protocolVersion": self.MCP_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "supernova", "version": "1.0"},
-        })
+        }, timeout=MCP_INIT_TIMEOUT)
         # Send initialized notification (MCP handshake requirement)
         await self._send_notification("notifications/initialized", {})
         logger.info("GitNexus MCP client started")
@@ -210,7 +217,7 @@ class GitNexusMCPClient:
                 f"GitNexus MCP stdin write timed out after {MCP_WRITE_TIMEOUT}s"
             )
 
-    async def _send_request(self, method: str, params: dict) -> dict:
+    async def _send_request(self, method: str, params: dict, *, timeout: float | None = None) -> dict:
         """Send a JSON-RPC request and read the response."""
         if self._process is None:
             raise RuntimeError("GitNexus MCP client not started. Call await client.start() first.")
@@ -228,11 +235,12 @@ class GitNexusMCPClient:
 
         try:
             response_line = await asyncio.wait_for(
-                self._process.stdout.readline(), timeout=MCP_READ_TIMEOUT
+                self._process.stdout.readline(),
+                timeout=timeout if timeout is not None else MCP_READ_TIMEOUT,
             )
         except asyncio.TimeoutError:
             raise ConnectionError(
-                f"GitNexus MCP timed out after {MCP_READ_TIMEOUT}s waiting for response"
+                f"GitNexus MCP timed out after {timeout if timeout is not None else MCP_READ_TIMEOUT}s waiting for response"
             )
         if not response_line:
             raise ConnectionError("GitNexus MCP closed connection")

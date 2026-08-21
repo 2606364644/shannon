@@ -450,3 +450,40 @@ class TestStartAndWriteTimeout:
                 await asyncio.wait_for(
                     client._send_request("tools/call", {}), timeout=2)
 
+
+
+class TestInitTimeout:
+    """initialize 握手读超时独立于 MCP_READ_TIMEOUT（MCP_INIT_TIMEOUT）。
+
+    真机 NodeGoat-20260821-044404：pre-recon LLM subagent 并发抢 CPU，gitnexus mcp
+    （node 子进程）冷启动 >30s 才完成内部初始化（stderr 'server starting' 在
+    initialize 30s 读超时之后 1s 才到；空闲时实测 1.5s）。查询级 READ_TIMEOUT(30s)
+    罩 initialize 会把冷启动余量误杀 -> non-retryable -> 整扫 fail-fast。
+    initialize 用独立的 MCP_INIT_TIMEOUT 给冷启动留余量；查询级 30s 不动。
+    """
+
+    @pytest.mark.asyncio
+    async def test_init_read_timeout_uses_dedicated_window(self, tmp_path):
+        """initialize 读超时走 MCP_INIT_TIMEOUT：patch 成 0.05s 后挂起的 stdout
+        必须快速抛 ConnectionError。若实现误用 MCP_READ_TIMEOUT(30s)，wait_for(2)
+        抛的是 asyncio.TimeoutError 而非 ConnectionError -> 测试失败防回退。"""
+        client = GitNexusMCPClient(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.stderr = None  # _drain_stderr 直接返回
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.write = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+
+        async def never_readline():
+            await asyncio.Event().wait()  # 永不返回
+
+        mock_proc.stdout = MagicMock()
+        mock_proc.stdout.readline = never_readline
+
+        with patch(
+            "supernova_core.code_index.gitnexus_mcp.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=mock_proc),
+        ):
+            with patch("supernova_core.code_index.gitnexus_mcp.MCP_INIT_TIMEOUT", 0.05):
+                with pytest.raises(ConnectionError, match="timed out"):
+                    await asyncio.wait_for(client.start(), timeout=2)

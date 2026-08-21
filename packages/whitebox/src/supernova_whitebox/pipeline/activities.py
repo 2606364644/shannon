@@ -756,6 +756,18 @@ async def run_code_index(input: ActivityInput) -> dict:
                     )
             except PentestError:
                 raise
+            except ConnectionError as exc:
+                # MCP 子进程冷启动/握手超时是并发负载下的瞬时环境错误（真机
+                # NodeGoat-20260821-044404：LLM subagent 抢 CPU，node 冷启动 >30s，
+                # initialize 读超时）。retryable=True 让 CODE_INDEX_RETRY 重试——
+                # 重试时 node 二进制已进 page cache，二次启动快；仍失败才真死。
+                # engine 不可用/索引失败等配置类错误不在此列，保持 non-retryable。
+                raise PentestError(
+                    f"GitNexus MCP query failed: {exc}. "
+                    "Code index requires a working GitNexus MCP connection.",
+                    category="code_index", error_code=ErrorCode.CODE_INDEX_FAILED,
+                    retryable=True,
+                ) from exc
             except Exception as exc:
                 raise PentestError(
                     f"GitNexus MCP query failed: {exc}. "

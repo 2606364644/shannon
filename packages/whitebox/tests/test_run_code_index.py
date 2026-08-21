@@ -207,3 +207,40 @@ async def test_gitnexus_llm_client_falls_back_to_text_when_no_structured_output(
 
 
 
+
+
+@pytest.mark.asyncio
+async def test_run_code_index_mcp_timeout_is_retryable(tmp_path):
+    """MCP 握手/连接超时(ConnectionError) → retryable ApplicationFailure(temporal 重试)。
+
+    真机 NodeGoat-20260821-044404：LLM subagent 并发抢 CPU，gitnexus mcp 冷启动
+    >30s，initialize 读超时(30s) -> ConnectionError -> PentestError 默认
+    retryable=False -> non-retryable -> 整扫 fail-fast。连接类瞬时错误可重试
+    （重试时 node 二进制已进 page cache，二次启动快），CODE_INDEX_RETRY(max 3)
+    兜底，仍失败才真死；engine 不可用/索引失败等配置类错误保持 non-retryable。"""
+    input = ActivityInput(repo_path=str(tmp_path), workspace_name="test")
+
+    mcp_client = MagicMock()
+    mcp_client.__aenter__ = AsyncMock(
+        side_effect=ConnectionError("GitNexus MCP timed out after 30s waiting for response"))
+    mcp_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("supernova_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+         patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+         patch("supernova_whitebox.pipeline.activities._get_paths") as mock_paths, \
+         patch("supernova_core.code_index.gitnexus_mcp.GitNexusMCPClient",
+               return_value=mcp_client):
+        cm = mock_sess.return_value.track_step.return_value
+        cm.__aenter__ = AsyncMock(return_value=None)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        mock_engine = MagicMock()
+        mock_engine.is_available.return_value = True
+        mock_engine.ensure_indexed_async = AsyncMock(return_value=MagicMock(success=True))
+        mock_engine_cls.return_value = mock_engine
+        mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
+
+        with pytest.raises(ApplicationFailure, match="GitNexus MCP") as ei:
+            await run_code_index(input)
+        # 关键断言：连接类瞬时错误必须可重试（non_retryable=False），
+        # 让 CODE_INDEX_RETRY 接管而非把整条扫描打死。
+        assert ei.value.non_retryable is False
