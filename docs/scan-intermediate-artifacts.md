@@ -3,9 +3,7 @@
 > 状态：依据当前代码（`feat/fork-py`）核对整理，2026-08-21。
 > SSOT：`packages/core/src/supernova_core/models/deliverables.py`（tier 判定与文件名模式）、
 > `packages/core/src/supernova_core/utils/paths.py`（目录布局）。
-> 注意：`docs/whitebox-blackbox-handoff.md` 中 repo-centric（`<REPO>/.supernova/deliverables`）
-> 的说法已过时，当前代码为 session-centric（`workspaces/<session>/deliverables`，
-> `DEFAULT_DELIVERABLES_SUBDIR = "deliverables"`）。
+> 交接运行手册见 `docs/whitebox-blackbox-handoff.md`。
 
 ---
 

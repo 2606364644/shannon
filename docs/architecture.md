@@ -224,7 +224,7 @@ Agent 失败: GitManager.rollback(deliverables, reason)
 白盒和黑盒之间通过结构化 JSON 文件实现解耦通信：
 
 1. 白盒阶段的 Vuln Agent（如 `injection-vuln`）在完成分析后，将结构化的漏洞利用队列写入 `{vuln_type}_exploitation_queue.json`
-2. 该文件存储在 `.supernova/deliverables/` 目录下
+2. 该文件存储在 `workspaces/<session>/deliverables/whitebox/`（intermediate tier）目录下
 3. 黑盒阶段的 Exploit Agent（如 `injection-exploit`）通过 `ExploitExecutor` 读取对应的队列文件作为输入
 4. 桥接过程完全通过文件系统完成，无需额外的消息队列或 API 调用
 
@@ -254,7 +254,7 @@ Whitebox                        Blackbox
 
 每次扫描创建独立的 Workspace 目录，实现完整的会话隔离：
 
-- 每个 Workspace 包含独立的 `session.json`（元数据）、`workflow.log`（执行日志）、`agents/`（Agent 日志）、`prompts/`（归档 Prompt）、`.supernova/deliverables/`（输出文件）
+- 每个 Workspace 包含独立的 `session.json`（元数据）、`workflow.log`（执行日志）、`agents/`（Agent 日志）、`prompts/`（归档 Prompt）、`deliverables/`（输出文件，三桶布局：`whitebox/`、`blackbox/`、`combined/`）
 - `SessionManager` 负责创建和管理 Workspace 生命周期
 - Workspace 命名格式：`{hostname}_shannon-{timestamp}`，确保全局唯一
 

@@ -57,55 +57,57 @@ uv run supernova-whitebox start --repo /path/to/target
 
 ### 查看产出物
 
-默认情况下，扫描产出物存放在目标仓库的 `<repo>/.supernova/deliverables/` 目录下。
+默认情况下，扫描产出物存放在 `workspaces/<session>/deliverables/` 目录下（三桶布局：`whitebox/`、`blackbox/`、`combined/`）。
 
 ## 4. 黑盒扫描教程
 
-黑盒扫描针对运行中的 Web 应用进行运行时漏洞验证。
+黑盒扫描针对运行中的 Web 应用进行运行时漏洞验证。黑盒是 **exploitation-only 下游**：
+必须复用白盒结果（`{vc}_exploitation_queue.json` + `recon_deliverable.md`），无白盒产物会
+直接 fail-fast，不会独立侦察。
 
-- **独立扫描**（无白盒结果）：无需源代码访问。
-- **复用白盒结果**（推荐）：跳过侦察阶段，直接对白盒发现的漏洞做运行时验证。
-
-### 启动扫描（独立模式）
+### 一键组合扫描（推荐）
 
 ```bash
-uv run supernova-blackbox start --url https://example.com
+uv run supernova-combined scan --repo /path/to/target --url https://example.com
 ```
 
 ### 启动扫描（复用白盒结果）
 
-在白盒扫描完成后，黑盒可通过 `--repo` 复用白盒产出的漏洞队列，跳过侦察阶段：
+在白盒扫描完成后，黑盒复用其漏洞队列做运行时验证：
 
 ```bash
-uv run supernova-blackbox start --url https://example.com --repo /path/to/target
+uv run supernova-blackbox start --url https://example.com -w wb-myapp
 ```
 
-`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，详见 [白盒→黑盒交接运行手册](whitebox-blackbox-handoff.md)。
+`-w` 指向白盒 workspace；不传时软默认自动发现最近的白盒 workspace（`--url` 匹配的优先），
+详见 [白盒→黑盒交接运行手册](whitebox-blackbox-handoff.md)。
 
 可选参数：
 
 | 参数 | 说明 |
 |------|------|
 | `--url` | （必填）目标 URL |
-| `-r` / `--repo` | 目标仓库路径（复用白盒结果时必填） |
+| `-w` / `--workspace` | 工作区名称（复用白盒结果 / 支持恢复已有工作区） |
+| `--latest` | 复用最近白盒 workspace 的产出物（找不到时报错退出） |
+| `-r` / `--repo` | 目标仓库路径（兼容 deliverables 位于 repo 下的旧平铺布局） |
 | `-o` / `--output` | 产出物输出目录 |
-| `-w` / `--workspace` | 工作区名称（支持恢复已有工作区） |
 | `-c` / `--config` | YAML 配置文件路径 |
 | `--vuln-classes` | 指定要测试的漏洞类型（默认：全部），可多次使用 |
 | `--no-exploit` | 跳过漏洞利用阶段 |
+| `--rerun` | 强制重跑黑盒（旧 evidence 归档到 `.blackbox-archive/`） |
 | `--pipeline-testing` | 使用最小化提示词进行测试 |
 | `--temporal-address` | Temporal 服务器地址（默认 `localhost:7233`） |
 
 ### 按漏洞类型过滤
 
 ```bash
-uv run supernova-blackbox start --url https://example.com --repo /path/to/target --vuln-classes injection --vuln-classes xss
+uv run supernova-blackbox start --url https://example.com -w wb-myapp --vuln-classes injection --vuln-classes xss
 ```
 
 ### 仅检测不利用
 
 ```bash
-uv run supernova-blackbox start --url https://example.com --repo /path/to/target --no-exploit
+uv run supernova-blackbox start --url https://example.com -w wb-myapp --no-exploit
 ```
 
 ### 查看报告

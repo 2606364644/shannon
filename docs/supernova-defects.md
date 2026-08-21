@@ -157,7 +157,7 @@ vuln_tasks.append(
 
 ### 5.3 D6：并行 Git 竞争风险
 
-6 个 vuln agent 并行运行，都往同一个 repo 的 `.supernova/deliverables/` 写文件。每个 agent 执行时都调用 `GitManager.create_checkpoint()`（git add -A && git commit）和 `GitManager.commit()`。
+6 个 vuln agent 并行运行，都往同一个 workspace 的 `deliverables/whitebox/` 写文件。每个 agent 执行时都调用 `GitManager.create_checkpoint()`（git add -A && git commit）和 `GitManager.commit()`。
 
 多个 agent 同时执行 `git add -A` 可能导致：一个 agent 的 deliverable 被另一个 agent 的 commit 包含，或者 index.lock 冲突。
 

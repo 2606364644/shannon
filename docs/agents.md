@@ -283,7 +283,7 @@ recon-blackbox → 5个 exploit Agent（并行）→ report
 
 ### 6.1 总体说明
 
-所有 deliverable 均为 Markdown 文件，保存在 `.supernova/deliverables/` 目录下。Agent 使用 `save-deliverable` CLI 工具保存文件，该工具提供自动验证功能。大型报告采用分块写入策略（CHUNKED WRITING），通过 Write/Edit 工具分多次写入以避免超出 32K token 限制。
+所有 deliverable 均为 Markdown 文件，保存在 `workspaces/<session>/deliverables/` 目录下（白盒 agent 落 `whitebox/` 桶，黑盒 agent 落 `blackbox/` 桶）。Agent 使用 `save-deliverable` CLI 工具保存文件，该工具提供自动验证功能。大型报告采用分块写入策略（CHUNKED WRITING），通过 Write/Edit 工具分多次写入以避免超出 32K token 限制。
 
 ### 6.2 各 Agent 输出文件
 

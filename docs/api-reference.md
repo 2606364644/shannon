@@ -1122,7 +1122,7 @@ class PipelineInput
 | `vuln_classes` | `list[VulnType] \| None` | `None` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
+| `deliverables_subdir` | `str` | `"deliverables"` |
 
 白盒扫描流水线的输入数据。
 
@@ -1164,7 +1164,7 @@ class ActivityInput
 | `web_url` | `str` | `""` |
 | `config_path` | `str \| None` | `None` |
 | `workspace_name` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
+| `deliverables_subdir` | `str` | `"deliverables"` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
 
@@ -1537,7 +1537,7 @@ class BlackboxPipelineInput
 | `exploit` | `bool` | `True` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
+| `deliverables_subdir` | `str` | `"deliverables"` |
 
 黑盒扫描流水线的输入数据。
 
@@ -1581,7 +1581,7 @@ class BlackboxActivityInput
 | `repo_path` | `str \| None` | `None` |
 | `config_path` | `str \| None` | `None` |
 | `workspace_name` | `str \| None` | `None` |
-| `deliverables_subdir` | `str` | `".supernova/deliverables"` |
+| `deliverables_subdir` | `str` | `"deliverables"` |
 | `pipeline_testing_mode` | `bool` | `False` |
 | `api_key` | `str \| None` | `None` |
 | `agent_name` | `str \| None` | `None` |
