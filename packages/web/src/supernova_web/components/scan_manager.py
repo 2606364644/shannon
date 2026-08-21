@@ -31,7 +31,7 @@ from .host_profile_store import (
 )
 from .repo_manager import _resolve_repo_dir, _validate_ws_segment, resolve_linked_repo_path
 from .scan_liveness import is_scan_recently_active
-from .scan_store import ScanStore, _read_workflow_id_from_ndjson
+from .scan_store import ScanStore, _read_workflow_id_from_ndjson, write_repo_snapshot
 from .workspaces_indexer import _compute_status
 
 
@@ -229,6 +229,9 @@ class ScanManager:
             scan_id, scan_dir = self._store.create_scan(
                 ws, req.url or "", target or "", req.type)
         self._mark_owner(scan_dir, "web")
+        # 分支快照（spec 2026-08-21 §4）：repo 来源提交时快照仓库当前 branch/commit
+        # 进 scan_dir——切分支后报告靠此区分来源（scan_id 只含仓库名+时间戳）。
+        self._maybe_write_repo_snapshot(req, target, scan_dir)
         event_file = scan_dir / "events.ndjson"
         scan_key = (ws, scan_id)
         self._active_reqs[scan_key] = req
@@ -1797,6 +1800,16 @@ class ScanManager:
         if req.type == "correlation":
             yaml_path = await self._resolve_correlation_yaml(req)
         return target, yaml_path
+
+    def _maybe_write_repo_snapshot(self, req: ScanRequest, target: str | None,
+                                   scan_dir: Path) -> None:
+        """repo 来源提交时写 repo-snapshot.json（快照逻辑在 scan_store）。
+
+        非 repo 来源（url/黑盒 reuse 的 source=None）不写；correlation 走 yaml 多仓、
+        但其 source=repo 时 target 仍为单仓路径，写快照属实无害。"""
+        if req.source is None or req.source.kind != "repo" or not target:
+            return
+        write_repo_snapshot(scan_dir, target)
 
     def _resolve_repo_path(self, ws: str, name: str) -> str:
         """将 repo 名（可为 group/repo）解析为 workspaces/<ws>/repos 内绝对路径，

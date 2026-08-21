@@ -488,6 +488,37 @@ class RepoManager:
         src["branch"] = branch; src["commit"] = head
         self._write_meta(ws, name, source=src)
 
+    # ls-remote 是网络调用（问远端，不依赖本地 ref），大仓/慢网需上限防悬挂
+    LS_REMOTE_TIMEOUT_S = 15
+
+    async def list_branches(self, ws: str, name: str) -> list[str]:
+        """列远端分支名（git ls-remote --heads origin，只列分支不列 tag）。
+
+        凭据零新工作：clone 时 _inject_auth 注入的带凭据 URL 已被 git 写进
+        .git/config remote origin，ls-remote origin 复用（与 checkout 的 fetch 同机制）。
+        错误约定（branches 端点映射）：仓库不存在/忙 → ValueError；ls-remote 失败/
+        超时 → RuntimeError（网络/凭据失效，前端降级手输）。
+        """
+        target = self._repo_dir(ws, name)
+        if not target.is_dir() or not _is_repo(target):
+            raise ValueError(f"仓库不存在：{name}")
+        if (ws, name) in self._jobs:
+            raise ValueError(f"仓库正忙：{name}")
+        try:
+            proc = await asyncio.wait_for(asyncio.create_subprocess_exec(
+                "git", "-C", str(target), "ls-remote", "--heads", "origin",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE),
+                timeout=self.LS_REMOTE_TIMEOUT_S)
+            out, err = await proc.communicate()
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"ls-remote 超时（>{self.LS_REMOTE_TIMEOUT_S}s）")
+        if proc.returncode != 0:
+            raise RuntimeError(f"ls-remote 失败：{err.decode(errors='replace').strip()[:200]}")
+        # 输出行 `<sha>\trefs/heads/<branch>`；取尾段去重排序
+        return sorted({ln.split("\t")[1][len("refs/heads/"):]
+                       for ln in out.decode(errors="replace").splitlines()
+                       if "\trefs/heads/" in ln})
+
     async def delete(self, ws: str, name: str) -> None:
         if (ws, name) in self._jobs:
             raise ValueError(f"仓库正忙：{name}")

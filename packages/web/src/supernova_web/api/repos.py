@@ -157,6 +157,29 @@ async def repo_events(ws: str, name: str, request: Request,
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+@router.get("/{ws}/repos/{name:path}/branches")
+async def list_repo_branches(ws: str, name: str, request: Request,
+                             _: User = Depends(workspace_member)):
+    """列远端分支（分支列 combobox 数据源，ls-remote --heads 问远端不依赖本地 ref）。
+
+    错误分档：仓库级 404/405/409（对齐 pull/checkout）；ls-remote 是网络调用，
+    失败/超时 → 502（前端降级为手输分支名），区别于服务器错误 500。
+    声明须在 GET /{name:path} 之前——{name:path} 贪婪匹配会吞掉 /branches 后缀。
+    """
+    rm = request.app.state.repo_manager
+    if rm.get_repo(ws, name) is None:
+        raise HTTPException(404, "repo not found")
+    if rm._is_linked(ws, name):
+        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
+    try:
+        branches = await rm.list_branches(ws, name)
+    except ValueError as e:        # clone/pull 忙碌
+        raise HTTPException(409, str(e))
+    except RuntimeError as e:      # ls-remote 失败/超时（网络/凭据失效）
+        raise HTTPException(502, str(e))
+    return {"branches": branches}
+
+
 @router.get("/{ws}/repos/{name:path}")
 async def get_repo(ws: str, name: str, request: Request,
                    _: User = Depends(workspace_member)):
@@ -199,8 +222,13 @@ async def pull_repo(ws: str, name: str, request: Request,
 async def checkout_repo(ws: str, name: str, body: CheckoutBody, request: Request,
                         _: User = Depends(workspace_member)):
     rm = request.app.state.repo_manager
+    sm = request.app.state.scan_manager
     if rm._is_linked(ws, name):
         raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
+    # 扫描 worker 直读仓库工作树（共享 volume）：运行中切换会让 worker 读到混合
+    # 分支代码 → 与 delete 同款引用锁拒绝（spec 2026-08-21 §2b）。
+    if (ws, name) in sm.active_repo_sources():
+        raise HTTPException(409, "仓库正被扫描引用")
     try:
         await rm.checkout(ws, name, body.branch)
     except ValueError as e:

@@ -198,6 +198,57 @@ def _repo_label(repo_path: str) -> str:
     return label or "repo"
 
 
+# 分支快照文件（spec 2026-08-21 §4）：提交扫描时仓库当前 branch/commit，报告区分
+# 「同一仓扫不同分支」的来源。scan_id 只含仓库名+时间戳，切分支后仅靠它分不清。
+REPO_SNAPSHOT_FILE = "repo-snapshot.json"
+
+
+def _repo_branch_commit(repo_path: str) -> tuple[str | None, str | None]:
+    """读仓库当前 (branch, commit)：私有克隆读 .supernova-repo.json 的 source；
+    linked 仓（无 meta）读 .git/HEAD 的 ref（commit 无来源 → None）。全缺失 → (None, None)。"""
+    p = Path(repo_path)
+    meta_file = p / ".supernova-repo.json"
+    if meta_file.exists():
+        try:
+            src = json.loads(meta_file.read_text("utf-8", errors="replace")).get("source", {})
+            return src.get("branch"), src.get("commit")
+        except json.JSONDecodeError:
+            pass
+    head_file = p / ".git" / "HEAD"
+    if head_file.exists():
+        m = re.match(r"ref: refs/heads/(.+)",
+                     head_file.read_text("utf-8", errors="replace").strip())
+        if m:
+            return m.group(1), None
+    return None, None
+
+
+def write_repo_snapshot(scan_dir: Path, repo_path: str) -> None:
+    """把仓库当前 branch/commit 快照进 scan_dir/repo-snapshot.json。
+
+    两来源皆缺失（裸目录/损坏）→ 不写文件（读侧缺失 → None，前端不显示）。
+    """
+    branch, commit = _repo_branch_commit(repo_path)
+    if branch or commit:
+        (Path(scan_dir) / REPO_SNAPSHOT_FILE).write_text(
+            json.dumps({"branch": branch, "commit": commit}), encoding="utf-8")
+
+
+def read_repo_snapshot(scan_dir: Path) -> dict:
+    """读快照；未写/损坏 → {}（调用方 .get() 兜 None）。"""
+    try:
+        data = json.loads((Path(scan_dir) / REPO_SNAPSHOT_FILE).read_text("utf-8", errors="replace"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _repo_snapshot_fields(scan_dir: Path) -> dict:
+    """ScanSummary 构造用的快照字段展开（repo_branch/repo_commit）。"""
+    snap = read_repo_snapshot(scan_dir)
+    return {"repo_branch": snap.get("branch"), "repo_commit": snap.get("commit")}
+
+
 def _strip_ws_prefix(ws: str, value: str) -> str:
     """剥展示名的 {ws}- 前缀：web scheme 真实 workflow_id {ws}-{scan_id} -> 展示名 {scan_id}
     （前端任务名不带工作区名，ws 上下文前端已知 / 跨 ws 表格另有独立 ws 列）；
@@ -351,6 +402,10 @@ class ScanSummary:
     # -> None，前端 '—' 兜底。
     repo: str | None = None
     repo_url: str | None = None
+    # 分支快照（spec 2026-08-21 §4）：提交扫描时仓库当前 branch/commit（repo-snapshot.json）。
+    # 切分支后报告靠此区分来源；存量报告/黑盒无快照 → None，前端不显示。
+    repo_branch: str | None = None
+    repo_commit: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -376,6 +431,8 @@ class ScanSummary:
             "latest_bb_run": self.latest_bb_run,
             "repo": self.repo,
             "repo_url": self.repo_url,
+            "repo_branch": self.repo_branch,
+            "repo_commit": self.repo_commit,
         }
 
 
@@ -676,6 +733,8 @@ class ScanStore:
             latest_bb_run=latest_bb_run,
             repo=(_repo_label(rp) or None) if (rp := (data.get("repo_path") if isinstance(data, dict) else None)) else None,
             repo_url=mgr.get_web_url(scan_dir),
+            # 分支快照（spec 2026-08-21 §4）：存量报告/黑盒无快照 → None
+            **_repo_snapshot_fields(scan_dir),
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:
