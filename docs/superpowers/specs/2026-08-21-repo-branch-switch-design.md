@@ -84,7 +84,7 @@ if (ws, name) in sm.active_repo_sources():
 
 复用「提交时写 scan_dir、列表时读回」既有模式（`repo_url=mgr.get_web_url(scan_dir)` 同款，`scan_store.py:678`）：
 
-- **写入**：`create_scan` 解析 repo 路径后（`_resolve_repo_path` 已读 `.supernova-repo.json` 取 state，顺手取 `source.branch/commit`），往 scan_dir 写 `repo-snapshot.json`：`{"branch": "...", "commit": "..."}`。仅 repo 来源（白盒/组合的白盒腿）写；黑盒（无 repo）、legacy、url/上传来源不写。
+- **写入**：锚点定在 `_resolve_repo_path`（`scan_manager.py:1801`，已读 `.supernova-repo.json` 取 state，顺手取 `source.branch/commit`）——凡经它成功解析的单仓 repo 来源提交路径（白盒及以 repo 为源的其他类型）都往 scan_dir 写 `repo-snapshot.json`：`{"branch": "...", "commit": "..."}`。不经它的不写：correlation（多仓 yaml，无单一 repo 概念）、黑盒（无 repo）、legacy、url/上传来源。
 - **读回**：`ScanSummary` 加可选字段 `repo_branch: str | None`、`repo_commit: str | None`（仓库维度字段区 `scan_store.py:349-353`，`to_dict` 一并输出）；构造时（`scan_store.py:655-680` 一带）从 scan_dir 读快照文件，缺失/损坏 → None。
 - **前端**：报告列表与详情的仓库信息处展示 `repo@branch`（commit 前 8 位 hover tooltip）；字段缺失（存量报告/黑盒）不显示，布局零破坏。
 - **语义**：快照 = 扫描提交时点的仓库态；提交后切分支不影响该记录。
