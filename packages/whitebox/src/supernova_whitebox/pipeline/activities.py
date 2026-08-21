@@ -1645,6 +1645,16 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 logger.warning(
                     "gitnexus chain-verdict: second-order builder failed (%s)", exc)
 
+            # P3 (spec 2026-08-21 safe-branch-recall): presumed-safe 来源候选
+            # (chain_propagator 对 intra 否定 sink 的表达式兜底,notes='presumed-safe')
+            # 判 vulnerable → 只进 chain_verdicts.json(数据流视图可见该枝终审),
+            # 不进 exploitation queue —— 防确定性兜底假阳污染报告。intra 报的
+            # 候选(无此 notes)判 vulnerable 是真阳,照常进 queue(现状不变)。
+            presumed_safe_flow_ids = {
+                f.flow_id for f in pgraph.taint_flows
+                if getattr(f, "notes", "") == "presumed-safe"
+            }
+
             for vc, builder in (
                 ("injection", build_injection_findings),
                 ("xss", build_xss_findings),
@@ -1664,13 +1674,26 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 # Merge second-order findings into this vc's queue so they
                 # get written + counted alongside the single-hop ones.
                 findings = list(findings or []) + second_order_by_vc.get(vc, [])
-                if findings:
+                # P3 分流：presumed-safe 来源判 vulnerable 的条目出 queue
+                # (chain_verdicts 落盘仍用全量 findings,见下方 _dump_chain_verdicts)。
+                queue_findings = [
+                    f for f in findings
+                    if not (getattr(f, "flow_id", "") in presumed_safe_flow_ids
+                            and getattr(f, "verdict", "") == "vulnerable")
+                ]
+                if len(queue_findings) < len(findings):
+                    logger.info(
+                        "gitnexus chain-verdict %s: %d presumed-safe vulnerable "
+                        "finding(s) routed to chain_verdicts only (not queue)",
+                        vc, len(findings) - len(queue_findings),
+                    )
+                if queue_findings:
                     # tiering：*_gitnexus_queue.json 属中间产物 → 桶内 intermediate/
                     atomic_write_json(
                         intermediate_path(deliverables, f"{vc}_gitnexus_queue.json"),
-                        {"vulnerabilities": [f.model_dump() for f in findings]},
+                        {"vulnerabilities": [f.model_dump() for f in queue_findings]},
                     )
-                    per_class[vc] = len(findings)
+                    per_class[vc] = len(queue_findings)
                 # 数据流视图（spec 2026-08-20 §4 P1）：落 chain_verdicts
                 # 产物（safe 链也进），供 P4 组装器按 flow_id 拼 GitNexus 枝。
                 # 与 gitnexus_queue 同条件（有 findings 才落盘），零 finding

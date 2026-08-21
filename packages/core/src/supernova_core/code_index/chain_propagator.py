@@ -16,6 +16,7 @@ Algorithm:
 """
 
 import logging
+import os
 import re
 from collections import defaultdict
 
@@ -30,6 +31,26 @@ from supernova_core.code_index.parameter_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# P2 (2026-08-21 safe-branch-recall spec): presumed-safe 候选 per-sink 上限。
+# 防 intra 否定 + 表达式回退在大仓 source×sink 笛卡尔积下产流爆炸;
+# 超限丢弃并 log(no silent caps)。
+PRESUMED_SAFE_MAX_PER_SINK_DEFAULT = 3
+
+
+def _presumed_safe_max_per_sink() -> int:
+    raw = os.environ.get("SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK")
+    if raw is None:
+        return PRESUMED_SAFE_MAX_PER_SINK_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        logger.warning(
+            "SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK=%r not an int, using default %d",
+            raw, PRESUMED_SAFE_MAX_PER_SINK_DEFAULT,
+        )
+        return PRESUMED_SAFE_MAX_PER_SINK_DEFAULT
+    return val if val >= 0 else PRESUMED_SAFE_MAX_PER_SINK_DEFAULT
 
 
 def _references_tainted(arg_expr: str, tainted: set[str]) -> bool:
@@ -512,6 +533,12 @@ def produce_intra_first_taint_flows(
     arrow 的 req → intra LLM 对"db 到 eval(req.body.preTax)"返回合法空判定(不触发
     fallback)→ intra-first 双重门全断。回退 flow 一律 needs_review + 低置信,字面量
     表达式(常量 sink)不产。
+
+    spec 2026-08-21 P2 —— presumed-safe 二审:intra 有信息但否定该 sink(tainted_params
+    非空 + sink 不在 hits)时,同样用表达式匹配 SourcePoint 产 ``notes="presumed-safe"``
+    候选流交 chain_verdict 定生死(终审权统一归 chain_verdict,intra 降为初审线索;
+    防 LLM 把被防护阻断的路径静默不报 → 数据流视图 0 剪断枝)。per-sink 上限
+    ``SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK``(默认 3)防大仓 source×sink 笛卡尔积爆炸。
     """
     from supernova_core.code_index.llm_taint_analyzer import _is_literal_expression
 
@@ -552,8 +579,8 @@ def produce_intra_first_taint_flows(
 
         # ---- spec 2026-08-21 修复点 A: 表达式回退 ----
         # 仅当 intra 对该函数无有效信息(缺失/空判定,即"问错问题"场景)才回退;
-        # intra 有非空 tainted_params 但该 sink 不在 hits = LLM 有依据的否定,
-        # 尊重判定不回退(守 test_intra_first_skips_sink_not_in_intra_hits 语义)。
+        # intra 有非空 tainted_params 但该 sink 不在 hits = LLM 有依据的否定
+        # → 交下方 P2 presumed-safe 二审。
         intra_informative = intra is not None and bool(intra.tainted_params)
         if not intra_informative:
             for sink in sinks:
@@ -578,6 +605,49 @@ def produce_intra_first_taint_flows(
                         needs_review=True,  # 未经 intra 证实 → 一律复核(chain_verdict 轻判)
                         notes="intra-first-expr-fallback",
                     ))
+
+        # ---- P2 (spec 2026-08-21 safe-branch-recall): intra 否定 → presumed-safe 二审 ----
+        # intra 有信息但该 sink 不在 hits(LLM 有依据的否定,如认定 sanitizer 阻断)
+        # → 否定也送二审:表达式匹配 SourcePoint 产 presumed-safe 候选流,
+        # chain_verdict 定生死。不是推翻 intra 否定,是把终审权统一归 chain_verdict
+        # (防 LLM 漏报防护流 → 数据流视图 0 剪断枝)。与修复点 A 互补:A 管
+        # "intra 无信息",本条管"intra 有信息但否定"。
+        elif intra_informative:
+            cap = _presumed_safe_max_per_sink()
+            for sink in sinks:
+                if sink.id in intra.hits:
+                    continue  # 主路径已产(intra-first),不叠加
+                exprs = [slot.expression for slot in (sink.dangerous_slots or [])
+                         if slot.expression and not _is_literal_expression(slot.expression)]
+                if not exprs:
+                    continue
+                n_kept = 0
+                for sp in _source_points_matching(func_id, set(exprs), source_points):
+                    if (sp.param_name, sink.id) in produced:
+                        continue
+                    if n_kept >= cap:
+                        logger.warning(
+                            "presumed-safe cap %d reached for sink %s (func %s); "
+                            "dropping extra source pairings (raise "
+                            "SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK to keep more)",
+                            cap, sink.id, func_id,
+                        )
+                        break
+                    primary = sink.dangerous_slots[0] if sink.dangerous_slots else None
+                    flows.append(TaintFlow(
+                        flow_id=f"{sp.entry_point_id}->{sink.id}",
+                        entry_point_id=sp.entry_point_id,
+                        source_param=sp.param_name,
+                        source_type=sp.source_type,
+                        propagation_steps=[],  # 无 intra 证实步骤(否定场景)
+                        sink_call_site_id=sink.id,
+                        sink_slot=primary.slot if primary else SlotContext.GENERIC,
+                        tainted_arg_index=primary.arg_index if primary else -1,
+                        confidence=_EXPR_FALLBACK_CONFIDENCE,
+                        needs_review=True,  # intra 否定过 → 必须 chain_verdict 复核
+                        notes="presumed-safe",
+                    ))
+                    n_kept += 1
     return flows
 
 

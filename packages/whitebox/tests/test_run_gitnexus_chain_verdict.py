@@ -54,8 +54,8 @@ def _write_pgraph(deliverables, flows):
 
 
 def _flow(slot, source="q", source_type="query", sink_id="app.py:h:db.execute:5:0",
-          steps=None):
-    return {
+          steps=None, notes=None):
+    d = {
         "flow_id": "ep#" + sink_id,
         "entry_point_id": "app.py:h:1",
         "source_param": source,
@@ -66,6 +66,9 @@ def _flow(slot, source="q", source_type="query", sink_id="app.py:h:db.execute:5:
         "confidence": 1.0,
         "has_sanitizer_hint": False,
     }
+    if notes is not None:
+        d["notes"] = notes
+    return d
 
 
 def _write_sink(deliverables, sink_id, category, sink_subtype):
@@ -284,3 +287,76 @@ async def test_entry_points_route_flows_into_queue(tmp_path, monkeypatch):
 
     data = json.loads((deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
     assert data["vulnerabilities"][0]["path"] == "POST /search → q->db"
+
+
+# ===== P3 (2026-08-21 safe-branch-recall spec): presumed-safe 来源分流 =====
+
+@pytest.mark.asyncio
+async def test_presumed_safe_vulnerable_excluded_from_queue_kept_in_verdicts(
+        tmp_path, monkeypatch):
+    """P3：presumed-safe 来源（intra 否定过的表达式兜底候选，notes='presumed-safe'）
+    判 vulnerable → 只进 chain_verdicts.json（数据流视图可见红枝）不进
+    exploitation queue（报告零影响）；同场普通来源（无该 notes）判 vulnerable
+    照常进 queue。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_pgraph(deliverables, [
+        _flow("sql_value", source="q", sink_id="app.py:h:db.execute:5:0"),   # 普通
+        _flow("sql_value", source="b", sink_id="app.py:h:db.execute:6:0",
+              notes="presumed-safe"),                                        # P2 来源
+    ])
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    session = _RecordingSession()
+    set_audit_session(session)
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    # queue 只剩普通来源（presumed-safe 判 vuln 不进 —— 防确定性兜底假阳进报告）
+    queue = json.loads(
+        (deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
+    assert len(queue["vulnerabilities"]) == 1
+    assert queue["vulnerabilities"][0]["source"].startswith("q ")
+    assert result["per_class"]["injection"] == 1
+    # verdicts 两条都在（数据流视图可见 presumed-safe 枝的终审结论）
+    verdicts = json.loads(
+        (deliverables / "intermediate" / "injection_chain_verdicts.json").read_text())
+    assert len(verdicts["verdicts"]) == 2
+    assert all(v["verdict"] == "vulnerable" for v in verdicts["verdicts"])
+
+
+@pytest.mark.asyncio
+async def test_presumed_safe_safe_verdict_still_in_queue(tmp_path, monkeypatch):
+    """P3 边界：presumed-safe 来源判 safe → 照常进 queue（safe 条目本来全量落，
+    externally_exploitable=False，与其它 safe 条目一致，报告无影响）。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_pgraph(deliverables, [
+        _flow("sql_value", source="b", sink_id="app.py:h:db.execute:6:0",
+              notes="presumed-safe"),
+    ])
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
+                '"b->db","mismatch_reason":null,"confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    queue = json.loads(
+        (deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
+    assert len(queue["vulnerabilities"]) == 1
+    assert queue["vulnerabilities"][0]["verdict"] == "safe"
+    assert result["per_class"]["injection"] == 1

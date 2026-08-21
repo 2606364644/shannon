@@ -120,6 +120,37 @@ class TestBuildTaintPrompt:
         assert "query" in prompt  # ParameterSource.QUERY_PARAM.value
 
 
+class TestPromptThreeStateReporting:
+    """P1 (2026-08-21 safe-branch-recall spec): intra prompt 报告口径三态化。
+
+    旧措辞 "can reach a sink" + "Only include paths you are confident about"
+    引导 LLM 把被 sanitizer 阻断的路径归入「不到达/没把握」静默不报 → 防护流
+    从未产出 → chain_verdict 无从判 safe → 数据流视图 0 剪断枝。锁定:
+      - 剪断态引导: sanitizer 阻断的路径也必须报 (sanitized=true);
+      - 断流态引导: 外部不可控/无数据流路径不报;
+      - 误导措辞删除: confidence 门控句不复存在。
+    """
+
+    def test_prompt_instructs_sanitized_paths_still_reported(self):
+        block = _block(params=["q"])
+        prompt = build_taint_prompt(block, [_sink(block.id)])
+        # 剪断态: 数据流路径存在 + sanitizer 阻断 → 仍要报
+        assert "still report it with sanitized=true" in prompt
+        assert "sanitizer_description" in prompt  # 引导句指明字段去向
+
+    def test_prompt_instructs_uncontrollable_params_not_reported(self):
+        block = _block(params=["q"])
+        prompt = build_taint_prompt(block, [_sink(block.id)])
+        # 断流态: 外部不可控 / 无数据流路径 → 不报
+        assert "not externally controllable" in prompt
+
+    def test_prompt_drops_confidence_gating_wording(self):
+        block = _block(params=["q"])
+        prompt = build_taint_prompt(block, [_sink(block.id)])
+        assert "confident about" not in prompt
+        assert "can reach a sink" not in prompt
+
+
 class TestParseLLMResponse:
     def test_valid_json_returns_result(self):
         data = TaintAnalysisResult(

@@ -194,12 +194,21 @@ def build_taint_prompt(
     parts.append("")
     parts.append(
         "Rules:\n"
-        "- tainted_params: list all parameters that can reach a sink\n"
+        # 三态报告口径 (2026-08-21 safe-branch-recall spec P1):
+        # 打通/剪断 → 报(数据流路径存在即报,sanitizer 阻断也算安全侧证据);
+        # 断流 → 不报(外部不可控/无路径)。旧措辞 "can reach a sink" +
+        # "Only include paths you are confident about" 会引导 LLM 把被防护
+        # 阻断的路径静默不报 → chain_verdict 无从判 safe → 数据流视图 0 剪断枝。
+        "- tainted_params: list all parameters whose data has a path to a sink\n"
         "- propagation_paths: one entry per param->sink path\n"
+        "- Report every path where the parameter's data reaches the sink. If the "
+        "path passes through a sanitizer/escape/validation that stops the taint, "
+        "still report it with sanitized=true and sanitizer_description\n"
+        "- Do NOT report parameters that are not externally controllable or have "
+        "no data-flow path to any sink\n"
         "- post_sanitized_concat: true if the path is sanitized but then re-tainted "
         "(e.g. escape() result concatenated with raw input, or merged with another source)\n"
-        "- confidence: 0.0-1.0, how certain the taint reaches the sink\n"
-        "- Only include paths you are confident about"
+        "- confidence: 0.0-1.0, how certain the taint reaches the sink"
     )
 
     return "\n".join(parts)

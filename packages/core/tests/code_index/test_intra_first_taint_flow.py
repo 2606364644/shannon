@@ -102,7 +102,9 @@ def test_intra_first_marks_needs_review_for_llm_discovered_source():
 
 
 def test_intra_first_skips_sink_not_in_intra_hits():
-    """intra 没判定该 sink 命中(hits 不含)→ 不产 TaintFlow。"""
+    """intra 有信息但否定该 sink(hits 不含)→ P2 (2026-08-21 safe-branch-recall
+    spec):否定也送二审 —— 产 presumed-safe 候选流交 chain_verdict 定生死,
+    不再静默不产(旧断言 flows==[] 已被 spec §3 P2 语义澄清修订)。"""
     handler = _blk("a.js:handler:1", "function handler(req){ eval(req.body.x); }", ["req"])
     sink = _sink(handler.id)
     intra = {handler.id: IntraResult(tainted_params={"req"}, hits={},  # 该 sink 未命中
@@ -110,7 +112,12 @@ def test_intra_first_skips_sink_not_in_intra_hits():
     sp = _source(handler.id, "x", ParameterSource.BODY_FIELD, "req.body.x")
 
     flows = produce_intra_first_taint_flows([sink], intra, [sp], [handler])
-    assert flows == []
+    assert len(flows) == 1
+    f = flows[0]
+    assert f.notes == "presumed-safe"
+    assert f.needs_review is True
+    assert f.confidence <= 0.5          # 低置信(对齐表达式回退档)
+    assert f.propagation_steps == []    # 无 intra 证实步骤
 
 
 def test_intra_first_skips_when_no_source_match():
@@ -294,3 +301,85 @@ class TestIntraFirstExprFallback:
         flows = produce_intra_first_taint_flows([sink], intra, [sp], [handler])
         assert len(flows) == 1
         assert flows[0].notes == "intra-first"
+
+
+# ===== P2 (2026-08-21 safe-branch-recall spec): intra 否定 → presumed-safe 二审 =====
+
+class TestPresumedSafeNegationReview:
+    """intra 有信息但否定该 sink(tainted_params 非空 + sink 不在 hits)→
+    表达式匹配 SourcePoint 产 presumed-safe 候选流(与修复点 A 互补:A 管
+    intra 无信息,P2 管 intra 有信息但否定)。防大仓 source×sink 笛卡尔积
+    爆炸:per-sink 上限 SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK(默认 3)。"""
+
+    def _negated_setup(self, n_sources=1):
+        """intra tainted_params 非空但 hits 不含 sink(LLM 有依据的否定)。"""
+        handler = _blk("a.js:handler:1",
+                       "function handler(req){ eval(escape(req.body.x)); }", ["req"])
+        sink = _sink(handler.id, dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.CMD_ARGUMENT,
+            expression="req.body.x", is_entry_hint=True)])
+        sps = [
+            _source(handler.id, f"x{i}", ParameterSource.BODY_FIELD,
+                    f"req.body.x{i if i else ''}")
+            for i in range(n_sources)
+        ]
+        intra = {handler.id: IntraResult(tainted_params={"req"}, hits={},
+                                         local_steps=[])}
+        return handler, sink, sps, intra
+
+    def test_negated_sink_yields_presumed_safe_flow(self):
+        """否定 sink + expr 匹配 source → 产 presumed-safe(steps=[]/复核/低置信)。"""
+        handler, sink, sps, intra = self._negated_setup(n_sources=1)
+        flows = produce_intra_first_taint_flows([sink], intra, sps, [handler])
+        assert len(flows) == 1
+        f = flows[0]
+        assert f.notes == "presumed-safe"
+        assert f.needs_review is True
+        assert f.confidence <= 0.5
+        assert f.propagation_steps == []
+        assert f.sink_call_site_id == sink.id
+        assert f.source_param == "x0"
+        assert f.sink_slot == SlotContext.CMD_ARGUMENT  # 透传(防 _route_for 拒)
+
+    def test_presumed_safe_cap_per_sink_default_3(self, caplog, monkeypatch):
+        """5 个 source 匹配同一 sink → 默认上限 3 条,超出 log 丢弃(no silent caps)。"""
+        import logging
+        monkeypatch.delenv("SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK", raising=False)
+        handler, sink, sps, intra = self._negated_setup(n_sources=5)
+        with caplog.at_level(logging.WARNING,
+                             logger="supernova_core.code_index.chain_propagator"):
+            flows = produce_intra_first_taint_flows([sink], intra, sps, [handler])
+        assert len(flows) == 3
+        assert any("presumed-safe" in r.getMessage() for r in caplog.records)
+
+    def test_presumed_safe_cap_env_override(self, monkeypatch):
+        """env SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK=1 → 只产 1 条。"""
+        monkeypatch.setenv("SUPERNOVA_PRESUMED_SAFE_MAX_PER_SINK", "1")
+        handler, sink, sps, intra = self._negated_setup(n_sources=5)
+        flows = produce_intra_first_taint_flows([sink], intra, sps, [handler])
+        assert len(flows) == 1
+
+    def test_presumed_safe_skips_sink_already_hit_by_intra(self):
+        """sink 在 intra.hits → 主路径 intra-first 产,不叠加 presumed-safe。"""
+        handler, sink, sps, intra = self._negated_setup(n_sources=1)
+        intra[handler.id] = IntraResult(
+            tainted_params={"req"}, hits={sink.id: 0.9},
+            local_steps=[])
+        flows = produce_intra_first_taint_flows([sink], intra, sps, [handler])
+        assert len(flows) == 1
+        assert flows[0].notes == "intra-first"  # 主路径独占,无 presumed-safe 叠加
+
+    def test_presumed_safe_no_source_match_no_flow(self):
+        """expr 非字面量但无匹配 SourcePoint → 不产(与修复点 A 同口径)。"""
+        handler, sink, _sps, intra = self._negated_setup(n_sources=1)
+        flows = produce_intra_first_taint_flows([sink], intra, [], [handler])
+        assert flows == []
+
+    def test_presumed_safe_skips_literal_expressions(self):
+        """字面量 slot expr → 不产(常量 sink 零噪音,与修复点 A 同口径)。"""
+        handler, sink, _sps, intra = self._negated_setup(n_sources=1)
+        lit_sink = _sink(handler.id, dangerous_slots=[DangerousSlot(
+            arg_index=0, slot=SlotContext.URL, expression='"/login"',
+            is_entry_hint=False)])
+        flows = produce_intra_first_taint_flows([lit_sink], intra, _sps, [handler])
+        assert flows == []
