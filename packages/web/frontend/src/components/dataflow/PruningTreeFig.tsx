@@ -3,15 +3,21 @@
 // （x = step_index × COL_W，全树统一）+ 打通枝红虚线流动 / 剪断枝绿实线至防护节点 + ✂ 残端 /
 // 黄盾=绕过 / 绿盾=有效=剪断点 / 红脉动靶心或灰虚线靶心 / 同名函数青色点线弧。
 // 不引可视化库（reactflow/d3 都不用）；参照 FileTree 组件惯例 + tokens.css 语义色。
-import { useCallback, useMemo, useRef, useState } from "react";
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DataflowBranch, DataflowNode, DataflowTree } from "@/api/types";
 import { BranchRow } from "./BranchRow";
 
 /** 列宽：同一传播步骤节点对齐到 x = step_index × COL_W（spec §5「列对齐」）。 */
 export const COL_W = 180;
-/** 行高：每条枝纵向占用空间。 */
-const ROW_H = 76;
+/** 行高：每条枝纵向占用空间（88 = pill ≤34 + 节点标签两行 + 公共函数下标 + 下一行 pill 顶间隙）。 */
+export const ROW_H = 88;
+/** 有副行（type·entry / 存储中转标记）时 source pill 半高（单行 pill 半高 11）。 */
+export const PILL_HALF_H_MAX = 17;
+/** 节点标签首行基线（相对行中心；须 > PILL_HALF_H_MAX + 字形高 8 + 间隙 3——
+ *  pill 右缘与 step-1 标签左缘横向重叠 ~58px 是列宽 180 下的既定几何，
+ *  纵向带必须完全错开，否则副行文字与节点标签互叠（2026-08-21 真实数据重叠）。 */
+export const NODE_LABEL_Y1 = 28;
 const PAD_X = 16; // viewBox 左边距（容纳 source pill 左缘 -6 与盾外圈，不裁切）
 const PAD_Y = 28; // viewBox 上内边距
 const FOLD_THRESHOLD = 4; // 剪断枝 >4 折叠（spec §5）
@@ -39,7 +45,7 @@ function textWidthPx(s: string): number {
   for (const ch of s) w += ch.charCodeAt(0) > 0xff ? 10 : 5.6;
   return w;
 }
-/** 按像素预算截断标签：超出加「…」保留前缀（全名进 data-tooltip）。 */
+/** 按像素预算截断标签：超出加「…」保留前缀（全名进 <title>）。 */
 function fitLabel(s: string, budgetPx: number): string {
   if (textWidthPx(s) <= budgetPx) return s;
   const ellipsis = 10;
@@ -52,6 +58,27 @@ function fitLabel(s: string, budgetPx: number): string {
     out += ch;
   }
   return out;
+}
+
+/** 按像素预算把标签拆成 ≤2 行（真实数据 func 是 40-70 字符自然语言描述，
+ *  单行一刀切到 ~26 半角信息量暴跌——两行预算翻倍且严格列内，相邻列不叠）。
+ *  一行装得下 → [原文]；两行也装不下 → 第二行尾「…」（全名进 <title>）。 */
+function fitLabelTwoLines(s: string, budgetPx: number): string[] {
+  if (textWidthPx(s) <= budgetPx) return [s];
+  // 逐字符贪心装第一行（不预算 …——两行兜底会加）
+  let w = 0;
+  let cut = 0;
+  for (const ch of s) {
+    const cw = ch.charCodeAt(0) > 0xff ? 10 : 5.6;
+    if (w + cw > budgetPx) break;
+    w += cw;
+    cut++;
+  }
+  const l1 = s.slice(0, cut);
+  const rest = s.slice(cut);
+  const l2 = fitLabel(rest, budgetPx);
+  // 第一行尽量吃满但避免行尾标点悬挂：OK 简化，直接返回
+  return [l1, l2];
 }
 
 /** sink 列索引（= 最大中间节点数 + 1，保证 sink 在最右统一列）。 */
@@ -296,7 +323,7 @@ function TreeCard({
             <FoldedSafeRow rowIdx={layouts.length} count={foldedSafeCount} sinkCol={sinkCol} t={t} />
           )}
           {sharedArcs.map((arc, i) => (
-            <SameLineArcView key={i} arc={arc} t={t} />
+            <SameLineArcView key={i} arc={arc} />
           ))}
           {/* sink 靶心：有打通枝 → 红脉动圆环；safe-only → 灰虚线圆环（无输入到达） */}
           <SinkTarget
@@ -531,10 +558,15 @@ function BranchPath({
 
 /** source 青色 pill（step_index=0，列对齐 x=0）。
  *  spec §5：青色 pill 显示「参数名 + type + METHOD /route」。
- *  2ND 存储中转枝（source.type === "storage"）：pill 下方加琥珀色「⟳ 存储中转」标记，
+ *  副行收进 pill（2026-08-21 重叠修复）：裸画在 pill 底边外 y+15 会与 step-1 节点标签
+ *  横向重叠 ~58px 且纵向同带 → 有副行时 pill 高度撑到 34，主/副行全部收进 rect。
+ *  2ND 存储中转枝（source.type === "storage"）：副行位置换琥珀色「⟳ 存储中转」标记
+ *  （与 meta 互斥——storage 枝 entry 通常为空，meta 全文进 <title>），
  *  tooltip 用 spec §5 白话「经过存储中转：先存进数据库，读出来才发起请求」。
  *  跨树 source 提示（spec §5「跨树 source 提示」）：同一入口（label+entry）出现在多棵树时，
- *  tooltip 注「同一入口还流向：[其它 tree 的 sink 名]」，避免误读为重复数据（与存储提示并存）。 */
+ *  tooltip 注「同一入口还流向：[其它 tree 的 sink 名]」，避免误读为重复数据（与存储提示并存）。
+ *  tooltip 走原生 <title>（data-tooltip 的 CSS ::after 在 SVG <g> 上无 containing block，
+ *  定位回退到视口容器 → 所有浮层叠到同一处，2026-08-21 已全量移除）。 */
 function SourcePill({
   x,
   y,
@@ -550,21 +582,29 @@ function SourcePill({
 }) {
   const label = source.label ?? "source";
   const isStorage = source.type === "storage";
-  // 副信息行：METHOD /route（storage 的 type 不直译进副行——用白话标记行承载）
+  // 副信息行：METHOD /route（storage 的 type 不直译进副行——白话标记行承载）
   const metaParts = [isStorage ? null : source.type, source.entry].filter(Boolean);
+  const metaText = metaParts.join(" · ");
   const hasMeta = metaParts.length > 0;
+  // 副行与存储标记互斥占同一行位（pill 最多双行）
+  const hasSub = hasMeta || isStorage;
   // 主/副文本按列宽预算截断（真实数据 label/entry 长串会溢出到邻列与节点文字重叠）
   const shownLabel = fitLabel(label, COL_W - 28);
-  const shownMeta = fitLabel(metaParts.join(" · "), COL_W - 20);
+  const shownMeta = fitLabel(metaText, COL_W - 20);
   const labelCut = shownLabel !== label;
-  const metaCut = shownMeta !== metaParts.join(" · ");
+  const metaCut = shownMeta !== metaText;
   // pill 宽度按截断后文本实宽（不再用 length×6 粗估——中文/全角宽度低估同样溢出）
   const w = Math.min(COL_W - 8, Math.max(56, textWidthPx(shownLabel) + 16));
+  const h = hasSub ? PILL_HALF_H_MAX * 2 : 22;
+  const topY = -h / 2;
+  // 主行基线：有副行时上移，无副行居中
+  const mainY = hasSub ? -4 : 4;
+  const subY = 11;
   // tooltip：截断全名（主/副各自补）+ 存储中转白话（2ND 枝）+ 跨树提示（并存拼接）；
   // 都无 → source 基本描述
   const tipParts: string[] = [];
   if (labelCut) tipParts.push(label);
-  if (metaCut) tipParts.push(metaParts.join(" · "));
+  if (metaCut && metaText) tipParts.push(metaText);
   if (isStorage) tipParts.push(t("workspaceDetail.dataflow.storageRelayFull"));
   if (crossTreeTip) tipParts.push(t("workspaceDetail.dataflow.crossTreeTooltip", { sinks: crossTreeTip }));
   const tooltip =
@@ -572,29 +612,22 @@ function SourcePill({
       ? tipParts.join(" ｜ ")
       : [source.label, source.type, source.entry].filter(Boolean).join(" · ") || "source";
   return (
-    /* transform 平移局部坐标系到 (x,y)：data-tooltip 的 CSS ::after 浮层在局部原点
-       渲染（SVG 伪元素无 CSS 盒定位），带 transform 即浮在 pill 自身位置。 */
-    <g
-      data-source=""
-      data-node="0"
-      x={x}
-      transform={`translate(${x} ${y})`}
-      className="source-pill"
-      data-tooltip={tooltip}
-    >
-      <rect x={-6} y={-12} width={w} height={24} rx={12} className="source-pill" />
-      <text x={2} y={4} className="source-pill-txt" textAnchor="start" data-source-label="">
+    <g data-source="" data-node="0" x={x} transform={`translate(${x} ${y})`} className="source-pill">
+      <title>{tooltip}</title>
+      <rect x={-6} y={topY} width={w} height={h} rx={12} className="source-pill" />
+      <text x={2} y={mainY} className="source-pill-txt" textAnchor="start" data-source-label="">
         {shownLabel}
       </text>
-      {/* 副信息行：type · METHOD /route（spec §5 source 行要求） */}
-      {hasMeta && (
-        <text x={2} y={15} className="source-meta-txt" textAnchor="start" data-source-meta="">
+      {/* 副信息行：type · METHOD /route（spec §5 source 行要求，收进 pill 内）。
+          与存储标记互斥占同一行位（storage 时 entry 全文进 <title>）。 */}
+      {hasMeta && !isStorage && (
+        <text x={2} y={subY} className="source-meta-txt" textAnchor="start" data-source-meta="">
           {shownMeta}
         </text>
       )}
-      {/* 存储中转白话标记（2ND 枝 source.type=storage）：琥珀色，tooltip 含完整白话 */}
+      {/* 存储中转白话标记（2ND 枝 source.type=storage）：琥珀色，与 meta 互斥占副行位 */}
       {isStorage && (
-        <text x={2} y={27} className="storage-relay-txt" textAnchor="start" data-storage-relay="">
+        <text x={2} y={subY} className="storage-relay-txt" textAnchor="start" data-storage-relay="">
           {t("workspaceDetail.dataflow.storageRelayMark")}
         </text>
       )}
@@ -602,11 +635,13 @@ function SourcePill({
   );
 }
 
-/** 节点：圆 + 函数名 + 防护盾（黄=绕过 / 绿=有效=剪断点）+ 剪刀（剪断点）。
+/** 节点：圆 + 函数名（两行）+ 防护盾（黄=绕过 / 绿=有效=剪断点）+ 剪刀（剪断点）。
  *  data-node = step_index（1-based 中间节点；source 是 step 0 在 SourcePill）。
+ *  函数名两行（2026-08-21 重叠修复）：真实数据 func 是 40-70 字符自然语言描述，
+ *  单行一刀切到 ~26 半角信息量暴跌；两行各按列宽预算截断（相邻列不叠），line 号拼尾行。
  *  公共函数下标（spec §5「公共函数 ⟳ N 枝经过」）：func 经多枝共用时，
  *  节点下方加「⟳ 公共函数 · N 枝经过」（N=树内 func 重名计数，前端自算），
- *  hover tooltip 说明剪断了哪几条枝。 */
+ *  hover <title> 说明剪断了哪几条枝。 */
 function NodeView({
   x,
   y,
@@ -643,14 +678,14 @@ function NodeView({
         })
       : t("workspaceDetail.dataflow.pubFuncTooltipNone", { count: pubFuncStat!.count })
     : undefined;
-  // 函数名按列宽预算截断（真实 label 长串溢出列界与邻列文字重叠），全名进 tooltip
-  const fullFunc = node.func ?? "?";
-  const shownFunc = fitLabel(fullFunc, COL_W - 24);
-  const nodeTooltip = pubTooltip ?? (shownFunc !== fullFunc ? fullFunc : undefined);
+  // 标签 = func:line，按列宽预算拆 ≤2 行（预算 = COL_W-24 严格列内），全名进 <title>
+  const fullLabel = node.line != null ? `${node.func ?? "?"}:${node.line}` : (node.func ?? "?");
+  const lines = fitLabelTwoLines(fullLabel, COL_W - 24);
+  const labelCut = lines.join("").replace("…", "") !== fullLabel;
+  const nodeTooltip = pubTooltip ?? (labelCut ? fullLabel : undefined);
   return (
-    /* transform 平移局部坐标系到 (x,y)：data-tooltip 的 CSS ::after 浮层在局部原点
-       渲染（SVG 伪元素无 CSS 盒定位），带 transform 即浮在节点自身位置。 */
-    <g data-node={step} x={x} transform={`translate(${x} ${y})`} data-tooltip={nodeTooltip}>
+    <g data-node={step} x={x} transform={`translate(${x} ${y})`}>
+      {nodeTooltip && <title>{nodeTooltip}</title>}
       <circle cx={0} cy={0} r={NODE_R} className={boxClass} />
       {/* 防护盾（外圈）：绿=有效 / 黄=绕过 */}
       {hasShield && (shieldEff || shieldBypass) && (
@@ -668,27 +703,26 @@ function NodeView({
           ✂
         </text>
       )}
-      {/* 函数名 + line 标签（函数名截断，全名 hover tooltip） */}
+      {/* 函数名（≤2 行，行距 11；首行基线 NODE_LABEL_Y1） */}
       <text
         x={0}
-        y={NODE_R + 14}
+        y={NODE_LABEL_Y1}
         className="fill-[hsl(var(--foreground))]"
         fontSize={10}
         textAnchor="middle"
         data-node-label=""
       >
-        {shownFunc}
+        {lines.map((l, i) => (
+          <tspan key={i} x={0} dy={i === 0 ? 0 : 11}>
+            {l}
+          </tspan>
+        ))}
       </text>
-      {node.line != null && (
-        <text x={0} y={NODE_R + 26} className="fill-[hsl(var(--muted-foreground))]" fontSize={9} textAnchor="middle">
-          :{node.line}
-        </text>
-      )}
       {/* 公共函数下标（spec §5）：⟳ 公共函数 · N 枝经过 */}
       {isPubFunc && (
         <text
           x={0}
-          y={NODE_R + 38}
+          y={NODE_LABEL_Y1 + 22}
           className="pubfunc-sub"
           textAnchor="middle"
           data-pubfunc=""
@@ -725,25 +759,25 @@ function FoldedSafeRow({
   );
 }
 
-/** 同一函数青色点线弧 + 标注（spec §5「同一函数虚线 ⟳」：不合并节点）。
+/** 同一函数青色点线弧（spec §5「同一函数虚线 ⟳」：不合并节点）。
  *  与「公共函数 ⟳ N 枝经过」节点下标是 spec 表格两行独立元素：弧=跨枝同一性（点线连同名节点），
- *  下标=N 枝经过计数（在 NodeView 节点下方）。本组件只画弧 + 「⟳ 同一函数」小标。 */
-function SameLineArcView({ arc, t }: { arc: SameLineArc; t: ReturnType<typeof useTranslation>["t"] }) {
+ *  下标=N 枝经过计数（在 NodeView 节点下方）。
+ *  每弧不带文字标注（2026-08-21 重叠修复）：多共享函数时各弧 midX/midY 相近，
+ *  「⟳ 同一函数」小标互叠；弧语义收进 LegendBar 图例一项。 */
+function SameLineArcView({ arc }: { arc: SameLineArc }) {
   const midX = (arc.from.x + arc.to.x) / 2;
-  const midY = Math.min(arc.from.y, arc.to.y) - 18;
+  const midY = Math.min(arc.from.y, arc.to.y) - 24;
   const d = `M ${arc.from.x} ${arc.from.y} Q ${midX} ${midY}, ${arc.to.x} ${arc.to.y}`;
   return (
     <g data-sameline="" className="sameline">
       <path d={d} className="sameline" />
-      <text x={midX} y={midY - 2} className="sameline-txt" textAnchor="middle" data-sameline-label="">
-        {t("workspaceDetail.dataflow.samelineLabel")}
-      </text>
     </g>
   );
 }
 
 /** sink 靶心：有打通枝 → 红实线圆环 + 脉动；safe-only → 灰虚线圆环。
- *  灰靶心带「无输入到达」标注（spec §5 白话表：sink 无枝到达 = 无输入到达，禁「未被触及」）。 */
+ *  灰靶心带「无输入到达」标注（spec §5 白话表：sink 无枝到达 = 无输入到达，禁「未被触及」）。
+ *  sink 名两行（2026-08-21：真实 sink 名 40+ 字符，单行截断信息量低），全名进 <title>。 */
 function SinkTarget({
   x,
   y,
@@ -759,26 +793,24 @@ function SinkTarget({
 }) {
   const sinkCls = hasVuln ? "sink-pulse" : "sink-idle";
   const noInputTip = hasVuln ? undefined : t("workspaceDetail.dataflow.sinkNoInput");
-  // sink 名按列宽预算截断（长名溢出 viewBox 右界被裁=「文字缺失」），全名进 tooltip
-  const shownLabel = fitLabel(label, COL_W - 24);
-  const labelCut = shownLabel !== label;
-  const tooltip = [labelCut ? label : null, noInputTip].filter(Boolean).join(" · ") || undefined;
+  // sink 名按列宽预算拆 ≤2 行（长名溢出 viewBox 右界被裁=「文字缺失」），全名进 <title>
+  const lines = fitLabelTwoLines(label, COL_W - 24);
+  const tooltip = [label, noInputTip].filter(Boolean).join(" · ");
   return (
-    <g
-      data-sink-target={hasVuln ? "vuln" : "safe"}
-      transform={`translate(${x} ${y})`}
-      className={sinkCls}
-      data-tooltip={tooltip}
-    >
+    <g data-sink-target={hasVuln ? "vuln" : "safe"} transform={`translate(${x} ${y})`} className={sinkCls}>
       {/* 原生 SVG tooltip（hover 教读图；截断时含全名） */}
       {tooltip && <title>{tooltip}</title>}
       <circle r={16} className={sinkCls} />
       <circle r={6} fill={hasVuln ? "hsl(var(--c-red))" : "hsl(var(--muted-foreground))"} opacity={hasVuln ? 0.8 : 0.4} />
       <text x={0} y={30} className="sink-label" textAnchor="middle" data-sink-label="">
-        {shownLabel}
+        {lines.map((l, i) => (
+          <tspan key={i} x={0} dy={i === 0 ? 0 : 12}>
+            {l}
+          </tspan>
+        ))}
       </text>
       {!hasVuln && (
-        <text x={0} y={44} className="sink-noinput-txt" textAnchor="middle" data-sink-noinput="">
+        <text x={0} y={54} className="sink-noinput-txt" textAnchor="middle" data-sink-noinput="">
           {noInputTip}
         </text>
       )}
@@ -786,62 +818,104 @@ function SinkTarget({
   );
 }
 
-/** 缩放平移容器：限高 + wheel 缩放（鼠标锚点）+ 拖拽平移 + 重置/百分比控件。 */
-function ZoomViewport({ children, maxHeight }: { children: React.ReactNode; maxHeight: number }) {
+/** 缩放平移容器（2026-08-21 交互重做）：
+ *  - 滚轮：无修饰键放行（页面自然滚动，不再劫持）；Ctrl/⌘+wheel 缩放（接管浏览器页缩放）。
+ *    原生 addEventListener({passive:false}) 注册——React 合成 onWheel 在 root 上是 passive，
+ *    preventDefault 无效。
+ *  - 缩放：直接放大 svg 的 width 属性（viewBox 不变）——SVG 语义放大，布局尺寸随之
+ *    变化 → overflow:auto 滚动条自动正确。替代旧 CSS transform:scale（不改布局尺寸，
+ *    scale>1 时溢出被裁、滚动条到不了右侧内容）。
+ *  - 拖拽平移：驱动 scrollLeft/scrollTop（程序化滚动，滚动条同步）——替代旧 translate
+ *    双轨（translate 把内容移出滚动条可达范围 = 图「错乱/丢失」）。
+ *  - 控件：− / 百分比(reset) / + 三个按钮。 */
+function ZoomViewport({
+  children,
+  maxHeight,
+}: {
+  children: React.ReactElement<{ width?: number | string }>;
+  maxHeight: number;
+}) {
   const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
-  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    if (e.cancelable) e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale((s) => Math.min(3, Math.max(0.3, s * delta)));
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return; // 纯滚轮 → 页面/容器自然滚动
+      e.preventDefault(); // Ctrl+wheel 浏览器默认是页缩放 → 接管为图缩放
+      setScale((s) => Math.min(3, Math.max(0.3, s * (e.deltaY > 0 ? 0.9 : 1.1))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
-    dragRef.current = { x: e.clientX, y: e.clientY, tx, ty };
-  }, [tx, ty]);
+    const el = ref.current;
+    if (!el) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+  }, []);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragRef.current) return;
-    setTx(dragRef.current.tx + (e.clientX - dragRef.current.x));
-    setTy(dragRef.current.ty + (e.clientY - dragRef.current.y));
+    const d = dragRef.current;
+    const el = ref.current;
+    if (!d || !el) return;
+    el.scrollLeft = d.sl - (e.clientX - d.x);
+    el.scrollTop = d.st - (e.clientY - d.y);
   }, []);
 
   const endDrag = useCallback(() => {
     dragRef.current = null;
   }, []);
 
-  const reset = useCallback(() => {
-    setScale(1);
-    setTx(0);
-    setTy(0);
-  }, []);
+  // svg width（数字 prop）× scale：viewBox 不变 → 语义放大，布局尺寸联动滚动条
+  const baseW = typeof children.props.width === "number" ? children.props.width : null;
+  const scaled = baseW != null ? cloneElement(children, { width: baseW * scale }) : children;
+  const btnCls =
+    "rounded border border-border bg-card px-1.5 text-xs text-muted-foreground hover:text-primary";
 
   return (
     <div
+      ref={ref}
       data-viewport=""
       data-max-height={String(maxHeight)}
       style={{ maxHeight, overflow: "auto", position: "relative", cursor: "grab" }}
-      onWheel={onWheel}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
     >
-      <div style={{ transform: `translate(${tx}px, ${ty}px) scale(${scale})`, transformOrigin: "0 0" }}>
-        {children}
-      </div>
-      <button
-        type="button"
-        onClick={reset}
-        data-zoom-reset=""
-        className="absolute right-2 top-2 z-10 rounded border border-border bg-card px-2 py-0.5 text-xs text-muted-foreground hover:text-primary"
-        title="reset"
-      >
-        {Math.round(scale * 100)}%
-      </button>
+      {scaled}
+      <span className="absolute right-2 top-2 z-10 flex items-center gap-1">
+        <button
+          type="button"
+          data-zoom-out=""
+          onClick={() => setScale((s) => Math.max(0.3, s * 0.9))}
+          className={btnCls}
+          aria-label="zoom out"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => setScale(1)}
+          data-zoom-reset=""
+          className={btnCls}
+          title="reset"
+        >
+          {Math.round(scale * 100)}%
+        </button>
+        <button
+          type="button"
+          data-zoom-in=""
+          onClick={() => setScale((s) => Math.min(3, s * 1.1))}
+          className={btnCls}
+          aria-label="zoom in"
+        >
+          +
+        </button>
+      </span>
     </div>
   );
 }

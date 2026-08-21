@@ -92,10 +92,18 @@ export function BranchRow({ branch, highlighted = false, onHover, selected = fal
         >
           {track.label}
         </span>
-        {branch.verdict_reason && tone !== "safe" && (
-          <span className="text-xs text-muted-foreground">{branch.verdict_reason}</span>
-        )}
       </div>
+      {/* 判定理由：真实数据是 300+ 字自然语言——独立行限两行（line-clamp-2），
+          全文 hover title；不再挤在标签行里把布局撑爆（2026-08-21 重叠修复）。 */}
+      {branch.verdict_reason && tone !== "safe" && (
+        <p
+          data-branch-verdict-reason=""
+          title={branch.verdict_reason}
+          className="mt-0.5 line-clamp-2 text-xs text-muted-foreground"
+        >
+          {branch.verdict_reason}
+        </p>
+      )}
 
       {/* source → 节点链 → sink 摘要行 */}
       <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-muted-foreground">

@@ -3,7 +3,7 @@ import { render, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import i18n from "@/i18n";
-import { COL_W, PruningTreeFig } from "../PruningTreeFig";
+import { COL_W, NODE_LABEL_Y1, PILL_HALF_H_MAX, ROW_H, PruningTreeFig } from "../PruningTreeFig";
 import { BranchRow } from "../BranchRow";
 import type { DataflowTree, DataflowBranch } from "@/api/types";
 
@@ -198,8 +198,8 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
     const arc = container.querySelector('[data-sameline]');
     expect(arc).toBeTruthy();
     expect(arc?.getAttribute("class") ?? "").toContain("sameline");
-    const label = container.querySelector('[data-sameline-label]');
-    expect(label?.textContent ?? "").toContain("同一函数");
+    // 每弧不带文字标签（多共享函数时 midX/midY 相近的弧标签互叠；语义进 LegendBar 图例）
+    expect(container.querySelector("[data-sameline-label]")).toBeNull();
   });
 
   it("缩放平移：容器限高 520 + wheel 缩放 + 重置控件", () => {
@@ -249,9 +249,10 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
     const arc = container.querySelector('[data-sameline]');
     expect(arc).toBeTruthy();
     // 下标 tooltip 说明剪断哪几条枝（此处两枝均打通 → 无剪断枝 → tooltip 用 TooltipNone）
-    const nodeWithSub = sub?.closest('[data-tooltip]');
-    expect(nodeWithSub?.getAttribute("data-tooltip")).toBeTruthy();
-    expect(nodeWithSub?.getAttribute("data-tooltip") ?? "").toContain("2");
+    const nodeWithSub = sub?.closest("g[data-node]");
+    const nodeTitle = nodeWithSub?.querySelector("title");
+    expect(nodeTitle?.textContent ?? "").toBeTruthy();
+    expect(nodeTitle?.textContent ?? "").toContain("2");
   });
 
   it("跨树 source tooltip：同一入口流向多 sink 注「同一入口还流向：」", () => {
@@ -274,7 +275,7 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
     expect(sources.length).toBeGreaterThanOrEqual(2);
     // 跨树 tooltip 集合：第一棵树(T1 cursor.execute) 的 source 应提示流向第二棵(fs.writeFile)；
     // 第二棵树(T2 fs.writeFile) 的 source 应提示流向第一棵(cursor.execute)。
-    const tooltips = Array.from(sources).map((s) => s.getAttribute("data-tooltip") ?? "");
+    const tooltips = Array.from(sources).map((s) => s.querySelector("title")?.textContent ?? "");
     const crossTips = tooltips.filter((tt) => tt.includes("同一入口还流向"));
     expect(crossTips.length).toBeGreaterThanOrEqual(1);
     // 两棵树互相指向，tooltip 集合中应同时出现另一棵树的 sink 名
@@ -288,9 +289,8 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
   it("safe-only 灰靶心带「无输入到达」白话（spec §5 表：禁「未被触及」）", () => {
     const { container } = render(<PruningTreeFig trees={[safeOnlyTree]} />);
     const g = container.querySelector('[data-sink-target="safe"]')!;
-    // 直显小字 + data-tooltip + 原生 <title> 三处同一白话
+    // 直显小字 + 原生 <title> 两处同一白话
     expect(g.querySelector("[data-sink-noinput]")?.textContent).toBe("无输入到达");
-    expect(g.getAttribute("data-tooltip") ?? "").toContain("无输入到达");
     expect(g.querySelector("title")?.textContent ?? "").toContain("无输入到达");
     // 打通树靶心不带该标注
     const { container: vulnC } = render(<PruningTreeFig trees={[vulnerableTree]} />);
@@ -313,7 +313,7 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
     const mark = container.querySelector("[data-storage-relay]");
     expect(mark?.textContent ?? "").toContain("存储中转");
     // tooltip 含 spec §5 白话全句
-    const tip = container.querySelector("[data-source]")?.getAttribute("data-tooltip") ?? "";
+    const tip = container.querySelector("[data-source] title")?.textContent ?? "";
     expect(tip).toContain("先存进数据库");
     expect(tip).toContain("读出来才发起请求");
     // 工程词 storage 不再直译进 pill 副行
@@ -386,6 +386,18 @@ describe("BranchRow — 枝条明细 + 代码展开", () => {
     // 非存储枝不带标记
     const { container: plain } = render(<BranchRow branch={vulnerableTree.branches[0]} />);
     expect(plain.querySelector("[data-storage-relay]")).toBeNull();
+  });
+
+  it("超长 verdict_reason 限两行（line-clamp-2）+ title 全文（真实数据 300 字判定理由不再挤爆首行）", () => {
+    const LONG_REASON =
+      "数据被嵌入 HTML 注释上下文但仅应用 JSON 编码，外部可控的 cn_name 含 --> 时提前闭合注释，" +
+      "其后的 mention 与注入标记将作为评论正文被渲染；这是编码与最终渲染上下文不匹配的典型场景，".repeat(3);
+    const branch: DataflowBranch = { ...vulnerableTree.branches[0], verdict_reason: LONG_REASON };
+    const { container } = render(<BranchRow branch={branch} />);
+    const reason = container.querySelector("[data-branch-verdict-reason]");
+    expect(reason).toBeTruthy();
+    expect(reason?.className).toContain("line-clamp-2");
+    expect(reason?.getAttribute("title") ?? "").toBe(LONG_REASON);
   });
 });
 
@@ -467,7 +479,7 @@ describe("图↔行 hover 双向联动 + 点枝条展开（spec §5 交互）", 
     expect(path?.getAttribute("class") ?? "").not.toContain("selected");
   });
 
-  it("节点带 transform（data-tooltip 的 CSS ::after 浮层定位到节点自身位置）", () => {
+  it("节点带 transform（局部坐标系平移到 (x,y)）", () => {
     const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
     const node1 = container.querySelector('[data-node="1"]');
     expect(node1?.getAttribute("transform") ?? "").toContain("translate");
@@ -475,15 +487,14 @@ describe("图↔行 hover 双向联动 + 点枝条展开（spec §5 交互）", 
     expect(source?.getAttribute("transform") ?? "").toContain("translate");
   });
 
-  it("data-tooltip 有 CSS 消费方（tokens.css 全局 [data-tooltip] hover 暗色浮层规则）", () => {
+  it("SVG 内不用 data-tooltip CSS 浮层（::after 在 SVG 无 containing block 定位不可靠），tooltip 走原生 <title>", () => {
     // vitest 默认 stub CSS 导入（?raw 也拿不到原文），用 node:fs 直读源文件；
     // 路径锚定本测试文件（expect.getState().testPath），不依赖进程 cwd。
     const testDir = dirname(expect.getState().testPath ?? "");
     const tokensCss = readFileSync(resolve(testDir, "../../../styles/tokens.css"), "utf-8");
-    // 通用消费规则存在：hover ::after 弹 attr(data-tooltip) 暗色浮层
-    expect(tokensCss).toMatch(/\[data-tooltip\]:hover::after/);
-    expect(tokensCss).toContain("content: attr(data-tooltip)");
-    // 联动高亮 class 消费方也在（hovered/selected → 枝条加粗提亮）
+    // 2026-08-21 重叠修复：SVG 侧 data-tooltip 浮层规则已删（::after 定位不可靠 → 全部 <title>）
+    expect(tokensCss).not.toMatch(/\[data-tooltip\]:hover::after/);
+    // 联动高亮 class 消费方仍在（hovered/selected → 枝条加粗提亮）
     expect(tokensCss).toMatch(/\.branch-(vuln|safe|unknown)\.(hovered|selected)/);
     expect(tokensCss).toContain(".branch-row-hovered");
     expect(tokensCss).toContain(".branch-row-selected");
@@ -558,16 +569,37 @@ describe("PruningTreeFig — 真实数据布局回归（长标签/深链/中途�
     expect(d).not.toContain("720");
   });
 
-  it("节点长函数名按列宽截断加 …，data-tooltip 保留全名", () => {
+  it("节点长函数名两行拆分（≤2 行列内预算，装得下则全文显示），超长时 <title> 保留全名", () => {
     const { container } = render(<PruningTreeFig trees={[longLabelTree]} />);
     const label = container.querySelector('[data-node="1"] [data-node-label]');
     expect(label).toBeTruthy();
+    // 2026-08-21 两行化：两行合计显示信息远多于旧单行截断（~26 半角），仅尾部留 …
+    const tspans = label?.querySelectorAll("tspan") ?? [];
+    expect(tspans.length).toBe(2);
     const shown = label?.textContent ?? "";
-    expect(shown.length).toBeLessThan(LONG_FUNC.length);
-    expect(shown).toContain("…");
-    // 全名进 tooltip（hover 可见完整函数描述）
-    const nodeG = container.querySelector('[data-node="1"]');
-    expect(nodeG?.getAttribute("data-tooltip") ?? "").toContain(LONG_FUNC);
+    expect(shown).toContain("handleProfileUpdate 接收 req.body");
+    expect(shown.replace("…", "").length).toBeGreaterThan(40);
+    // 更长的 func（两行也装不下）→ 第二行 …，全名进 <title>
+    const HUGE_FUNC = "list_work_item_push_records extract_text: 从 CSV/需求描述逐字段抽取产品经理与测试负责人等 6 类角色字段值并拼接过滤条件";
+    const hugeFuncTree: DataflowTree = {
+      ...vulnerableTree,
+      tree_id: "T-HUGEFUNC",
+      branches: [
+        {
+          ...vulnerableTree.branches[0],
+          branch_id: "F-HUGEFUNC",
+          nodes: [
+            { ...vulnerableTree.branches[0].nodes[0], func: HUGE_FUNC },
+            { ...vulnerableTree.branches[0].nodes[1], func: "db.run" },
+          ],
+        },
+      ],
+    };
+    const { container: c2 } = render(<PruningTreeFig trees={[hugeFuncTree]} />);
+    const shown2 = c2.querySelector('[data-node="1"] [data-node-label]')?.textContent ?? "";
+    expect(shown2).toContain("…");
+    expect(shown2.replace("…", "").length).toBeLessThan(HUGE_FUNC.length);
+    expect(c2.querySelector('[data-node="1"] title')?.textContent ?? "").toContain(HUGE_FUNC);
   });
 
   it("source 长 label / 长 entry 截断；sink 长 label 截断且全名可见", () => {
@@ -579,13 +611,14 @@ describe("PruningTreeFig — 真实数据布局回归（长标签/深链/中途�
     // 副行（type · entry）同样受列宽约束
     const srcMeta = container.querySelector("[data-source] [data-source-meta]");
     expect((srcMeta?.textContent ?? "").length).toBeLessThanOrEqual(LONG_ENTRY.length);
-    // sink label 截断（不出右边界），全名在 tooltip/title
+    // sink label 两行拆分（2026-08-21：不再单行一刀切——此长度两行可全文显示，不出右边界）
     const sinkLabel = container.querySelector("[data-sink-target] [data-sink-label]");
     expect(sinkLabel).toBeTruthy();
-    expect((sinkLabel?.textContent ?? "").length).toBeLessThan(LONG_SINK.length);
-    expect(sinkLabel?.textContent ?? "").toContain("…");
+    const sinkTspans = sinkLabel?.querySelectorAll("tspan") ?? [];
+    expect(sinkTspans.length).toBeLessThanOrEqual(2);
+    expect(sinkLabel?.textContent ?? "").toBe(LONG_SINK);
     const sinkG = container.querySelector("[data-sink-target]");
-    expect(sinkG?.getAttribute("data-tooltip") ?? "").toContain(LONG_SINK);
+    expect(sinkG?.querySelector("title")?.textContent ?? "").toContain(LONG_SINK);
   });
 
   it("svg 按像素宽渲染（宽树不整图压缩致文字不可读），viewBox 覆盖 pill 左缘与 sink 右侧", () => {
@@ -601,5 +634,133 @@ describe("PruningTreeFig — 真实数据布局回归（长标签/深链/中途�
     expect(vb[0]).toBeLessThan(0);
     const sinkX = 5 * COL_W; // midCutTree sinkCol = 4+1
     expect(vb[0] + vb[2]).toBeGreaterThanOrEqual(sinkX + COL_W * 0.9);
+  });
+});
+
+// ===== 真实数据重叠修复（2026-08-21 第二轮：requirement-sec-review-20260821-044018）=====
+// 真实 LLM 轨数据（每树 1 枝、自然语言长 label/entry/func）暴露的布局重叠：
+// - source 副行（entry）裸画在 pill 底边外 y+15，与 step-1 节点标签（基线 y+25、
+//   横向左缘可至 x+102）横向重叠 ~58px 且纵向同带 → 文字互叠；
+// - SVG <g> 上 data-tooltip 的 CSS ::after position:absolute 无 containing block
+//   （SVG 元素不支持 CSS position）→ 浮层定位回退到视口容器，所有 hover tooltip 叠到同一处；
+// - ZoomViewport wheel 一律 preventDefault 缩放（页面滚不动）+ 拖拽 translate 与
+//   overflow:auto 滚动条双轨错位（图被 translate 移出滚动条可达范围）。
+describe("PruningTreeFig — 真实数据重叠修复（pill 副行/标签带/tooltip/缩放交互）", () => {
+  const HUGE_ENTRY =
+    "CLI push {url} [无中间件,本地 CLI 触发]; CLI push(批量) [无中间件]; daemon push-worker (src/daemon/worker.py:165-211) [无中间件,常驻线程每 600s 触发]";
+  const hugeTree: DataflowTree = {
+    ...vulnerableTree,
+    tree_id: "T-HUGE-01",
+    sink: { ...vulnerableTree.sink, label: "add_workitem_comment 'content': comment_content → MCP add_comment" },
+    branches: [
+      {
+        ...vulnerableTree.branches[0],
+        branch_id: "F-HUGE",
+        verdict_reason:
+          "数据被嵌入 HTML 注释上下文但仅应用 JSON 编码，外部可控的 cn_name 含 --> 时提前闭合注释，其后的 mention 与注入标记将作为评论正文被渲染；这是编码与最终渲染上下文不匹配的典型场景。",
+        source: {
+          label: "writer.list_work_item_push_records: extract_text(F.PRODUCT_MANAGER)",
+          type: null,
+          entry: HUGE_ENTRY,
+          file: "src/feishu/writer.py",
+          line: 172,
+        },
+        nodes: [
+          {
+            func: "pusher.run_batch: product_manager = record['product_manager']",
+            file: "src/commands/pusher.py",
+            line: 178,
+            transformation: null,
+            intermediate_vars: [],
+            code: null,
+            has_code: false,
+          },
+          {
+            func: "_resolve_mention: cn_name = name_cn or cn_name or nick (回退攻击者值)",
+            file: "src/oa/client.py",
+            line: 82,
+            transformation: null,
+            intermediate_vars: [],
+            code: null,
+            has_code: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("source 副行收进 pill：rect 高度按副行撑起，副行基线落在 rect 内（不再裸画 pill 外与节点标签带重叠）", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    const rect = container.querySelector('[data-source] rect.source-pill');
+    const meta = container.querySelector('[data-source] [data-source-meta]');
+    expect(rect).toBeTruthy();
+    expect(meta).toBeTruthy();
+    const h = parseFloat(rect!.getAttribute("height") ?? "0");
+    const y = parseFloat(rect!.getAttribute("y") ?? "0");
+    const metaY = parseFloat(meta!.getAttribute("y") ?? "999");
+    // 有副行 → pill 高度撑起（≥34），副行基线在 rect 底边之内
+    expect(h).toBeGreaterThanOrEqual(34);
+    expect(metaY).toBeLessThanOrEqual(y + h);
+  });
+
+  it("节点标签两行渲染：tspan ≤ 2 且两行合计显示信息多于单行截断（自然语言 func 不再一刀切到 25 字符）", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    const label = container.querySelector('[data-node="1"] [data-node-label]');
+    expect(label).toBeTruthy();
+    const tspans = label?.querySelectorAll("tspan") ?? [];
+    expect(tspans.length).toBeLessThanOrEqual(2);
+    expect(tspans.length).toBeGreaterThanOrEqual(2); // 此 fixture func 必然拆两行
+    const shown = Array.from(tspans).map((t) => t.textContent ?? "").join("");
+    // 两行合计显示的字符数 > 单行预算（~26 半角）——长 func 信息量显著提升
+    expect(shown.replace("…", "").length).toBeGreaterThan(26);
+  });
+
+  it("布局几何常量锁定：pill 底边与节点标签顶带纵向错开 ≥ 3px（横向重叠区不再同带）", () => {
+    // PILL_HALF_H_MAX = 有副行 pill 半高；NODE_LABEL_Y1 = 标签首行基线；FONT_ASCENT ≈ 8（10px 字）
+    expect(PILL_HALF_H_MAX).toBeLessThanOrEqual(NODE_LABEL_Y1 - 8 - 3);
+    // 行高足够容纳：pill（≤半高）+ 标签两行 + 公共函数下标 + 下一行 pill 顶
+    expect(ROW_H).toBeGreaterThanOrEqual(NODE_LABEL_Y1 + 11 + 11 + PILL_HALF_H_MAX + 4);
+  });
+
+  it("SVG 内 tooltip 全部用原生 <title>（data-tooltip 的 CSS 浮层在 SVG 内无 containing block，定位不可靠）", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    expect(container.querySelectorAll("svg [data-tooltip]").length).toBe(0);
+    // 节点全名进 <title>
+    const nodeTitle = container.querySelector('[data-node="1"] title');
+    expect(nodeTitle?.textContent ?? "").toContain("pusher.run_batch");
+    // source 副行超长 entry → 全文进 <title>
+    const srcTitle = container.querySelector("[data-source] title");
+    expect(srcTitle?.textContent ?? "").toContain(HUGE_ENTRY);
+  });
+
+  it("wheel 无修饰键放行页面滚动（不 preventDefault），Ctrl+wheel 才缩放（svg width 随 scale 联动）", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    const viewport = container.querySelector('[data-viewport]') as HTMLElement;
+    expect(viewport).toBeTruthy();
+    const svg = container.querySelector("svg");
+    const baseW = parseFloat(svg?.getAttribute("width") ?? "0");
+    // 无修饰 wheel：不取消默认行为（页面滚动继续）
+    const plain = fireEvent.wheel(viewport, { deltaY: 120 });
+    expect(plain).toBe(true);
+    expect(parseFloat(svg?.getAttribute("width") ?? "0")).toBeCloseTo(baseW, 5);
+    // Ctrl+wheel：接管默认（浏览器页缩放）→ 图缩放（width × 1.1）
+    const zoomed = fireEvent.wheel(viewport, { deltaY: -120, ctrlKey: true });
+    expect(zoomed).toBe(false);
+    expect(parseFloat(svg?.getAttribute("width") ?? "0")).toBeCloseTo(baseW * 1.1, 1);
+  });
+
+  it("拖拽平移驱动滚动条（scrollLeft/scrollTop），无 CSS translate 双轨错位", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    const viewport = container.querySelector('[data-viewport]') as HTMLElement;
+    expect(viewport).toBeTruthy();
+    fireEvent.mouseDown(viewport, { clientX: 300, clientY: 200 });
+    fireEvent.mouseMove(viewport, { clientX: 240, clientY: 170 });
+    // 向左拖 60px → 内容右移 → scrollLeft +60（程序化滚动，滚动条同步）
+    expect(viewport.scrollLeft).toBeCloseTo(60, 0);
+    expect(viewport.scrollTop).toBeCloseTo(30, 0);
+    fireEvent.mouseUp(viewport);
+    // 无 translate transform（旧实现 translate(tx,ty) 与滚动条双轨 → 图被移出可达范围）
+    const inner = viewport.firstElementChild as HTMLElement;
+    expect(inner.style.transform).toBe("");
   });
 });

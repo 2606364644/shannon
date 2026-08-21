@@ -174,11 +174,6 @@
   stroke-dasharray: 1 4;
   opacity: 0.7;
 }
-.sameline-txt {
-  fill: hsl(var(--c-cyan));
-  font-size: 10px;
-  opacity: 0.85;
-}
 .source-pill {
   fill: hsl(var(--c-cyan) / 0.16);
   stroke: hsl(var(--c-cyan));
@@ -339,35 +334,8 @@ svg g[data-branch-id] {
   .dataflow-flash { animation: none; }
 }
 
-/* —— [data-tooltip] 通用暗色 hover 浮层（data-tooltip 属性的全局 CSS 消费方）——
-   任何带 data-tooltip 的元素 hover 时弹出暗色浮层（纯 CSS ::after content:attr）。
-   现有受益点：剪枝树节点 / source pill / sink 靶心（spec §5「节点 hover tooltip：
-   函数+位置+防护速览，暗色浮层」）。HTML 元素浮层锚定元素上方；
-   SVG <g> 无 CSS 盒定位，::after 在该 g 的局部原点渲染——带 transform 的 g
-   （PruningTreeFig 节点/pill/靶心均带）即浮在元素自身位置，伴生规则保 SVG 文本可读。 */
-[data-tooltip] {
-  position: relative;
-}
-[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 30;
-  max-width: 280px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: hsl(34 8% 12%);
-  color: hsl(36 10% 91%);
-  border: 1px solid hsl(34 10% 26%);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: normal;
-  pointer-events: none;
-  box-shadow: 0 2px 8px hsl(0 0% 0% / 0.3);
-}
-/* SVG 伴生：伪元素按 SVG 文本渲染（HTML 盒样式多半不适用），保证可读填充色 */
-svg [data-tooltip]:hover::after {
-  fill: hsl(36 10% 91%);
-  font-size: 11px;
-}
+/* —— 剪枝树 tooltip（2026-08-21 重叠修复）——
+   旧方案 [data-tooltip] + ::after 暗色浮层已删：SVG <g> 不支持 CSS position，
+   ::after position:absolute 的 containing block 回退到 HTML 层最近 positioned 祖先
+   （ZoomViewport 的 position:relative）→ 所有 hover 浮层叠到容器左上同一处。
+   SVG 内 tooltip 全量改原生 <title>（自动换行、跟随鼠标、零定位 hack）。 */

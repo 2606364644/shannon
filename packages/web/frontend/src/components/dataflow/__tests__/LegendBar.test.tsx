@@ -9,20 +9,21 @@ import { LegendBar } from "../LegendBar";
 describe("LegendBar — 图例条（spec §5 视觉语言表）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 
-  it("渲染 5 类图例项：打通 / 剪断 / 黄盾 / 绿盾 / 靶心（含白话文案）", () => {
+  it("渲染 6 类图例项：打通 / 剪断 / 黄盾 / 绿盾 / 靶心 / 同一函数弧（含白话文案）", () => {
     const { container } = render(<LegendBar />);
     const bar = container.querySelector('[data-testid="dataflow-legend-bar"]');
     expect(bar).toBeTruthy();
-    for (const kind of ["vuln", "cut", "shield-bypass", "shield-effective", "target"]) {
+    for (const kind of ["vuln", "cut", "shield-bypass", "shield-effective", "target", "sameline"]) {
       expect(bar?.querySelector(`[data-legend="${kind}"]`)).toBeTruthy();
     }
-    // 白话文案（spec §5 口径：打通/剪断/被绕过/有效/无输入到达）
+    // 白话文案（spec §5 口径：打通/剪断/被绕过/有效/无输入到达/同一函数）
     expect(screen.getByText(/漏洞链路/)).toBeInTheDocument();
     expect(screen.getByText(/防护拦下/)).toBeInTheDocument();
     expect(screen.getByText(/防护被绕过/)).toBeInTheDocument();
     expect(screen.getByText(/有效防护（剪断点）/)).toBeInTheDocument();
     expect(screen.getByText(/有打通枝到达/)).toBeInTheDocument();
     expect(screen.getByText(/无输入到达/)).toBeInTheDocument();
+    expect(screen.getByText(/同一函数/)).toBeInTheDocument();
     expect(screen.getByText("图例")).toBeInTheDocument();
   });
 
@@ -43,6 +44,8 @@ describe("LegendBar — 图例条（spec §5 视觉语言表）", () => {
     // 靶心一项双样例：红靶心 + 灰虚线靶心（sink-idle）
     expect(container.querySelector('[data-legend="target"] [data-sample="target-vuln"]')).toBeTruthy();
     expect(cls('[data-legend="target"] [data-sample="target-safe"]')).toContain("sink-idle");
+    // 同一函数弧：青色点线（sameline；每弧文字标签已去——多弧时互叠，语义收进本图例）
+    expect(cls('[data-legend="sameline"] path')).toContain("sameline");
   });
 
   it("静态不动画：图例条不含 .flow 流动 / .sink-pulse 脉动动画类", () => {

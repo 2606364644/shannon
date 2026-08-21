@@ -98,6 +98,17 @@ export function LegendBar() {
         }
         text={t("workspaceDetail.dataflow.legendTarget")}
       />
+      {/* 同一函数弧：青色点线连同名节点（跨枝同一性，不合并节点）——
+          每弧文字标注已去（多共享函数时互叠，2026-08-21），语义收进本图例。 */}
+      <LegendItem
+        kind="sameline"
+        sample={
+          <svg width="40" height="16" viewBox="0 0 40 16" aria-hidden className="shrink-0">
+            <path d="M3 13 Q 13 1, 23 7 T 37 13" className="sameline" fill="none" />
+          </svg>
+        }
+        text={t("workspaceDetail.dataflow.samelineLabel")}
+      />
     </div>
   );
 }
