@@ -142,6 +142,10 @@ export const pullRepo = (ws: string, name: string) =>
 export const checkoutRepo = (ws: string, name: string, branch: string) =>
   apiPost<{ checked_out: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}/checkout`, { branch });
 
+/** 列远端分支（ls-remote --heads，spec 2026-08-21 §2a）：分支列 combobox 数据源。 */
+export const listBranches = (ws: string, name: string) =>
+  apiGet<{ branches: string[] }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}/branches`);
+
 /** CloneProgress SSE 路径——client 这层不直接消费（CloneProgress 自管 useEventSource），
  *  暴露给组件层用，避免各处再写一遍 ws+name 拼接。 */
 export const repoEventsUrl = (ws: string, name: string) =>

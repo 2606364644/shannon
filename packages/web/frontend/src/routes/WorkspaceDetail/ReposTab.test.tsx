@@ -158,4 +158,73 @@ describe("ReposTab", () => {
     expect(screen.queryByLabelText("repos.updateAria")).toBeNull(); // 无更新(pull)按钮——空壳 pull 必 409
     expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy(); // 有删除按钮（icon-only）
   });
+
+  // ---- 分支列行内切换（spec 2026-08-21 §3）：ready+git+私有克隆 → BranchCombobox ----
+
+  function mockFetchByRoute(handlers: Record<string, unknown>) {
+    const fm = vi.spyOn(window, "fetch");
+    fm.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/auth/me")) {
+        return new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 });
+      }
+      for (const [frag, body] of Object.entries(handlers)) {
+        if (url.includes(frag)) return new Response(JSON.stringify(body), { status: 200 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+    return fm;
+  }
+
+  it("分支列：ready+git+私有克隆渲染切换下拉（显示当前分支），linked 保持只读", async () => {
+    mockFetchByRoute({ "/repos": [
+      { name: "app", state: "ready", source: { kind: "git", url: "https://x/app.git", branch: "main" } },
+      { name: "ftoa", linked: true, state: "ready", source: { kind: "linked" } },
+    ] });
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("app")).toBeTruthy());
+    // 私有克隆：分支列是 combobox 触发器（icon-only，aria 在触发器上）
+    expect(screen.getByLabelText("repoDetail.switchAria")).toBeTruthy();
+    expect(screen.getByText("main")).toBeTruthy();
+    // linked：无切换入口（后端 405），只有一处 switchAria（私有克隆行）
+    expect(screen.getAllByLabelText("repoDetail.switchAria")).toHaveLength(1);
+  });
+
+  it("分支列：非 ready（cloning）保持只读，不渲染下拉", async () => {
+    mockFetchByRoute({ "/repos": [
+      { name: "busy", state: "cloning", source: { kind: "git", branch: "main" } },
+    ] });
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("busy")).toBeTruthy());
+    expect(screen.queryByLabelText("repoDetail.switchAria")).toBeNull();
+    expect(screen.getByText("main")).toBeTruthy(); // 只读文本仍显示分支
+  });
+
+  it("切分支：选中其他分支 → POST /checkout + 成功 toast + 刷新列表", async () => {
+    const fm = mockFetchByRoute({
+      "/branches": { branches: ["dev", "main"] },
+      "/repos": [
+        { name: "app", state: "ready", source: { kind: "git", url: "https://x/app.git", branch: "main" } },
+      ],
+    });
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("repoDetail.switchAria")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("repoDetail.switchAria"));
+    const dev = await screen.findByRole("option", { name: /^dev$/ });
+    fireEvent.click(dev);
+    await waitFor(() => {
+      expect(fm.mock.calls.some(([u]) => String(u).includes("/repos/app/checkout"))).toBeTruthy();
+    });
+    const call = fm.mock.calls.find(([u]) => String(u).includes("/repos/app/checkout"));
+    const init = call?.[1] as RequestInit | undefined;
+    expect(JSON.parse(init?.body as string)).toEqual({ branch: "dev" });
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+  });
 });

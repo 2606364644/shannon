@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { deleteRepo, deleteRepos, pullRepo, ApiError } from "@/api/client";
+import { deleteRepo, deleteRepos, pullRepo, checkoutRepo, ApiError } from "@/api/client";
 import { useRepos } from "@/api/useRepos";
 import { useAuth } from "@/auth/AuthContext";
 import type { Repo, RepoState } from "@/api/types";
@@ -18,6 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { AddRepoDialog } from "@/components/AddRepoDialog";
+import { BranchCombobox } from "@/components/BranchCombobox";
 import { CloneProgress } from "@/components/CloneProgress";
 import { CopyButton } from "@/components/CopyButton";
 
@@ -159,6 +160,26 @@ export function ReposTab({ workspace: wsProp }: Props) {
       pullTimerRef.current = setTimeout(() => void refresh(), PULL_REFRESH_DELAY_MS);
     } catch (e) {
       if (e instanceof ApiError) toast.error(t("repos.errors.updateFailed", { status: e.status }));
+    }
+  }
+
+  // 切换分支（spec 2026-08-21 §3）：后端 checkout + meta 回写，刷新取新 branch/commit。
+  // 409=被扫描引用（与删除同文案）；422=分支不存在；405 不会到这（linked 行不渲染下拉）。
+  async function doCheckout(name: string, branch: string) {
+    try {
+      await checkoutRepo(workspace, name, branch);
+      toast.success(t("repoDetail.checkoutSuccess", { branch }));
+      await refresh();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        toast.error(
+          e.status === 409
+            ? t("repos.errors.inUse")
+            : e.status === 422
+              ? t("repoDetail.errors.branchNotFound", { branch })
+              : t("repoDetail.errors.checkoutFailed", { status: e.status }),
+        );
+      }
     }
   }
 
@@ -321,10 +342,21 @@ export function ReposTab({ workspace: wsProp }: Props) {
                           <span className="text-xs text-muted-foreground">{r.source?.kind ?? "-"}</span>
                         )}
                       </TableCell>
+                      {/* 分支列：ready+git+私有克隆 → 行内切换下拉（点开 lazy 拉远端分支，
+                          手输兜底）；linked（后端 405）/ 非 ready / 非 git 退化为只读文本 */}
                       <TableCell className="py-2.5 px-3">
-                        <span className="block truncate font-mono text-xs text-muted-foreground">
-                          {r.source?.branch ?? "-"}
-                        </span>
+                        {!r.linked && r.state === "ready" && r.source?.kind === "git" ? (
+                          <BranchCombobox
+                            ws={workspace}
+                            repo={r.name}
+                            value={r.source.branch ?? null}
+                            onSwitch={(b) => doCheckout(r.name, b)}
+                          />
+                        ) : (
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {r.source?.branch ?? "-"}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap py-2.5 px-3 text-right font-mono text-xs text-muted-foreground tabular-nums">
                         {fmtSize(r.size_bytes)}
