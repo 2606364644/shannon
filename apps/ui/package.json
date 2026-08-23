@@ -1,0 +1,11 @@
+{
+  "name": "@shannon/ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  }
+}

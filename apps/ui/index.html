@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shannon — New repository</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' fill='%23e9ece5'/%3E%3Cpath d='M3 6V3h3M21 6V3h-3M3 18v3h3M21 18v3h-3' fill='none' stroke='%231c2620' stroke-width='2'/%3E%3Crect x='9' y='9' width='6' height='6' fill='%23c2570f'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <style>
+    /* === Tokens === */
+    :root {
+      --bench: #e9ece5;
+      --paper: #fbfbf8;
+      --white: #ffffff;
+      --ink: #1c2620;
+      --ink-dim: #5a665e;
+      --rule: #c3cbbf;
+      --seal: #0e5f52;
+      --seal-ink: #0b4a40;
+      --signal: #c2570f;
+      --signal-ink: #a34a08;
+      --fault: #b3261e;
+      --terminal: #14201b;
+      --terminal-ink: #cfe3da;
+      --terminal-prompt: #7fb8a8;
+      --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+      --body: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
+      --mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { -webkit-text-size-adjust: 100%; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-family: var(--body);
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--ink);
+      background-color: var(--bench);
+      background-image:
+        linear-gradient(to right, rgba(28, 38, 32, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(28, 38, 32, 0.05) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    ::selection { background: var(--seal); color: var(--paper); }
+
+    /* === Masthead === */
+    .masthead {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px clamp(20px, 4vw, 40px);
+      background: var(--bench);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .brand {
+      font-family: var(--display);
+      font-weight: 900;
+      font-size: 13px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    .brand .divider { color: var(--rule); padding: 0 0.6em; }
+
+    .brand .context {
+      font-family: var(--mono);
+      font-weight: 400;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: var(--ink-dim);
+    }
+
+    .bench-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--ink-dim);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* === Main stage === */
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 0 clamp(20px, 4vw, 40px);
+      display: grid;
+    }
+
+    body[data-view='bench'] main { align-content: center; padding-block: clamp(40px, 9vh, 96px); }
+    body[data-view='receipt'] main,
+    body[data-view='rejection'] main { align-content: start; padding-block: 44px 72px; }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+
+    /* === Bench (empty state) === */
+    .bench {
+      position: relative;
+      padding: clamp(56px, 11vh, 104px) clamp(16px, 4vw, 32px);
+      text-align: center;
+    }
+
+    .bench::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(194, 87, 15, 0.05);
+      box-shadow: inset 0 2px 16px rgba(28, 38, 32, 0.1);
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+
+    .bench.dragging::before { opacity: 1; }
+
+    .bench > * { position: relative; }
+
+    .mark {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      transition: transform 0.18s ease, border-color 0.18s ease;
+    }
+
+    .mark.tl { top: 0; left: 0; border-top: 2px solid var(--ink); border-left: 2px solid var(--ink); }
+    .mark.tr { top: 0; right: 0; border-top: 2px solid var(--ink); border-right: 2px solid var(--ink); }
+    .mark.bl { bottom: 0; left: 0; border-bottom: 2px solid var(--ink); border-left: 2px solid var(--ink); }
+    .mark.br { bottom: 0; right: 0; border-bottom: 2px solid var(--ink); border-right: 2px solid var(--ink); }
+
+    .bench.dragging .mark.tl { transform: translate(12px, 12px); }
+    .bench.dragging .mark.tr { transform: translate(-12px, 12px); }
+    .bench.dragging .mark.bl { transform: translate(12px, -12px); }
+    .bench.dragging .mark.br { transform: translate(-12px, -12px); }
+    .bench.dragging .mark { border-color: var(--signal); }
+
+    .bench h1 {
+      margin: 0 0 14px;
+      font-family: var(--display);
+      font-size: clamp(34px, 5.6vw, 54px);
+      line-height: 0.99;
+      font-weight: 840;
+      font-variation-settings: 'wdth' 122;
+      text-transform: uppercase;
+      letter-spacing: -0.01em;
+    }
+
+    .lede {
+      margin: 0 auto;
+      max-width: 46ch;
+      color: var(--ink-dim);
+      font-size: 16px;
+    }
+
+    .lede .linklike {
+      font: inherit;
+      font-weight: 600;
+      color: var(--seal-ink);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .spec {
+      margin: 26px 0 0;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+
+    .spec .dot { padding: 0 0.7em; color: var(--rule); }
+
+    .drop-hint {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -34px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--signal-ink);
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      pointer-events: none;
+    }
+
+    .bench.dragging .drop-hint { opacity: 1; transform: translateY(0); }
+    .bench.dragging .spec { color: var(--signal-ink); }
+
+    /* === Receiving (upload in progress) === */
+    .receiving { padding: clamp(40px, 9vh, 88px) 16px; text-align: center; }
+
+    .recv-name {
+      margin: 0 0 22px;
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
+    .meter {
+      width: min(420px, 100%);
+      height: 8px;
+      margin: 0 auto;
+      border: 1px solid var(--ink);
+      background: var(--paper);
+    }
+
+    .meter i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--seal);
+      transition: width 0.2s linear;
+    }
+
+    .recv-note {
+      margin: 10px 0 0;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+
+    /* === Receipt (registered) === */
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      box-shadow:
+        0 1px 0 rgba(28, 38, 32, 0.06),
+        0 16px 36px -20px rgba(28, 38, 32, 0.4);
+      padding: clamp(20px, 4vw, 36px);
+    }
+
+    .r-top {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .r-top h2 {
+      margin: 0;
+      font-family: var(--display);
+      font-size: clamp(26px, 4vw, 36px);
+      line-height: 1.02;
+      font-weight: 840;
+      font-variation-settings: 'wdth' 118;
+      text-transform: uppercase;
+      word-break: break-word;
+    }
+
+    .r-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(140px, auto));
+      gap: 4px 28px;
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .r-meta div { display: flex; gap: 10px; justify-content: space-between; }
+
+    .r-meta dt { color: var(--ink-dim); letter-spacing: 0.06em; text-transform: uppercase; font-size: 10.5px; padding-top: 1px; }
+    .r-meta dd { margin: 0; font-weight: 500; }
+
+    /* Stages */
+    .stages {
+      list-style: none;
+      display: flex;
+      margin: 20px 0 0;
+      padding: 0;
+      border: 1px solid var(--rule);
+    }
+
+    .stages li {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      border-right: 1px solid var(--rule);
+      transition: color 0.2s ease;
+    }
+
+    .stages li:last-child { border-right: none; }
+
+    .stages i {
+      flex: none;
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid var(--ink-dim);
+      display: grid;
+      place-items: center;
+      font-style: normal;
+      font-size: 10px;
+      line-height: 1;
+      color: transparent;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .stages li.done { color: var(--ink); }
+    .stages li.done i {
+      background: var(--seal);
+      border-color: var(--seal);
+      color: var(--paper);
+    }
+    .stages li.done i::before { content: '✓'; }
+
+    /* Hash line */
+    .hashline {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .hashlabel {
+      flex: none;
+      align-self: center;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      color: var(--ink-dim);
+    }
+
+    .hashbox {
+      flex: 1;
+      min-width: 0;
+      background: var(--white);
+      border: 1px solid var(--rule);
+      padding: 10px 14px;
+    }
+
+    .hashbox code {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      word-break: break-all;
+      color: var(--ink);
+    }
+
+    .hashbox code::after {
+      content: '▌';
+      color: var(--seal);
+      animation: caret 0.9s steps(1) infinite;
+    }
+
+    .hashline.typed .hashbox code::after { content: ''; animation: none; }
+
+    @keyframes caret { 50% { opacity: 0; } }
+
+    .seal-mark {
+      flex: none;
+      align-self: center;
+      width: 22px;
+      height: 22px;
+      background: var(--seal);
+      color: var(--paper);
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      transform: scale(0);
+      transition: transform 0.18s cubic-bezier(0.2, 1.6, 0.4, 1);
+    }
+
+    .seal-mark.on { transform: scale(1); }
+
+    /* Manifest */
+    .manifest {
+      margin-top: 20px;
+      border: 1px solid var(--rule);
+      background: var(--white);
+    }
+
+    .m-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--rule);
+      background: var(--paper);
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+
+    .manifest ol {
+      list-style: none;
+      margin: 0;
+      padding: 6px 0;
+      max-height: 236px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .manifest li {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      padding: 2.5px 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.55;
+      animation: rowIn 0.3s ease both;
+      animation-delay: calc(min(var(--i), 10) * 24ms);
+    }
+
+    .manifest li:nth-child(odd) { background: rgba(28, 38, 32, 0.025); }
+
+    .manifest .path {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manifest .bytes {
+      flex: none;
+      color: var(--ink-dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .m-more {
+      margin: 0;
+      padding: 6px 14px;
+      border-top: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-dim);
+    }
+
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Command */
+    .cmdrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .cmdrow label {
+      flex: none;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+
+    .cmdrow input {
+      flex: 1;
+      min-width: 220px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--white);
+      border: 1px solid var(--rule);
+      padding: 9px 12px;
+      outline: none;
+    }
+
+    .cmdrow input:focus { border-color: var(--seal); }
+
+    .cmd {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 12px;
+      padding: 13px 16px;
+      background: var(--terminal);
+    }
+
+    .cmd .dollar { color: var(--terminal-prompt); }
+
+    .cmd code {
+      flex: 1;
+      min-width: 0;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--terminal-ink);
+      word-break: break-all;
+    }
+
+    .cmd button {
+      flex: none;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--paper);
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .cmd button:hover { background: transparent; color: var(--terminal-ink); }
+    .cmd button.copied { background: var(--seal); border-color: var(--seal); color: var(--paper); }
+
+    .r-actions { margin-top: 22px; }
+
+    .ghost {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink);
+      background: transparent;
+      border: 1px solid var(--ink);
+      padding: 9px 16px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .ghost:hover { background: var(--ink); color: var(--paper); }
+
+    /* === Rejection === */
+    .rejection { border-left: 4px solid var(--fault); }
+
+    .rejection .eyebrow { color: var(--fault); }
+
+    .rejection h2 {
+      margin: 0 0 8px;
+      font-family: var(--display);
+      font-size: clamp(24px, 4vw, 34px);
+      line-height: 1.05;
+      font-weight: 840;
+      font-variation-settings: 'wdth' 118;
+      text-transform: uppercase;
+    }
+
+    .rej-detail {
+      margin: 0 0 22px;
+      color: var(--ink-dim);
+      font-family: var(--mono);
+      font-size: 13px;
+      word-break: break-word;
+    }
+
+    /* === Footer === */
+    footer {
+      padding: 16px clamp(20px, 4vw, 40px);
+      border-top: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      color: var(--ink-dim);
+    }
+
+    /* === Motion & a11y === */
+    .masthead, footer { animation: fadeUp 0.34s ease both; }
+    main > * { animation: fadeUp 0.34s ease both; }
+    main > *:nth-child(2) { animation-delay: 70ms; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--seal);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+
+    /* === Narrow screens === */
+    @media (max-width: 680px) {
+      .r-top { flex-direction: column; align-items: flex-start; }
+      .r-meta { grid-template-columns: 1fr 1fr; width: 100%; }
+      .stages li { padding: 9px 10px; gap: 7px; font-size: 10px; letter-spacing: 0.08em; }
+      .stages li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .hashline { flex-direction: column; }
+      .hashlabel, .seal-mark { align-self: flex-start; }
+      .cmd { flex-wrap: wrap; }
+      .cmd button { width: 100%; }
+      .bench-meta { display: none; }
+    }
+  </style>
+</head>
+<body data-view="bench">
+
+  <header class="masthead">
+    <div class="brand">
+      Shannon<span class="divider">·</span><span class="context">Target intake</span>
+    </div>
+    <div class="bench-meta" id="bench-meta">— repositories on bench</div>
+  </header>
+
+  <main id="stage">
+
+    <section id="bench" class="bench" tabindex="0" role="button"
+             aria-label="Deliver a zip archive to register a repository">
+      <i class="mark tl"></i><i class="mark tr"></i><i class="mark bl"></i><i class="mark br"></i>
+
+      <div id="bench-idle">
+        <h1>Drop a zip<br>on the bench</h1>
+        <p class="lede">It's unpacked, hashed, and registered under <b>repos/</b> —
+          ready for a scan. Or <button class="linklike" id="browse" type="button">browse files</button>.</p>
+        <p class="spec">.zip only<span class="dot">·</span>up to 512 MB<span class="dot">·</span>unpacked to repos/</p>
+        <p class="drop-hint">Release to register</p>
+      </div>
+
+      <div id="bench-receiving" class="receiving" hidden>
+        <p class="eyebrow">Receiving</p>
+        <p class="recv-name" id="recv-name">—</p>
+        <div class="meter"><i id="recv-bar"></i></div>
+        <p class="recv-note" id="recv-note">Uploading 0%</p>
+      </div>
+
+      <input type="file" id="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+    </section>
+
+    <section id="receipt" class="card" hidden aria-live="polite">
+      <div class="r-top">
+        <div>
+          <p class="eyebrow">Intake receipt</p>
+          <h2 id="r-slug">—</h2>
+        </div>
+        <dl class="r-meta">
+          <div><dt>Archive</dt><dd id="r-file">—</dd></div>
+          <div><dt>Compressed</dt><dd id="r-size">—</dd></div>
+          <div><dt>Unpacked</dt><dd id="r-unpacked">—</dd></div>
+          <div><dt>Files</dt><dd id="r-count">—</dd></div>
+        </dl>
+      </div>
+
+      <ol class="stages" id="stages">
+        <li data-stage="received"><i></i><span>Received</span></li>
+        <li data-stage="verified"><i></i><span>Verified</span></li>
+        <li data-stage="registered"><i></i><span>Registered</span></li>
+      </ol>
+
+      <div class="hashline" id="hashline">
+        <span class="hashlabel">SHA-256</span>
+        <div class="hashbox"><code id="r-hash"></code></div>
+        <span class="seal-mark" id="seal-mark" aria-hidden="true">✓</span>
+      </div>
+
+      <div class="manifest">
+        <p class="m-head"><span>Packing list</span><span id="m-count">—</span></p>
+        <ol id="r-manifest"></ol>
+        <p class="m-more" id="m-more" hidden></p>
+      </div>
+
+      <div class="cmdrow">
+        <label for="target-url">Target URL</label>
+        <input id="target-url" type="url" placeholder="https://staging.example.internal" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="cmd">
+        <code><span class="dollar">$</span> <span id="r-cmd"></span></code>
+        <button id="copy" type="button">Copy</button>
+      </div>
+
+      <div class="r-actions">
+        <button class="ghost" id="again" type="button">Register another archive</button>
+      </div>
+    </section>
+
+    <section id="rejection" class="card rejection" hidden aria-live="polite">
+      <p class="eyebrow">Intake rejected</p>
+      <h2>Not registered</h2>
+      <p class="rej-detail" id="rej-detail">—</p>
+      <button class="ghost" id="rej-again" type="button">Back to the bench</button>
+    </section>
+
+  </main>
+
+  <footer>Shannon is a defensive security tool — run it only against systems you own or are explicitly authorized to test.</footer>
+
+  <script>
+    'use strict';
+
+    const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
+    const MANIFEST_ROWS_SHOWN = 200;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const $ = (id) => document.getElementById(id);
+
+    const bench = $('bench');
+    const fileInput = $('file');
+    let currentSlug = null;
+
+    // === Formatting helpers ===
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ['KB', 'MB', 'GB'];
+      let value = bytes;
+      let unit = 'B';
+      for (const next of units) {
+        if (value < 1024) break;
+        value /= 1024;
+        unit = next;
+      }
+      return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`;
+    }
+
+    function manifestDepth(relPath) {
+      return relPath.split('/').length - 1;
+    }
+
+    // === View switching ===
+
+    function setView(name) {
+      document.body.dataset.view = name;
+      $('bench').hidden = name !== 'bench';
+      $('receipt').hidden = name !== 'receipt';
+      $('rejection').hidden = name !== 'rejection';
+    }
+
+    function resetBench() {
+      $('bench-idle').hidden = false;
+      $('bench-receiving').hidden = true;
+      $('recv-bar').style.width = '0%';
+      $('recv-note').textContent = 'Uploading 0%';
+      fileInput.value = '';
+      bench.classList.remove('dragging');
+      bench.focus({ preventScroll: true });
+    }
+
+    // === Intake flow ===
+
+    function handleFile(file) {
+      if (!file.name.toLowerCase().endsWith('.zip')) {
+        return showRejection(`"${file.name}" is not a zip archive — Shannon accepts .zip only.`);
+      }
+      if (file.size > MAX_ARCHIVE_BYTES) {
+        return showRejection(`"${file.name}" is ${formatBytes(file.size)} — over the 512 MB intake limit.`);
+      }
+      upload(file);
+    }
+
+    function upload(file) {
+      setView('bench');
+      $('bench-idle').hidden = true;
+      $('bench-receiving').hidden = false;
+      $('recv-name').textContent = `${file.name} · ${formatBytes(file.size)}`;
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/api/repos?name=${encodeURIComponent(file.name)}`);
+      xhr.setRequestHeader('Content-Type', 'application/zip');
+
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+        const pct = Math.round((event.loaded / event.total) * 100);
+        $('recv-bar').style.width = `${pct}%`;
+        $('recv-note').textContent = `Uploading ${pct}%`;
+      };
+
+      xhr.onload = () => {
+        let body = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          body = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && body) {
+          showReceipt(body);
+        } else {
+          const detail = body?.error ?? `The intake server answered ${xhr.status}.`;
+          showRejection(detail);
+        }
+      };
+
+      xhr.onerror = () => {
+        showRejection('Intake server unreachable — is the console still running?');
+      };
+
+      xhr.send(file);
+    }
+
+    function showReceipt(data) {
+      setView('receipt');
+      currentSlug = data.slug;
+
+      $('r-slug').textContent = data.slug;
+      $('r-file').textContent = data.fileName;
+      $('r-size').textContent = formatBytes(data.archiveBytes);
+      $('r-unpacked').textContent = formatBytes(data.unpackedBytes);
+      $('r-count').textContent = String(data.fileCount);
+      $('m-count').textContent = `${data.fileCount} files · ${formatBytes(data.unpackedBytes)} unpacked`;
+
+      // 1. Mark the archive received.
+      markStage('received');
+
+      // 2. Type out the digest, then verify and register.
+      typeHash(data.sha256, () => {
+        markStage('verified');
+        $('seal-mark').classList.add('on');
+        renderManifest(data);
+        markStage('registered');
+        renderCommand();
+        refreshBenchMeta();
+      });
+    }
+
+    function markStage(name) {
+      const item = document.querySelector(`.stages li[data-stage='${name}']`);
+      if (item) item.classList.add('done');
+    }
+
+    function typeHash(hash, done) {
+      const target = $('r-hash');
+      target.textContent = '';
+      if (reducedMotion) {
+        target.textContent = hash;
+        $('hashline').classList.add('typed');
+        done();
+        return;
+      }
+      let index = 0;
+      const timer = window.setInterval(() => {
+        index = Math.min(hash.length, index + 2);
+        target.textContent = hash.slice(0, index);
+        if (index >= hash.length) {
+          window.clearInterval(timer);
+          $('hashline').classList.add('typed');
+          window.setTimeout(done, 140);
+        }
+      }, 18);
+    }
+
+    function renderManifest(data) {
+      const list = $('r-manifest');
+      list.textContent = '';
+      const fragment = document.createDocumentFragment();
+      data.manifest.slice(0, MANIFEST_ROWS_SHOWN).forEach((entry, i) => {
+        const li = document.createElement('li');
+        li.style.setProperty('--i', String(i));
+        const path = document.createElement('span');
+        path.className = 'path';
+        path.style.paddingLeft = `${Math.min(manifestDepth(entry.path), 4) * 14}px`;
+        path.textContent = entry.path;
+        const bytes = document.createElement('span');
+        bytes.className = 'bytes';
+        bytes.textContent = formatBytes(entry.bytes);
+        li.append(path, bytes);
+        fragment.appendChild(li);
+      });
+      list.appendChild(fragment);
+      const more = $('m-more');
+      if (data.manifestTruncated) {
+        more.hidden = false;
+        more.textContent = `Packing list truncated — ${data.fileCount} files registered in total.`;
+      } else {
+        more.hidden = true;
+      }
+    }
+
+    function commandText() {
+      const url = $('target-url').value.trim();
+      return `./shannon start -r repos/${currentSlug} -u ${url || '<target-url>'}`;
+    }
+
+    function renderCommand() {
+      $('r-cmd').textContent = commandText();
+    }
+
+    function showRejection(detail) {
+      setView('rejection');
+      $('rej-detail').textContent = detail;
+      refreshBenchMeta();
+    }
+
+    // === Bench meta (repository count) ===
+
+    async function refreshBenchMeta() {
+      try {
+        const res = await fetch('/api/repos');
+        if (!res.ok) return;
+        const data = await res.json();
+        $('bench-meta').textContent =
+          `${data.count} ${data.count === 1 ? 'repository' : 'repositories'} on bench`;
+      } catch {
+        $('bench-meta').textContent = 'Bench status unavailable';
+      }
+    }
+
+    // === Wiring ===
+
+    let dragDepth = 0;
+
+    bench.addEventListener('dragenter', (event) => {
+      event.preventDefault();
+      dragDepth += 1;
+      bench.classList.add('dragging');
+    });
+
+    bench.addEventListener('dragover', (event) => {
+      event.preventDefault();
+    });
+
+    bench.addEventListener('dragleave', () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) bench.classList.remove('dragging');
+    });
+
+    bench.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dragDepth = 0;
+      bench.classList.remove('dragging');
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      if (files.length > 1) {
+        showRejection('One archive at a time — drop a single .zip.');
+        return;
+      }
+      handleFile(files[0]);
+    });
+
+    // Keep the browser from navigating away when a zip misses the bench.
+    window.addEventListener('dragover', (event) => event.preventDefault());
+    window.addEventListener('drop', (event) => event.preventDefault());
+
+    bench.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    $('browse').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (file) handleFile(file);
+    });
+
+    $('target-url').addEventListener('input', renderCommand);
+
+    $('copy').addEventListener('click', async () => {
+      const button = $('copy');
+      try {
+        await navigator.clipboard.writeText(commandText());
+      } catch {
+        const area = document.createElement('textarea');
+        area.value = commandText();
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+      }
+      button.textContent = 'Copied';
+      button.classList.add('copied');
+      window.setTimeout(() => {
+        button.textContent = 'Copy';
+        button.classList.remove('copied');
+      }, 1600);
+    });
+
+    $('again').addEventListener('click', () => {
+      setView('bench');
+      resetBench();
+    });
+
+    $('rej-again').addEventListener('click', () => {
+      setView('bench');
+      resetBench();
+    });
+
+    refreshBenchMeta();
+  </script>
+</body>
+</html>

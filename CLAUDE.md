@@ -60,6 +60,9 @@ npx @keygraph/shannon setup
 ./shannon start -u <url> -r my-repo -w my-audit    # Resume (same command)
 ./shannon workspaces                                 # List all workspaces
 
+# Intake console (upload a zip as a repository)
+pnpm --filter @shannon/ui start                      # → http://127.0.0.1:8234
+
 # Monitor
 ./shannon logs <workspace>            # Show a scan's live log
 ./shannon status                      # Show running scans
@@ -94,6 +97,7 @@ pnpm biome:fix                       # Auto-fix lint, format, and import sorting
 ```
 apps/cli/        — @keygraph/shannon (published to npm, bundled with tsdown)
 apps/worker/     — @shannon/worker (private, Temporal worker + pipeline logic)
+apps/ui/         — @shannon/ui (private, zero-build intake console: drag-and-drop zip → repos/)
 ```
 
 ### CLI Package (`apps/cli/`)
