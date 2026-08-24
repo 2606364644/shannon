@@ -17,7 +17,7 @@ describe("ThemeToggle", () => {
   beforeEach(async () => {
     await act(async () => { await i18n.changeLanguage("zh"); });
     localStorage.clear();
-    document.documentElement.classList.remove("dark", "light");
+    document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
   });
   afterEach(async () => {
     await act(async () => { await i18n.changeLanguage("zh"); });
@@ -34,29 +34,40 @@ describe("ThemeToggle", () => {
     expect(container.querySelector("svg.lucide-sun")).not.toBeNull();
   });
 
-  it("点击 dark→light 并持久化", () => {
-    localStorage.setItem(THEME_KEY, "dark");
+  it("点击 dark→light 并持久化（对侧默认主题 mac，挂 theme-mac）", () => {
+    localStorage.setItem(THEME_KEY, "dark"); // 旧值 → 读时归一 charcoal
     renderToggle();
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    expect(localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
+    expect(localStorage.getItem(THEME_KEY)).toBe("mac");
   });
 
-  it("点击 light→dark", () => {
-    localStorage.setItem(THEME_KEY, "light");
+  it("点击 light→dark（对侧基础主题 charcoal）", () => {
+    localStorage.setItem(THEME_KEY, "light"); // 旧值 → 读时归一 warm-paper
     renderToggle();
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(localStorage.getItem(THEME_KEY)).toBe("dark");
+    expect(localStorage.getItem(THEME_KEY)).toBe("charcoal");
   });
 
-  it("system 态点击 → 落到显式反色（effective dark → light，退出 system）", () => {
+  it("palette 主题（mac）点击 → 翻到对侧基础主题 charcoal（无对侧变体）", () => {
+    localStorage.setItem(THEME_KEY, "mac");
+    renderToggle();
+    expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
+    expect(localStorage.getItem(THEME_KEY)).toBe("charcoal");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-mac")).toBe(false);
+  });
+
+  it("system 态点击 → 落到显式反色（effective dark → mac，退出 system）", () => {
     localStorage.setItem(THEME_KEY, "system");
     // test-setup matchMedia stub matches=false → effective dark
     renderToggle();
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
-    expect(localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(localStorage.getItem(THEME_KEY)).toBe("mac");
     expect(document.documentElement.classList.contains("light")).toBe(true);
   });
 

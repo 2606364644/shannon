@@ -15,7 +15,7 @@ function Command({
   return (
     <CommandPrimitive
       className={cn(
-        "flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground",
+        "flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground [backdrop-filter:var(--backdrop-float,none)]",
         className
       )}
       {...props}

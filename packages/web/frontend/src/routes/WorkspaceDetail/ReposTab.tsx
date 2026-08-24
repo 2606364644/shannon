@@ -276,7 +276,7 @@ export function ReposTab({ workspace: wsProp }: Props) {
                   所在目录独立成列；整表全选 checkbox 落在名称列头（对齐全选入口）。 */}
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="sticky top-0 z-10 w-64 bg-card py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-64 bg-card py-2.5 pl-4 pr-3 text-xs font-medium text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <Checkbox
                         aria-label={t("repos.bulk.selectAll")}
@@ -286,14 +286,14 @@ export function ReposTab({ workspace: wsProp }: Props) {
                       {t("repos.table.name")}
                     </div>
                   </TableHead>
-                  <TableHead className="sticky top-0 z-10 w-40 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-40 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">
                     {t("repos.table.directory")}
                   </TableHead>
-                  <TableHead className="sticky top-0 z-10 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.source")}</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-28 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.branch")}</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-20 whitespace-nowrap bg-card py-2.5 px-3 text-right text-xs font-medium text-muted-foreground">{t("repos.table.size")}</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-36 whitespace-nowrap bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.state")}</TableHead>
-                  <TableHead className="sticky top-0 z-10 w-28 whitespace-nowrap bg-card py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.source")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-28 bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.branch")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-20 whitespace-nowrap bg-card py-2.5 px-3 text-right text-xs font-medium text-muted-foreground">{t("repos.table.size")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-36 whitespace-nowrap bg-card py-2.5 px-3 text-xs font-medium text-muted-foreground">{t("repos.table.state")}</TableHead>
+                  <TableHead className="sticky top-0 z-10 [backdrop-filter:var(--backdrop-card,none)] w-28 whitespace-nowrap bg-card py-2.5 px-3 text-center text-xs font-medium text-muted-foreground">{t("repos.table.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

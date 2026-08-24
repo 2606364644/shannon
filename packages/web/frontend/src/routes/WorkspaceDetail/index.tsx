@@ -242,12 +242,12 @@ export default function WorkspaceDetail() {
                 </span>
                 {agg.composition.total > 0 && (
                   <span className="flex items-center gap-2">
-                    <span className="flex h-1 w-[120px] gap-px overflow-hidden rounded-full bg-border">
+                    <span data-testid="ws-composition-bar" className="flex h-1 w-[120px] gap-px overflow-hidden rounded-full bg-border">
                       {agg.composition.top.map(([cls, n], i) => (
-                        <span key={cls} className="bg-primary" style={{ width: `${(n / agg.composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
+                        <span key={cls} className="bg-red" style={{ width: `${(n / agg.composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
                       ))}
                       {agg.composition.rest > 0 && (
-                        <span className="bg-primary/25" style={{ width: `${(agg.composition.rest / agg.composition.total) * 100}%` }} />
+                        <span className="bg-red/25" style={{ width: `${(agg.composition.rest / agg.composition.total) * 100}%` }} />
                       )}
                     </span>
                     <span className="flex gap-x-2">

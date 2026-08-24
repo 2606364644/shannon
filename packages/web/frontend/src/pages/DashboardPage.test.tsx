@@ -58,6 +58,22 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
     expect(screen.getByText("需关注")).toBeInTheDocument();
   });
 
+  it("构成谱带：红色威胁通道（bg-red），不用品牌色 primary（mac 下蓝会弱化危害感）", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([
+      { ...mockScans[1], vuln_counts: { xss: 2, ssrf: 1 } },
+    ]);
+    renderPage();
+    // 横幅谱带：分段=漏洞类别（非严重度），整条红色语义通道 + 透明度递减区分分段
+    const bar = await screen.findByTestId("dash-composition-bar");
+    expect(bar.innerHTML).toContain("bg-red");
+    expect(bar.innerHTML).not.toContain("bg-primary");
+    // 磁贴谱带同语义
+    const tile = await screen.findByTestId("tile-composition-bar");
+    expect(tile.innerHTML).toContain("bg-red");
+    expect(tile.innerHTML).not.toContain("bg-primary");
+  });
+
   it("磁贴：按工作区分组渲染（ws-a/ws-b），运行中扫描进度融进磁贴", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue(mockScans);

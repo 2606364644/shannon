@@ -9,28 +9,35 @@
    - 浅：淡暖画布（sat12% 够暖不发黄）+ 极淡暖白卡 + 暖灰 hairline + 柔暖棕阴影。
    - primary 双主题统一 coral(15°)（Claude 灵魂色 #D97757，橙红非紫，不违反避紫约束）；
      severity 暖梯度 red/orange/yellow（与 coral 同暖色系，统一感更强）。
-   - radius 10px（从 8 提到 10，更 Claude 圆润但克制）；暖棕/暖黑柔阴影浮起卡片。 */
+   - radius 10px（从 8 提到 10，更 Claude 圆润但克制）；暖棕/暖黑柔阴影浮起卡片。
+   2026-08-24（二）：基础双主题精确对齐 claude.ai 真值（深 #262624/#30302E/#E8E6E3、
+   浅 #FAF9F5/纯白卡/#2C2B29，coral 灵魂色不动），显示名改「Claude 深色/浅色」；
+   默认主题对改为 浅=Mac / 深=Claude 深色（theme.ts defaultThemeFor）。
+   扩展主题块见下方（mac=Apple HIG / midnight=Linear / graphite=Geist）。 */
 
 :root {
-  /* 层 A · shadcn token（深 · 暖炭黑；hue34 暖深非冷灰，降 sat 去脏感） */
-  --background: 34 7% 10%;
-  --foreground: 36 10% 91%;
-  --card: 34 5% 13%;
-  --card-foreground: 36 10% 91%;
-  --popover: 34 5% 13%;
-  --popover-foreground: 36 10% 91%;
+  /* 层 A · shadcn token（深 · Claude 深色；2026-08-24 精确对齐 claude.ai 暗色真值：
+     底 #262624 / 抬升面 #30302E / 文本 #E8E6E3——近中性微暖灰，sat 仅 3-4%（原
+     hue34/sat7 的"暖炭"感偏黄偏脏）；边框改 alpha 暖白 hairline（claude.ai 暗色
+     浮层勾勒法，透出底色不闷）。coral 灵魂色不动。 */
+  --background: 60 3% 15%;
+  --foreground: 36 10% 90%;
+  --card: 60 3% 18%;
+  --card-foreground: 36 10% 90%;
+  --popover: 60 3% 18%;
+  --popover-foreground: 36 10% 90%;
   --primary: 15 60% 56%;
-  --primary-foreground: 34 7% 10%;
-  --secondary: 34 5% 16%;
-  --secondary-foreground: 36 10% 91%;
-  --muted: 34 5% 16%;
+  --primary-foreground: 40 4% 12%;
+  --secondary: 60 3% 16%;
+  --secondary-foreground: 36 10% 90%;
+  --muted: 60 3% 16%;
   --muted-foreground: 36 5% 62%;
-  --accent: 34 5% 18%;
-  --accent-foreground: 36 10% 91%;
+  --accent: 60 3% 21%;
+  --accent-foreground: 36 10% 90%;
   --destructive: 5 62% 56%;
-  --destructive-foreground: 34 7% 10%;
-  --border: 34 5% 20%;
-  --input: 34 5% 20%;
+  --destructive-foreground: 40 4% 12%;
+  --border: 36 10% 90% / 0.10;
+  --input: 36 10% 90% / 0.10;
   --ring: 15 60% 56%;
 
   /* 层 B · 语义色（深，HSL channel；--c- 前缀避 events.css hex --cyan 等同名冲突）
@@ -49,8 +56,8 @@
   --font-serif: "IBM Plex Serif", Georgia, serif;
   --radius: 12px;
 
-  /* 层 E · elevation（深 · 暖黑柔阴影浮起；hue30 与背景同系） */
-  --shadow-card: 0 0 0 1px hsl(34 10% 100% / 0.03), 0 2px 8px hsl(0 0% 0% / 0.25), 0 1px 2px hsl(0 0% 0% / 0.2);
+  /* 层 E · elevation（深 · claude.ai 暗色浮层：alpha 白 hairline + 柔黑落影） */
+  --shadow-card: 0 0 0 1px hsl(36 10% 100% / 0.05), 0 1px 2px hsl(0 0% 0% / 0.2), 0 2px 8px hsl(0 0% 0% / 0.25);
 
   /* cta 按钮专用：coral 柔和材质阴影（ambient coral 光晕 + 落影），非 neon inset 高光。
      hover 加强光晕 + 投影，配合按钮 hover:-translate-y-px 微浮起。*/
@@ -62,73 +69,273 @@
   --shadow-toolbar: 0 1px 2px hsl(0 0% 0% / 0.18);
   --shadow-toolbar-hover: 0 1px 2px hsl(0 0% 0% / 0.25), 0 10px 24px -8px hsl(0 0% 0% / 0.55);
 
-  /* 层 D · @tailwindcss/typography prose 主题（深 · 暖黑；links 用 coral） */
+  /* 层 D · @tailwindcss/typography prose 主题（深 · 暖白文本；links 用 coral） */
   --prose-body: 40 14% 90%;
   --prose-headings: 40 16% 94%;
   --prose-links: 15 70% 65%;
   --prose-bold: 40 16% 94%;
   --prose-code: 192 90% 60%;
-  --prose-code-bg: 30 8% 17%;
+  --prose-code-bg: 60 3% 18%;
   --prose-quotes: 40 7% 60%;
   --prose-bullets: 40 7% 60%;
-  --prose-hr: 30 8% 22%;
+  --prose-hr: 36 10% 90% / 0.12;
 }
 
 .light {
-  /* 层 A · shadcn token（浅 · 黄暖白；2026-07-16 重做）
-     设计意图：白底带暖黄调，所有中性色（border/secondary/muted/card）
-     饱和度拉到 28-44% 确保读出来是奶油/米白/暖褐，绝无灰感。
-     L 保持 91-97% 亮堂好读。与旧版（sat 7-14% 暖灰）彻底拉开差距。 */
-  --background: 40 32% 95%;
-  --foreground: 30 26% 18%;
-  --card: 38 28% 97%;
-  --card-foreground: 30 26% 18%;
-  --popover: 38 28% 97%;
-  --popover-foreground: 30 26% 18%;
+  /* 层 A · shadcn token（浅 · Claude 浅色；2026-08-24 精确对齐 claude.ai 亮色真值：
+     画布 #FAF9F5 暖白（L97——比旧 95% 更白更轻，暖意在 sat 里不在黄感里）+
+     纯白卡（claude.ai 卡即纯白浮在暖白画布上）+ 次级面 #F4F3F1 + 文本 #2C2B29
+     暖黑。边框 alpha 暖黑 hairline；阴影三层制（顶部内高光 + 近距落影 + 远距氛围）
+     落影色同步中性化。coral 灵魂色不动（15 58% 50% ≈ claude 浅底 accent #CC6B3C）。 */
+  --background: 48 33% 97%;
+  --foreground: 40 4% 17%;
+  --card: 0 0% 100%;
+  --card-foreground: 40 4% 17%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 40 4% 17%;
   --primary: 15 58% 50%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 40 32% 91%;
-  --secondary-foreground: 30 26% 18%;
-  --muted: 40 32% 91%;
-  --muted-foreground: 34 32% 36%;
-  --accent: 40 36% 84%;
-  --accent-foreground: 30 26% 18%;
+  --secondary: 40 12% 95%;
+  --secondary-foreground: 40 4% 17%;
+  --muted: 40 12% 95%;
+  --muted-foreground: 40 4% 42%;
+  --accent: 40 12% 92%;
+  --accent-foreground: 40 4% 17%;
   --destructive: 5 58% 46%;
   --destructive-foreground: 0 0% 100%;
-  --border: 36 44% 76%;
-  --input: 36 44% 76%;
+  --border: 40 8% 17% / 0.10;
+  --input: 40 8% 17% / 0.10;
   --ring: 15 58% 50%;
 
-  /* 层 B · 语义色（浅 · 暖调梯度；微调配合黄暖白背景） */
+  /* 层 B · 语义色（浅 · 暖调梯度；sat 微收配合降饱和暖纸底） */
   --c-cyan: 190 65% 32%;
   --c-magenta: 278 55% 50%;
   --c-green: 142 38% 35%;
   --c-red: 5 58% 46%;
-  --c-orange: 26 74% 45%;
-  --c-yellow: 40 72% 36%;
-  --c-amber: 36 73% 40%;
+  --c-orange: 26 70% 37%;
+  --c-yellow: 40 70% 29%;
+  --c-amber: 36 73% 34%;
 
-  /* 层 D · prose 主题（浅 · 暖褐文字配黄暖白底） */
-  --prose-body: 30 22% 16%;
-  --prose-headings: 30 26% 13%;
-  --prose-links: 15 58% 43%;
-  --prose-bold: 30 22% 16%;
+  /* 层 D · prose 主题（浅 · 暖墨文字配暖白底） */
+  --prose-body: 40 4% 17%;
+  --prose-headings: 40 6% 12%;
+  --prose-links: 15 58% 42%;
+  --prose-bold: 40 6% 12%;
   --prose-code: 190 65% 30%;
-  --prose-code-bg: 40 28% 88%;
-  --prose-quotes: 34 28% 36%;
-  --prose-bullets: 34 28% 36%;
-  --prose-hr: 38 38% 82%;
+  --prose-code-bg: 40 12% 94%;
+  --prose-quotes: 40 4% 40%;
+  --prose-bullets: 40 4% 40%;
+  --prose-hr: 40 8% 17% / 0.10;
 
-  /* 层 E · elevation（浅 · 暖棕柔阴影） */
-  --shadow-card: 0 1px 2px hsl(34 40% 30% / 0.10), 0 4px 14px hsl(34 40% 30% / 0.06);
+  /* 层 E · elevation（浅 · 暖纸三层制：白高光 + 中性暖黑落影 + 氛围） */
+  --shadow-card: inset 0 1px 0 hsl(40 30% 100% / 0.7), 0 1px 2px hsl(40 12% 20% / 0.06), 0 8px 24px -8px hsl(40 12% 20% / 0.09);
 
-  /* cta 按钮专用（浅 · 柔和暖棕落影 + 微 coral 光晕）*/
-  --shadow-cta: 0 1px 2px hsl(34 40% 30% / 0.14), 0 6px 16px -6px hsl(15 58% 45% / 0.22);
-  --shadow-cta-hover: 0 2px 4px hsl(34 40% 30% / 0.18), 0 12px 24px -6px hsl(15 58% 50% / 0.30);
+  /* cta 按钮专用（浅 · 顶部白高光 + 落影 + coral 光晕）*/
+  --shadow-cta: inset 0 1px 0 hsl(40 30% 100% / 0.22), 0 1px 2px hsl(40 12% 20% / 0.12), 0 6px 18px -6px hsl(15 58% 45% / 0.25);
+  --shadow-cta-hover: inset 0 1px 0 hsl(40 30% 100% / 0.28), 0 2px 4px hsl(40 12% 20% / 0.14), 0 12px 26px -6px hsl(15 58% 50% / 0.32);
 
-  /* toolbar 按钮专用（浅 · 暖棕柔阴影） */
-  --shadow-toolbar: 0 1px 2px hsl(34 40% 30% / 0.08);
-  --shadow-toolbar-hover: 0 2px 4px hsl(34 40% 30% / 0.10), 0 10px 24px -8px hsl(34 40% 30% / 0.24);
+  /* toolbar 按钮专用（浅 · 柔和落影） */
+  --shadow-toolbar: 0 1px 2px hsl(40 12% 20% / 0.08);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(40 30% 100% / 0.55), 0 2px 4px hsl(40 12% 20% / 0.10), 0 10px 24px -8px hsl(40 12% 20% / 0.20);
+}
+
+/* —— 扩展主题（2026-08-24 新增并材质升级，只增不删：charcoal/warm-paper 基础主题即上方 :root/.light 原样保留）——
+   双类选择器 .dark.theme-* / .light.theme-*（特异性 (0,2,0)）严格高于 :root/.light，覆盖不依赖源顺序。
+   三条设计纪律：coral 主色全主题保留（品牌灵魂）；severity red/orange/yellow 只调 lightness/sat 保 AA、
+   hue 不动（漏洞严重度语义）；cyan=GitNexus 轨 / magenta=LLM 轨双轨语义色逐主题单独校对比。
+   材质语言各主题独立：边框用 alpha（透出底色、细腻不发闷）、阴影三层制（顶部内高光 + 近距落影 +
+   远距氛围）、圆角随主题气质覆盖（mac 12 / midnight 12 / graphite 8）；字体始终共享。 */
+
+/* 午夜 Midnight（深 · 靛蓝 SOC，2026-08-24 材质升级对标 Linear 深色）：
+   近黑靛底 + 浮层顶部 hairline 发光（Linear 深色浮层的质感灵魂）+ 高饱和语义色。
+   coral 与靛蓝近乎互补（15° vs 230°）提亮到 62% 做高对比强调；
+   边框用 alpha 白（实色深边框发闷，alpha 白随底色透出蓝色调）。 */
+.dark.theme-midnight {
+  /* 层 A · shadcn token */
+  --background: 230 20% 8%;
+  --foreground: 228 24% 93%;
+  --card: 230 18% 11%;
+  --card-foreground: 228 24% 93%;
+  --popover: 230 18% 12%;
+  --popover-foreground: 228 24% 93%;
+  --primary: 16 70% 62%;
+  --primary-foreground: 230 25% 8%;
+  --secondary: 230 16% 16%;
+  --secondary-foreground: 228 24% 93%;
+  --muted: 230 16% 16%;
+  --muted-foreground: 228 12% 64%;
+  --accent: 230 16% 18%;
+  --accent-foreground: 228 24% 93%;
+  --destructive: 4 72% 60%;
+  --destructive-foreground: 230 20% 8%;
+  --border: 230 30% 80% / 0.14;
+  --input: 230 30% 80% / 0.14;
+  --ring: 16 70% 62%;
+
+  /* 层 B · 语义色（Linear 式高饱和：深底上彩色就该亮而饱和，不灰败） */
+  --c-cyan: 192 85% 62%;
+  --c-magenta: 280 72% 78%;
+  --c-green: 148 55% 58%;
+  --c-red: 4 72% 62%;
+  --c-orange: 25 85% 64%;
+  --c-yellow: 45 85% 60%;
+  --c-amber: 40 85% 58%;
+
+  /* 层 C · 圆角（Linear 中等） */
+  --radius: 12px;
+
+  /* 层 D · prose（深靛底） */
+  --prose-body: 228 24% 90%;
+  --prose-headings: 228 26% 94%;
+  --prose-links: 16 74% 68%;
+  --prose-bold: 228 26% 94%;
+  --prose-code: 192 90% 64%;
+  --prose-code-bg: 230 18% 16%;
+  --prose-quotes: 228 14% 60%;
+  --prose-bullets: 228 14% 60%;
+  --prose-hr: 230 20% 90% / 0.12;
+
+  /* 层 E · elevation（Linear 浮层：顶部内高光 + 外圈 alpha 描边 + 远距靛黑氛围） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 0 0 1px hsl(230 30% 80% / 0.06), 0 12px 32px -12px hsl(230 40% 2% / 0.6);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.2), 0 1px 2px hsl(230 40% 2% / 0.4), 0 6px 18px -6px hsl(16 80% 50% / 0.4);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.25), 0 2px 4px hsl(230 40% 2% / 0.4), 0 12px 26px -6px hsl(16 85% 55% / 0.5);
+  --shadow-toolbar: 0 1px 2px hsl(230 40% 2% / 0.3);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 2px 4px hsl(230 40% 2% / 0.35), 0 10px 24px -8px hsl(230 40% 2% / 0.65);
+}
+
+/* 石墨 Graphite（深 · 纯中性，2026-08-24 材质升级对标 Vercel/Geist 深色）：
+   精确灰阶（近纯黑底 #0d0d0d、卡 8%、alpha 白 12% 边框）+ 8px 利落圆角 + 极轻阴影。
+   Geist 的"设计感"来自灰阶的精确而非装饰——结构零色温，暖意只留给 coral 与 severity。 */
+.dark.theme-graphite {
+  /* 层 A · shadcn token */
+  --background: 0 0% 5%;
+  --foreground: 0 0% 93%;
+  --card: 0 0% 8%;
+  --card-foreground: 0 0% 93%;
+  --popover: 0 0% 10%;
+  --popover-foreground: 0 0% 93%;
+  --primary: 15 62% 56%;
+  --primary-foreground: 0 0% 5%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 0 0% 93%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 0 0% 63%;
+  --accent: 0 0% 16%;
+  --accent-foreground: 0 0% 93%;
+  --destructive: 5 65% 60%;
+  --destructive-foreground: 0 0% 5%;
+  --border: 0 0% 100% / 0.12;
+  --input: 0 0% 100% / 0.12;
+  --ring: 15 62% 56%;
+
+  /* 层 B · 语义色（中性底上彩色收敛饱和——Geist 的彩是"平"的，不荧光） */
+  --c-cyan: 190 65% 60%;
+  --c-magenta: 280 65% 78%;
+  --c-green: 145 50% 55%;
+  --c-red: 5 65% 60%;
+  --c-orange: 25 72% 62%;
+  --c-yellow: 45 72% 58%;
+  --c-amber: 40 75% 56%;
+
+  /* 层 C · 圆角（Geist 利落小圆角） */
+  --radius: 8px;
+
+  /* 层 D · prose（纯中性炭底） */
+  --prose-body: 0 0% 90%;
+  --prose-headings: 0 0% 94%;
+  --prose-links: 15 68% 66%;
+  --prose-bold: 0 0% 94%;
+  --prose-code: 190 80% 60%;
+  --prose-code-bg: 0 0% 15%;
+  --prose-quotes: 0 0% 60%;
+  --prose-bullets: 0 0% 60%;
+  --prose-hr: 0 0% 100% / 0.12;
+
+  /* 层 E · elevation（极轻：细描边 + 一层落影，Geist 不靠重阴影浮起） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 1px hsl(0 0% 100% / 0.06), 0 8px 24px -12px hsl(0 0% 0% / 0.6);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 2px hsl(0 0% 0% / 0.5), 0 6px 18px -6px hsl(15 75% 50% / 0.35);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.22), 0 2px 4px hsl(0 0% 0% / 0.5), 0 12px 26px -6px hsl(15 80% 55% / 0.45);
+  --shadow-toolbar: 0 1px 2px hsl(0 0% 0% / 0.4);
+  --shadow-toolbar-hover: 0 2px 4px hsl(0 0% 0% / 0.45), 0 10px 24px -8px hsl(0 0% 0% / 0.7);
+}
+
+/* Mac（浅 · Apple HIG 系统级对齐，2026-08-24 由霜白 frost 全面升级改名）：
+   HIG 开放规范的精确系统色——#F2F2F7 systemGroupedBackground 画布 + 纯白卡 +
+   Apple 蓝 #007AFF 主操作（唯一非 coral primary 的主题，macOS 交互蓝是 Mac 感的
+   最强单一信号）；severity 用 Apple 系统色浅底文本变体（red=#D70015 / orange=
+   #C93400 / green=#248A3D 系）；文本 Apple 近黑 #1D1D1F + 次级 #6E6E73。
+   材质走 macOS 系统窗口 vibrancy 配方（2026-08-24 升级，web 复刻三件套）：
+   ① 表面 alpha 化（卡 60% 白「透」）② --backdrop-card/float 磨砂 token
+   （saturate(180%)+blur，组件读 var、其他主题未定义回落 none 零影响）
+   ③ body 环境色光层（蓝/桃/薰衣草三团 radial，fixed）给半透表面提供可透之物；
+   hairline 细边 + 极柔双层影 + 12px 桌面窗口圆角保持。 */
+.light.theme-mac {
+  /* 层 A · shadcn token（卡/浮层级表面带 alpha = vibrancy 的「透」） */
+  --background: 240 6% 96%;
+  --foreground: 240 5% 12%;
+  --card: 0 0% 100% / 0.60;
+  --card-foreground: 240 5% 12%;
+  --popover: 0 0% 100% / 0.72;
+  --popover-foreground: 240 5% 12%;
+  --primary: 211 100% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 96% / 0.65;
+  --secondary-foreground: 240 5% 12%;
+  --muted: 240 5% 96% / 0.65;
+  --muted-foreground: 240 4% 40%;
+  --accent: 240 5% 94% / 0.72;
+  --accent-foreground: 240 5% 12%;
+  --destructive: 2 100% 42%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 6% 10% / 0.14;
+  --input: 240 6% 10% / 0.14;
+  --ring: 211 100% 45%;
+
+  /* 层 B · 语义色（Apple 系统色浅底文本变体，白底全部 ≥AA 4.5） */
+  --c-cyan: 192 95% 28%;
+  --c-magenta: 341 80% 38%;
+  --c-green: 138 60% 30%;
+  --c-red: 2 100% 42%;
+  --c-orange: 15 100% 38%;
+  --c-yellow: 45 100% 27%;
+  --c-amber: 42 100% 28%;
+
+  /* 层 C · 圆角（macOS 窗口级，桌面感） */
+  --radius: 12px;
+
+  /* 层 D · prose（Apple label 近黑 + 蓝链接） */
+  --prose-body: 240 5% 14%;
+  --prose-headings: 240 6% 9%;
+  --prose-links: 211 100% 40%;
+  --prose-bold: 240 6% 9%;
+  --prose-code: 192 95% 26%;
+  --prose-code-bg: 240 5% 93%;
+  --prose-quotes: 240 4% 42%;
+  --prose-bullets: 240 4% 42%;
+  --prose-hr: 240 5% 10% / 0.12;
+
+  /* 层 E · elevation（macOS 窗口材质：hairline + 近距细影 + 远距极柔氛围） */
+  --shadow-card: 0 0 0 1px hsl(240 6% 20% / 0.04), 0 1px 2px hsl(240 6% 20% / 0.05), 0 10px 30px -10px hsl(240 6% 20% / 0.12);
+  --shadow-cta: 0 1px 2px hsl(211 100% 25% / 0.18), 0 6px 16px -6px hsl(211 100% 45% / 0.28);
+  --shadow-cta-hover: 0 2px 4px hsl(211 100% 25% / 0.22), 0 10px 22px -6px hsl(211 100% 45% / 0.36);
+  --shadow-toolbar: 0 1px 2px hsl(240 6% 20% / 0.06);
+  --shadow-toolbar-hover: 0 2px 4px hsl(240 6% 20% / 0.08), 0 10px 24px -8px hsl(240 6% 20% / 0.14);
+
+  /* 层 F · vibrancy 磨砂（组件经 [backdrop-filter:var(--backdrop-*,none)] 消费；
+     其他主题不定义 → none，零影响。浮层 blur 更深一级对齐 macOS 层级） */
+  --backdrop-card: saturate(180%) blur(22px);
+  --backdrop-float: saturate(180%) blur(32px);
+}
+
+/* mac 环境色光层：画布上三团极浅 radial（蓝/桃/薰衣草，模拟桌面壁纸透进窗口的光），
+   fixed 随滚动不动；半透明表面 + blur 采到它们才有「磨砂玻璃透彩光」的观感。
+   色斑饱和度刻意压低——安全工具的克制，不是壁纸狂欢。 */
+.light.theme-mac body {
+  background-image:
+    radial-gradient(52rem 34rem at 8% -6%, hsl(211 80% 88% / 0.55), transparent 60%),
+    radial-gradient(46rem 30rem at 96% 12%, hsl(20 85% 90% / 0.50), transparent 62%),
+    radial-gradient(50rem 36rem at 55% 108%, hsl(260 45% 90% / 0.50), transparent 65%);
+  background-attachment: fixed;
 }
 
 /* —— 剪枝树（PruningTreeFig）专用动画与 class（spec 2026-08-20 §5 视觉语言）——

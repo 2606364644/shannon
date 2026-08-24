@@ -11,32 +11,32 @@ function Consumer({ label }: { label: string }) {
 describe("ThemeContext", () => {
   beforeEach(() => {
     localStorage.clear();
-    document.documentElement.classList.remove("dark", "light");
+    document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
   });
 
-  it("Provider 初始化读 getInitialTheme（无 stored → dark）", () => {
+  it("Provider 初始化读 getInitialTheme（无 stored → charcoal）", () => {
     render(
       <ThemeProvider>
         <Consumer label="c" />
       </ThemeProvider>
     );
-    expect(screen.getByTestId("c").textContent).toBe("dark");
+    expect(screen.getByTestId("c").textContent).toBe("charcoal");
   });
 
-  it("Provider 初始化读 stored light", () => {
-    localStorage.setItem(THEME_KEY, "light");
+  it("Provider 初始化读 stored mac（palette 主题原样）", () => {
+    localStorage.setItem(THEME_KEY, "mac");
     render(
       <ThemeProvider>
         <Consumer label="c" />
       </ThemeProvider>
     );
-    expect(screen.getByTestId("c").textContent).toBe("light");
+    expect(screen.getByTestId("c").textContent).toBe("mac");
   });
 
   it("setTheme 更新 state + 持久化 + 挂 class", () => {
     function Setter() {
       const { setTheme } = useTheme();
-      return <button onClick={() => setTheme("light")}>to-light</button>;
+      return <button onClick={() => setTheme("warm-paper")}>to-light</button>;
     }
     render(
       <ThemeProvider>
@@ -45,8 +45,8 @@ describe("ThemeContext", () => {
       </ThemeProvider>
     );
     fireEvent.click(screen.getByText("to-light"));
-    expect(screen.getByTestId("c").textContent).toBe("light");
-    expect(localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(screen.getByTestId("c").textContent).toBe("warm-paper");
+    expect(localStorage.getItem(THEME_KEY)).toBe("warm-paper");
     expect(document.documentElement.classList.contains("light")).toBe(true);
   });
 
@@ -62,8 +62,8 @@ describe("ThemeContext", () => {
         <Setter />
       </ThemeProvider>
     );
-    expect(screen.getByTestId("a").textContent).toBe("dark");
-    expect(screen.getByTestId("b").textContent).toBe("dark");
+    expect(screen.getByTestId("a").textContent).toBe("charcoal");
+    expect(screen.getByTestId("b").textContent).toBe("charcoal");
     fireEvent.click(screen.getByText("to-system"));
     // 两个消费者都应同步到 system —— 现状两处独立 useState 时这里会失败
     expect(screen.getByTestId("a").textContent).toBe("system");

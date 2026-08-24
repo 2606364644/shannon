@@ -549,10 +549,17 @@
       "system": "System"
     },
     "themeTitle": "Theme",
-    "themeDark": "Dark",
-    "themeLight": "Light",
     "themeSystem": "Auto",
-    "themeSwitchAria": "Toggle light/dark theme",
+    "themeSystemHint": "Follows your OS",
+    "themeGroupDark": "Dark",
+    "themeGroupLight": "Light",
+    "themes": {
+      "charcoal": "Claude Dark",
+      "midnight": "Midnight",
+      "graphite": "Graphite",
+      "warmPaper": "Claude Light",
+      "mac": "Mac"
+    },
     "accountSecurityTitle": "Account security",
     "accountSecurityHint": "Change your sign-in password",
     "changePasswordBtn": "Change password",

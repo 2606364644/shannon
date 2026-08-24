@@ -282,7 +282,7 @@ export default function WsSettingsTab() {
           </div>
 
           {/* 配置词典面板：把后端 key 分类（生效 / 进程级）做成始终可见、可交互的清单 */}
-          <aside className="space-y-4 rounded-lg border bg-card/60 p-4 lg:overflow-y-auto">
+          <aside className="space-y-4 rounded-lg border bg-card/60 p-4 [backdrop-filter:var(--backdrop-card,none)] lg:overflow-y-auto">
             <div className="space-y-1">
               <h3 className="text-sm font-medium">{t("wsConfig.keys.panelTitle")}</h3>
               <p className="text-xs text-muted-foreground">{t("wsConfig.keys.panelDesc")}</p>

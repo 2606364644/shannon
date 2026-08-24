@@ -11,13 +11,26 @@
     <script>
       (function () {
         try {
+          // 与 theme.ts applyTheme 同语义（防 FOAC 首帧闪基础主题）：
+          // 主题 → mode class + palette class；旧值 dark/light/frost 读时归一；
+          // system/无/非法 → 按 prefers 落默认主题对（浅=mac / 深=charcoal）。
+          var DEF = {
+            charcoal: ["dark"],
+            midnight: ["dark", "theme-midnight"],
+            graphite: ["dark", "theme-graphite"],
+            mac: ["light", "theme-mac"],
+            "warm-paper": ["light"],
+          };
+          var legacy = { dark: "charcoal", light: "warm-paper", frost: "mac" };
           var t = localStorage.getItem("supernova-theme");
-          // "system" 或非法值 → 读 prefers-color-scheme 解析为 dark/light
-          // （system 是逻辑态，<html> 只挂 dark/light；旧 dark/light 向后兼容）
-          if (t === "system" || (t !== "dark" && t !== "light")) {
-            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          if (legacy[t]) t = legacy[t];
+          if (!DEF[t]) {
+            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "mac" : "charcoal";
           }
-          document.documentElement.classList.add(t);
+          var cl = document.documentElement.classList;
+          DEF[t].forEach(function (c) {
+            cl.add(c);
+          });
         } catch (e) {
           document.documentElement.classList.add("dark");
         }

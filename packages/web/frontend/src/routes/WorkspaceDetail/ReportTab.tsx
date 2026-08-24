@@ -58,7 +58,7 @@ function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
     // 报告是长文档型页面：外壳满宽（控制台风格）后，正文需可读字宽护栏，否则 prose max-w-none
     // 会铺到 ~2300px 行太长。max-w-5xl(1024px) 居中 = 文档阅读标准做法，与 live/logs 满宽控制台
     // 形成有意的对比。scan header/tabs 仍满宽（在 ReportTab 之外的 ScanDetail 层）。
-    <div className="mx-auto max-w-5xl rounded-md border border-border bg-card p-4">
+    <div className="mx-auto max-w-5xl rounded-md border border-border bg-card p-4 [backdrop-filter:var(--backdrop-card,none)]">
       <MarkdownView markdown={md} />
     </div>
   );

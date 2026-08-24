@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { applyTheme, getInitialTheme, type Theme } from "@/lib/theme";
+import { applyTheme, defaultThemeFor, getInitialTheme, type Theme } from "@/lib/theme";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -10,7 +10,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() =>
-    typeof window !== "undefined" ? getInitialTheme() : "dark"
+    typeof window !== "undefined" ? getInitialTheme() : defaultThemeFor("dark")
   );
 
   // mount + 每次 theme 变化：applyTheme（挂 class + 持久化 + system 注册/清理 matchMedia 监听）。

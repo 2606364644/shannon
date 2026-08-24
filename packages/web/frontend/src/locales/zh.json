@@ -549,10 +549,17 @@
       "system": "系统"
     },
     "themeTitle": "主题",
-    "themeDark": "深色",
-    "themeLight": "浅色",
     "themeSystem": "跟随系统",
-    "themeSwitchAria": "切换深浅主题",
+    "themeSystemHint": "深浅随操作系统",
+    "themeGroupDark": "深色",
+    "themeGroupLight": "浅色",
+    "themes": {
+      "charcoal": "Claude 深色",
+      "midnight": "午夜",
+      "graphite": "石墨",
+      "warmPaper": "Claude 浅色",
+      "mac": "Mac"
+    },
     "accountSecurityTitle": "账户安全",
     "accountSecurityHint": "修改登录密码",
     "changePasswordBtn": "修改密码",

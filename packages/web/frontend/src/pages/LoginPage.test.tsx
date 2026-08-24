@@ -29,7 +29,7 @@ describe("LoginPage", () => {
     i18n.changeLanguage("zh");
     localStorage.clear();
     document.title = "";
-    document.documentElement.classList.remove("dark", "light");
+    document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
   });
   afterEach(() => i18n.changeLanguage("zh"));
 
@@ -63,7 +63,7 @@ describe("LoginPage", () => {
     });
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(localStorage.getItem(THEME_KEY)).toBe("mac"); // 对侧默认主题=Mac
   });
 
   it("跟随全局主题（<html> 设 dark 时不强制 light）", async () => {

@@ -31,8 +31,9 @@ const isRun = (s: ScanSummary) => s.is_running || s.status === "running";
 /** 稳定空数组：SWR 首帧 data=undefined 时的兜底引用（避免每次渲染新 [] 触发 [data] effect）。 */
 const EMPTY_SCANS: ScanSummary[] = [];
 
-/** 发现构成：vuln_counts 按类别聚合 → Top4 + 其他（类别≠严重度，配色用同族珊瑚递减
- *  透明度，避免被误读为严重级别）。旧数据无 vuln_counts → total=0 整条隐藏。 */
+/** 发现构成：vuln_counts 按类别聚合 → Top4 + 其他（类别≠严重度，谱带走红色威胁通道——
+ *  与横幅红数字同语义、传达危害量；透明度递减只做分段区分，不逐段套严重度色避免误读为级别）。
+ *  旧数据无 vuln_counts → total=0 整条隐藏。 */
 function vulnComposition(scans: ScanSummary[]) {
   const by: Record<string, number> = {};
   for (const s of scans) {
@@ -200,11 +201,11 @@ export function DashboardPage() {
           <div className="flex min-w-[260px] flex-1 flex-col justify-center gap-2 py-4 pr-6 pl-2">
             {composition.total > 0 && (
               <div className="max-w-[460px]">
-                <div className="flex h-1.5 gap-px overflow-hidden rounded-full bg-border" aria-label={t("dashboard.hero.composition")}>
+                <div data-testid="dash-composition-bar" className="flex h-1.5 gap-px overflow-hidden rounded-full bg-border" aria-label={t("dashboard.hero.composition")}>
                   {composition.top.map(([cls, n], i) => (
-                    <span key={cls} className="bg-primary" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
+                    <span key={cls} className="bg-red" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
                   ))}
-                  {composition.rest > 0 && <span className="bg-primary/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
+                  {composition.rest > 0 && <span className="bg-red/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 font-mono text-[11px] text-muted-foreground">
                   {composition.top.map(([cls, n]) => <span key={cls}>{cls} {n.toLocaleString()}</span>)}
@@ -326,7 +327,7 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
       data-testid={`ws-tile-${name}`}
       onClick={() => nav(`/p/${name}`)}
       className={cn(
-        "ws-tile group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card",
+        "ws-tile group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-card [backdrop-filter:var(--backdrop-card,none)]",
         "shadow-[var(--shadow-card)] transition-[transform,box-shadow] duration-150 hover:-translate-y-0.5",
         running.length > 0 && "ws-tile-live",
       )}
@@ -351,7 +352,7 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
         )}
       </div>
 
-      {/* 信号区：发现数（主角）+ 分段构成谱带（2px 间隙分段读数，同族珊瑚透明度阶梯） */}
+      {/* 信号区：发现数（主角）+ 分段构成谱带（2px 间隙分段读数，红色威胁通道透明度阶梯） */}
       {totalVulns === 0 ? (
         <div className="flex items-end gap-2 px-4 pb-3.5 pt-1">
           <ShieldCheck className="mb-1 size-4 shrink-0 text-green" aria-hidden />
@@ -368,11 +369,11 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
           </div>
           {composition.total > 0 && (
             <div className="min-w-0 flex-1 pb-1">
-              <div className="flex h-[5px] gap-0.5">
+              <div data-testid="tile-composition-bar" className="flex h-[5px] gap-0.5">
                 {composition.top.map(([cls, n], i) => (
-                  <span key={cls} className="rounded-[2px] bg-primary" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
+                  <span key={cls} className="rounded-[2px] bg-red" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
                 ))}
-                {composition.rest > 0 && <span className="rounded-[2px] bg-primary/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
+                {composition.rest > 0 && <span className="rounded-[2px] bg-red/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
               </div>
               <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
                 {composition.top.map(([cls, n]) => `${cls} ${n.toLocaleString()}`).join(" · ")}

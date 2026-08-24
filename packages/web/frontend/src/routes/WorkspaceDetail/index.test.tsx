@@ -110,6 +110,10 @@ describe("WorkspaceDetail ws 概览", () => {
     const big = await screen.findByTestId("ws-hero-findings");
     expect(big.textContent).toBe("3");
     expect(big.className).toMatch(/text-red/);
+    // mini 谱带：红色威胁通道（与红数字同语义），非品牌色 primary（mac 下蓝会弱化危害感）
+    const bar = document.querySelector('[data-testid="ws-composition-bar"]');
+    expect(bar?.innerHTML).toContain("bg-red");
+    expect(bar?.innerHTML).not.toContain("bg-primary");
     expect(screen.getByText(/^xss 2$/)).toBeInTheDocument();
     expect(screen.getByText(/^ssrf 1$/)).toBeInTheDocument();
   });

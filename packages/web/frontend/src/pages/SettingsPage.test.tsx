@@ -57,7 +57,7 @@ beforeEach(async () => {
   });
   mockUser.must_change_password = false;
   localStorage.clear();
-  document.documentElement.classList.remove("dark", "light");
+  document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
 });
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
@@ -90,19 +90,42 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByText(/未配置/)).toBeInTheDocument());
   });
 
-  it("主题 segmented：点浅色 → <html>.light + localStorage=light", async () => {
+  it("主题选择器：点 Mac → <html>.light + theme-mac + localStorage=mac", async () => {
     renderWithTheme(<SettingsPage />);
     await screen.findByText("个人化");
-    fireEvent.click(screen.getByRole("button", { name: "浅色" }));
+    fireEvent.click(screen.getByRole("button", { name: /Mac/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    expect(localStorage.getItem("supernova-theme")).toBe("light");
+    expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
+    expect(localStorage.getItem("supernova-theme")).toBe("mac");
   });
 
-  it("主题 segmented：点跟随系统 → localStorage=system", async () => {
+  it("主题选择器：渲染 Claude 双主题新标签（charcoal/warm-paper 改名后）", async () => {
     renderWithTheme(<SettingsPage />);
     await screen.findByText("个人化");
-    fireEvent.click(screen.getByRole("button", { name: "跟随系统" }));
+    expect(screen.getByRole("button", { name: /Claude 深色/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Claude 浅色/ })).toBeInTheDocument();
+    // 旧名不再出现（改名闭环）
+    expect(screen.queryByRole("button", { name: /^炭黑$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^暖纸$/ })).not.toBeInTheDocument();
+  });
+
+  it("主题选择器：点午夜 → <html>.dark + theme-midnight + localStorage=midnight", async () => {
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    fireEvent.click(screen.getByRole("button", { name: /午夜/ }));
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-midnight")).toBe(true);
+    expect(localStorage.getItem("supernova-theme")).toBe("midnight");
+  });
+
+  it("主题选择器：点跟随系统 → localStorage=system 且 palette class 清空", async () => {
+    localStorage.setItem("supernova-theme", "midnight");
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    expect(document.documentElement.classList.contains("theme-midnight")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /跟随系统/ }));
     expect(localStorage.getItem("supernova-theme")).toBe("system");
+    expect(document.documentElement.className).not.toContain("theme-");
   });
 
   it("must_change_password=true → 显示改密提醒 badge", async () => {
