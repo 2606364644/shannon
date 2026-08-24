@@ -260,7 +260,7 @@ export function ScanList() {
   );
 }
 
-/** 表格主行 + 嵌套黑盒 run 子行（可展开）。组合任务默认展开（预览示意 + 常显语义保留）。 */
+/** 表格主行 + 嵌套黑盒 run 子行（可展开，默认收起——列表扫读优先，黑盒明细按需展开）。 */
 function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onChanged: () => void }) {
   const { t } = useTranslation();
   const nav = useNavigate();
@@ -268,7 +268,7 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
   const [pending, setPending] = useState<"cancel" | "delete" | null>(null);
   const isCombined = scan.combined === true;
   const hasRuns = isCombined && (scan.bb_runs?.length ?? 0) > 0;
-  const [open, setOpen] = useState(hasRuns);
+  const [open, setOpen] = useState(false);
 
   const isRunning = isRun(scan);
   const isTerminal = TERMINAL.has(scan.status);
@@ -365,8 +365,12 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
 
   return (
     <>
-      {/* 整行可点（v4）：与 ID/查看同目标（defaultTab）；行内交互元素 stopPropagation 防误触 */}
-      <TableRow onClick={() => nav(`${scanPath}/${defaultTab}`)} className="cursor-pointer">
+      {/* 整行可点（v4）：与 ID/查看同目标（defaultTab）；行内交互元素 stopPropagation 防误触。
+          展开时去底边线——父行与嵌套 run 组无缝相接（树形从属，组内子行间仍保留细线）。 */}
+      <TableRow
+        onClick={() => nav(`${scanPath}/${defaultTab}`)}
+        className={`cursor-pointer ${open && hasRuns ? "border-b-0" : ""}`}
+      >
         {/* 展开柄：仅组合任务带 bb_runs 时显（纯白盒/黑盒无子行不占交互） */}
         <TableCell className="w-9 pl-4">
           {hasRuns && (
@@ -507,20 +511,16 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
         </TableCell>
       </TableRow>
 
-      {/* 版本化黑盒 run（spec 2026-08-14 §5.2）：嵌套展开子行（组合任务默认展开）。
-          纯白盒（无 bb_runs）不渲染。 */}
+      {/* 版本化黑盒 run（spec 2026-08-14 §5.2）：嵌套展开子行（默认收起，点柄展开）。
+          纯白盒（无 bb_runs）不渲染。子行直接产出 TableRow（与主表同网格，见组件注释）。 */}
       {open && hasRuns && (
-        <TableRow>
-          <TableCell colSpan={10} className="px-0 py-0">
-            <NestedBlackboxRuns
-              ws={ws}
-              scanId={scan.scan_id}
-              runs={scan.bb_runs!}
-              latestRunId={scan.latest_bb_run ?? null}
-              onChanged={onChanged}
-            />
-          </TableCell>
-        </TableRow>
+        <NestedBlackboxRuns
+          ws={ws}
+          scanId={scan.scan_id}
+          runs={scan.bb_runs!}
+          latestRunId={scan.latest_bb_run ?? null}
+          onChanged={onChanged}
+        />
       )}
 
       {/* 取消/删除确认 Dialog */}
@@ -548,14 +548,22 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
   );
 }
 
-/** 版本化黑盒 run 嵌套列表（spec 2026-08-14 §5.2）：展开子行内显每个 run 的 id + 状态 +
- *  最新 tag + 跳转到该 run 详情/报告的链接（?run= 选中）+ 终态 run 可删。 */
+/** 版本化黑盒 run 嵌套子行（spec 2026-08-14 §5.2）：每个 run 渲染为真实 TableRow，遵守
+ *  主表同一 colgroup 列语义——状态徽标→状态列、run_id→扫描列、「黑盒」→类型列、
+ *  completed_at→时间列、查看/删除→操作列，与主行垂直对齐；无数据的列（仓库/进度/
+ *  漏洞/成本）以弱「—」占位保网格。
+ *  （2026-08-24 改版：旧版是 colSpan 大格内自由 flex 列表，元素全挤左侧、右侧 6 列空洞，
+ *  与主表网格零对齐——不平衡的根源。）从属表达：柄列贯通竖线（父行展开时 border-b-0
+ *  无缝相接）+ 子行弱底色/小半号字/紧凑行高的整体降级。整行可点（与「查看」同目标
+ *  ?run= 选中）；终态 run 可删（运行中禁删，对齐后端 409）。 */
 function NestedBlackboxRuns({ ws, scanId, runs, latestRunId, onChanged }: {
   ws: string; scanId: string; runs: BlackboxRunSummary[]; latestRunId: string | null; onChanged: () => void;
 }) {
   const { t } = useTranslation();
+  const nav = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const runPath = (runId: string) => `/p/${ws}/scans/${scanId}?run=${runId}`;
 
   async function doDelete() {
     if (!pendingDelete) return;
@@ -574,36 +582,82 @@ function NestedBlackboxRuns({ ws, scanId, runs, latestRunId, onChanged }: {
 
   return (
     <>
-      <div className="mx-4 mb-3 ml-12 flex flex-col gap-1.5 border-l-2 border-border py-1 pl-4" data-testid="nested-runs">
-        {runs.map((r) => (
-          <div key={r.run_id} className="flex items-center gap-2.5 text-[12.5px]">
-            <span className="font-mono text-muted-foreground">{r.run_id}</span>
-            <StatusBadge status={(r.status ?? r.bb_phase ?? "unknown") as never} />
-            {r.run_id === latestRunId && (
-              <span className="rounded-full border border-primary/35 px-1.5 py-px text-[10px] text-primary">
-                {t("workspaceDetail.scans.runs.latest")}
+      {runs.map((r, i) => {
+        // 时间列 started_at ?? completed_at：任务级 bb_runs[] 条目实际只在终态并
+        // completed_at（started_at 只写 run 级 session，不进条目），运行中无时间戳 → 「—」。
+        const tsMs = r.started_at ? Date.parse(r.started_at) : (r.completed_at ? Date.parse(r.completed_at) : NaN);
+        const tsUnix = Number.isFinite(tsMs) ? tsMs / 1000 : null;
+        return (
+          <TableRow
+            key={r.run_id}
+            data-testid={i === 0 ? "nested-runs" : undefined}
+            onClick={() => nav(runPath(r.run_id))}
+            className="cursor-pointer bg-muted/25 text-xs hover:bg-muted/45"
+          >
+            {/* 柄列：贯通从属竖线（与父行展开柄同列，行高全高；px-0 让线正落列中轴） */}
+            <TableCell className="relative w-9 px-0 py-1.5">
+              <span aria-hidden className="absolute inset-y-0 left-1/2 w-px bg-border" />
+            </TableCell>
+            <TableCell className="py-1.5">
+              <StatusBadge status={(r.status ?? r.bb_phase ?? "unknown") as never} />
+            </TableCell>
+            <TableCell className="max-w-0 py-1.5">
+              <span className="flex items-center gap-1.5">
+                <Link
+                  to={runPath(r.run_id)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="truncate font-mono text-[12px] font-medium hover:text-primary"
+                >
+                  {r.run_id}
+                </Link>
+                {r.run_id === latestRunId && (
+                  <span className="shrink-0 rounded-full border border-primary/35 px-1.5 py-px text-[10px] leading-4 text-primary">
+                    {t("workspaceDetail.scans.runs.latest")}
+                  </span>
+                )}
               </span>
-            )}
-            <Link
-              to={`/p/${ws}/scans/${scanId}?run=${r.run_id}`}
-              className="text-xs text-primary hover:underline"
+            </TableCell>
+            {/* 黑盒 run 打的是 web 目标非仓库；漏洞/成本无 run 级数据 → 「—」占位保网格 */}
+            <TableCell className="py-1.5"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell className="py-1.5">
+              <Badge variant="outline" className="font-mono text-[10.5px] text-muted-foreground">
+                {t("workspaceDetail.scans.typeBlackbox")}
+              </Badge>
+            </TableCell>
+            <TableCell className="py-1.5"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell className="py-1.5 text-right"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell className="py-1.5 text-right"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell
+              className="whitespace-nowrap py-1.5 font-mono text-[11px] text-muted-foreground"
+              title={fmtTimeFull(tsUnix) || undefined}
             >
-              {t("workspaceDetail.scans.runs.view")}
-            </Link>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6 text-muted-foreground hover:text-destructive"
-              aria-label={t("workspaceDetail.scans.runs.delete")}
-              disabled={!isRunTerminal(r.status)}
-              title={isRunTerminal(r.status) ? undefined : t("workspaceDetail.scans.runs.deleteRunningHint")}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPendingDelete(r.run_id); }}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
-        ))}
-      </div>
+              {tsUnix ? fmtTime(tsUnix) : <span className="text-muted-foreground/50">—</span>}
+            </TableCell>
+            <TableCell className="whitespace-nowrap py-1.5 pr-4 text-right">
+              <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                <Link
+                  to={runPath(r.run_id)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-[11.5px] text-primary hover:underline"
+                >
+                  {t("workspaceDetail.scans.runs.view")}
+                </Link>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6 text-muted-foreground hover:text-destructive"
+                  aria-label={t("workspaceDetail.scans.runs.delete")}
+                  disabled={!isRunTerminal(r.status)}
+                  title={isRunTerminal(r.status) ? undefined : t("workspaceDetail.scans.runs.deleteRunningHint")}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPendingDelete(r.run_id); }}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </TableCell>
+          </TableRow>
+        );
+      })}
       {/* 删除 run 确认 Dialog */}
       <Dialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
         <DialogContent>

@@ -38,12 +38,21 @@ function renderList() {
   );
 }
 
+/** 默认收起（2026-08-24）：断言 run 内容前先点展开柄。 */
+async function expandRuns() {
+  fireEvent.click(await screen.findByRole("button", { name: "展开黑盒 run" }));
+}
+
 describe("ScanList 版本化黑盒 run（T15）", () => {
-  it("组合任务卡内嵌 run 列表（run_id + 状态）", async () => {
+  it("组合任务卡内嵌 run 列表（run_id + 状态，默认收起点柄展开）", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([combinedWithRuns])),
     );
     renderList();
+    // 默认收起：run 内容不渲染，点展开柄后出现
+    await screen.findByText("ws-s1");
+    expect(screen.queryByText("run-1")).not.toBeInTheDocument();
+    await expandRuns();
     expect(await screen.findByText("run-1")).toBeInTheDocument();
     expect(screen.getByText("run-2")).toBeInTheDocument();
   });
@@ -57,6 +66,25 @@ describe("ScanList 版本化黑盒 run（T15）", () => {
     renderList();
     await screen.findByText("ws-w1");
     expect(screen.queryByTestId("nested-runs")).not.toBeInTheDocument();
+  });
+
+  // 列化改版（2026-08-24）：run 行是真实 TableRow，与主表同网格——黑盒类型徽标 +
+  // completed_at 时间列（任务级 bb_runs[] 条目实际只有 completed_at，started_at 不进条目）。
+  it("run 子行列化：黑盒徽标 + completed_at 时间（无 colSpan 大格包裹）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([{
+        ...combinedWithRuns,
+        bb_runs: [{ run_id: "run-1", status: "completed", completed_at: "2026-08-20T15:03:49+00:00" }],
+        latest_bb_run: "run-1",
+      }])),
+    );
+    renderList();
+    await expandRuns();
+    expect(await screen.findByText("run-1")).toBeInTheDocument();
+    // 黑盒类型徽标（主行显「组合」，子行细分「黑盒」）
+    expect(screen.getByText("黑盒")).toBeInTheDocument();
+    // 时间列（ISO UTC → 本地 MM-DD HH:mm；jsdom 本地时区随环境，只断言含日期段）
+    expect(screen.getByText(/08-2\d \d{2}:\d{2}/)).toBeInTheDocument();
   });
 });
 
@@ -73,6 +101,7 @@ describe("ScanList 删除单个黑盒 run", () => {
       }),
     );
     renderList();
+    await expandRuns();
     await screen.findByText("run-1");
     const delBtns = screen.getAllByRole("button", { name: /删除该 run/ });
     expect(delBtns).toHaveLength(2);          // run-1, run-2 各一个
