@@ -6,10 +6,12 @@
    localStorage 旧值 "dark"/"light" 读时映射为 "charcoal"/"warm-paper"；
    "frost"（霜白，2026-08-24 改名 Mac）读时映射为 "mac"（只读时归一，不回写）。
    默认主题对（2026-08-24）：浅色=Mac、深色=Claude 深色（charcoal）——首次访问按
-   OS 偏好落这一对，system 态与快捷翻转（oppositeBaseTheme）同源。 */
+   OS 偏好落这一对，system 态与快捷翻转（oppositeBaseTheme）同源。
+   2026-08-25 扩展至 11 主题：+sentry/arc/mission（深）+ github/notion/kami（浅），
+   移植自 OpenDesign DESIGN.md（spec 2026-08-25-theme-expansion）。 */
 
 export type ThemeMode = "dark" | "light";
-export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite";
+export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite" | "sentry" | "arc" | "mission" | "github" | "notion" | "kami";
 /** @deprecated 语义由 ThemeMode 取代；保留别名避免存量导入破坏。 */
 export type EffectiveTheme = ThemeMode;
 export type Theme = ThemeId;
@@ -50,6 +52,24 @@ export const THEMES: readonly ThemeDef[] = [
     preview: { bg: "hsl(0 0% 5%)", card: "hsl(0 0% 8%)", primary: "hsl(15 62% 56%)", border: "hsl(0 0% 100% / 0.12)" },
   },
   {
+    id: "sentry",
+    mode: "dark",
+    paletteClass: "theme-sentry",
+    preview: { bg: "hsl(258 40% 10%)", card: "hsl(259 40% 14%)", primary: "hsl(247 44% 56%)", border: "hsl(252 33% 26%)" },
+  },
+  {
+    id: "arc",
+    mode: "dark",
+    paletteClass: "theme-arc",
+    preview: { bg: "hsl(240 13% 9%)", card: "hsl(240 13% 15%)", primary: "hsl(15 60% 56%)", border: "hsl(0 0% 100% / 0.20)" },
+  },
+  {
+    id: "mission",
+    mode: "dark",
+    paletteClass: "theme-mission",
+    preview: { bg: "hsl(223 49% 8%)", card: "hsl(221 39% 11%)", primary: "hsl(43 100% 50%)", border: "hsl(214 52% 25%)" },
+  },
+  {
     id: "mac",
     mode: "light",
     paletteClass: "theme-mac",
@@ -60,6 +80,24 @@ export const THEMES: readonly ThemeDef[] = [
     mode: "light",
     paletteClass: null,
     preview: { bg: "hsl(48 33% 97%)", card: "hsl(0 0% 100%)", primary: "hsl(15 58% 50%)", border: "hsl(40 8% 17% / 0.10)" },
+  },
+  {
+    id: "github",
+    mode: "light",
+    paletteClass: "theme-github",
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(210 29% 97%)", primary: "hsl(212 92% 45%)", border: "hsl(210 18% 84%)" },
+  },
+  {
+    id: "notion",
+    mode: "light",
+    paletteClass: "theme-notion",
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(30 10% 96%)", primary: "hsl(208 100% 44%)", border: "hsl(0 0% 0% / 0.10)" },
+  },
+  {
+    id: "kami",
+    mode: "light",
+    paletteClass: "theme-kami",
+    preview: { bg: "hsl(53 29% 95%)", card: "hsl(48 33% 97%)", primary: "hsl(215 55% 24%)", border: "hsl(50 21% 89%)" },
   },
 ];
 
@@ -98,6 +136,12 @@ function normalizeStored(v: string | null): ThemeId | null {
     case "mac":
     case "midnight":
     case "graphite":
+    case "sentry":
+    case "arc":
+    case "mission":
+    case "github":
+    case "notion":
+    case "kami":
       return v;
     default:
       return null;

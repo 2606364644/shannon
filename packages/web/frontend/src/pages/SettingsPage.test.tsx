@@ -57,7 +57,10 @@ beforeEach(async () => {
   });
   mockUser.must_change_password = false;
   localStorage.clear();
-  document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
+  document.documentElement.classList.remove(
+    "dark", "light", "theme-mac", "theme-midnight", "theme-graphite",
+    "theme-sentry", "theme-arc", "theme-mission", "theme-github", "theme-notion", "theme-kami",
+  );
 });
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
@@ -126,6 +129,18 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /跟随系统/ }));
     expect(localStorage.getItem("supernova-theme")).toBe("system");
     expect(document.documentElement.className).not.toContain("theme-");
+  });
+
+  it("主题选择器：新六主题全部渲染 + 点 kami → light + theme-kami", async () => {
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    for (const label of ["Sentry 紫黑", "Arc 玻璃", "指挥中心", "GitHub", "Notion 暖灰", "kami 纸质"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: /kami 纸质/ }));
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-kami")).toBe(true);
+    expect(localStorage.getItem("supernova-theme")).toBe("kami");
   });
 
   it("must_change_password=true → 显示改密提醒 badge", async () => {

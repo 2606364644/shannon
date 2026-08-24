@@ -558,7 +558,13 @@
       "midnight": "Midnight",
       "graphite": "Graphite",
       "warmPaper": "Claude Light",
-      "mac": "Mac"
+      "mac": "Mac",
+      "sentry": "Sentry Purple",
+      "arc": "Arc Glass",
+      "mission": "Mission Control",
+      "github": "GitHub",
+      "notion": "Notion Warm",
+      "kami": "kami Paper"
     },
     "accountSecurityTitle": "Account security",
     "accountSecurityHint": "Change your sign-in password",

@@ -9,7 +9,8 @@ export default {
     extend: {
       fontFamily: {
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
-        sans: ['"IBM Plex Sans"', "system-ui", "sans-serif"],
+        /* sans 经 var 间接（:root --font-sans = 同 Plex 栈）：可主题化，kami 覆写为衬线栈 */
+        sans: ["var(--font-sans)"],
         serif: ['"IBM Plex Serif"', "Georgia", "serif"],
       },
       colors: {

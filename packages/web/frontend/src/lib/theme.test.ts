@@ -81,16 +81,59 @@ describe("theme lib", () => {
     expect(cl.contains("light")).toBe(false);
   });
 
-  it("THEMES 覆盖 5 主题；palette id 与 paletteClass 一一对应；浅色组默认 Mac 在前", () => {
-    expect(THEMES.map((t) => t.id)).toEqual(["charcoal", "midnight", "graphite", "mac", "warm-paper"]);
+  it("THEMES 覆盖 11 主题；palette id 与 paletteClass 一一对应；浅色组默认 Mac 在前", () => {
+    expect(THEMES.map((t) => t.id)).toEqual([
+      "charcoal", "midnight", "graphite", "sentry", "arc", "mission",
+      "mac", "warm-paper", "github", "notion", "kami",
+    ]);
     expect(getThemeDef("charcoal")?.paletteClass).toBeNull();
     expect(getThemeDef("mac")?.paletteClass).toBe("theme-mac");
+    expect(getThemeDef("sentry")?.paletteClass).toBe("theme-sentry");
+    expect(getThemeDef("arc")?.paletteClass).toBe("theme-arc");
+    expect(getThemeDef("mission")?.paletteClass).toBe("theme-mission");
+    expect(getThemeDef("github")?.paletteClass).toBe("theme-github");
+    expect(getThemeDef("notion")?.paletteClass).toBe("theme-notion");
+    expect(getThemeDef("kami")?.paletteClass).toBe("theme-kami");
     expect(getThemeDef("system")).toBeNull();
   });
 
   it("oppositeBaseTheme: dark→mac / light→charcoal（翻到对侧默认主题）", () => {
     expect(oppositeBaseTheme("dark")).toBe("mac");
     expect(oppositeBaseTheme("light")).toBe("charcoal");
+  });
+
+  it("applyTheme(sentry/arc/mission): dark + 各自 palette class", () => {
+    for (const id of ["sentry", "arc", "mission"] as const) {
+      applyTheme(id);
+      const cl = document.documentElement.classList;
+      expect(cl.contains("dark")).toBe(true);
+      expect(cl.contains(`theme-${id}`)).toBe(true);
+    }
+  });
+
+  it("applyTheme(github/notion/kami): light + 各自 palette class", () => {
+    for (const id of ["github", "notion", "kami"] as const) {
+      applyTheme(id);
+      const cl = document.documentElement.classList;
+      expect(cl.contains("light")).toBe(true);
+      expect(cl.contains(`theme-${id}`)).toBe(true);
+    }
+  });
+
+  it("getInitialTheme: 新主题 id stored 原样读出", () => {
+    localStorage.setItem(THEME_KEY, "kami");
+    expect(getInitialTheme()).toBe("kami");
+    localStorage.setItem(THEME_KEY, "mission");
+    expect(getInitialTheme()).toBe("mission");
+  });
+
+  it("resolveEffectiveTheme: 新主题查 def.mode 正确", () => {
+    expect(resolveEffectiveTheme("sentry")).toBe("dark");
+    expect(resolveEffectiveTheme("arc")).toBe("dark");
+    expect(resolveEffectiveTheme("mission")).toBe("dark");
+    expect(resolveEffectiveTheme("github")).toBe("light");
+    expect(resolveEffectiveTheme("notion")).toBe("light");
+    expect(resolveEffectiveTheme("kami")).toBe("light");
   });
 });
 

@@ -558,7 +558,13 @@
       "midnight": "午夜",
       "graphite": "石墨",
       "warmPaper": "Claude 浅色",
-      "mac": "Mac"
+      "mac": "Mac",
+      "sentry": "Sentry 紫黑",
+      "arc": "Arc 玻璃",
+      "mission": "指挥中心",
+      "github": "GitHub",
+      "notion": "Notion 暖灰",
+      "kami": "kami 纸质"
     },
     "accountSecurityTitle": "账户安全",
     "accountSecurityHint": "修改登录密码",
