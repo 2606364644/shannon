@@ -406,6 +406,10 @@ class ScanSummary:
     # 切分支后报告靠此区分来源；存量报告/黑盒无快照 → None，前端不显示。
     repo_branch: str | None = None
     repo_commit: str | None = None
+    # 跨仓关联血缘（C2，spec 2026-08-24）：session.corr_children 透传——
+    # [{service, scan_id, reused, status?}]（提交时 web 写 SessionManager.update_session）。
+    # 纯白盒/纯黑盒未写 → None（零回归）。
+    corr_children: list[dict] | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -433,6 +437,7 @@ class ScanSummary:
             "repo_url": self.repo_url,
             "repo_branch": self.repo_branch,
             "repo_commit": self.repo_commit,
+            "corr_children": self.corr_children,
         }
 
 
@@ -696,6 +701,8 @@ class ScanStore:
         combined = data.get("combined") if isinstance(data, dict) else None
         bb_runs = data.get("bb_runs") if isinstance(data, dict) else None
         latest_bb_run = data.get("latest_bb_run") if isinstance(data, dict) else None
+        # 跨仓关联血缘（C2）：session.corr_children 透传（读法对齐 bb_runs；未写 → None）。
+        corr_children = data.get("corr_children") if isinstance(data, dict) else None
         # 版本化 run（spec §5.2/§5.3）：bb_phase/bb_reason/completed_agents 下沉到 run 级
         # session；任务级进度经 merge_latest_run_view 合并白盒(任务 session
         # completed_agents) + latest run completed_agents，bb_phase/bb_reason 取自 latest
@@ -735,6 +742,7 @@ class ScanStore:
             repo_url=mgr.get_web_url(scan_dir),
             # 分支快照（spec 2026-08-21 §4）：存量报告/黑盒无快照 → None
             **_repo_snapshot_fields(scan_dir),
+            corr_children=corr_children,
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

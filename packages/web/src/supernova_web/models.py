@@ -155,11 +155,13 @@ class ScanRequest(BaseModel):
         - 单填一个 = 合法；都不填 = 合法（向后兼容，无 HOST 代理）。
         与认证字段完全独立（HOST 可与任意 auth 模式组合：profile/inline/无 auth）。
         对 blackbox 与组合模式（whitebox+url）生效--两条入口都暴露了 HOST 配置；
-        纯白盒（无 url）/correlation 即便误填也忽略（无黑盒阶段，HOST 代理无意义）。
+        correlation+url（C3 fix ②：gateway 段③黑盒验证）同组合模式校验；纯白盒
+        （无 url）/correlation 无 url 即便误填也忽略（无黑盒阶段，HOST 代理无意义）。
         """
         is_combined_or_bb = (
             self.type == "blackbox"
             or (self.type == "whitebox" and self.url)
+            or (self.type == "correlation" and self.url)
         )
         if is_combined_or_bb:
             if self.host_profile_id == "":

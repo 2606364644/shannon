@@ -15,12 +15,16 @@ _log = logging.getLogger(__name__)
 
 from temporalio.client import Client
 
+from supernova_core.models.multi_repo_config import MultiRepoConfig
+from supernova_core.config.parser import parse_multi_repo_config
 from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
 from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 from supernova_core.session import SessionManager
 from supernova_core.utils.paths import (
-    INTERMEDIATE_SUBDIR, blackbox_dir, blackbox_run_dir, combined_run_dir,
-    whitebox_dir)
+    INTERMEDIATE_SUBDIR, WHITEBOX_SUBDIR, blackbox_dir, blackbox_run_dir,
+    combined_run_dir, deliverables_dir_for_workspace, whitebox_dir)
+from supernova_multi.correlation_event_writer import CorrelationEventWriter
+from supernova_multi.orchestrator import plan_repo_scans
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_web.models import ScanRequest
@@ -79,6 +83,36 @@ _RESUMABLE_STATUSES = frozenset({"interrupted", "crashed"})
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _find_queue_files(dlv: Path) -> list[Path]:
+    """收集 deliverables/ 下的 *_exploitation_queue.json（跨仓关联 C2 复用校验用）。
+
+    三处 glob 与 multi orchestrator 的 queue 收集（orchestrator.py 三段 dict 合并）完全
+    同序：whitebox/intermediate/（tiering 新结构）→ whitebox/（老结构）→ deliverables
+    根（更老结构）；同名仅补白（intermediate 优先）。glob 不递归，三处合并去重。
+    """
+    queue_files: dict[str, Path] = {}
+    for q in (dlv / WHITEBOX_SUBDIR / INTERMEDIATE_SUBDIR).glob("*_exploitation_queue.json"):
+        queue_files[q.name] = q
+    for q in (dlv / WHITEBOX_SUBDIR).glob("*_exploitation_queue.json"):
+        queue_files.setdefault(q.name, q)
+    for q in dlv.glob("*_exploitation_queue.json"):
+        queue_files.setdefault(q.name, q)
+    return list(queue_files.values())
+
+
+def _dump_multi_repo_yaml(config: MultiRepoConfig, path: Path) -> None:
+    """MultiRepoConfig 落盘（跨仓关联 C3）：out_workspace 覆写后 dump 成 worker 侧
+    parse_multi_repo_config 可直读的 yaml（关联 workflow / 漂移检测读此文件）。
+
+    by_alias 保 relations 的 from 键（Relation.from_ alias "from"），round-trip 已验：
+    dump → parse 回同构 config（含 out_workspace 覆写值）。
+    """
+    import yaml
+    path.write_text(
+        yaml.safe_dump(config.model_dump(by_alias=True), allow_unicode=True),
+        encoding="utf-8")
 
 
 class ScanManager:
@@ -197,21 +231,41 @@ class ScanManager:
         if len(self._handles) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
 
-        if req.type == "correlation":
-            target, yaml_path = await self._resolve_inputs(req)
-            ws = self._resolve_out_workspace(yaml_path)
-        else:
-            target, yaml_path = await self._resolve_inputs(req)
-            ws = req.workspace
+        target, yaml_path = await self._resolve_inputs(req)
+        # C3（跨仓关联）：主行落请求 ws——旧 _resolve_out_workspace（从 yaml 推 ws）不再
+        # 走：out_workspace 由下方 correlation 分支覆写为主行 scan_id 落盘 yaml（旧函数
+        # 保留待 D 阶段清理）。
+        ws = req.workspace
 
         # HOST only belongs to a blackbox stage.  Resolve it before creating a scan
-        # directory; pure whitebox/correlation intentionally ignore legacy HOST fields.
+        # directory; pure whitebox (no url) intentionally ignores legacy HOST fields.
+        # correlation + gateway url 有段③黑盒验证（C3 fix ②）——同组合模式解析 HOST，
+        # 供 _run_blackbox_phase 从主行 session 读映射；无 url 的 correlation 忽略。
         host_config = None
-        if req.type == "blackbox" or (req.type == "whitebox" and req.url):
+        if req.type == "blackbox" or (
+                (req.type == "whitebox" or req.type == "correlation") and req.url):
             host_config = await self._resolve_host_config(req, ws)
 
         ws_dir = self._workspaces_dir / ws
         ws_dir.mkdir(parents=True, exist_ok=True)
+
+        # ── correlation 前置解析（C3，spec 2026-08-24 §5.3 步骤 1-2）────────────
+        # yaml 解析 + 复用子仓校验 + 现扫子仓 repo 解析，全部在任何 scan 行落盘前完成：
+        # 任一失败 raise ValueError（API 层转 422），不留 ghost 主行 / 部分提交的子仓
+        # workflow。corr_repo_paths 由 _validate_reused_children 填复用子仓 scan_dir，
+        # 下方现扫子仓补齐自己的 c_dir 后整体传 _submit_correlation。
+        corr_config: MultiRepoConfig | None = None
+        corr_repo_paths: dict[str, Path] = {}
+        corr_repo_dirs: dict[str, str] = {}
+        if req.type == "correlation":
+            corr_config = parse_multi_repo_config(yaml_path)
+            corr_repo_paths = self._validate_reused_children(ws, corr_config)
+            for plan in plan_repo_scans(corr_config):
+                if not plan.reuse:
+                    # path 语义 = ws 内仓库名（web 提交通道；_resolve_repo_path 做
+                    # linked 仓优先 + 防遍历 + state=ready 校验，同白盒 source=repo）。
+                    corr_repo_dirs[plan.service] = self._resolve_repo_path(
+                        ws, plan.repo_path or "")
 
         lineage: str | None = None
         if req.type == "blackbox":
@@ -225,6 +279,13 @@ class ScanManager:
             async with self._create_scan_lock:
                 scan_id, scan_dir = self._store.create_scan(
                     ws, req.url or "", target or "", req.type, lineage=lineage)
+        elif req.type == "correlation":
+            # 主行（C3）：repo 字段填 entrypoint 服务名做展示锚（scan_id 前缀即该名，
+            # 对齐白盒的 <repo>-<ts> 可读性）。
+            entry_svc = next((svc for svc, spec in corr_config.repos.items()
+                              if spec.role == "entrypoint"), "")
+            scan_id, scan_dir = self._store.create_scan(
+                ws, req.url or "", entry_svc, "correlation")
         else:
             scan_id, scan_dir = self._store.create_scan(
                 ws, req.url or "", target or "", req.type)
@@ -239,8 +300,25 @@ class ScanManager:
         try:
             # Snapshot before auth config and before Temporal submission.
             if host_config is not None:
+                host_patch: dict = {"host_config": host_config}
+                if req.type == "correlation":
+                    # C3 fix ②：镜像组合分支补 legacy bb_host_mappings（旧读方 /
+                    # reconcile 路径；_session_host_mappings 优先读上方 host_config
+                    # 快照，此键是兜底）——gateway 黑盒验证段据此起 host proxy。
+                    host_patch["bb_host_mappings"] = self._host_config_mappings(
+                        host_config)
                 SessionManager(scan_dir.parent).update_session(
-                    scan_dir, {"host_config": host_config})
+                    scan_dir, host_patch)
+            # C3 fix round 2：correlation + gateway url 的认证落地（spec §5.3 段③
+            # 「+认证可选」）--镜像组合分支的 _dump_auth_config 调用点 + bb_auth_ref
+            # session 写。_run_blackbox_phase 的 config_path 解析（scan_dir/
+            # scan-config.yaml 存在即取）零改动接住。无认证字段 -> 返 None 不落文件，
+            # config_path 保持 None（黑盒跳过登录段，零回归）。
+            if req.type == "correlation" and req.url:
+                corr_auth_path = await self._dump_auth_config(req, ws, scan_dir)
+                if corr_auth_path:
+                    SessionManager(scan_dir.parent).update_session(
+                        scan_dir, {"bb_auth_ref": self._snapshot_auth_ref(req)})
 
             if req.type == "whitebox":
                 if req.url:
@@ -298,8 +376,51 @@ class ScanManager:
                     config_path, host_mappings=host_mappings)
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"reuse_whitebox_scan_id": req.reuse_whitebox_scan_id})
-            else:
-                raise ValueError(f"correlation 暂未 C1 化: {req.type}")
+            elif req.type == "correlation":
+                # ── 跨仓三段接力提交（C3，spec 2026-08-24 §5.3 步骤 3-5）─────────
+                # ④ 覆写 out_workspace=主行 scan_id 落盘 yaml（关联 workflow / 漂移
+                # 检测读此文件；表单/yaml 预览中该字段省略，此 dump 是 worker 读到的真值）。
+                corr_config.correlation.out_workspace = scan_id
+                dumped = yaml_path.parent / f"{scan_id}-multi-repo.yaml"
+                _dump_multi_repo_yaml(corr_config, dumped)
+                corr_writer = CorrelationEventWriter(event_file)
+                # ⑤ 子仓登记：现扫子仓逐仓建标准白盒行 + 提交（url 空、combined=False
+                # ——纯白盒，终态自写）；复用子仓零动作（路径已在 corr_repo_paths）。
+                children: list[dict] = []
+                child_handles: dict[str, tuple[str, Any]] = {}
+                for plan in plan_repo_scans(corr_config):
+                    svc = plan.service
+                    if plan.reuse:
+                        children.append({"service": svc, "scan_id": plan.workspace,
+                                         "reused": True})
+                        await corr_writer.repo(svc, "completed", detail="reused")
+                        continue
+                    c_scan_id, c_dir = self._store.create_scan(ws, "", svc, "whitebox")
+                    self._mark_owner(c_dir, "web")
+                    await corr_writer.repo(svc, "started")
+                    wb_handle = await self._submit_whitebox(
+                        corr_repo_dirs[svc], ws, c_scan_id, c_dir,
+                        c_dir / "events.ndjson", "")
+                    child_handles[svc] = (c_scan_id, wb_handle)
+                    corr_repo_paths[svc] = c_dir
+                    children.append({"service": svc, "scan_id": c_scan_id,
+                                     "reused": False})
+                SessionManager(scan_dir.parent).update_session(scan_dir, {
+                    "corr_children": children,
+                    "config_path": str(dumped),
+                })
+                # ⑥ 三段接力编排（fire-and-forget；镜像 _combined_orchestrator 的
+                # try/except/finally + _ensure_scan_end 幂等收尾）。cancel/delete 经
+                # _orchestrator_tasks 可达（级联取消子仓/关联 workflow 属 D 阶段）。
+                orch = asyncio.create_task(self._correlation_orchestrator(
+                    scan_key, child_handles, scan_dir, req, dumped, corr_repo_paths))
+                self._orchestrator_tasks[scan_key] = orch
+                # 主行自起 _watch（tail events.ndjson 至编排收尾的 scan_end；finally
+                # 清 _active_reqs/_tasks）。主行无单一 workflow handle（子仓/关联句柄由
+                # 编排持有）——不进 _handles，提前返回不走下方通用登记。
+                self._tasks[scan_key] = asyncio.create_task(
+                    self._watch(scan_key, event_file, scan_dir))
+                return ws, scan_id
         except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
             self._handles.pop(scan_key, None)
@@ -767,6 +888,7 @@ class ScanManager:
         event_file: Path, web_url: str, config_path: str | None,
         host_mappings: dict[str, str] | None = None,
         workflow_id_suffix: str = "",
+        correlated_workspace: str | None = None,
     ) -> Any:
         """提交黑盒 scan 到 supernova-bb-web queue。参照 _submit_whitebox。
 
@@ -777,6 +899,9 @@ class ScanManager:
         workflow_id_suffix（spec §7.6，组合接力复用本方法的关键）：默认 ""（零回归，既有调用
         workflow_id 不变）；组合接力首跑传 "-bb"、续跑传 "-bb-rerun-N"。不手写 chained 版
         （原草案手写版漏传 host_mappings 等字段，重复造轮子——见 spec §5）。
+
+        correlated_workspace（跨仓关联 C1）：默认 None（零回归）；组合关联扫描传入关联
+        workspace id，灌入 BlackboxPipelineInput（字段 B1 已定义）供黑盒复用其 topology。
         """
         from supernova_blackbox.pipeline.shared import BlackboxPipelineInput
         from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
@@ -797,6 +922,7 @@ class ScanManager:
             workspaces_root=str(self._workspaces_dir),
             exploit=True,
             host_mappings=host_mappings or {},
+            correlated_workspace=correlated_workspace,
         )
         handle = await client.start_workflow(
             BlackboxScanWorkflow.run, inp, id=workflow_id,
@@ -804,6 +930,46 @@ class ScanManager:
             run_timeout=workflow_run_timeout(),
         )
         self._mark_submitted_at(scan_dir)
+        return handle
+
+    async def _submit_correlation(self, config_path: Path,
+                                  repo_workspace_paths: dict[str, Path],
+                                  out_ws_dir: Path, event_file: Path,
+                                  ws: str) -> Any:
+        """提交关联阶段 workflow 到 supernova-corr-web queue（跨仓关联 C2，镜像 _submit_whitebox）。
+
+        config_path = correlation yaml（_resolve_correlation_yaml 产物，worker 侧
+        parse_multi_repo_config 直读）；repo_workspace_paths = {service: 复用白盒 scan_dir}
+        （_validate_reused_children 产物，worker 据此收集各仓 exploitation queue）；
+        out_ws_dir = workspaces/<ws>/scans/<scan_id>（关联主行 scan 目录，worker 侧
+        SessionManager 幂等建 workspace）；ws = yaml 的 out_workspace（event_file 所在 ws，
+        provider/env 解析亦按它）。write_scan_end 保持默认 False——终态由 web 编排收尾
+        （_ensure_scan_end），worker 不写。
+        """
+        from supernova_multi.pipeline.workflows import CorrelationScanWorkflow
+        from supernova_multi.pipeline.shared import CorrelationPipelineInput
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_CORRELATION
+
+        # 与白盒/黑盒路径一致：配置不完整时在连接 Temporal 前失败。
+        provider_config = self._resolve_provider_config(ws)
+        client = await Client.connect(self._temporal_address())
+        workflow_id = self._resolve_workflow_id(ws, out_ws_dir.name) + "-corr"
+        inp = CorrelationPipelineInput(
+            config_path=str(config_path),
+            repo_workspace_paths={k: str(v) for k, v in repo_workspace_paths.items()},
+            out_ws_dir=str(out_ws_dir),
+            event_file=str(event_file),
+            provider_config=provider_config,
+            env_overrides=self._resolve_env_overrides(ws),
+        )
+        handle = await client.start_workflow(
+            CorrelationScanWorkflow.run, inp, id=workflow_id,
+            task_queue=WEB_TASK_QUEUE_CORRELATION,
+            run_timeout=workflow_run_timeout(),
+        )
+        # 提交成功后锚定 submitted_at（scan_liveness 提交宽限门防冷启动误杀；
+        # start_workflow 抛错不达此处，提交失败不写）。
+        self._mark_submitted_at(out_ws_dir)
         return handle
 
     async def start_auth_validation(self, ws: str, profile_id: str, cred_id: str,
@@ -1860,6 +2026,38 @@ class ScanManager:
             return self._config_store.write_temp(req.config_content)
         raise ValueError("correlation 扫描需 config_name 或 config_content")
 
+    def _validate_reused_children(self, ws: str,
+                                  config: MultiRepoConfig) -> dict[str, Path]:
+        """校验 correlation yaml 里每个 spec.workspace 复用子仓（跨仓关联 C2）。
+
+        逐 service 检查三项：① get_scan_dir(ws, spec.workspace) 存在；② session
+        scan_type == "whitebox"（只有白盒产物可作关联输入）；③ deliverables/ 下至少
+        一个 *_exploitation_queue.json（_find_queue_files 三处 glob，同 orchestrator
+        收集口径）。全部通过 → 返回 {service: scan_dir}（供 _submit_correlation 的
+        repo_workspace_paths）；任一不合法 raise ValueError（API 层转 422，前端提示
+        改重新扫）。path 型 repo（spec.workspace 为空，白盒新扫）不参与复用校验。
+        """
+        out: dict[str, Path] = {}
+        for service, spec in config.repos.items():
+            reused_id = spec.workspace
+            if not reused_id:
+                continue  # path 型 repo（关联时新扫白盒），非复用子仓
+            scan_dir = self._store.get_scan_dir(ws, reused_id)
+            if scan_dir is None:
+                raise ValueError(
+                    f"复用扫描不可用: {service}: 复用的扫描不存在: {reused_id}")
+            scan_type = SessionManager(scan_dir.parent).get_scan_type(scan_dir)
+            if scan_type != "whitebox":
+                raise ValueError(
+                    f"复用扫描不可用: {service}: 复用的扫描类型为 {scan_type}，"
+                    f"需白盒（{reused_id}）")
+            if not _find_queue_files(deliverables_dir_for_workspace(scan_dir)):
+                raise ValueError(
+                    f"复用扫描不可用: {service}: deliverables 下无 "
+                    f"*_exploitation_queue.json（白盒无可利用产物，请重新扫描）")
+            out[service] = scan_dir
+        return out
+
     async def _watch(self, scan_key: tuple[str, str], event_file: Path,
                      scan_dir: Path) -> None:
         """C1: tail events.ndjson 直到 scan_end(worker finalize_summary 写)或超时.
@@ -2185,6 +2383,70 @@ class ScanManager:
             await self._ensure_scan_end(scan_dir, status=final_status)
             self._orchestrator_tasks.pop(scan_key, None)
 
+    async def _correlation_orchestrator(self, scan_key: tuple[str, str],
+                                        child_handles: dict[str, tuple[str, Any]],
+                                        scan_dir: Path, req: ScanRequest,
+                                        config_path: Path,
+                                        repo_workspace_paths: dict[str, Path]) -> None:
+        """跨仓三段接力编排（C3，spec 2026-08-24 §5.3）：子仓白盒 → 关联 →（可选）黑盒验证。
+
+        child_handles 值 = (子仓 scan_id, wb handle)——start 提交段登记；本编排 await
+        全部现扫子仓（任一失败 → 主行 failed、不进关联阶段），全成功后 _submit_correlation
+        （write_scan_end=False，phase 不写终态），再按 gateway URL 决定段③黑盒验证 run。
+
+        scan_end 不变量：任务级终态事件恒由 finally 的 _ensure_scan_end 幂等收口——
+        events 已有 scan_end 则 no-op（绝不写第二条），绝不裸调 _write_scan_end。
+        _run_blackbox_phase 不写任务级 scan_end（其 _mark_run 终态钩子只补 run 级
+        events），故成功路径的任务级终态也是此处写的；子仓失败/关联异常/跳过段③
+        同样经此收口，防 _watch 永久 tail。
+        """
+        ws, scan_id = scan_key
+        final_status = "completed"
+        run_id: str | None = None
+        event_file = scan_dir / "events.ndjson"
+        corr_writer = CorrelationEventWriter(event_file)
+        try:
+            # 段①：await 全部现扫子仓（dict 序 = 提交序）；任一子仓 workflow 返回
+            # status=failed（或 raise，走下方 except）→ 主行 failed，不进关联阶段。
+            for svc, (_c_scan_id, wb_handle) in child_handles.items():
+                result = await self._await_workflow_result(wb_handle)
+                status = (result.get("status") if isinstance(result, dict)
+                          else getattr(result, "status", None))
+                if status == "failed":
+                    await corr_writer.repo(svc, "failed", detail="scan failed")
+                    final_status = "failed"
+                    return  # finally 走 _ensure_scan_end(failed) + pop _orchestrator_tasks
+                await corr_writer.repo(svc, "completed")
+            # 段②：关联阶段（repo_workspace_paths = 复用 scan_dir ∪ 现扫 c_dir）。
+            await corr_writer.phase("correlation", "started")
+            handle = await self._submit_correlation(
+                Path(config_path), repo_workspace_paths, scan_dir, event_file, ws)
+            await self._await_workflow_result(handle)
+            await corr_writer.phase("correlation", "completed")
+            # 段③（可选）：gateway URL → 黑盒验证 run-1（correlated_workspace=主行
+            # scan_id，黑盒 recon-skip 消费主行合并 queue / topology）。
+            if req.url:
+                async with self._create_scan_lock:
+                    run_id, _ = self._store.create_blackbox_run(
+                        ws, scan_id, auth_ref=self._snapshot_auth_ref(req))
+                k = int(run_id.split("-")[1])
+                await self._run_blackbox_phase(
+                    scan_dir, ws, scan_id, self._snapshot_auth_ref(req), run_id,
+                    workflow_id_suffix=f"-bb-{k}",
+                    correlated_workspace=scan_id)
+        except Exception as exc:
+            final_status = "failed"
+            # 接力任意阶段失败：黑盒 run 已建则标该 run failed；关联/子仓阶段（run 未建）
+            # run_id 为 None 不标（子仓 workflow 自身终态已落各自 session）。
+            if run_id is not None:
+                await self._mark_run(scan_dir, run_id, "failed",
+                                     reason=str(exc), status="failed")
+        finally:
+            # 幂等收口（同 _combined_orchestrator）：events 无 scan_end 才写（唯一的
+            # 任务级终态事件；run 级 scan_end 由 _mark_run 终态钩子/黑盒 finalize 管）。
+            await self._ensure_scan_end(scan_dir, status=final_status)
+            self._orchestrator_tasks.pop(scan_key, None)
+
     def _build_combined_resume_req(self, data: dict, ws: str) -> ScanRequest:
         """从 session data 重建组合扫描 ScanRequest（resume 编排 task 用）。
 
@@ -2208,7 +2470,8 @@ class ScanManager:
 
     async def _run_blackbox_phase(self, scan_dir: Path, ws: str, scan_id: str,
                                   auth_ref: dict, run_id: str,
-                                  workflow_id_suffix: str = "-bb-1") -> None:
+                                  workflow_id_suffix: str = "-bb-1",
+                                  correlated_workspace: str | None = None) -> None:
         """组合接力公共段（spec §7.3）：预检白盒产物 → 复用 _submit_blackbox（suffix 后缀）→
         等黑盒 → 融合报告。
 
@@ -2220,9 +2483,13 @@ class ScanManager:
         workflow_id_suffix（Task 7 扩展）：默认 "-bb"（Task 4 首跑，零回归）；rerun_blackbox
         传 "-bb-rerun-N"（D5 续跑，每次起新黑盒 workflow id）。透传给 _submit_blackbox。
 
+        correlated_workspace（跨仓关联 C1）：默认 None（零回归，既有组合扫描行为不变）；
+        关联扫描场景由编排层传入，透传给 _submit_blackbox。
+
         _generate_combined_report 由 Task 8 实现；本任务仅保留调用点（单测 mock 之）。
         """
-        # 预检白盒产物（recon_deliverable.md + 至少一个非空 queue）。不全 → 跳过黑盒。
+        # 预检产物（recon_deliverable.md + 至少一个非空 queue；correlation 主行改查
+        # deliverables/ 根的非空合并 queue——C3 fix ①）。不全 → 跳过黑盒。
         if not self._whitebox_deliverables_ready(scan_dir):
             await self._mark_run(scan_dir, run_id, "skipped",
                                  reason="白盒无可利用产物", status="skipped")
@@ -2254,7 +2521,8 @@ class ScanManager:
             repo_path=str(scan_dir), ws=ws, scan_id=scan_id, scan_dir=scan_dir,
             event_file=run_dir / "events.ndjson", web_url=bb_url,
             config_path=str(scan_config) if scan_config.exists() else None,
-            host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix)
+            host_mappings=host_mappings, workflow_id_suffix=workflow_id_suffix,
+            correlated_workspace=correlated_workspace)
         await self._mark_run(scan_dir, run_id, "running", status="running")
         bb_result = await self._await_workflow_result(bb_handle)
         # 黑盒 workflow 正常返回 status=failed（未 raise）：不生成融合报告，run 标
@@ -2532,30 +2800,53 @@ class ScanManager:
             scan_dir / "events.ndjson", status, 0, tail,
             session_status=session_status, scan_dir=scan_dir)
 
+    def _scan_row_is_correlation(self, scan_dir: Path) -> bool:
+        """scan 行是否 correlation 主行（C3 fix ①：段③就绪门/进度分母按行类型分流）。
+
+        检测口径同 resume/_validate_reused_children：SessionManager.get_scan_type。"""
+        try:
+            return SessionManager(scan_dir.parent).get_scan_type(scan_dir) == "correlation"
+        except Exception:  # noqa: BLE001 - session 读失败按非 correlation 处理（零回归）
+            return False
+
     def _whitebox_deliverables_ready(self, scan_dir: Path) -> bool:
         """预检白盒产物可被黑盒利用（spec §7.3）：
 
         True iff deliverables/whitebox/recon_deliverable.md 存在 AND 至少一个非空
         {vt}_exploitation_queue.json（vulnerabilities 列表非空）。黑盒只 exploit 白盒发现的
         类，缺其一则跳过黑盒（bb_phase=skipped）。
+
+        correlation 主行（C3 fix ①，spec 2026-08-24 §5.3 段③）：关联段产物落
+        deliverables/ 根（write_correlation_deliverables：merged queue / topology /
+        report），无 whitebox/ 子结构与 recon_deliverable.md——就绪门改查「至少一个
+        非空合并 queue」（_count_nonempty_queues 的 correlation 分支收集）。
         """
+        if self._scan_row_is_correlation(scan_dir):
+            return self._count_nonempty_queues(scan_dir) > 0
         wb_dir = scan_dir / "deliverables" / "whitebox"
         if not (wb_dir / "recon_deliverable.md").is_file():
             return False
         return self._count_nonempty_queues(scan_dir) > 0
 
     def _count_nonempty_queues(self, scan_dir: Path) -> int:
-        """数 deliverables/whitebox/ 下非空的 {vt}_exploitation_queue.json 数（vulnerabilities
-        列表非空）。用于预检 + expected_agents.blackbox 分母（spec §9.5）。"""
-        wb_dir = scan_dir / "deliverables" / "whitebox"
-        if not wb_dir.is_dir():
-            return 0
-        # tiering（spec 2026-08-18）：queue 是中间产物落 whitebox/intermediate/，
-        # 老结构在桶顶层。glob 不递归，双 glob 覆盖（intermediate 有则用之，同名
-        # 不共存于两种结构）。
-        queue_files = list(
-            (wb_dir / INTERMEDIATE_SUBDIR).glob("*_exploitation_queue.json")
-        ) or list(wb_dir.glob("*_exploitation_queue.json"))
+        """数非空的 {vt}_exploitation_queue.json 数（vulnerabilities 列表非空）。用于
+        段③预检 + expected_agents.blackbox 分母（spec §9.5）。
+
+        白盒/组合行：deliverables/whitebox/ 下（tiering（spec 2026-08-18）：queue 是
+        中间产物落 whitebox/intermediate/，老结构在桶顶层。glob 不递归，双 glob 覆盖
+        ——intermediate 有则用之，同名不共存于两种结构）。
+        correlation 主行（C3 fix ①）：关联段合并 queue 落 deliverables/ 根——用
+        _find_queue_files 三处 glob 同序收集（对齐 multi orchestrator 的 queue 收集）。
+        """
+        if self._scan_row_is_correlation(scan_dir):
+            queue_files = _find_queue_files(scan_dir / "deliverables")
+        else:
+            wb_dir = scan_dir / "deliverables" / "whitebox"
+            if not wb_dir.is_dir():
+                return 0
+            queue_files = list(
+                (wb_dir / INTERMEDIATE_SUBDIR).glob("*_exploitation_queue.json")
+            ) or list(wb_dir.glob("*_exploitation_queue.json"))
         n = 0
         for qf in queue_files:
             try:
