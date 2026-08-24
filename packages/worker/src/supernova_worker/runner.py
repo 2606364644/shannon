@@ -1,8 +1,9 @@
-"""常驻 worker 容器入口：连接 temporal，起两个 Worker 消费 WEB 固定 task queue。
+"""常驻 worker 容器入口：连接 temporal，起三个 Worker 消费 WEB 固定 task queue。
 
 与 CLI 的 self-contained run_scan 不同——这里 worker 只消费、不提交：
 - 白盒 Worker 消费 supernova-wb-web（web scan_manager 提交，Plan 2 接入）
 - 黑盒 Worker 消费 supernova-bb-web
+- 跨仓关联 Worker 消费 supernova-corr-web（B2：依赖 supernova-multi pipeline）
 
 CLI 路径（supernova-whitebox/-blackbox start）零改动，仍用 generate_task_queue
 唯一随机 queue 自己提交自己消费，与本 worker 容器互不干扰（queue 精确匹配）。
@@ -18,6 +19,7 @@ from supernova_core.config.env_loader import load_env
 from supernova_core.services.temporal_infra import (
     WEB_TASK_QUEUE_WHITEBOX,
     WEB_TASK_QUEUE_BLACKBOX,
+    WEB_TASK_QUEUE_CORRELATION,
 )
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.activities import (
@@ -49,12 +51,13 @@ from supernova_blackbox.pipeline.activities import (
     run_host_proxy_setup as bb_run_host_proxy_setup, stop_host_proxy as bb_stop_host_proxy,
     cleanup_auth_state_activity as bb_cleanup_auth_state_activity,
 )
+from supernova_multi.pipeline.workflows import CorrelationScanWorkflow, run_correlation_activity
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
 
 
 async def run_worker(temporal_address: str = "localhost:7233") -> None:
-    """连接 temporal，起白盒+黑盒两个常驻 Worker 并行消费 WEB 固定 queue。
+    """连接 temporal，起白盒+黑盒+跨仓关联三个常驻 Worker 并行消费 WEB 固定 queue。
 
     永不主动返回（常驻）；temporal 连接失败 fail-fast 抛错。
     """
@@ -109,8 +112,19 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
         ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
     )
+    corr_worker = Worker(
+        client=client,
+        task_queue=WEB_TASK_QUEUE_CORRELATION,
+        workflows=[CorrelationScanWorkflow],
+        activities=[run_correlation_activity],
+        # 对齐 wb/bb worker，contextvar 化后并发放开（默认 4，env 可配）。
+        max_concurrent_workflow_tasks=int(
+            os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
+        ),
+        graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
+    )
 
-    await asyncio.gather(wb_worker.run(), bb_worker.run())
+    await asyncio.gather(wb_worker.run(), bb_worker.run(), corr_worker.run())
 
 
 def main() -> None:

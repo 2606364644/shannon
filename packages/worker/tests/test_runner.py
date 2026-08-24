@@ -1,4 +1,4 @@
-"""run_worker：连接 temporal，起两个常驻 Worker（白盒/黑盒固定 queue），注册对应 workflow+activities。"""
+"""run_worker：连接 temporal，起三个常驻 Worker（白盒/黑盒/跨仓关联固定 queue），注册对应 workflow+activities。"""
 import os
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
@@ -7,14 +7,16 @@ import pytest
 from supernova_core.services.temporal_infra import (
     WEB_TASK_QUEUE_WHITEBOX,
     WEB_TASK_QUEUE_BLACKBOX,
+    WEB_TASK_QUEUE_CORRELATION,
 )
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow
+from supernova_multi.pipeline.workflows import CorrelationScanWorkflow
 
 
 @pytest.mark.asyncio
-async def test_run_worker_connects_and_registers_two_workers(monkeypatch):
-    """run_worker 连 temporal + 起两个 Worker（白盒/黑盒固定 queue）+ 并行 run。"""
+async def test_run_worker_connects_and_registers_three_workers(monkeypatch):
+    """run_worker 连 temporal + 起三个 Worker（白盒/黑盒/跨仓关联固定 queue）+ 并行 run。"""
     from supernova_worker.runner import run_worker
 
     monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
@@ -24,21 +26,23 @@ async def test_run_worker_connects_and_registers_two_workers(monkeypatch):
     wb_worker.run = AsyncMock(return_value=None)
     bb_worker = MagicMock()
     bb_worker.run = AsyncMock(return_value=None)
+    corr_worker = MagicMock()
+    corr_worker.run = AsyncMock(return_value=None)
 
     with (
         patch("supernova_worker.runner.Client.connect",
               AsyncMock(return_value=mock_client)) as mock_connect,
         patch("supernova_worker.runner.Worker",
-              side_effect=[wb_worker, bb_worker]) as mock_worker_cls,
+              side_effect=[wb_worker, bb_worker, corr_worker]) as mock_worker_cls,
     ):
         await run_worker("temporal:7233")
 
     # 连接 temporal
     mock_connect.assert_awaited_once_with("temporal:7233")
 
-    # 两个 Worker 创建，task_queue + workflows 正确
-    assert mock_worker_cls.call_count == 2
-    wb_call, bb_call = mock_worker_cls.call_args_list
+    # 三个 Worker 创建，task_queue + workflows 正确
+    assert mock_worker_cls.call_count == 3
+    wb_call, bb_call, corr_call = mock_worker_cls.call_args_list
     assert wb_call.kwargs["client"] is mock_client
     assert wb_call.kwargs["task_queue"] == WEB_TASK_QUEUE_WHITEBOX
     assert WhiteboxScanWorkflow in wb_call.kwargs["workflows"]
@@ -47,14 +51,19 @@ async def test_run_worker_connects_and_registers_two_workers(monkeypatch):
     assert bb_call.kwargs["task_queue"] == WEB_TASK_QUEUE_BLACKBOX
     assert BlackboxScanWorkflow in bb_call.kwargs["workflows"]
     assert len(bb_call.kwargs["activities"]) >= 10  # 黑盒 ~16 activities
+    assert corr_call.kwargs["client"] is mock_client
+    assert corr_call.kwargs["task_queue"] == WEB_TASK_QUEUE_CORRELATION
+    assert CorrelationScanWorkflow in corr_call.kwargs["workflows"]
+    assert len(corr_call.kwargs["activities"]) >= 1  # 跨仓关联 run_correlation_activity
 
     # P3c 阶段 3：contextvar 化（AuditSession/LogBus/heartbeat 按 workflow_id 隔离）后
     # 并发不再串台。max_concurrent 读 SUPERNOVA_WORKER_MAX_CONCURRENT_WF（默认 4）。
     assert bb_call.kwargs["max_concurrent_workflow_tasks"] == 4
 
-    # 两个 worker 都 run（并行 gather）
+    # 三个 worker 都 run（并行 gather）
     wb_worker.run.assert_awaited_once()
     bb_worker.run.assert_awaited_once()
+    corr_worker.run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -67,7 +76,7 @@ async def test_run_worker_registers_all_defined_activities(monkeypatch):
     FAILED。既有的 ``len(activities) >= N`` 弱数量断言拦不住单点漏注(17 vs 18 都 ≥10)，
     改精确集合比对。注册的是真实函数对象，读 __name__ 即 defn 名(bb_assemble_report 等
     import 别名自动解析回 assemble_report——@activity.defn 无显式 name=，defn 名 == 函数名)。
-    一次覆盖 wb+bb 双 Worker，顺带防 whitebox 侧同类漏注。
+    一次覆盖 wb+bb+corr 三 Worker，顺带防 whitebox 侧同类漏注。
     """
     from pathlib import Path
     from supernova_worker.runner import run_worker
@@ -81,23 +90,30 @@ async def test_run_worker_registers_all_defined_activities(monkeypatch):
     wb_worker.run = AsyncMock(return_value=None)
     bb_worker = MagicMock()
     bb_worker.run = AsyncMock(return_value=None)
+    corr_worker = MagicMock()
+    corr_worker.run = AsyncMock(return_value=None)
 
     with (
         patch("supernova_worker.runner.Client.connect",
               AsyncMock(return_value=mock_client)),
         patch("supernova_worker.runner.Worker",
-              side_effect=[wb_worker, bb_worker]) as mock_worker_cls,
+              side_effect=[wb_worker, bb_worker, corr_worker]) as mock_worker_cls,
     ):
         await run_worker("temporal:7233")
 
-    wb_call, bb_call = mock_worker_cls.call_args_list
+    wb_call, bb_call, corr_call = mock_worker_cls.call_args_list
     wb_registered = {getattr(f, "__name__", f) for f in wb_call.kwargs["activities"]}
     bb_registered = {getattr(f, "__name__", f) for f in bb_call.kwargs["activities"]}
+    corr_registered = {getattr(f, "__name__", f) for f in corr_call.kwargs["activities"]}
 
     wb_expected = _activity_def_names(
         Path(wb_activities.__file__).read_text(encoding="utf-8"))
     bb_expected = _activity_def_names(
         Path(bb_activities.__file__).read_text(encoding="utf-8"))
+    # corr 的 @activity.defn 定义在 multi pipeline workflows 模块（单 activity 直通）。
+    from supernova_multi.pipeline import workflows as corr_workflows
+    corr_expected = _activity_def_names(
+        Path(corr_workflows.__file__).read_text(encoding="utf-8"))
 
     assert wb_registered == wb_expected, (
         f"whitebox worker 注册不一致：missing={sorted(wb_expected - wb_registered)}, "
@@ -105,6 +121,9 @@ async def test_run_worker_registers_all_defined_activities(monkeypatch):
     assert bb_registered == bb_expected, (
         f"blackbox worker 注册不一致：missing={sorted(bb_expected - bb_registered)}, "
         f"extra={sorted(bb_registered - bb_expected)}")
+    assert corr_registered == corr_expected, (
+        f"correlation worker 注册不一致：missing={sorted(corr_expected - corr_registered)}, "
+        f"extra={sorted(corr_registered - corr_expected)}")
 
 
 @pytest.mark.asyncio
@@ -133,11 +152,13 @@ async def test_run_worker_whitebox_concurrent_and_migration_activities(monkeypat
     wb_worker.run = AsyncMock()
     bb_worker = MagicMock()
     bb_worker.run = AsyncMock()
+    corr_worker = MagicMock()
+    corr_worker.run = AsyncMock()
 
     with patch("supernova_worker.runner.Client.connect",
                AsyncMock(return_value=mock_client)), \
          patch("supernova_worker.runner.Worker",
-               side_effect=[wb_worker, bb_worker]) as mw:
+               side_effect=[wb_worker, bb_worker, corr_worker]) as mw:
         await run_worker("temporal:7233")
 
     wb_call = mw.call_args_list[0]
@@ -161,13 +182,16 @@ async def test_worker_max_concurrent_reads_env(monkeypatch):
     wb_worker.run = AsyncMock()
     bb_worker = MagicMock()
     bb_worker.run = AsyncMock()
+    corr_worker = MagicMock()
+    corr_worker.run = AsyncMock()
     with patch("supernova_worker.runner.Client.connect",
                AsyncMock(return_value=mock_client)), \
          patch("supernova_worker.runner.Worker",
-               side_effect=[wb_worker, bb_worker]) as mw:
+               side_effect=[wb_worker, bb_worker, corr_worker]) as mw:
         await run_worker("temporal:7233")
     assert mw.call_args_list[0].kwargs["max_concurrent_workflow_tasks"] == 8
     assert mw.call_args_list[1].kwargs["max_concurrent_workflow_tasks"] == 8
+    assert mw.call_args_list[2].kwargs["max_concurrent_workflow_tasks"] == 8
 
 
 def test_main_loads_profile_env_before_starting_worker():

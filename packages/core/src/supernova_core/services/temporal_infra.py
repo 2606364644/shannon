@@ -33,6 +33,7 @@ def generate_task_queue(prefix: str) -> str:
 # （-web 后缀 vs 8hex 后缀），temporal queue 精确匹配 → CLI 与 WEB 互不消费、互不干扰。
 WEB_TASK_QUEUE_WHITEBOX = "supernova-wb-web"
 WEB_TASK_QUEUE_BLACKBOX = "supernova-bb-web"
+WEB_TASK_QUEUE_CORRELATION = "supernova-corr-web"
 
 
 def _shannon_container_exists() -> bool:

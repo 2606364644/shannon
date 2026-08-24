@@ -1496,6 +1496,7 @@ source = { editable = "packages/worker" }
 dependencies = [
     { name = "supernova-blackbox" },
     { name = "supernova-core" },
+    { name = "supernova-multi" },
     { name = "supernova-whitebox" },
     { name = "temporalio" },
 ]
@@ -1504,6 +1505,7 @@ dependencies = [
 requires-dist = [
     { name = "supernova-blackbox", editable = "packages/blackbox" },
     { name = "supernova-core", editable = "packages/core" },
+    { name = "supernova-multi", editable = "packages/multi" },
     { name = "supernova-whitebox", editable = "packages/whitebox" },
     { name = "temporalio", specifier = ">=1.7" },
 ]
