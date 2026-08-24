@@ -390,6 +390,39 @@ body.
     expect(container.querySelector(".copy-btn")).toBeNull();
   });
 
+  it("黑盒利用步骤嵌套命令围栏：归入对应步骤列表项、带复制按钮（步骤编号不丢）", () => {
+    // 后端 renderers/exploit.py 尾随命令拆分产物（真实 AUTH-VULN-04 形态）：
+    // 步骤有序列表 + 项内嵌套 ```bash 围栏 + 证据字段的终端转录围栏。
+    const md = `# 认证利用报告
+
+### AUTH-VULN-04: auth bypass
+- **严重程度:** critical
+- **利用步骤:**
+  1. Send a pre-auth request to POST http://x/login.
+  2. Observe the response: HTTP/1.1 302 Found.
+  3. Follow the redirect with the issued cookie:
+     \`\`\`bash
+     curl -b 'connect.sid=<SID>' http://10.2.22.187:4000/benefits
+     \`\`\`
+- **影响证据:**
+  \`\`\`bash
+  curl -s -D - -o /dev/null -X POST http://x/login
+  \`\`\`
+`;
+    const { container } = render(<MarkdownView markdown={md} />);
+    // 两处围栏都渲染为带复制按钮的代码块（bash 角标）
+    const blocks = container.querySelectorAll('pre[data-testid="code-block"]');
+    expect(blocks.length).toBe(2);
+    blocks.forEach((b) => expect(b.querySelector(".copy-btn")).not.toBeNull());
+    // 命令完整落在代码块内（复制按钮拷到纯命令，$ 提示符后端已剥）
+    expect(blocks[0]).toHaveTextContent("curl -b 'connect.sid=<SID>' http://10.2.22.187:4000/benefits");
+    // 有序步骤仍是列表（fence 嵌套项内不断列表、编号文本保留）
+    const ol = container.querySelector("ol");
+    expect(ol).not.toBeNull();
+    expect(ol?.querySelectorAll("li").length).toBe(3);
+    expect(ol).toHaveTextContent("Follow the redirect with the issued cookie:");
+  });
+
   it("带语言标记的 block code 显语言角标", () => {
     const { container } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
     const lang = container.querySelector('[data-testid="code-lang"]');
