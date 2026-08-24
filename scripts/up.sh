@@ -1,33 +1,30 @@
 #!/usr/bin/env bash
-# scripts/up.sh —— 一键启动 web,自动判断 temporal 复用还是自建。
+# scripts/up.sh —— 一键启动 web/worker，自动判断 temporal 复用还是自建。
 #
 # 用法：
-#   ./scripts/up.sh              # 启动（自动判断复用/自建），复用现有镜像不重建（秒起，生产式）
-#   ./scripts/up.sh --dev        # 叠加 docker-compose.dev.yml：bind mount 源码，改 Python 免 rebuild（开发式）
-#   ./scripts/up.sh --build      # 启动并强制重建镜像（改了依赖/前端/Dockerfile 后用）
-#   ./scripts/up.sh restart web  # 重启进程（dev 下改了 Python 后让它加载新代码，免 rebuild）
+#   ./scripts/up.sh              # 启动（自动判断 temporal；镜像已有就不重建，秒起）
+#   ./scripts/up.sh --build      # 强制重建镜像（改了 packages/ 源码、依赖、前端后用）
+#   ./scripts/up.sh --dev        # 叠加 dev override：源码挂载进容器，改 Python 免 rebuild
+#   ./scripts/up.sh restart web  # 重启进程（dev 下改完 Python 让它加载新代码）
 #   ./scripts/up.sh down         # 停掉
-#   ./scripts/up.sh logs web     # 看日志（任意 docker compose 子命令透传）
+#   ./scripts/up.sh logs web     # 看日志（其他 compose 子命令同理透传）
+#   --dev 和 --build 可组合。
 #
-# --dev 与 --build 正交、可组合（./scripts/up.sh --dev --build）。
+# temporal 怎么起，看三态：
+#   自己的 temporal 在跑 → 自建（再次 up 的常态）
+#   7233 被别的进程占用 → 复用外部 temporal（-f 加 external-temporal override）
+#   7233 空闲           → 自建（主 compose 默认）
+#   不能只看 7233 被占就当外部：自己的 temporal 也占 7233，套错 override 会让
+#   worker 连一个不存在的主机名然后 crash loop（踩过）。
 #
-# 逻辑：
-#   先预清理 compose 项目内失败/空壳容器（Created/Exited/Dead 态）——
-#   专治"曾直接 docker compose up 失败，留下 supernova-{temporal,web} 空壳"在模式切换/端口检测时捣乱。
-#   安全（双重，绝不误删外部 shannon-temporal）：
-#     - docker compose ps 只列本项目(supernova)容器，物理上排除外部 shannon-temporal；
-#     - 且只删非运行态，running 的容器（含外部 temporal）一律不动。
-#   再判断 temporal 模式（三态，关键防误判）：
-#     - 本项目 temporal(supernova-temporal) 已在跑 → 自建模式（「再次 up」常态，不套 override）
-#     - 否则若 7233 被非本项目进程占用 → 复用模式：-f 加载 external-temporal override
-#     - 否则（7233 空闲）→ 自建模式：裸 docker compose up（主 compose 默认就自建 temporal）
-#   ⚠️ 不能只看 7233 是否被占：自己的 temporal 启动后就占着 7233，会被误判成「外部 temporal」
-#      从而套 override、把 web/worker 指向不存在的主机名 → worker crash loop（曾发生）。
-#
-# 设计要点：
-#   - 主 docker-compose.yml 默认就是"自建 temporal"，裸跑 docker compose up 不报错。
-#   - 复用模式用 -f 显式加载 docker-compose.override.external-temporal.yml（入库模板）。
-#   - 不依赖本地 docker-compose.override.yml（那个被 .gitignore 排除、且会干扰自动判断）。
+# 卡在拉 temporal 镜像 60s 后报 "context deadline exceeded"？
+#   拉镜像走的是 Docker Desktop / macOS 系统代理，shell 里 export http_proxy 没用。
+#   多半是代理软件在跑但「系统代理」开关被关了。修法任选：
+#   1) 代理软件里重开「系统代理」（还不行就重启 Docker Desktop）；
+#   2) Docker Desktop Settings → Proxies 手动填 http://127.0.0.1:7890，一劳永逸；
+#   3) 绕开代理直接拉国内镜像（拉一次就缓存，之后不再拉）：
+#      docker pull docker.m.daocloud.io/temporalio/temporal:latest \
+#        && docker tag docker.m.daocloud.io/temporalio/temporal:latest temporalio/temporal:latest
 set -euo pipefail
 
 # 切到仓库根（脚本可能在子目录被调用）
@@ -35,13 +32,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# C1: worker 常驻消费 WEB 固定 task queue，故 up 一并拉起 web worker。
-#
-# 参数解析：第一个非 flag 参数 = compose 子命令（默认 up）；--build / --dev 各自提取为
-# up 专属标志（强制重建镜像 / 叠加开发 override），不透传给 docker compose；其余原样透传。
-# 这样 `up.sh --build`、`up.sh --dev`、`up.sh --dev --build` 都能工作（flag 可放任意位置），
-# 而裸 `up.sh` 复用现有镜像——适合只改了 workspaces/repos/.env 等挂载内容、没动 packages/ 源码的场景。
-# 首次启动（镜像不存在）时 docker compose up 会自动构建（compose 有 build: 配置），无需显式 --build。
+# C1: worker 常驻消费 WEB 固定 task queue，up 时一并拉起。
+# 参数解析：第一个非 flag 参数 = compose 子命令（默认 up）；--build/--dev 是 up 专属
+# flag 不透传，其余原样透传。裸 up 复用现有镜像；镜像不存在时 compose 会自动构建。
 ACTION="up"
 PASSTHROUGH=()
 WANT_BUILD=0
@@ -64,7 +57,7 @@ if [ "$WANT_BUILD" = "1" ]; then
   BUILD_FLAG="--build"
 fi
 
-# 检测 7233 端口是否被监听（docker-proxy / temporal 进程都会占）
+# 7233 端口是否被监听（docker-proxy / temporal 进程都算）
 port_in_use() {
   if command -v ss >/dev/null 2>&1; then
     ss -tln 2>/dev/null | grep -q ':7233'
@@ -76,24 +69,15 @@ port_in_use() {
   fi
 }
 
-# 本项目（supernova）的 temporal 容器是否正在运行。
-# 关键：区分「自己的 supernova-temporal 占了 7233」与「真正的外部 temporal 占了 7233」。
-# 前者是「再次 up」（改完配置重启 web/worker 等）的正常情况——应维持自建模式，
-# 绝不能因 7233 被自己的 temporal 占用就误判成「外部 temporal 已存在」去套 override
-# （曾导致 worker/web 连向不存在的旧主机名 shannon-py-temporal → DNS 失败 → crash loop）。
-# 只有 7233 被非本项目的进程占用，才是真正的「复用外部 temporal」场景。
+# 自己的 temporal 是否在跑——见文件头三态说明（自己的 7233 ≠ 外部 temporal）。
 own_temporal_running() {
   local tid
   tid=$(docker compose -f docker-compose.yml ps -q temporal 2>/dev/null || true)
   [ -n "$tid" ] && [ "$(docker inspect -f '{{.State.Running}}' "$tid" 2>/dev/null)" = "true" ]
 }
 
-# 清理 compose 项目内失败/空壳容器（Created/Exited/Dead 等非运行态）。
-# 专治：曾直接 `docker compose up` 失败，留下 supernova-{temporal,web} 的 Created 态空壳，
-#       这些空壳在后续模式切换 / 端口检测 / up 时捣乱。
-# 安全保证（双重，绝不误删外部 shannon-temporal）：
-#   1. docker compose ps 只列本项目(supernova)管辖的容器，物理上排除外部 shannon-temporal；
-#   2. 只删 state ∈ {created, exited, dead}，running / restarting / paused 一律保留。
+# 清掉本项目里 Created/Exited/Dead 的空壳容器（上次 up 失败留下的，会捣乱模式判断）。
+# 只删本项目的非运行态容器，running 的一律不动，外部 shannon-temporal 更碰不到。
 cleanup_stale_containers() {
   local stale c
   stale=$(docker compose ps -a --format '{{.Name}}\t{{.State}}' 2>/dev/null \
@@ -109,9 +93,8 @@ cleanup_stale_containers() {
   fi
 }
 
-# Docker 在另一条 compose up/down 或 rm 请求刚开始删除同一容器时，会返回
-# "removal of container ... is already in progress"。这只是短暂竞态：等待容器
-# 消失后再继续启动，而不是让 set -e 把整个 up.sh 提前终止。
+# 另一个请求正在删同一容器时会报 "already in progress"，等它删完再试，
+# 别让 set -e 把整个脚本带崩。
 remove_stale_container() {
   local c="$1"
   local max_attempts="${SUPERNOVA_CONTAINER_REMOVE_RETRIES:-30}"
@@ -131,12 +114,12 @@ remove_stale_container() {
       return 0
     fi
 
-    # rm 失败后它可能刚好被另一请求删完了。
+    # rm 失败后它可能刚好被别人删完了。
     if ! docker inspect "$c" >/dev/null 2>&1; then
       return 0
     fi
 
-    # 只有已知的删除竞态重试；权限、名称解析等真实错误立即暴露。
+    # 只有删除竞态值得重试；权限等真实错误直接报出来。
     if [[ "$err" != *"already in progress"* ]]; then
       printf '%s\n' "$err" >&2
       return 1
@@ -163,8 +146,7 @@ OVERRIDE_FILE="docker-compose.override.external-temporal.yml"
 DEV_FILE="docker-compose.dev.yml"
 
 if [ "$ACTION" = "up" ]; then
-  # 确保 docker 环境：buildx 就位 compose 才走 BuildKit（跨平台 Linux/WSL2/Mac）。
-  # 失败（runtime 缺等）→ set -e 中止，不带着坏环境硬 build。down/logs 不 build 不调。
+  # buildx 就位 compose 才走 BuildKit；环境坏了让 set -e 直接中止，不带病硬跑。
   bash "$SCRIPT_DIR/ensure-docker.sh"
   cleanup_stale_containers
   if [ "$WANT_BUILD" = "1" ]; then
@@ -173,12 +155,9 @@ if [ "$ACTION" = "up" ]; then
     echo ">> 复用现有镜像（未传 --build）。dev 下改 Python 用 restart；改依赖/前端再加 --build。"
   fi
 
-  # 组装 compose 文件列表：base + temporal 模式（互斥）+ dev override（正交，可叠加）。
-  # 用数组而非两条分支，便于 dev override 独立于 temporal 模式叠加在任一之上。
+  # 组装 compose 文件：base + temporal 模式（二选一）+ dev override（可叠加）。
   COMPOSE_FILES=(-f docker-compose.yml)
   if own_temporal_running; then
-    # 本项目 temporal(supernova-temporal) 已在运行 → 维持自建模式，不套 override。
-    # 即便它占着 7233 也不是「外部 temporal」，而是「再次 up」的常态。
     echo ">> 本项目 temporal(supernova-temporal) 已在运行 → 自建模式（不套 override）"
   elif port_in_use; then
     echo ">> 7233 被非本项目的进程占用 → 复用外部 temporal 模式"
@@ -199,18 +178,13 @@ if [ "$ACTION" = "up" ]; then
     COMPOSE_FILES+=(-f "$DEV_FILE")
   fi
 
-  # BUILD_FLAG 为空时需展开为无（不加引号是有意为之），故关闭 SC2086：
+  # BUILD_FLAG 不加引号是有意的（空时展开为零个参数）：
   # shellcheck disable=SC2086
-  # PASSTHROUGH 可能为空数组：macOS 默认 /bin/bash 3.2 在 set -u 下展开空数组
-  # "${ARR[@]}" 会报 unbound variable（4.4+ 才修）。用 ${ARR[@]+"${ARR[@]}"} 惯用法：
-  # 空时展开为零参数，非空时正确分词（含空格元素），全 bash 版本兼容。
+  # ${ARR[@]+"${ARR[@]}"} 是 macOS bash 3.2 + set -u 下空数组的安全展开，勿简化。
   docker compose "${COMPOSE_FILES[@]}" up -d $BUILD_FLAG ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} web worker
 else
-  # down / logs / ps / restart 等子命令透传。
-  # 注意：复用模式下若 web 接入了 shannon-net，down 只停 compose 管辖的服务，
-  # 不影响外部 temporal 容器。
-  # 用 PASSTHROUGH 而非 $@：参数解析已把 ACTION/--build/--dev 提取掉，$@ 仍是原始全部
-  # 参数，直接用会把 ACTION 重复传一次（如 `down` → `docker compose down down`）。
+  # down/logs/ps 等子命令透传。用 PASSTHROUGH 而非 $@（$@ 还带着 ACTION，会重复传）。
+  # down 只停 compose 管辖的服务，不动外部 temporal。
   echo ">> 透传子命令: $ACTION ${PASSTHROUGH[*]}"
   docker compose "$ACTION" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
 fi
