@@ -29,6 +29,17 @@ const SCAN_TABS = [
   { value: "live", labelKey: "workspaceDetail.tabs.live" },
 ] as const;
 
+// correlation 主行 tab 组（D6，spec 2026-08-24 §8）：概览 | 跨仓关联 | 产物 | 日志——
+// 无 report/dataflow/live：关联结果在专属「跨仓关联」tab；实时进度在顶部
+// ScanProgressOverview（correlation_progress 事件经 dashboardReducer 渲染 repo/
+// phase/edge 网格），原始事件流可经日志文件查看。
+const CORRELATION_SCAN_TABS = [
+  { value: "overview", labelKey: "workspaceDetail.tabs.overview" },
+  { value: "correlation", labelKey: "workspaceDetail.tabs.correlation" },
+  { value: "deliverables", labelKey: "workspaceDetail.tabs.deliverables" },
+  { value: "logs", labelKey: "workspaceDetail.tabs.logs" },
+] as const;
+
 /** ApiError → 可读文案：优先 body.detail（后端 ValueError 的 str，如「白盒产物未就绪」），
  *  pydantic 校验数组取首条 msg；兜底 HTTP 状态码（ApiError.message 只是 "API 422"）。 */
 function apiErrMsg(e: unknown): string {
@@ -150,6 +161,11 @@ export default function ScanDetail() {
 
   const status = meta?.status ?? meta?.session?.status ?? "running";
   const isCombined = meta?.combined === true;
+  // correlation 主行（D6）：tab 组按 scan_type 分支（概览/跨仓关联/产物/日志）；
+  // 两段式组合时间线不渲染——关联是三段接力（子仓白盒→关联→黑盒验证），两段
+  // 「白盒段/黑盒段」标签会错述语义，专属三段横幅在概览 tab 的 CorrelationOverview。
+  const isCorrelation = meta?.scan_type === "correlation";
+  const scanTabs = isCorrelation ? CORRELATION_SCAN_TABS : SCAN_TABS;
   // 版本化黑盒 run（spec 2026-08-14 §5.2）：?run= 选中（默认 latest_bb_run），供 ReportTab/
   // DeliverablesTab 按 run 切黑盒/融合产物。终端态白盒任务提供「加黑盒」入口（建下一个 run）。
   const [searchParams, setSearchParams] = useSearchParams();
@@ -290,8 +306,9 @@ export default function ScanDetail() {
         </div>
       </div>
       {/* 组合扫描两段时间线（spec §9/§11.3）+ 选中 run 失败横幅（spec 2026-08-14 可见性）：
-          静态上下文，随页滚动；shrink-0 以兼容 live/logs flex 链。 */}
-      {isCombined && !loading && (
+          静态上下文，随页滚动；shrink-0 以兼容 live/logs flex 链。
+          correlation 主行不渲染（见 isCorrelation 注释——三段语义在概览 tab）。 */}
+      {isCombined && !isCorrelation && !loading && (
         <div className={isFlexLayout ? "shrink-0" : ""}>
           <CombinedDetailTimeline
             ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase} onRerunDone={load}
@@ -335,7 +352,7 @@ export default function ScanDetail() {
         <Tabs value={current} onValueChange={(v) => navigate(v)}>
           <div data-testid="scan-tabs-sticky">
             <TabsList>
-              {SCAN_TABS.map((tab) => (
+              {scanTabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>{t(tab.labelKey)}</TabsTrigger>
               ))}
             </TabsList>

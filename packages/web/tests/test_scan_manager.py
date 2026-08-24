@@ -9,6 +9,7 @@ _watch -> tail events.ndjson 直到 scan_end; cancel -> handle.cancel(temporal �
 import asyncio
 import json
 import time
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -611,7 +612,10 @@ async def test_submit_correlation_to_correlation_queue(tmp_path, monkeypatch):
     call = mock_client.start_workflow.call_args
     assert call.kwargs["task_queue"] == WEB_TASK_QUEUE_CORRELATION
     assert call.kwargs["id"] == f"ws-{scan_id}-corr"
-    assert call.kwargs["run_timeout"] == workflow_run_timeout()
+    # final-fix ④：corr run_timeout 须严格大于 activity 预算 4h —— max(env, 4.5h)，
+    # 默认 3h 时抬到 4.5h（防 3h workflow 掐死 4h activity）。
+    assert call.kwargs["run_timeout"] == max(
+        workflow_run_timeout(), timedelta(hours=4, minutes=30))
     inp = call.args[1]
     assert isinstance(inp, CorrelationPipelineInput)
     assert inp.config_path == str(tmp_path / "web-multi-x.yaml")
@@ -818,6 +822,68 @@ async def test_start_correlation_reuse_no_child_rows(tmp_path, monkeypatch):
     assert submitted["corr_paths"]["frontend"] == tmp_path / "ws" / "scans" / front_id
     assert submitted["corr_paths"]["order-svc"] == tmp_path / "ws" / "scans" / order_id
     assert main.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_start_correlation_form_yaml_defaults_and_abs_paths(
+        tmp_path, monkeypatch):
+    """final-fix ①+②：表单形 yaml（formToYaml 产物——无 correlation 段、path=仓库
+    名、复用仓无 path）经 start() 全程不 422：
+
+    ① 缺 correlation 段被注入默认占位（store validate + start 解析两处兜底），
+      占位 out_workspace 被 C3 覆写为主行 scan_id 落进 worker yaml；
+    ② 落盘 worker yaml 的 repos path 回填为绝对仓库目录（关联 agent 源码可达 +
+      漂移检测不再静默跳过）——现扫子仓用已解析目录，复用子仓 best-effort
+      （仓仍在 ws → 回填；已删 → null，见本用例第二段）。
+    """
+    import yaml
+    _seed_repo(tmp_path, "ws", "frontend")   # 现扫子仓
+    _seed_repo(tmp_path, "ws", "order-svc")  # 复用子仓的源仓仍在 ws
+    order_id = _seed_reusable_whitebox(tmp_path, "ws", "order-svc")
+    # formToYaml 形状：只有 repos/relations；path=仓库名；复用仓仅 workspace
+    form_yaml = (
+        "repos:\n"
+        "  frontend:\n    path: frontend\n    role: entrypoint\n"
+        f"  order-svc:\n    workspace: {order_id}\n"
+        "relations:\n  - {from: frontend, to: order-svc, protocol: grpc}\n"
+    )
+    sm, store, submitted, pre_ids, ws_name, scan_id = await _start_corr_env(
+        tmp_path, monkeypatch, yaml_text=form_yaml)
+    # 无 422（start 返回即证）；现扫仅 frontend 一仓，order-svc 复用不建行
+    assert len(submitted["wb"]) == 1
+    assert submitted["corr"] == 1
+    # worker yaml：注入的 correlation.out_workspace == 主行 scan_id（占位被覆写）
+    sess = json.loads((tmp_path / "ws" / "scans" / scan_id / "session.json").read_text())
+    dumped = Path(sess["config_path"])
+    assert dumped.name == f"{scan_id}-multi-repo.yaml"
+    raw = yaml.safe_load(dumped.read_text("utf-8"))
+    assert raw["correlation"]["out_workspace"] == scan_id
+    # repos path 全为绝对目录（非裸仓库名）：现扫 = 解析出的仓库目录；复用仓
+    # best-effort 回填（源仓仍在 ws）
+    assert Path(raw["repos"]["frontend"]["path"]) == (
+        tmp_path / "ws" / "repos" / "frontend").resolve()
+    assert Path(raw["repos"]["order-svc"]["path"]) == (
+        tmp_path / "ws" / "repos" / "order-svc").resolve()
+    assert raw["repos"]["frontend"]["path"] != "frontend"
+
+    # 复用仓已不在 ws（best-effort 失败）→ path 保持 null（漂移跳过是正解）
+    import shutil
+    shutil.rmtree(tmp_path / "ws" / "repos" / "order-svc")
+    gone_id = _seed_reusable_whitebox(tmp_path, "ws", "pay-svc")
+    form_yaml2 = (
+        "repos:\n"
+        "  frontend:\n    path: frontend\n    role: entrypoint\n"
+        f"  pay-svc:\n    workspace: {gone_id}\n"
+        "relations:\n  - {from: frontend, to: pay-svc, protocol: grpc}\n"
+    )
+    _sm2, _store2, _sub2, _pre2, _ws2, scan_id2 = await _start_corr_env(
+        tmp_path, monkeypatch, yaml_text=form_yaml2)
+    sess2 = json.loads(
+        (tmp_path / "ws" / "scans" / scan_id2 / "session.json").read_text())
+    raw2 = yaml.safe_load(Path(sess2["config_path"]).read_text("utf-8"))
+    assert raw2["repos"]["pay-svc"]["path"] is None
+    assert Path(raw2["repos"]["frontend"]["path"]) == (
+        tmp_path / "ws" / "repos" / "frontend").resolve()
 
 
 @pytest.mark.asyncio
@@ -1068,3 +1134,164 @@ async def test_start_correlation_gateway_url_without_auth_no_config(tmp_path, mo
     assert not (scan_dir / "scan-config.yaml").exists()
     captured = await _run_real_bb_phase_capture(sm, monkeypatch, scan_dir, "ws", scan_id)
     assert captured["config_path"] is None
+
+
+# ── C4: correlation cancel 级联 + resume 收口 ──────────────────────────────
+
+def _fake_wf_handle_factory(wf_cancels: list):
+    """Client.get_workflow_handle 替身：按 id 造 handle，cancel 记录进 wf_cancels。"""
+
+    def fake_get_handle(wf_id, *args, **kwargs):
+        h = MagicMock()
+        h.id = wf_id
+        h.cancel = AsyncMock(side_effect=lambda: wf_cancels.append(wf_id))
+        return h
+
+    return fake_get_handle
+
+
+@pytest.mark.asyncio
+async def test_cancel_correlation_cascades(tmp_path, monkeypatch):
+    """C4: 取消 correlation 主行级联——编排 task cancel+pop、主/子仓 _handles cancel、
+    现扫子仓白盒 + -corr 关联 workflow re-attach cancel（复用子仓已终态不碰）、
+    heartbeat fresh 写协作式信号、主行标 cancelled + scan_end。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "frontend", "correlation")
+    c1_id, _c1_dir = store.create_scan("ws", "", "frontend", "whitebox")
+    c2_id, _c2_dir = store.create_scan("ws", "", "order-svc", "whitebox")
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"corr_children": [
+        {"service": "frontend", "scan_id": c1_id, "reused": False},
+        {"service": "order-svc", "scan_id": c2_id, "reused": True},
+    ]})
+    # 编排 task 占位（挂起协程；cancel 后应 cancelled 且 key 被 pop）
+    orch = asyncio.ensure_future(asyncio.sleep(60))
+    sm._orchestrator_tasks[("ws", scan_id)] = orch
+    # 主行 + 现扫子仓 handle 登记（AsyncMock cancel）；复用子仓无 handle
+    main_h, c1_h = AsyncMock(), AsyncMock()
+    sm._handles[("ws", scan_id)] = main_h
+    sm._handles[("ws", c1_id)] = c1_h
+    # Temporal re-attach mock：记录被 cancel 的 workflow id
+    wf_cancels: list = []
+    mock_client = _patch_client(monkeypatch)
+    mock_client.get_workflow_handle = _fake_wf_handle_factory(wf_cancels)
+    # heartbeat fresh → 协作式信号兜底
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")
+
+    result = await sm.cancel("ws", scan_id)
+
+    assert result == {"cancelled": scan_id}
+    assert ("ws", scan_id) not in sm._orchestrator_tasks  # 编排 task 已 pop
+    await asyncio.sleep(0)  # 让 cancel 传播到挂起协程
+    assert orch.cancelled()
+    main_h.cancel.assert_awaited_once()   # 主行 handle（登记路径）
+    c1_h.cancel.assert_awaited_once()     # 现扫子仓 handle（登记路径）
+    assert f"ws-{c1_id}" in wf_cancels    # 现扫子仓 workflow re-attach cancel
+    assert f"ws-{scan_id}-corr" in wf_cancels  # 关联 workflow cancel
+    assert f"ws-{c2_id}" not in wf_cancels     # 复用子仓（已终态）不碰
+    assert f"ws-{scan_id}" not in wf_cancels   # 主行无白盒 base workflow（区别于组合路径）
+    assert (scan_dir / "cancel.requested").exists()  # heartbeat fresh → 信号
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+    assert sess.get("completed_at") is not None
+    assert '"scan_end"' in (scan_dir / "events.ndjson").read_text()
+
+
+@pytest.mark.asyncio
+async def test_cancel_correlation_with_active_bb_run(tmp_path, monkeypatch):
+    """C4: 段③黑盒 run 在跑（latest 非终态）→ run workflow re-attach cancel + 标
+    cancelled（防永久 pending 禁用 delete/续跑门）。段③建 run 会给主行 session 写
+    combined=True（create_blackbox_run 副作用）——路由仍按 scan_type=correlation 级联
+    （不进 _cancel_combined：base/authcheck workflow 不被 cancel）。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "gw", "correlation")
+    run_id, _run_dir = store.create_blackbox_run("ws", scan_id)
+    assert json.loads((scan_dir / "session.json").read_text()).get("combined") is True
+    wf_cancels: list = []
+    mock_client = _patch_client(monkeypatch)
+    mock_client.get_workflow_handle = _fake_wf_handle_factory(wf_cancels)
+
+    result = await sm.cancel("ws", scan_id)
+
+    assert result == {"cancelled": scan_id}
+    assert f"ws-{scan_id}-bb-1" in wf_cancels       # 活跃 run 的黑盒 workflow
+    assert f"ws-{scan_id}-corr" in wf_cancels       # 走 correlation 级联（非组合路径）
+    assert f"ws-{scan_id}" not in wf_cancels        # 组合路径的 base cancel 未发生
+    assert f"ws-{scan_id}-authcheck" not in wf_cancels  # 组合路径的 authcheck 未发生
+    runs = store.list_blackbox_runs("ws", scan_id)
+    assert runs[-1]["status"] == "cancelled"        # run 收终态
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"            # 主行照标 cancelled
+
+
+@pytest.mark.asyncio
+async def test_cancel_correlation_temporal_unreachable_still_marks(tmp_path, monkeypatch):
+    """C4: Temporal 不可达（Client.connect 抛）→ re-attach 全跳过，仍标 cancelled
+    （对齐 _cancel_combined 的 best-effort 语义：不可达不阻断终态）。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "gw", "correlation")
+    c1_id, _c1_dir = store.create_scan("ws", "", "frontend", "whitebox")
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"corr_children": [
+        {"service": "frontend", "scan_id": c1_id, "reused": False}]})
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("temporal down")
+
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.Client.connect", boom)
+    result = await sm.cancel("ws", scan_id)
+    assert result == {"cancelled": scan_id}
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+    assert '"scan_end"' in (scan_dir / "events.ndjson").read_text()
+
+
+@pytest.mark.asyncio
+async def test_resume_correlation_alive_noop(tmp_path):
+    """C4: correlation 主行 heartbeat 判活 → resume no-op（ValueError 拒绝；不动
+    session、不提交 workflow）。session 显式 interrupted 但 worker 复活的 race 由
+    纯心跳门兜底；分支位于 _check_temporal 之前（ValueError 而非 Temporal 侧错误）。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "frontend", "correlation")
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"status": "interrupted"})
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh → 判活
+    before = (scan_dir / "session.json").read_text()
+
+    with pytest.raises(ValueError, match="仍在运行"):
+        await sm.resume("ws", scan_id)
+
+    assert (scan_dir / "session.json").read_text() == before  # session 零改动
+    assert not sm._handles and not sm._orchestrator_tasks     # 零提交
+
+
+@pytest.mark.asyncio
+async def test_resume_correlation_stale_marks_interrupted(tmp_path):
+    """C4: stale correlation 主行（session running + 无心跳，web 崩溃未及 reconcile）→
+    resume 标 interrupted 终态（补 scan_end + session）+ ValueError 引导重扫；不重入
+    接力（零 workflow 提交、不写 resumeAttempts——不走白盒 resume 机器）。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "frontend", "correlation")
+    sess = json.loads((scan_dir / "session.json").read_text())
+    sess["status"] = "running"
+    sess["created_at"] = time.time() - 3600  # 越过提交宽限门（created_at 回落锚点）
+    (scan_dir / "session.json").write_text(json.dumps(sess))
+    # 无 heartbeat + 宽限外 → _compute_status 判 interrupted → 过 resumable 门
+
+    with pytest.raises(ValueError, match="不支持断点恢复"):
+        await sm.resume("ws", scan_id)
+
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "interrupted"
+    assert sess.get("completed_at") is not None
+    events = (scan_dir / "events.ndjson").read_text()
+    assert '"scan_end"' in events and '"interrupted"' in events
+    assert "resumeAttempts" not in sess              # 不走白盒 resume 重提交机器
+    assert not sm._handles and not sm._orchestrator_tasks
+
+    # 幂等：已收口后再 resume 不覆写终态（同 ValueError、scan_end 不双写）
+    with pytest.raises(ValueError, match="不支持断点恢复"):
+        await sm.resume("ws", scan_id)
+    assert (scan_dir / "events.ndjson").read_text().count('"scan_end"') == 1

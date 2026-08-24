@@ -148,6 +148,12 @@ function describe(e: NdjsonEvent): RowDesc {
     case "run_end":
       return { icon: "◆", tag: "RUN", body: `${e.run} · ${e.status}` };
 
+    case "correlation_progress": {
+      // 跨仓关联三段接力进度（web CorrelationEventWriter，CONTROL）：node=repo/phase/edge。
+      const icon = e.status === "failed" ? "✗" : e.status === "completed" ? "✓" : "○";
+      return { icon, tag: "CORR", body: `${e.node} ${e.name} ${e.status}${e.detail ? ` — ${e.detail}` : ""}` };
+    }
+
     case "InfoEvent":
       return { icon: "·", tag: "INFO", body: e.message };
 

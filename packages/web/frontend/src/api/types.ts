@@ -83,7 +83,7 @@ export interface RunEndEvent extends CommonFields {
   returncode?: number; stderr_tail?: string;
 }
 export interface CorrelationProgressEvent extends CommonFields {
-  type: "correlation_progress"; node: "repo" | "edge"; name: string;
+  type: "correlation_progress"; node: "repo" | "phase" | "edge"; name: string;
   status: "started" | "completed" | "failed"; detail?: string;
 }
 
@@ -178,6 +178,10 @@ export interface ScanSummary {
   // 同一仓扫不同分支靠此区分来源；存量报告/黑盒不返 -> 可选，消费方不显示。
   repo_branch?: string | null;
   repo_commit?: string | null;
+  // 跨仓关联血缘（C2，spec 2026-08-24）：correlation 主行 session.corr_children 透传
+  // （scan_manager 提交子仓时写 {service, scan_id, reused}）。非 correlation scan 不返
+  // -> 可选，消费方 null-safe。
+  corr_children?: { service: string; scan_id: string; reused: boolean }[] | null;
 }
 
 export interface SessionMetrics {
@@ -414,6 +418,56 @@ export interface DataflowView {
   safe_vectors: SafeVector[];
 }
 
+// === 跨仓关联视图（spec 2026-08-24，对齐 web api/scans.py assemble_correlation_detail，Task C5）===
+// GET /workspaces/{ws}/scans/{id}/correlation 返回值；422=非 correlation scan。
+// 缺文件语义（关联未跑完）：topology/report_md → null、boundaries/flows → []、
+// {vc}_exploitation_queue.json 缺 → merged_vulns 键缺席（前端显「进行中/未开始」）。
+// 产物 schema 同源：core correlation/schemas.py（Call/TopologyEdge/TrustBoundary/CrossServiceFlow）。
+/** 拓扑边上的单次跨服务调用证据（schemas.py Call）。 */
+export interface CorrCall {
+  method: string;
+  call_site: { file: string; line: number; snippet: string };
+  confidence: string;
+  evidence: string;
+}
+/** 候选跨服务攻击链（schemas.py CrossServiceFlow）：前端仓入口 → RPC method → 后端仓漏洞。 */
+export interface CorrFlow {
+  edge_from: string;
+  edge_to: string;
+  entry: string;
+  method: string;
+  call_site: { file: string; line: number; snippet: string };
+  vuln_refs: { service: string; title: string; severity: string; location: string }[];
+  confidence: string;
+  evidence: string;
+}
+/** merged_vulns 单项：{vc}_exploitation_queue.json 的 vulnerabilities 元素（宽松 dict）。 */
+export interface CorrVuln {
+  title: string;
+  description?: string;
+  severity?: string;
+  location?: string;
+  service?: string;
+  [k: string]: unknown;
+}
+export interface CorrelationDetail {
+  topology: { services: { name: string; role: string; repo: string }[];
+              edges: { from: string; to: string; protocol: string; status: string;
+                       calls: CorrCall[]; error?: string | null }[] } | null;
+  boundaries: { service: string; method: string; exposure: string;
+                reachable_from: string[]; reason: string; confidence: string }[];
+  flows: CorrFlow[];
+  merged_vulns: Record<string, CorrVuln[]>;
+  // 首版保守恒 []（后端不解析 correlation-report.md；后续版本从事件/report 提取）。
+  drift_warnings: unknown[];
+  corr_children: { service: string; scan_id: string; reused: boolean }[];
+  report_md: string | null;
+}
+
+/** 多仓配置摘要（GET /api/multi-configs）。backend MultiRepoConfigStore.list_configs()
+ *  返 list[str]——仅配置名（已排序），无对象元数据，故摘要即 string（勿包 {name} 壳）。 */
+export type MultiConfigSummary = string;
+
 /** 黑盒登录配置（对齐 core Authentication schema：models/config.py:29-45）。
  *  字段名（snake_case）与后端 pydantic 模型一致——scan_manager Authentication.model_validate 校验。*/
 export interface ScanAuthentication {
@@ -507,8 +561,12 @@ export interface ScanRequest {
   // （agent-browser --proxy 覆盖 DNS），或 host_url 临时拉取一份 /etc/hosts 风格文本。
   host_profile_id?: string;
   host_url?: string;
-  config_yaml?: string;
   config_name?: string;
+  // correlation（spec 2026-08-24，backend models.py 已有——D2 漏加的前端类型补齐）：
+  // 多仓拓扑 YAML 内容（与 config_name 二选一，前端表单直发派生 YAML）。
+  config_content?: string;
+  // 可选：提交时把 config_content 另存为命名配置（multi-config store）。
+  save_as?: string;
 }
 
 export interface ScanResponse {

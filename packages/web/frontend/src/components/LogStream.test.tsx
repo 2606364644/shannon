@@ -313,4 +313,22 @@ describe("LogStream", () => {
     expect(infoRow?.textContent ?? "").toMatch(/\[INFO\]/);
     expect(infoRow?.textContent ?? "").toMatch(/mod\.c: hi/);
   });
+
+  // ─── correlation_progress（D6 跨仓关联主行编排事件，CONTROL → trace 色）───
+  it("correlation_progress 渲染 node/name/status/detail，不再退化成裸 type 名", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-08-24T10:00:00.000Z", category: "CONTROL", type: "correlation_progress",
+        node: "repo", name: "frontend", status: "completed", detail: "reused" },
+      { ts: "2026-08-24T10:00:01.000Z", category: "CONTROL", type: "correlation_progress",
+        node: "edge", name: "frontend->order-svc", status: "failed", detail: "raw=low" },
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    // CONTROL → CAT_CLASS → trace（两行同色，按 data-type 区分身份后逐行断言）
+    const rows = Array.from(container.querySelectorAll(".trace"));
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("repo frontend completed");
+    expect(rows[0].textContent).toContain("reused");
+    expect(rows[1].textContent).toContain("edge frontend->order-svc failed");
+    expect(rows[1].textContent).toContain("raw=low");
+  });
 });

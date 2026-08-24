@@ -229,12 +229,6 @@
   "workspaces": {
     "title": "工作区",
     "subtitle": "所有扫描任务与产物",
-    "stats": {
-      "running": "运行中",
-      "completed": "已完成",
-      "failed": "失败",
-      "totalCost": "总成本"
-    },
     "status": {
       "running": "运行中",
       "in-progress": "进行中",
@@ -245,23 +239,13 @@
       "killed": "已终止",
       "crashed": "已崩溃"
     },
-    "table": {
-      "name": "工作区",
-      "status": "状态",
-      "type": "类型",
-      "vulns": "漏洞数",
-      "cost": "花费",
-      "time": "时间",
-      "actions": "操作"
-    },
     "expandAria": "展开",
-    "searchPlaceholder": "搜索工作区…",
-    "statusFilterAria": "状态筛选",
     "typeFilterAria": "类型筛选",
     "filter": {
       "allStatus": "全部状态",
       "allType": "全部类型",
-      "whitebox": "白盒"
+      "whitebox": "白盒",
+      "correlation": "跨仓关联"
     },
     "newScan": "新建扫描",
     "lastRefresh": "上次刷新 {{time}}",
@@ -270,7 +254,6 @@
       "title": "暂无工作区",
       "hint": "新建一个扫描开始"
     },
-    "noChild": "无子白盒",
     "deleteDialog": {
       "cancelTitle": "取消扫描",
       "cancelDesc": "取消扫描 {{ws}}？进度会丢失。",
@@ -325,11 +308,6 @@
     }
   },
   "scan": {
-    "cardTitle": {
-      "whitebox": "白盒扫描",
-      "blackbox": "黑盒扫描",
-      "correlation": "联动扫描"
-    },
     "fields": {
       "selectRepo": "选择仓库",
       "targetName": "扫描目标 + 命名",
@@ -481,6 +459,87 @@
       "selectProfile": "选择 HOST 档案",
       "urlPlaceholder": "https://example.com/hosts.txt",
       "infoNote": "将目标域名重定向到指定 IP（DNS 覆盖），用于内网/灰度环境渗透测试。"
+    },
+    "type": {
+      "whitebox": "白盒扫描",
+      "correlation": "跨仓关联"
+    },
+    "correlation": {
+      "subtitle": "串联多个仓库的调用链，发起跨仓关联分析",
+      "submit": "开始关联扫描",
+      "footerHint": "配置多仓拓扑后提交",
+      "reposSection": "仓库与服务",
+      "addRepo": "+ 添加仓库",
+      "roleLabel": "角色",
+      "roleEntrypoint": "入口",
+      "roleBackend": "后端",
+      "sourceLabel": "来源",
+      "sourceRescan": "重新扫描",
+      "sourceReuse": "复用历史扫描",
+      "protocolLabel": "协议",
+      "removeRepo": "删除仓库",
+      "selectRepoFirst": "请先选择仓库",
+      "reuseEmpty": "该仓库还没有可复用的白盒扫描",
+      "relationsTitle": "调用关系",
+      "relationsEmpty": "暂无调用关系——添加后端仓库会自动连到入口",
+      "relationsHint": "复杂拓扑请在 YAML 中编辑",
+      "gatewayTitle": "黑盒验证",
+      "gatewayLabel": "网关地址",
+      "gatewayPlaceholder": "http://gateway.example.com",
+      "gatewayHint": "填写后，关联完成时对入口服务发起黑盒验证（可选）",
+      "yamlToggle": "YAML 配置",
+      "yamlEditor": "YAML 编辑器",
+      "applyYaml": "应用到表单",
+      "loadError": "加载关联详情失败：{{error}}",
+      "pending": "关联阶段进行中 / 未开始",
+      "pendingHint": "关联阶段尚未产出拓扑等工件，扫描推进后本视图自动补全。",
+      "childrenTitle": "子仓扫描",
+      "childReused": "复用",
+      "childFresh": "新扫",
+      "driftTitle": "版本漂移警告",
+      "topologyTitle": "服务拓扑",
+      "clickEdgeHint": "点击边查看调用明细",
+      "edgeCalls": "边调用明细",
+      "noCalls": "无调用记录",
+      "flowsTitle": "跨服务攻击链",
+      "flowsIntro": "概率性 Agent 推断产物，供人工复核",
+      "flowsEmpty": "暂无候选攻击链",
+      "evidence": "证据",
+      "vulnsTitle": "按服务分组漏洞",
+      "vulnsEmpty": "暂无合并漏洞",
+      "serviceUnknown": "未知服务",
+      "boundariesTitle": "信任边界",
+      "boundariesEmpty": "暂无信任边界",
+      "reportTitle": "关联报告",
+      "colService": "服务",
+      "colMethod": "方法",
+      "colCallSite": "调用点",
+      "colSnippet": "代码片段",
+      "colConfidence": "置信度",
+      "colEvidence": "证据",
+      "colExposure": "暴露面",
+      "colReachableFrom": "可达来源",
+      "colReason": "依据",
+      "overviewPhaseTitle": "三段接力进度",
+      "segChildren": "子仓白盒",
+      "segCorrelation": "跨仓关联",
+      "segVerify": "黑盒验证",
+      "overviewColScan": "扫描任务",
+      "overviewColSource": "来源",
+      "overviewColStatus": "状态",
+      "overviewMergedVulns": "合并漏洞 {{count}} 条",
+      "overviewGoResult": "查看跨仓关联结果",
+      "overviewNoChildren": "暂无子仓登记",
+      "overviewNoChildrenHint": "关联扫描提交后此处列出各子仓扫描状态。",
+      "issues": {
+        "needEntrypoint": "至少需要一个 entrypoint 仓库",
+        "unnamedRepo": "存在未命名的仓库卡片",
+        "dupRepo": "仓库重复: {{name}}",
+        "repoNoSource": "仓库 {{name}} 缺少来源",
+        "undeclaredService": "relations 引用未声明服务: {{name}}",
+        "yamlSyntax": "YAML 语法错误: {{msg}}",
+        "missingRepos": "缺少 repos 段"
+      }
     }
   },
   "dashboard": {
@@ -616,6 +675,7 @@
       "report": "报告",
       "deliverables": "产物",
       "dataflow": "数据流",
+      "correlation": "跨仓关联",
       "logs": "日志",
       "live": "实时",
       "repos": "仓库",
@@ -745,6 +805,13 @@
       "typeCombined": "组合",
       "typeBlackbox": "黑盒",
       "typeFilterCombined": "组合（白盒+黑盒）",
+      "typeWhitebox": "白盒",
+      "typeCorrelation": "跨仓关联",
+      "corr": {
+        "reused": "复用",
+        "toggleExpand": "展开关联子行",
+        "toggleCollapse": "收起关联子行"
+      },
       "avgCtx": "平均耗时 {{avg}} · 最长 {{max}} · 最短 {{min}}"
     },
     "errorBoundary": {

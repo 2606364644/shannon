@@ -6,6 +6,7 @@ import { http, HttpResponse, delay } from "msw";
 import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import ScanDetail from "./ScanDetail";
+import { DefaultScanTab } from "@/router";
 
 // useEventSource mock（可控 events）：回归测试注入历史回放含 scan_end；其余测试空事件
 // （等价 jsdom 无 EventSource 时的 no-op）。
@@ -41,6 +42,7 @@ function renderAt(path: string) {
             <Route path="report" element={<div>rp-content</div>} />
             <Route path="deliverables" element={<div>dl-content</div>} />
             <Route path="dataflow" element={<div>df-content</div>} />
+            <Route path="correlation" element={<div>corr-content</div>} />
             <Route path="logs" element={<div>lg-content</div>} />
             <Route path="live" element={<div>lv-content</div>} />
           </Route>
@@ -192,5 +194,120 @@ describe("ScanDetail 加黑盒入口门控", () => {
     renderAt("/p/ws/scans/s1/report");
     const btn = await screen.findByRole("button", { name: /加黑盒扫描/ });
     await waitFor(() => expect(btn).toBeEnabled());
+  });
+});
+
+// === correlation 主行 tab 组（D6，spec 2026-08-24 §8）===
+// 关联主行 tab 列表按 scan_type 分支：概览 | 跨仓关联 | 产物 | 日志——无 report/
+// dataflow/live（结果在专属跨仓关联 tab；实时进度在顶部 ScanProgressOverview 经
+// correlation_progress 事件渲染）。
+describe("ScanDetail correlation 主行 tab 组", () => {
+  it("correlation scan：渲染 4 tab（概览/跨仓关联/产物/日志），不含 report/dataflow/live", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "correlation" })),
+    );
+    renderAt("/p/ws/scans/s1/logs");
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "跨仓关联" })).toBeInTheDocument());
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    for (const name of ["概览", "跨仓关联", "产物", "日志"]) {
+      expect(screen.getByRole("tab", { name })).toBeInTheDocument();
+    }
+    for (const absent of ["报告", "数据流", "实时"]) {
+      expect(screen.queryByRole("tab", { name: absent })).not.toBeInTheDocument();
+    }
+  });
+
+  it("correlation tab 点击导航到 correlation 路由段", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "correlation" })),
+    );
+    renderAt("/p/ws/scans/s1/logs");
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "跨仓关联" })).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "跨仓关联" }));
+    expect(screen.getByText("corr-content")).toBeInTheDocument();
+  });
+
+  it("correlation 当前 tab aria-selected", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "correlation" })),
+    );
+    renderAt("/p/ws/scans/s1/correlation");
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "跨仓关联" })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("i18n 英文：跨仓关联 tab 标签 Correlation", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "correlation" })),
+    );
+    i18n.changeLanguage("en");
+    renderAt("/p/ws/scans/s1/logs");
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Correlation" })).toBeInTheDocument());
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+  });
+});
+
+// === DefaultScanTab correlation 默认概览（D6）===
+// 关联主行 tab 组无 report/live——默认落「概览」（简版 CorrelationOverview：三段横幅 +
+// children 状态网格），不再按终态分落 report/live。
+describe("DefaultScanTab correlation 默认概览", () => {
+  function renderDefault(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <Routes>
+            {/* 镜像真实 router.tsx：DefaultScanTab 挂 index 路由，tab 子路由平铺 */}
+            <Route path="/p/:workspace/scans/:scanId">
+              <Route index element={<DefaultScanTab />} />
+              <Route path="overview" element={<div>ov-content</div>} />
+              <Route path="report" element={<div>rp-content</div>} />
+              <Route path="live" element={<div>lv-content</div>} />
+            </Route>
+          </Routes>
+        </SWRConfig>
+      </MemoryRouter>,
+    );
+  }
+
+  it("correlation 主行（进行中）默认落概览而非 live", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "correlation" })),
+    );
+    renderDefault("/p/ws/scans/s1");
+    await waitFor(() => expect(screen.getByText("ov-content")).toBeInTheDocument());
+  });
+
+  it("correlation 主行（completed）仍落概览（tab 组无 report）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "completed", scan_type: "correlation" })),
+    );
+    renderDefault("/p/ws/scans/s1");
+    await waitFor(() => expect(screen.getByText("ov-content")).toBeInTheDocument());
+  });
+
+  it("whitebox 回归：running → live / completed → report 不变", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "running", scan_type: "whitebox" })),
+    );
+    const { unmount } = renderDefault("/p/ws/scans/s1");
+    await waitFor(() => expect(screen.getByText("lv-content")).toBeInTheDocument());
+    unmount();
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "completed", scan_type: "whitebox" })),
+    );
+    renderDefault("/p/ws/scans/s2");
+    await waitFor(() => expect(screen.getByText("rp-content")).toBeInTheDocument());
   });
 });

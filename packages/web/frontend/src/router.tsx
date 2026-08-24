@@ -20,6 +20,9 @@ const OverviewTab = lazy(() => import("./routes/WorkspaceDetail/OverviewTab").th
 const ReportTab = lazy(() => import("./routes/WorkspaceDetail/ReportTab").then(m => ({ default: m.ReportTab })));
 const DeliverablesTab = lazy(() => import("./routes/WorkspaceDetail/DeliverablesTab").then(m => ({ default: m.DeliverablesTab })));
 const DataFlowTab = lazy(() => import("./routes/WorkspaceDetail/DataFlowTab").then(m => ({ default: m.DataFlowTab })));
+// 跨仓关联结果 tab（D5 组件收 {ws, scanId} props——与兄弟 tab 的 useParams 自取不同，
+// 由 CorrelationTabRoute 包装注入；ReportTab 独立 chunk 同理，MarkdownView 栈不进主包）。
+const CorrelationTab = lazy(() => import("./routes/WorkspaceDetail/CorrelationTab").then(m => ({ default: m.CorrelationTab })));
 const LogsTab = lazy(() => import("./routes/WorkspaceDetail/LogsTab").then(m => ({ default: m.LogsTab })));
 const LiveTab = lazy(() => import("./routes/WorkspaceDetail/LiveTab"));
 const ReposTab = lazy(() => import("./routes/WorkspaceDetail/ReposTab").then(m => ({ default: m.ReposTab })));
@@ -32,19 +35,33 @@ const WorkspacesEntry = lazy(() => import("./components/WorkspacesEntry").then(m
 const DevComponentsPage = lazy(() => import("./pages/DevComponentsPage").then(m => ({ default: m.DevComponentsPage })));
 
 // per-scan 默认 tab：进行中 -> live，完成 -> report。fetch scan status 后 navigate（replace 避免占历史栈）。
-function DefaultScanTab() {
+// correlation 主行例外（D6，spec 2026-08-24 §8）：tab 组为 概览|跨仓关联|产物|日志（无
+// report/live），运行中/完成统一默认落「概览」（简版 CorrelationOverview：三段横幅 +
+// children 状态网格）。
+export function DefaultScanTab() {
   const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
   const nav = useNavigate();
   useEffect(() => {
     if (!workspace || !scanId) return;
     getScan(workspace, scanId)
       .then((s) => {
+        if (s.scan_type === "correlation") {
+          nav("overview", { replace: true });
+          return;
+        }
         const st = s.status ?? s.session?.status ?? "running";
         nav(st === "completed" || st === "done" ? "report" : "live", { replace: true });
       })
       .catch(() => nav("live", { replace: true }));
   }, [workspace, scanId, nav]);
   return null;
+}
+
+// 跨仓关联 tab 路由包装（D6）：CorrelationTab 收 {ws, scanId} props（D5 契约，组件自身
+// 无 router 依赖），此处从 useParams 注入。
+function CorrelationTabRoute() {
+  const { workspace, scanId } = useParams<{ workspace: string; scanId: string }>();
+  return <CorrelationTab ws={workspace ?? ""} scanId={scanId ?? ""} />;
 }
 
 // 旧 ws-scoped tab 路由（/p/:ws/overview 等）过渡期 shim：redirect 到 latest scan 的对应 tab。
@@ -107,7 +124,8 @@ export const router = createBrowserRouter([
         ],
       },
       {
-        // per-scan 视图：scan header + scan tabs（overview/report/deliverables/logs/live）
+        // per-scan 视图：scan header + scan tabs（overview/report/deliverables/logs/live；
+        // correlation 主行 tab 组分支见 ScanDetail——概览/跨仓关联/产物/日志）
         path: "/p/:workspace/scans/:scanId",
         element: <ScanDetail />,
         children: [
@@ -116,6 +134,8 @@ export const router = createBrowserRouter([
           { path: "report", element: <ReportTab /> },
           { path: "deliverables", element: <DeliverablesTab /> },
           { path: "dataflow", element: <DataFlowTab /> },
+          // 跨仓关联结果视图（D6 路由接线；命名对齐兄弟 tab 的单词段约定）
+          { path: "correlation", element: <CorrelationTabRoute /> },
           { path: "logs", element: <LogsTab /> },
           { path: "live", element: <LiveTab /> },
         ],

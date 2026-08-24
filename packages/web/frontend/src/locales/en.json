@@ -229,12 +229,6 @@
   "workspaces": {
     "title": "Workspaces",
     "subtitle": "All scan tasks and deliverables",
-    "stats": {
-      "running": "Running",
-      "completed": "Completed",
-      "failed": "Failed",
-      "totalCost": "Total Cost"
-    },
     "status": {
       "running": "Running",
       "in-progress": "In Progress",
@@ -245,23 +239,13 @@
       "killed": "Killed",
       "crashed": "Crashed"
     },
-    "table": {
-      "name": "Workspace",
-      "status": "Status",
-      "type": "Type",
-      "vulns": "Vulns",
-      "cost": "Cost",
-      "time": "Time",
-      "actions": "Actions"
-    },
     "expandAria": "Expand",
-    "searchPlaceholder": "Search workspaces…",
-    "statusFilterAria": "Status filter",
     "typeFilterAria": "Type filter",
     "filter": {
       "allStatus": "All status",
       "allType": "All type",
-      "whitebox": "whitebox"
+      "whitebox": "whitebox",
+      "correlation": "Correlation"
     },
     "newScan": "New scan",
     "lastRefresh": "Last updated {{time}}",
@@ -270,7 +254,6 @@
       "title": "No workspaces",
       "hint": "Create a scan to start"
     },
-    "noChild": "No child whiteboxes",
     "deleteDialog": {
       "cancelTitle": "Cancel scan",
       "cancelDesc": "Cancel scan {{ws}}? Progress will be lost.",
@@ -325,11 +308,6 @@
     }
   },
   "scan": {
-    "cardTitle": {
-      "whitebox": "Whitebox scan",
-      "blackbox": "Blackbox scan",
-      "correlation": "Correlation scan"
-    },
     "fields": {
       "selectRepo": "Select repository",
       "targetName": "Target + naming",
@@ -481,6 +459,87 @@
       "selectProfile": "Select HOST profile",
       "urlPlaceholder": "https://example.com/hosts.txt",
       "infoNote": "Redirect target domains to specified IPs (DNS override) for intranet/canary pentest."
+    },
+    "type": {
+      "whitebox": "Whitebox",
+      "correlation": "Correlation"
+    },
+    "correlation": {
+      "subtitle": "Chain calls across repositories and run a cross-repo correlation analysis",
+      "submit": "Start correlation scan",
+      "footerHint": "Configure the multi-repo topology, then submit",
+      "reposSection": "Repositories & services",
+      "addRepo": "+ Add repository",
+      "roleLabel": "Role",
+      "roleEntrypoint": "Entrypoint",
+      "roleBackend": "Backend",
+      "sourceLabel": "Source",
+      "sourceRescan": "Rescan",
+      "sourceReuse": "Reuse past scan",
+      "protocolLabel": "Protocol",
+      "removeRepo": "Remove repository",
+      "selectRepoFirst": "Select a repository first",
+      "reuseEmpty": "No whitebox scan for this repository yet",
+      "relationsTitle": "Call relations",
+      "relationsEmpty": "No relations yet — adding a backend repository links it to the entrypoint automatically",
+      "relationsHint": "Edit complex topologies in YAML",
+      "gatewayTitle": "Blackbox verification",
+      "gatewayLabel": "Gateway URL",
+      "gatewayPlaceholder": "http://gateway.example.com",
+      "gatewayHint": "When set, a blackbox verification runs against the entrypoint after correlation (optional)",
+      "yamlToggle": "YAML configuration",
+      "yamlEditor": "YAML editor",
+      "applyYaml": "Apply to form",
+      "loadError": "Failed to load correlation detail: {{error}}",
+      "pending": "Correlation phase in progress / not started",
+      "pendingHint": "The correlation phase has not produced topology artifacts yet; this view fills in as the scan progresses.",
+      "childrenTitle": "Child scans",
+      "childReused": "reused",
+      "childFresh": "fresh scan",
+      "driftTitle": "Version drift warnings",
+      "topologyTitle": "Service topology",
+      "clickEdgeHint": "Click an edge to inspect its calls",
+      "edgeCalls": "Edge calls",
+      "noCalls": "No calls recorded",
+      "flowsTitle": "Cross-service attack chains",
+      "flowsIntro": "Probabilistic agent inference — review before acting",
+      "flowsEmpty": "No candidate attack chains",
+      "evidence": "Evidence",
+      "vulnsTitle": "Vulnerabilities by service",
+      "vulnsEmpty": "No merged vulnerabilities",
+      "serviceUnknown": "unknown service",
+      "boundariesTitle": "Trust boundaries",
+      "boundariesEmpty": "No trust boundaries",
+      "reportTitle": "Correlation report",
+      "colService": "Service",
+      "colMethod": "Method",
+      "colCallSite": "Call site",
+      "colSnippet": "Snippet",
+      "colConfidence": "Confidence",
+      "colEvidence": "Evidence",
+      "colExposure": "Exposure",
+      "colReachableFrom": "Reachable from",
+      "colReason": "Reason",
+      "overviewPhaseTitle": "Relay progress",
+      "segChildren": "Child whitebox scans",
+      "segCorrelation": "Correlation",
+      "segVerify": "Blackbox verification",
+      "overviewColScan": "Scan",
+      "overviewColSource": "Source",
+      "overviewColStatus": "Status",
+      "overviewMergedVulns": "{{count}} merged vulnerabilities",
+      "overviewGoResult": "View correlation results",
+      "overviewNoChildren": "No child scans registered",
+      "overviewNoChildrenHint": "Child scan statuses will appear here once the correlation scan is submitted.",
+      "issues": {
+        "needEntrypoint": "At least one entrypoint repository is required",
+        "unnamedRepo": "An unnamed repository card exists",
+        "dupRepo": "Duplicate repository: {{name}}",
+        "repoNoSource": "Repository {{name}} has no source selected",
+        "undeclaredService": "relations references an undeclared service: {{name}}",
+        "yamlSyntax": "YAML syntax error: {{msg}}",
+        "missingRepos": "Missing repos section"
+      }
     }
   },
   "dashboard": {
@@ -616,6 +675,7 @@
       "report": "Report",
       "deliverables": "Deliverables",
       "dataflow": "Data flow",
+      "correlation": "Correlation",
       "logs": "Logs",
       "live": "Live",
       "repos": "Repositories",
@@ -745,6 +805,13 @@
       "typeCombined": "Combined",
       "typeBlackbox": "Blackbox",
       "typeFilterCombined": "Combined (whitebox + blackbox)",
+      "typeWhitebox": "Whitebox",
+      "typeCorrelation": "Correlation",
+      "corr": {
+        "reused": "Reused",
+        "toggleExpand": "Expand correlation children",
+        "toggleCollapse": "Collapse correlation children"
+      },
       "avgCtx": "avg {{avg}} · max {{max}} · min {{min}}"
     },
     "errorBoundary": {

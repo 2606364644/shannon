@@ -1,6 +1,6 @@
 import type {
-  BlackboxRunSummary, DataflowView, FsBrowseResult, Repo, RepoDetail,
-  ScanRequest, ScanSummary, SessionData,
+  BlackboxRunSummary, CorrelationDetail, DataflowView, FsBrowseResult,
+  MultiConfigSummary, Repo, RepoDetail, ScanRequest, ScanSummary, SessionData,
 } from "./types";
 
 export class ApiError extends Error {
@@ -288,6 +288,27 @@ export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) 
 // 全产物缺 → 后端 404（不产文件）；fetcher 抛 ApiError(404)，消费方据此显空态。
 export const fetchDataflowView = (ws: string, scanId: string) =>
   apiGet<DataflowView>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/dataflow`);
+
+// ── 跨仓关联视图（spec 2026-08-24，Task C5 后端）───────────────────────────────
+// GET /workspaces/{ws}/scans/{id}/correlation → assemble_correlation_detail 产物。
+// 404=scan 不存在；422=非 correlation scan；产物未生成时各字段 null/[]（前端显
+// 「关联阶段进行中/未开始」）。
+export function getCorrelationDetail(ws: string, scanId: string): Promise<CorrelationDetail> {
+  return apiGet<CorrelationDetail>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/correlation`);
+}
+
+// ── 多仓配置（对齐 backend api/multi_configs.py + MultiRepoConfigStore）─────────
+// GET /api/multi-configs → 配置名 list[str]（sorted）；POST 返 201 {name}
+// （ValidationError→422 / 非法名→400）；GET /{name} → {name, content}（无 → 404）。
+export function listMultiConfigs(): Promise<MultiConfigSummary[]> {
+  return apiGet<MultiConfigSummary[]>("/multi-configs");
+}
+export function saveMultiConfig(name: string, content: string): Promise<{ name: string }> {
+  return apiPost<{ name: string }>("/multi-configs", { name, content });
+}
+export function getMultiConfig(name: string): Promise<{ name: string; content: string }> {
+  return apiGet<{ name: string; content: string }>(`/multi-configs/${encodeURIComponent(name)}`);
+}
 
 // ── 组合扫描阶段判定（live 阶段徽章 / report ?run= 用；events 流已全量归并）──────
 // 2026-08-18 起 events 端点在后端按 ts 归并 认证/白盒/所有 run-K 为一条流，前端不再

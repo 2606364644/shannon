@@ -319,6 +319,96 @@ describe("dashboardReducer — 对齐 core DashboardState.apply", () => {
   });
 });
 
+// === correlation_progress（跨仓关联主行编排事件，D6，spec 2026-08-24）===
+// 事件源：web CorrelationEventWriter（scan_manager 三段接力编排写主行 events.ndjson），
+// shape（correlation_event_writer.py）：{type:"correlation_progress", category:"CONTROL",
+// node:"repo"|"phase"|"edge", name, status:"started"|"completed"|"failed", detail?}。
+// 段序：repo(started→completed|failed)×N → phase("correlation",started) →
+// edge("from->to",…)×M → phase("correlation",completed) → scan_end。
+// 前端映射（core DashboardState.apply 走 default 忽略——此类事件只在 web 编排层产生，
+// core 端无此流；前端把 repo/edge 行累积进 phase_units 网格 + 状态徽标供进度条渲染）。
+describe("dashboardReducer — correlation_progress 事件", () => {
+  const corr = (
+    node: "repo" | "phase" | "edge",
+    name: string,
+    status: "started" | "completed" | "failed",
+    detail?: string,
+  ) => ev({ type: "correlation_progress", category: "CONTROL", node, name, status, detail });
+
+  it("repo 事件：追加网格行 + 状态映射 started→running / completed→done / failed→failed", () => {
+    let s = dashboardReducer(emptyState(), corr("repo", "frontend", "started"));
+    expect(s.phase_units).toEqual(["frontend"]);
+    expect(s.unit_status["frontend"]).toBe("running");
+    expect(s.total_units).toBe(1);
+    expect(s.running_units).toEqual(["frontend"]);
+    s = dashboardReducer(s, corr("repo", "frontend", "completed"));
+    expect(s.unit_status["frontend"]).toBe("done");
+    expect(s.completed_units).toBe(1);
+    s = dashboardReducer(s, corr("repo", "order-svc", "started"));
+    s = dashboardReducer(s, corr("repo", "order-svc", "failed", "scan error"));
+    expect(s.phase_units).toEqual(["frontend", "order-svc"]); // 事件序 = 展示序
+    expect(s.unit_status["order-svc"]).toBe("failed");
+    expect(s.unit_intent["order-svc"]).toBe("scan error");
+    expect(s.completed_units).toBe(2); // done + failed 都是终态
+  });
+
+  it("repo completed + detail=reused（提交即复用）：直接 done 行 + intent 标注", () => {
+    const s = dashboardReducer(emptyState(), corr("repo", "users", "completed", "reused"));
+    expect(s.phase_units).toEqual(["users"]);
+    expect(s.unit_status["users"]).toBe("done");
+    expect(s.unit_intent["users"]).toBe("reused");
+    expect(s.completed_units).toBe(1);
+  });
+
+  it("phase 事件：设 current_phase；start 不清既有 repo 行（三段接力累积网格）", () => {
+    let s = dashboardReducer(emptyState(), corr("repo", "frontend", "completed"));
+    s = dashboardReducer(s, corr("phase", "correlation", "started"));
+    expect(s.current_phase).toBe("correlation");
+    expect(s.phase_units).toEqual(["frontend"]); // 与 PhaseEvent 不同：不重置
+    expect(s.unit_status["frontend"]).toBe("done");
+  });
+
+  it("phase completed：current_phase 保持（对齐 PhaseEvent complete 语义）", () => {
+    let s = dashboardReducer(emptyState(), corr("phase", "correlation", "started"));
+    s = dashboardReducer(s, corr("phase", "correlation", "completed"));
+    expect(s.current_phase).toBe("correlation");
+  });
+
+  it("edge 事件（name=from->to）：与 repo 行同网格追加（writer 已把 ok/low/error 归一）", () => {
+    let s = dashboardReducer(emptyState(), corr("repo", "frontend", "completed"));
+    s = dashboardReducer(s, corr("phase", "correlation", "started"));
+    s = dashboardReducer(s, corr("edge", "frontend->order-svc", "completed", "raw=ok"));
+    s = dashboardReducer(s, corr("edge", "frontend->users", "failed", "raw=low"));
+    expect(s.phase_units).toEqual(["frontend", "frontend->order-svc", "frontend->users"]);
+    expect(s.unit_status["frontend->order-svc"]).toBe("done");
+    expect(s.unit_status["frontend->users"]).toBe("failed");
+    expect(s.total_units).toBe(3);
+    expect(s.completed_units).toBe(3); // done + done + failed 全终态
+  });
+
+  it("scan_end completed：未完结的 repo/edge 行终态收敛 done（复用既有收敛行为）", () => {
+    let s = dashboardReducer(emptyState(), corr("repo", "frontend", "completed"));
+    s = dashboardReducer(s, corr("phase", "correlation", "started"));
+    s = dashboardReducer(s, corr("edge", "frontend->order-svc", "started"));
+    expect(s.completed_units).toBe(1);
+    s = dashboardReducer(s, ev({ type: "scan_end", category: "CONTROL", status: "completed" }));
+    expect(s.unit_status["frontend->order-svc"]).toBe("done");
+    expect(s.completed_units).toBe(2);
+    expect(s.total_units).toBe(2);
+  });
+
+  it("PhaseEvent start（段③黑盒 run 事件经归并流混入）：重置网格——常规 workflow 语义优先", () => {
+    let s = dashboardReducer(emptyState(), corr("repo", "frontend", "completed"));
+    s = dashboardReducer(s, corr("edge", "frontend->order-svc", "completed"));
+    s = dashboardReducer(s, ev({
+      type: "PhaseEvent", category: "PHASE", phase: "recon", event: "start",
+      steps: ["recon"], step_intents: [""],
+    }));
+    expect(s.phase_units).toEqual(["recon"]);
+    expect(s.current_phase).toBe("recon");
+  });
+});
+
 describe("formatters — 对齐 core formatters.py", () => {
   it("firstNonemptyLine: first non-blank stripped line", () => {
     expect(firstNonemptyLine("\n\nAnalyzing sinks...\n")).toBe("Analyzing sinks...");

@@ -71,7 +71,8 @@ function derive(s: DashboardState): DashboardState {
 /**
  * 1:1 复刻 core DashboardState.apply：fold 一个 ndjson 事件，返回新 state（不可变）。
  * 6 个状态变化分支（PhaseEvent / StepEvent / ResumeEvent / AgentEvent / ToolCallEvent /
- * LlmTurnEvent）+ 其余 type 无 dashboard 状态变化（return state）。
+ * LlmTurnEvent）+ SummaryEvent/scan_end 终态收敛 + correlation_progress（web 编排层
+ * 专属事件，前端扩展映射，见 case 注释）+ 其余 type 无 dashboard 状态变化（return state）。
  */
 export function dashboardReducer(state: DashboardState, event: NdjsonEvent): DashboardState {
   let next: DashboardState = state;
@@ -192,8 +193,41 @@ export function dashboardReducer(state: DashboardState, event: NdjsonEvent): Das
       break;
     }
 
-    // ErrorEvent / WorkflowHeader / InfoEvent / GitnexusLlmEvent /
-    // CorrelationProgressEvent → 无 dashboard 状态变化（对齐 core default）。
+    case "correlation_progress": {
+      // 跨仓关联主行编排事件（D6，spec 2026-08-24）：web CorrelationEventWriter 写主行
+      // events.ndjson 的三段接力进度——node=repo/edge → 累积成网格行（首次见到即声明，
+      // 事件序 = 展示序）+ 状态映射 started→running / completed→done / failed→failed，
+      // detail（如 reused / raw=ok）进 unit_intent；node=phase → current_phase。
+      // 注意与 core DashboardState.apply 的 1:1 复刻关系在此分支有意偏离：core 走 default
+      // 忽略——此类 CONTROL 事件只在 web 编排层产生（core CLI 端无此流），前端把 repo/
+      // phase/edge 映射进既有 phase_units/unit_status 模型，ScanProgressOverview 的进度
+      // 条/步级列表零改动即可渲染关联网格。phase start 不清既有行——三段接力是单一
+      // 累积网格（repo 段成果保留到 edge 段；段③黑盒 run 的常规 PhaseEvent start 进来
+      // 才按既有语义重置）。
+      if (event.node === "phase") {
+        next = { ...state, current_phase: event.name };
+        break;
+      }
+      const status: string =
+        event.status === "completed" ? "done"
+        : event.status === "failed" ? "failed"
+        : "running"; // started / 未知值保守视为进行中
+      const phase_units = state.phase_units.includes(event.name)
+        ? state.phase_units
+        : [...state.phase_units, event.name];
+      next = {
+        ...state,
+        phase_units,
+        unit_status: { ...state.unit_status, [event.name]: status },
+      };
+      if (event.detail) {
+        next = { ...next, unit_intent: { ...next.unit_intent, [event.name]: event.detail } };
+      }
+      break;
+    }
+
+    // ErrorEvent / WorkflowHeader / InfoEvent / GitnexusLlmEvent →
+    // 无 dashboard 状态变化（对齐 core default）。
     default:
       next = state;
   }

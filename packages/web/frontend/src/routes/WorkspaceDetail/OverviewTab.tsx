@@ -12,6 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useScanDetail } from "./useScanDetail";
+import { CorrelationOverview } from "./CorrelationOverview";
 
 function fmtMs(ms: number | null | undefined): string {
   if (ms == null || Number.isNaN(ms)) return "—";
@@ -32,6 +33,12 @@ export function OverviewTab() {
         {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
       </div>
     );
+  }
+  // 跨仓关联主行（D6）：概览 = 简版 CorrelationOverview（三段横幅 + 子仓状态网格）。
+  // 主行 session 无常规 phases/agents metrics（编排行不跑 agent），瀑布/Agent 台账
+  // 对关联行是空壳——按 scan_type 整体切换而非共用。
+  if (s?.scan_type === "correlation") {
+    return <CorrelationOverview ws={workspace ?? ""} scanId={scanId ?? ""} />;
   }
   if (!s?.metrics) {
     return <Empty title={t("workspaceDetail.overview.waitTitle")} hint={t("workspaceDetail.overview.waitHint")} />;

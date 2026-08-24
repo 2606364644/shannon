@@ -46,17 +46,22 @@ function segOf(s: ScanSummary): Seg | "other" {
 }
 
 /** 筛选态：分段（全部/运行中/已完成/失败）+ 类型 + 关键词。
- *  类型模型（重设计 2026-08-16）：只有白盒 + 组合——组合扫描 scan_type 仍为 whitebox、
- *  靠 combined 标记识别；黑盒一律是组合任务的嵌套 run，无独立行/入口。
- *  "whitebox" = 纯白盒（combined !== true），"combined" = 组合。 */
-type TypeFilter = "all" | "whitebox" | "combined";
+ *  类型模型（重设计 2026-08-16 收窄 + 2026-08-24 关联回归 D4）：白盒 + 组合 + 跨仓关联。
+ *  组合扫描 scan_type 仍为 whitebox、靠 combined 标记识别；黑盒一律是组合/关联任务的
+ *  嵌套 run，无独立行/入口。注意 correlation 主行跑过段③黑盒验证后 session 亦被
+ *  create_blackbox_run 置 combined=True——类型匹配须先判 correlation 再判 combined，
+ *  否则关联行会漏进「组合」档。 */
+type TypeFilter = "all" | "whitebox" | "combined" | "correlation";
 interface ListFilters { seg: "all" | Seg; type: TypeFilter; keyword: string }
 const DEFAULT_LIST_FILTERS: ListFilters = { seg: "all", type: "all", keyword: "" };
 
 function matchType(s: ScanSummary, type: TypeFilter): boolean {
+  if (type === "all") return true;
+  if (type === "correlation") return s.scan_type === "correlation";
+  // 「白盒」「组合」档均不含关联行（即使 combined=True，见上）——只入自己的档。
+  if (s.scan_type === "correlation") return false;
   if (type === "combined") return s.combined === true;
-  if (type === "whitebox") return s.scan_type === "whitebox" && s.combined !== true;
-  return true;
+  return s.scan_type === "whitebox" && s.combined !== true;
 }
 
 function fmtTimeFull(unix?: number | null): string {
@@ -105,6 +110,11 @@ export function ScanList() {
     completed: kwTyped.filter((s) => segOf(s) === "completed").length,
     failed: kwTyped.filter((s) => segOf(s) === "failed").length,
   };
+
+  // correlation 子行富化源（D4）：corr_children 只带 {service, scan_id, reused}，状态/
+  // 漏洞数/时间从同 ws 全量列表按 scan_id 补（现扫子仓由后端建在同 ws，天然在列）。
+  // 必须用未过滤的 scans——关键词/分段过滤不应连带抽掉嵌套子行的富化数据。
+  const scansById = new Map(scans.map((s) => [s.scan_id, s] as const));
 
   if (err) return <ErrorState message={t("workspaceDetail.scans.loadError", { error: err })} />;
 
@@ -185,14 +195,16 @@ export function ScanList() {
             </button>
           ))}
         </div>
-        {/* 类型模型收窄（2026-08-16）：只有白盒 + 组合——黑盒是组合任务的嵌套 run，
-            无独立类型可选；correlation 后端未实现，不入选项 */}
+        {/* 类型模型（2026-08-16 收窄 + 2026-08-24 关联回归 D4）：白盒 + 组合 + 跨仓关联——
+            黑盒是组合任务的嵌套 run 无独立类型可选；correlation 已接通（主行展开子仓
+            白盒/黑盒验证/复用引用子行，见 ScanRow），过滤档见上 */}
         <Select value={filters.type} onValueChange={(v) => setFilters((f) => ({ ...f, type: v as TypeFilter }))}>
           <SelectTrigger aria-label={t("scanFilters.type")} className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("workspaces.filter.allType")}</SelectItem>
             <SelectItem value="whitebox">{t("workspaces.filter.whitebox")}</SelectItem>
             <SelectItem value="combined">{t("workspaceDetail.scans.typeFilterCombined")}</SelectItem>
+            <SelectItem value="correlation">{t("workspaces.filter.correlation")}</SelectItem>
           </SelectContent>
         </Select>
         </div>
@@ -250,7 +262,7 @@ export function ScanList() {
             </TableHeader>
             <TableBody>
               {filtered.map((s) => (
-                <ScanRow key={s.scan_id} ws={workspace!} scan={s} onChanged={reload} />
+                <ScanRow key={s.scan_id} ws={workspace!} scan={s} scansById={scansById} onChanged={reload} />
               ))}
             </TableBody>
           </Table>
@@ -260,14 +272,27 @@ export function ScanList() {
   );
 }
 
-/** 表格主行 + 嵌套黑盒 run 子行（可展开，默认收起——列表扫读优先，黑盒明细按需展开）。 */
-function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onChanged: () => void }) {
+/** 表格主行 + 嵌套子行（可展开，默认收起——列表扫读优先，明细按需展开）：
+ *  组合任务 = 黑盒 run 子行（NestedBlackboxRuns）；correlation 主行 = 子仓白盒 +
+ *  黑盒验证 run + 复用引用子行（NestedCorrChildren + NestedBlackboxRuns，D4）。 */
+function ScanRow({ ws, scan, scansById, onChanged }: {
+  ws: string; scan: ScanSummary; scansById: Map<string, ScanSummary>; onChanged: () => void;
+}) {
   const { t } = useTranslation();
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<"cancel" | "delete" | null>(null);
   const isCombined = scan.combined === true;
-  const hasRuns = isCombined && (scan.bb_runs?.length ?? 0) > 0;
+  const isCorr = scan.scan_type === "correlation";
+  // 黑盒 run 子行：组合任务 + correlation 主行（段③黑盒验证经 create_blackbox_run
+  // 写 bb_runs；该调用同笔写 combined=True，isCorr 并入判式兜底半写状态）。
+  const hasRuns = (isCombined || isCorr) && (scan.bb_runs?.length ?? 0) > 0;
+  // correlation 子行（corr_children，C2 透传）：现扫子仓白盒（reused=false）+
+  // 复用历史子仓引用（reused=true）；非 correlation 行恒空。
+  const corrChildren = isCorr ? scan.corr_children ?? [] : [];
+  const freshChildren = corrChildren.filter((c) => !c.reused);
+  const reusedChildren = corrChildren.filter((c) => c.reused);
+  const expandable = hasRuns || corrChildren.length > 0;
   const [open, setOpen] = useState(false);
 
   const isRunning = isRun(scan);
@@ -279,7 +304,10 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
   const label = scan.workflow_id ?? scan.scan_id;
   // 默认进 scan 详情的 tab：完成 -> report（看结果），其余 -> live（看实时）。
   // 与 router.tsx DefaultScanTab 一致；此处据 scan.status 直定，免走 DefaultScanTab 多一次 getScan + 空白闪烁。
-  const defaultTab = scan.status === "completed" || scan.status === "done" ? "report" : "live";
+  // correlation 主行例外（D6）：tab 组为 概览|跨仓关联|产物|日志（无 report/live），
+  // 运行中/完成统一落「概览」（简版 CorrelationOverview）。
+  const defaultTab = isCorr ? "overview"
+    : scan.status === "completed" || scan.status === "done" ? "report" : "live";
 
   // 运行中行按需建 SSE 推实时阶段（粗粒度：段标签后缀）；终态/非运行中不建（url=""）。
   // 列表页粗粒度——精确步级/Agent 在扫描详情页顶部。scan_end → 刷新列表拿终态（漏洞数/状态）。
@@ -295,7 +323,8 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
     try {
       await resumeScan(ws, scan.scan_id);
       toast.success(t("workspaceDetail.scans.resumed"));
-      nav(`${scanPath}/live`);
+      // 恢复后落默认 tab（correlation 行无 live tab——落概览，D6）
+      nav(`${scanPath}/${defaultTab}`);
     } catch (e) {
       toast.error(t("workspaceDetail.scans.resumeFailed", { error: msg(e) }));
     } finally {
@@ -304,27 +333,16 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
   }
 
   // 重跑 = 同 ws 新建扫描（spec §12.7），按原扫描类型跳对应 tab 并预填相关数据。
-  // 调 getScan 拿原配置（白盒 source_repo / 黑盒 web_url+reuse+auth）-> location state 传 ScanNewPage 预填。
+  // 调 getScan 拿原配置（白盒 source_repo）-> location state 传 ScanNewPage 预填。
+  // 黑盒分支已删（D3 删 ScanNewPage 黑盒表单 + D4 删本列表黑盒行重跑入口）；
+  // correlation 重跑只带类型（多仓配置不可从 detail 重建，落空关联表单手填）。
   async function onRerun() {
     setBusy(true);
     try {
       const detail = await getScan(ws, scan.scan_id);
       const state: Record<string, unknown> = { type: scan.scan_type, workspace: ws };
-      if (scan.scan_type === "whitebox") {
-        if (detail.source_repo) state.repo = detail.source_repo;
-      } else if (scan.scan_type === "blackbox") {
-        if (detail.web_url) state.url = detail.web_url;
-        if (detail.reuse_whitebox_scan_id) state.reuseScanId = detail.reuse_whitebox_scan_id;
-        if (detail.authentication) state.auth = detail.authentication;
-        // auth-profile-vault（Task 14）：profile 模式预填（后端 _scan_detail 暂未返此字段，
-        // 前端先就位——后端补返 auth_profile_id+auth_credential_ids 时自动生效）。
-        if ((detail as { auth_profile_id?: string | null }).auth_profile_id) {
-          state.authProfileId = (detail as { auth_profile_id?: string | null }).auth_profile_id ?? undefined;
-          state.authCredentialIds = (detail as { auth_credential_ids?: string[] | null }).auth_credential_ids ?? undefined;
-        }
-        // HOST source is a rerun input, not the old resolved mapping snapshot.
-        if (detail.host_profile_id) state.hostProfileId = detail.host_profile_id;
-        else if (detail.host_url) state.hostUrl = detail.host_url;
+      if (scan.scan_type === "whitebox" && detail.source_repo) {
+        state.repo = detail.source_repo;
       }
       nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });
     } catch {
@@ -366,26 +384,30 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
   return (
     <>
       {/* 整行可点（v4）：与 ID/查看同目标（defaultTab）；行内交互元素 stopPropagation 防误触。
-          展开时去底边线——父行与嵌套 run 组无缝相接（树形从属，组内子行间仍保留细线）。 */}
+          展开时去底边线——父行与嵌套子行组无缝相接（树形从属，组内子行间仍保留细线）。 */}
       <TableRow
         onClick={() => nav(`${scanPath}/${defaultTab}`)}
-        className={`cursor-pointer ${open && hasRuns ? "border-b-0" : ""}`}
+        className={`cursor-pointer ${open && expandable ? "border-b-0" : ""}`}
       >
-        {/* 展开柄：仅组合任务带 bb_runs 时显（纯白盒/黑盒无子行不占交互） */}
+        {/* 展开柄：有子行可展开时显（组合任务带 bb_runs / correlation 主行带
+            corr_children；纯白盒/黑盒无子行不占交互）。aria 按行类型选标签。 */}
         <TableCell className="w-9 pl-4">
-          {hasRuns && (
+          {expandable && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
               aria-expanded={open}
-              aria-label={t(open ? "workspaceDetail.scans.runs.toggleCollapse" : "workspaceDetail.scans.runs.toggleExpand")}
+              aria-label={t(isCorr
+                ? (open ? "workspaceDetail.scans.corr.toggleCollapse" : "workspaceDetail.scans.corr.toggleExpand")
+                : (open ? "workspaceDetail.scans.runs.toggleCollapse" : "workspaceDetail.scans.runs.toggleExpand"))}
               className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
             >
               <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
             </button>
           )}
         </TableCell>
-        <TableCell><StatusBadge status={scan.status} /></TableCell>
+        {/* 状态徽标：correlation 主行追加 🔗 类型标记（StatusBadge correlation prop，D4 接回） */}
+        <TableCell><StatusBadge status={scan.status} correlation={isCorr} /></TableCell>
         <TableCell className="max-w-0 truncate font-mono">
           <Link
             to={`${scanPath}/${defaultTab}`}
@@ -411,10 +433,16 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
             <span className="block truncate font-mono text-[10.5px] text-muted-foreground/80">{compactUrl(scan.repo_url)}</span>
           )}
         </TableCell>
-        {/* 类型格：组合任务只显「组合」徽标——scan_type 底层仍为 whitebox（spec 2026-08-12 §6.2），
-            whitebox+组合双徽标冗余，2026-08-17 起组合单显 */}
+        {/* 类型格：correlation 主行显「跨仓关联」徽标（先于 combined 判——关联行跑过
+            段③黑盒验证后 session 亦置 combined=True）；组合任务只显「组合」徽标——
+            scan_type 底层仍为 whitebox（spec 2026-08-12 §6.2），whitebox+组合双徽标
+            冗余，2026-08-17 起组合单显 */}
         <TableCell>
-          {scan.combined === true ? (
+          {isCorr ? (
+            <Badge variant="outline" className="border-primary/35 font-mono text-primary">
+              {t("workspaceDetail.scans.typeCorrelation")}
+            </Badge>
+          ) : scan.combined === true ? (
             <Badge variant="outline" className="border-primary/35 font-mono text-primary">
               {t("workspaceDetail.scans.typeCombined")}
             </Badge>
@@ -469,7 +497,8 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
         <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground" title={fmtTimeFull(scan.created_at)}>
           {fmtTime(scan.created_at)}
         </TableCell>
-        {/* 操作组（预览 2026-08-15）：running=取消/查看/删除；未完成=恢复/查看/删除；终态=查看/重跑/删除。
+        {/* 操作组（预览 2026-08-15）：running=取消/查看/删除；未完成=恢复/查看/删除；
+            终态=查看/重跑/删除（黑盒历史行无重跑——D4 删入口，ScanNewPage 已无黑盒表单）。
             容器 stopPropagation——按钮动作不触发整行导航。 */}
         <TableCell className="whitespace-nowrap pr-4 text-right">
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
@@ -491,7 +520,7 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
                 <Eye className="size-3.5" /> {t("workspaceDetail.scans.view")}
               </Link>
             </Button>
-            {isTerminal && (
+            {isTerminal && scan.scan_type !== "blackbox" && (
               <Button size="sm" variant="ghost" onClick={onRerun} disabled={busy}>
                 <RefreshCw className="size-3.5" /> {t("workspaceDetail.scans.rerun")}
               </Button>
@@ -511,16 +540,28 @@ function ScanRow({ ws, scan, onChanged }: { ws: string; scan: ScanSummary; onCha
         </TableCell>
       </TableRow>
 
-      {/* 版本化黑盒 run（spec 2026-08-14 §5.2）：嵌套展开子行（默认收起，点柄展开）。
-          纯白盒（无 bb_runs）不渲染。子行直接产出 TableRow（与主表同网格，见组件注释）。 */}
-      {open && hasRuns && (
-        <NestedBlackboxRuns
-          ws={ws}
-          scanId={scan.scan_id}
-          runs={scan.bb_runs!}
-          latestRunId={scan.latest_bb_run ?? null}
-          onChanged={onChanged}
-        />
+      {/* 嵌套展开子行（默认收起，点柄展开）。子行直接产出 TableRow（与主表同网格，
+          见各组件注释）。correlation 主行展开序（D4）：现扫子仓白盒 → 黑盒验证 run
+          （读主行 bb_runs，既有渲染复用）→ 复用子仓引用。组合任务只有黑盒 run 子行；
+          纯白盒（无 bb_runs/corr_children）不渲染。 */}
+      {open && expandable && (
+        <>
+          {freshChildren.length > 0 && (
+            <NestedCorrChildren ws={ws} entries={freshChildren} scansById={scansById} />
+          )}
+          {hasRuns && (
+            <NestedBlackboxRuns
+              ws={ws}
+              scanId={scan.scan_id}
+              runs={scan.bb_runs!}
+              latestRunId={scan.latest_bb_run ?? null}
+              onChanged={onChanged}
+            />
+          )}
+          {reusedChildren.length > 0 && (
+            <NestedCorrChildren ws={ws} entries={reusedChildren} scansById={scansById} />
+          )}
+        </>
       )}
 
       {/* 取消/删除确认 Dialog */}
@@ -685,4 +726,105 @@ function NestedBlackboxRuns({ ws, scanId, runs, latestRunId, onChanged }: {
 function msg(e: unknown): string {
   if (e instanceof ApiError) return String(e.status);
   return e instanceof Error ? e.message : String(e);
+}
+
+/** correlation 主行嵌套子行（D4，spec 2026-08-24 §8.2）：corr_children[] 逐条渲染为
+ *  真实 TableRow，结构与 NestedBlackboxRuns 同款——遵守主表同一 colgroup 列语义
+ *  （状态→状态列、任务名→扫描列、service→仓库列、白盒→类型列、漏洞数→漏洞列、
+ *  created_at→时间列、查看→操作列），从属表达用柄列贯通竖线 + 子行弱底色/小半号字。
+ *  富化：corr_children 只带 {service, scan_id, reused}，状态/漏洞数/时间从同 ws 全量
+ *  列表按 scan_id 补（现扫子仓由后端建在同 ws，天然在列）；查不到（历史行被删）时
+ *  弱「—」占位保网格，链接仍指该 scan。调用方按 reused 分两组渲染（现扫在前、复用
+ *  引用殿后），复用行加「复用」标注与现扫行区分。行链接走裸 scan 路径——DefaultScanTab
+ *  按目标 scan 状态落 report/live。 */
+function NestedCorrChildren({ ws, entries, scansById }: {
+  ws: string;
+  entries: { service: string; scan_id: string; reused: boolean }[];
+  scansById: Map<string, ScanSummary>;
+}) {
+  const { t } = useTranslation();
+  const nav = useNavigate();
+  return (
+    <>
+      {entries.map((c) => {
+        const s = scansById.get(c.scan_id);
+        const childPath = `/p/${ws}/scans/${c.scan_id}`;
+        const label = s?.workflow_id ?? c.scan_id;
+        const v = s?.vuln_count ?? null;
+        return (
+          <TableRow
+            key={`${c.service}:${c.scan_id}`}
+            data-testid={`corr-child-${c.scan_id}`}
+            onClick={() => nav(childPath)}
+            className="cursor-pointer bg-muted/25 text-xs hover:bg-muted/45"
+          >
+            {/* 柄列：贯通从属竖线（与父行展开柄同列，行高全高；px-0 让线正落列中轴） */}
+            <TableCell className="relative w-9 px-0 py-1.5">
+              <span aria-hidden className="absolute inset-y-0 left-1/2 w-px bg-border" />
+            </TableCell>
+            <TableCell className="py-1.5">
+              {s ? <StatusBadge status={s.status} /> : <span className="text-muted-foreground/50">—</span>}
+            </TableCell>
+            <TableCell className="max-w-0 py-1.5">
+              <span className="flex items-center gap-1.5">
+                <Link
+                  to={childPath}
+                  onClick={(e) => e.stopPropagation()}
+                  className="truncate font-mono text-[12px] font-medium hover:text-primary"
+                >
+                  {label}
+                </Link>
+                {c.reused && (
+                  <span className="shrink-0 rounded-full border border-primary/35 px-1.5 py-px text-[10px] leading-4 text-primary">
+                    {t("workspaceDetail.scans.corr.reused")}
+                  </span>
+                )}
+              </span>
+            </TableCell>
+            {/* 仓库格 = service 名（提交子仓即以 service 建扫描，仓库名同源） */}
+            <TableCell className="max-w-0 py-1.5">
+              <span className="block truncate text-[12px] font-medium">{c.service}</span>
+            </TableCell>
+            <TableCell className="py-1.5">
+              <Badge variant="outline" className="font-mono text-[10.5px] text-muted-foreground">
+                {t("workspaceDetail.scans.typeWhitebox")}
+              </Badge>
+            </TableCell>
+            {/* 进度/成本无子行级数据 → 「—」占位保网格 */}
+            <TableCell className="py-1.5"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell className="py-1.5 text-right">
+              {v != null ? (
+                <span
+                  data-testid={`corr-child-vulns-${c.scan_id}`}
+                  className={`font-mono text-[13px] font-semibold leading-none ${v > 0 ? "text-red" : "text-muted-foreground/70"}`}
+                >
+                  {v}
+                </span>
+              ) : (
+                <span data-testid={`corr-child-vulns-${c.scan_id}`} className="text-muted-foreground/50">—</span>
+              )}
+            </TableCell>
+            <TableCell className="py-1.5 text-right"><span className="text-muted-foreground/50">—</span></TableCell>
+            <TableCell
+              className="whitespace-nowrap py-1.5 font-mono text-[11px] text-muted-foreground"
+              title={s ? fmtTimeFull(s.created_at) || undefined : undefined}
+            >
+              {s ? fmtTime(s.created_at) : <span className="text-muted-foreground/50">—</span>}
+            </TableCell>
+            <TableCell className="whitespace-nowrap py-1.5 pr-4 text-right">
+              <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                <Link
+                  to={childPath}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-[11.5px] text-primary hover:underline"
+                >
+                  {t("workspaceDetail.scans.view")}
+                </Link>
+              </div>
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </>
+  );
 }

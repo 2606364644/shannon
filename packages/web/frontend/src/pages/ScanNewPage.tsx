@@ -6,12 +6,18 @@ import { toast } from "sonner";
 import type { ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
 import { apiGet, apiPost, ApiError } from "../api/client";
 import { ScanFormFields } from "../components/ScanFormFields";
+import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
+import {
+  formToYaml, yamlToForm, validateForm, CorrYamlError, type CorrFormState,
+} from "@/lib/correlation-yaml";
 
-type ScanType = "whitebox" | "blackbox" | "correlation";
+/** 页面可达类型（D3）：白盒 | 跨仓关联，顶部 segmented 切换。黑盒只读分支已删除——
+ *  黑盒一律是组合任务的嵌套 run 或经 ScanDetail addBlackboxToWhitebox，无独立创建入口。 */
+type ScanType = "whitebox" | "correlation";
 
 export type LoginType = "form" | "sso" | "api" | "basic";
 
@@ -39,7 +45,7 @@ export interface AuthFormState {
   loginFlow: string; // textarea 多行；buildBody 时 split 成 string[]
 }
 
-const DEFAULT_AUTH: AuthFormState = {
+export const DEFAULT_AUTH: AuthFormState = {
   enabled: false,
   // 默认使用档案（profile）——展开认证配置时优先复用工作区已验证档案，与 segmented 顺序一致（使用档案居左）。
   source: "profile",
@@ -104,9 +110,10 @@ export function authFromPayload(auth: ScanAuthentication): AuthFormState {
   };
 }
 
-/** 重跑预填数据（ScanList.onRerun 经 location.state 传入，优先于 query param）。 */
+/** 重跑预填数据（ScanList.onRerun 经 location.state 传入，优先于 query param）。
+ *  D3：黑盒只读分支已删——type:"blackbox" 的历史 preset 落到白盒渲染（不触发黑盒表单）。 */
 export interface RerunPreset {
-  type?: ScanType;
+  type?: "whitebox" | "blackbox" | "correlation";
   workspace?: string;
   repo?: string;
   url?: string;
@@ -199,12 +206,14 @@ export function validateAuth(a: AuthFormState, t: TFunction): string | null {
 export interface FormState {
   /** 仓库代码源（白盒必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
   selectedRepo: string;
+  /** 白盒=组合扫描目标 URL；correlation=黑盒验证 gateway URL（CorrelationFormFields 的
+   *  gatewayUrl 即此字段，避免新 state）。可选——空则纯白盒 / 纯关联。 */
   url: string;
-  /** 黑盒必填：要复用的白盒 scan_id。黑盒恒复用白盒结果（exploitation-only），无独立 repo 模式。 */
+  /** 历史「黑盒复用白盒」字段：黑盒分支已删（D3），仅为 ScanFormFields 兼容保留，不再提交。 */
   reuseScanId: string;
-  /** 黑盒登录配置（仅 blackbox 用；whitebox/correlation 忽略）。 */
+  /** 登录配置（组合扫描 / correlation gateway 非空时用）。 */
   auth: AuthFormState;
-  /** HOST 解析（仅 blackbox 用；与 auth 独立，非互斥）。disabled=不起代理，向后兼容。 */
+  /** HOST 解析（与 auth 独立，非互斥）。disabled=不起代理，向后兼容。 */
   host: HostFormState;
   yaml: string;
   /** 白盒「同时发起黑盒扫描」组合开关（Task 9）。可选——旧 FormState 字面量（如单测 baseF）不传 = false。
@@ -239,8 +248,9 @@ function assignAuthToBody(body: ScanRequest, a: AuthFormState): void {
  *    - profile 模式 -> host_profile_id；url 模式 -> host_url。
  *    - enabled 时发；disabled 不发（向后兼容——不起代理，直连目标）。
  *    - 空值兜底 || undefined（不发空串）。
- *  黑盒与白盒组合扫描共用，保证两条分支字段映射一致。HOST 与认证独立、非互斥。
- *  仅组合模式（combined && url）/黑盒调——纯白盒（无 url）不发 host（无黑盒阶段，HOST 代理无意义）。 */
+ *  白盒组合扫描与 correlation（gateway url 开）共用，保证分支字段映射一致。HOST 与认证独立、非互斥。
+ *  仅组合模式（combined && url）/correlation+url 调——纯白盒/纯关联（无 url）不发 host
+ *  （无黑盒阶段，HOST 代理无意义）。 */
 function assignHostToBody(body: ScanRequest, h: HostFormState): void {
   if (!h.enabled) return;
   if (h.mode === "profile") body.host_profile_id = h.profileId || undefined;
@@ -256,39 +266,43 @@ function assignHostToBody(body: ScanRequest, h: HostFormState): void {
  * pydantic v2 默认不容未知键, 发 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422
  * （P2 final-review 抓到的 prod-blocking bug: 每个前端扫描提交都 422）。
  *
- * 入口收窄（2026-08-01，阶段 2）：黑盒 = 白盒下游 exploitation-only，恒复用白盒结果——
- *   恒发 reuse_whitebox_scan_id（必填，前端校验拦空），不再有 repo/standalone 分支。source 仅白盒用。
+ * D3：黑盒分支已删（黑盒一律是组合任务嵌套 run）；correlation 分支重写——config_content
+ * 必带（表单派生 YAML），gateway url（f.url）非空 = 段③黑盒验证，附认证/HOST
+ * （与白盒组合扫描共用 assignAuthToBody/assignHostToBody，字段映射一致）。
  */
-export function buildBody(type: ScanType, f: FormState, workspace: string): ScanRequest {
-  if (type === "correlation") return { type, config_yaml: f.yaml };
-  const hostIsActive = type === "blackbox" || (type === "whitebox" && !!f.combined && !!f.url);
+export function buildBody(type: ScanType, f: FormState, workspace: string, corrYaml = ""): ScanRequest {
+  if (type === "correlation") {
+    // gateway url 开 = 段③黑盒验证：HOST 同组合模式校验（enabled 须有具体来源，拒绝静默降级）。
+    if (f.url.trim()) {
+      const hostError = hostValidationKey(f.host);
+      if (hostError) throw new Error(hostError);
+    }
+    const body: ScanRequest = { type, workspace: workspace || undefined };
+    if (corrYaml) body.config_content = corrYaml;
+    if (f.url.trim()) {
+      body.url = f.url.trim();
+      if (f.auth.enabled) assignAuthToBody(body, f.auth);
+      assignHostToBody(body, f.host);
+    }
+    return body;
+  }
+  const hostIsActive = !!f.combined && !!f.url;
   if (hostIsActive) {
     const hostError = hostValidationKey(f.host);
     if (hostError) throw new Error(hostError);
   }
   const body: ScanRequest = { type, url: f.url || undefined, workspace: workspace || undefined };
-  if (type === "whitebox") {
-    body.source = { kind: "repo", value: f.selectedRepo };
-    // 组合扫描（Task 9）：开关开 + url → 同一 body 携带 url + 认证，后端 Task 1 validator
-    // 识别 type=whitebox + url → 组合扫描，先跑黑盒认证预验证（bb_phase=precheck）。
-    // 开关关 → 纯白盒：即便 f.url 有草稿也不发（strip 上方 line 设的 url），零回归。
-    if (f.combined && f.url) {
-      body.url = f.url;
-      if (f.auth.enabled) assignAuthToBody(body, f.auth);
-      assignHostToBody(body, f.host);
-    } else {
-      body.url = undefined;
-    }
-    return body;
+  body.source = { kind: "repo", value: f.selectedRepo };
+  // 组合扫描（Task 9）：开关开 + url → 同一 body 携带 url + 认证，后端 Task 1 validator
+  // 识别 type=whitebox + url → 组合扫描，先跑黑盒认证预验证（bb_phase=precheck）。
+  // 开关关 → 纯白盒：即便 f.url 有草稿也不发（strip 上方 line 设的 url），零回归。
+  if (f.combined && f.url) {
+    body.url = f.url;
+    if (f.auth.enabled) assignAuthToBody(body, f.auth);
+    assignHostToBody(body, f.host);
+  } else {
+    body.url = undefined;
   }
-  // blackbox：恒复用白盒结果（exploitation-only）。reuseScanId 由前端校验保证非空（提交按钮 disabled）。
-  body.reuse_whitebox_scan_id = f.reuseScanId || undefined;
-  // 认证（auth-profile-vault Task 14 双来源）：与白盒组合扫描共用 assignAuthToBody（字段映射一致）。
-  if (f.auth.enabled) assignAuthToBody(body, f.auth);
-  // HOST 解析（blackbox-host-profile Task 13）：enabled 时按 mode 发对应字段（与 auth 独立、非互斥）。
-  // profile 模式 → host_profile_id；url 模式 → host_url。空值兜底 || undefined（不发空串）。
-  // disabled 时两者都不发（向后兼容——不起代理，直连目标）。
-  assignHostToBody(body, f.host);
   return body;
 }
 
@@ -310,17 +324,14 @@ function renderError(e: ApiError, t: TFunction): string {
   return t("scan.errors.submitFailed", { status: e.status });
 }
 
-/** 仓库校验：白盒 / 黑盒 repo 模式必选仓库。本地路径入口已移除——不再校验绝对路径。 */
+/** 仓库校验：白盒必选仓库。本地路径入口已移除——不再校验绝对路径。 */
 function validateSource(selectedRepo: string, t: TFunction): string | null {
   return selectedRepo ? null : t("scan.errors.selectRepo");
 }
 
-function validateUrl(v: string, type: ScanType, t: TFunction): string | null {
-  if (type !== "blackbox") {
-    if (!v.trim()) return null;
-    return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
-  }
-  if (!v.trim()) return t("scan.errors.urlEmpty");
+/** URL 校验（可选字段）：非空时须 http(s)（白盒组合扫描 gateway / correlation gateway 同款）。 */
+function validateUrl(v: string, t: TFunction): string | null {
+  if (!v.trim()) return null;
   return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
@@ -332,11 +343,10 @@ export function ScanNewPage() {
   const presetWs = params.get("workspace");
   // 重跑预填：ScanList.onRerun 经 location.state 传入原扫描配置（优先于 query param）。
   const preset = (useLocation().state ?? {}) as RerunPreset;
-  // 类型模型收窄（重设计 2026-08-16）：只有白盒 + 组合——组合是白盒表单里的开关
-  // （combined + url）；黑盒一律是组合任务的嵌套 run，无独立创建入口（往白盒任务追加
-  // 黑盒走 ScanDetail 的 addBlackboxToWhitebox）。type 不再可切换：白盒恒定；
-  // blackbox 仅历史扫描经重跑预填（location.state）到达，保留只读渲染。
-  const type: ScanType = preset.type === "blackbox" ? "blackbox" : "whitebox";
+  // 类型切换（D3）：白盒 | 跨仓关联 segmented。黑盒只读分支已删——历史黑盒 preset
+  // （location.state.type="blackbox"，ScanList 旧入口）落到白盒渲染；correlation preset
+  // 直达跨仓表单。
+  const [type, setType] = useState<ScanType>(preset.type === "correlation" ? "correlation" : "whitebox");
   const [f, setF] = useState<FormState>({
     selectedRepo: preset.repo ?? presetRepo ?? "",
     url: preset.url ?? "",
@@ -346,6 +356,35 @@ export function ScanNewPage() {
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
     combined: false,
   });
+  // —— 跨仓关联表单态（D3 单向数据流）：yaml 是派生态——表单交互路径 formToYaml(state)
+  //    重生成；YAML 编辑路径仅校验（yamlToForm 试解析），回填表单只经显式「应用到表单」。 ——
+  const [corrState, setCorrState] = useState<CorrFormState>({ repos: [], relations: [] });
+  const [corrYaml, setCorrYaml] = useState<string>(() => formToYaml({ repos: [], relations: [] }));
+  const [yamlErr, setYamlErr] = useState<CorrYamlError | null>(null);
+  const updateCorr = (s: CorrFormState) => {
+    setCorrState(s);
+    setCorrYaml(formToYaml(s));
+    setYamlErr(null);
+  };
+  const onCorrYaml = (y: string) => {
+    setCorrYaml(y);
+    try {
+      yamlToForm(y); // 仅校验（不回填 state）
+      setYamlErr(null);
+    } catch (e) {
+      // D1 已知限制：病态 relations（非列表）抛裸 TypeError——与 CorrYamlError 同道展示。
+      setYamlErr(e instanceof CorrYamlError
+        ? e
+        : new CorrYamlError([e instanceof TypeError ? e.message : String(e)]));
+    }
+  };
+  const applyYaml = () => {
+    try {
+      updateCorr(yamlToForm(corrYaml));
+    } catch {
+      /* 不可达：YamlPanel 的应用按钮在有错时 disabled */
+    }
+  };
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
   const [workspace, setWorkspace] = useState(preset.workspace ?? presetWs ?? "");
   const [wsList, setWsList] = useState<Workspace[]>([]);
@@ -353,13 +392,15 @@ export function ScanNewPage() {
   const [wsLoading, setWsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
+  const setAuth = (patch: Partial<AuthFormState>) => setF((prev) => ({ ...prev, auth: { ...prev.auth, ...patch } }));
+  const setHost = (patch: Partial<HostFormState>) => setF((prev) => ({ ...prev, host: { ...prev.host, ...patch } }));
 
   useEffect(() => {
     if (presetRepo) set({ selectedRepo: presetRepo });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetRepo]);
 
-  // 拉取 ws 列表（用户可见的 ws，P1 后端已过滤）——供 ScanFormFields 的 ws 下拉使用
+  // 拉取 ws 列表（用户可见的 ws，P1 后端已过滤）——供两张表单的 ws 下拉使用
   useEffect(() => {
     apiGet<Workspace[]>("/workspaces")
       .then(setWsList)
@@ -367,25 +408,24 @@ export function ScanNewPage() {
       .finally(() => setWsLoading(false));
   }, []);
 
-  // 校验：白盒 = repo + url(可选) + ws；黑盒（仅历史重跑预填）= url + reuseScanId(必填) + ws。
-  // 白盒组合扫描（Task 9）：combined 开时 url 变必填 + auth 纳入校验（与黑盒同款 validateAuth）。
-  const needRepo = type === "whitebox";
-  const sourceErr = needRepo ? validateSource(f.selectedRepo, t) : null;
-  const reuseErr = type === "blackbox" && !f.reuseScanId
-    ? t("scan.errors.selectReuseScan")
-    : null;
+  // 校验：白盒 = repo + url(可选) + ws；correlation = validateForm(corrState) 空 + 无
+  // YAML 错 + ws（gateway url 可选，开了才纳入 url/auth/host 校验——同白盒组合扫描）。
   const combined = type === "whitebox" && !!f.combined;
+  const corrGatewayOn = type === "correlation" && !!f.url.trim();
+  const sourceErr = type === "whitebox" ? validateSource(f.selectedRepo, t) : null;
   const urlErr = combined
     ? (f.url.trim() ? (/^https?:\/\//.test(f.url.trim()) ? null : t("scan.errors.urlScheme")) : t("scan.errors.urlEmpty"))
-    : validateUrl(f.url, type, t);
-  const authErr = (type === "blackbox" || combined) ? validateAuth(f.auth, t) : null;
-  const hostErr = (type === "blackbox" || combined) ? validateHost(f.host, t) : null;
-  const isValid = !sourceErr && !reuseErr && !urlErr && !authErr && !hostErr && !!workspace;
+    : validateUrl(f.url, t);
+  const authErr = (combined || corrGatewayOn) ? validateAuth(f.auth, t) : null;
+  const hostErr = (combined || corrGatewayOn) ? validateHost(f.host, t) : null;
+  const corrIssues = type === "correlation" ? validateForm(corrState) : [];
+  const isValid = !sourceErr && !urlErr && !authErr && !hostErr && !!workspace
+    && (type === "whitebox" || (corrIssues.length === 0 && !yamlErr));
 
   async function onSubmit() {
     try {
       setSubmitting(true);
-      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace));
+      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace, corrYaml));
       // 组合扫描预验证态（Task 9，spec §8.2）：后端 passthrough bb_phase=precheck 表示
       // 黑盒认证预验证先行——提示用户「预验证中」，再跳 live 页跟踪进度。
       if (r.bb_phase === "precheck") toast.info(t("scan.precheckStatus"));
@@ -399,34 +439,76 @@ export function ScanNewPage() {
     }
   }
 
-  const subtitleKey = type === "blackbox" ? "scan.subtitleBlackbox" : "scan.subtitleWhitebox";
-  const submitLabel = type === "blackbox" ? t("scan.submitBlackbox") : t("scan.submit");
-  const footerHint = type === "blackbox" ? t("scan.footerHintBlackbox") : t("scan.footerHintWhitebox");
+  const subtitleKey = type === "correlation" ? "scan.correlation.subtitle" : "scan.subtitleWhitebox";
+  const submitLabel = type === "correlation" ? t("scan.correlation.submit") : t("scan.submit");
+  const footerHint = type === "correlation" ? t("scan.correlation.footerHint") : t("scan.footerHintWhitebox");
 
   return (
     <div className="space-y-4">
       {/* 页面标题 */}
       <PageHeader title={t("scan.title")} subtitle={t(subtitleKey)} />
 
-      {/* 整张卡片：单栏表单 + 底部操作（类型 tab 已移除——只有白盒/组合，黑盒无独立入口） */}
+      {/* 整张卡片：类型 segmented + 单栏表单 + 底部操作 */}
       <Card className="overflow-hidden">
-        {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽。 */}
-        <div className="p-5">
-          <ScanFormFields
-            type={type}
-            f={f}
-            set={set}
-            sourceErr={sourceErr}
-            reuseErr={reuseErr}
-            urlErr={urlErr}
-            authErr={authErr}
-            hostErr={hostErr}
-            workspace={workspace}
-            wsList={wsList}
-            onWorkspaceChange={setWorkspace}
-            wsLoading={wsLoading}
-            presetReuseScanId={preset.reuseScanId}
-          />
+        <div className="p-5 space-y-4">
+          {/* 类型切换 segmented（D3）：白盒 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run） */}
+          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+            {(["whitebox", "correlation"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setType(v)}
+                aria-pressed={type === v}
+                data-testid={`scan-type-${v}`}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  type === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t(`scan.type.${v}`)}
+              </button>
+            ))}
+          </div>
+
+          {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽；
+              跨仓关联走 CorrelationFormFields（仓库卡片 + YAML 面板）。 */}
+          {type === "whitebox" ? (
+            <ScanFormFields
+              type="whitebox"
+              f={f}
+              set={set}
+              sourceErr={sourceErr}
+              reuseErr={null}
+              urlErr={urlErr}
+              authErr={authErr}
+              hostErr={hostErr}
+              workspace={workspace}
+              wsList={wsList}
+              onWorkspaceChange={setWorkspace}
+              wsLoading={wsLoading}
+            />
+          ) : (
+            <CorrelationFormFields
+              state={corrState}
+              onState={updateCorr}
+              yaml={corrYaml}
+              onYaml={onCorrYaml}
+              yamlError={yamlErr}
+              onApplyYaml={applyYaml}
+              workspace={workspace}
+              wsList={wsList}
+              onWorkspaceChange={setWorkspace}
+              wsLoading={wsLoading}
+              gatewayUrl={f.url}
+              onGatewayUrl={(v) => set({ url: v })}
+              gatewayErr={urlErr}
+              auth={f.auth}
+              setAuth={setAuth}
+              authErr={authErr}
+              host={f.host}
+              setHost={setHost}
+              hostErr={hostErr}
+            />
+          )}
         </div>
 
         {/* 底部操作栏 */}

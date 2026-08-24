@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
-import { screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import { screen, waitFor, fireEvent, cleanup, within } from "@testing-library/react";
 import { renderWithSwr } from "@/test/swr-render";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { setupServer } from "msw/node";
@@ -34,6 +34,44 @@ const interrupted = {
 const cancelled = {
   scan_id: "s4", scan_type: "whitebox", status: "cancelled", created_at: 4000,
   completed_at: 5000, vuln_count: 0, total_cost_usd: 1, cost_currency: "USD", is_running: false,
+} as const;
+// 已完成白盒（D4）：黑盒历史行重跑入口已删（ScanNewPage 无黑盒表单），测重跑/
+// 终态按钮显隐的用例须用白盒终态行，不再复用黑盒 `completed`。
+const wbDone = {
+  scan_id: "s5", scan_type: "whitebox", status: "completed", created_at: 4500,
+  completed_at: 4600, vuln_count: 2, total_cost_usd: 1, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-s5",
+} as const;
+
+// ── D4（2026-08-24）：correlation 主行 + 嵌套子行列 fixtures ─────────────────
+// 现扫子仓白盒行由后端建在同 ws（scan_manager 提交时 create_scan(ws,…,"whitebox")），
+// 故列表同时含子行主行 + corr 主行——嵌套子行按 scan_id 从全量列表富化状态/漏洞数。
+const corrChildScan = {
+  scan_id: "child-1", scan_type: "whitebox", status: "completed", created_at: 5100,
+  completed_at: 5200, vuln_count: 2, total_cost_usd: 1, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-child-1", repo: "frontend",
+} as const;
+const corrHistScan = {
+  scan_id: "hist-9", scan_type: "whitebox", status: "completed", created_at: 900,
+  completed_at: 950, vuln_count: 4, total_cost_usd: 0.5, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-hist-9", repo: "order",
+} as const;
+// corr 主行：现扫子仓（child-1）+ 复用子仓（hist-9）+ 段③黑盒验证 run-1。
+// bb_runs 非空时后端 create_blackbox_run 亦置 combined=True——fixture 如实带，
+// 锁定「关联行即使 combined=True 也只归「跨仓关联」档，不漏进「组合」」。
+const corrMain = {
+  scan_id: "corr-1", scan_type: "correlation", status: "completed", created_at: 5000,
+  completed_at: 6000, vuln_count: 5, total_cost_usd: 3, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-corr-1", combined: true,
+  corr_children: [
+    { service: "frontend", scan_id: "child-1", reused: false },
+    { service: "order", scan_id: "hist-9", reused: true },
+  ],
+  bb_runs: [{
+    run_id: "run-1", status: "completed", bb_phase: "completed",
+    started_at: null, completed_at: "2026-08-24T10:00:00Z",
+  }],
+  latest_bb_run: "run-1",
 } as const;
 
 let listCalls = 0;
@@ -148,9 +186,10 @@ describe("ScanList 卡片操作按钮按 status 显隐", () => {
   });
 
   it("completed scan：不显恢复/取消，显删除/重跑/查看", async () => {
-    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));
+    // D4：重跑入口黑盒行已删——终态按钮显隐用白盒终态行断言。
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([wbDone])));
     renderList();
-    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("ws-s5")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /重跑/ })).toBeInTheDocument();
@@ -243,26 +282,22 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     await waitFor(() => expect(resumeCalls).toEqual(["ws/s3"]));
   });
 
-  it("重跑（黑盒）-> getScan 拿配置 -> 跳 /scan/new 并预填 location state", async () => {
-    const auth = {
-      login_type: "form", login_url: "http://t.example/login",
-      credentials: { username: "admin" },
-    };
+  it("重跑入口（D4 黑盒历史行移除）：黑盒行无重跑按钮；白盒重跑不受影响", async () => {
+    // D3 删 ScanNewPage 黑盒表单后，黑盒 preset 只会落坏表单——D4 把 ScanList 侧
+    // 黑盒行的重跑入口一并移除（白盒/组合不受影响）。
     server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed, wbDone])),
       http.get("/api/workspaces/:ws/scans/:scanId", () =>
-        HttpResponse.json({ scan_type: "blackbox", web_url: "http://t.example",
-          reuse_whitebox_scan_id: "wb-1", authentication: auth,
-          host_profile_id: "host-profile-1", host_url: null,
-          host_source: "profile", host_mapping_count: 2 })),
+        HttpResponse.json({ scan_type: "whitebox", source_repo: "group/repo-a" })),
     );
     renderList();
     await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    // 全列表唯一重跑按钮 = 白盒行（黑盒 s2 无）
+    expect(screen.getAllByRole("button", { name: /重跑/ })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
     await waitFor(() => expect(navMock).toHaveBeenCalled());
     expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
-      state: { type: "blackbox", workspace: "ws", url: "http://t.example",
-        reuseScanId: "wb-1", auth, hostProfileId: "host-profile-1" },
+      state: { type: "whitebox", workspace: "ws", repo: "group/repo-a" },
     });
   });
 
@@ -288,12 +323,13 @@ describe("ScanList 操作调 API + 列表刷新", () => {
   it("重跑 getScan 失败 -> 降级跳转（无 state）+ toast 提示", async () => {
     const { toast } = await import("sonner");
     server.use(
-      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])),
+      // D4：重跑仅白盒/组合/correlation 行有——黑盒 fixture 换白盒终态行。
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([wbDone])),
       http.get("/api/workspaces/:ws/scans/:scanId", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 })),
     );
     renderList();
-    await waitFor(() => expect(screen.getByText("s2")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("ws-s5")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
     await waitFor(() => expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws"));
     // 降级：仅 path 参数，无 state。
@@ -378,5 +414,79 @@ describe("ScanList v4：整行可点 + 空态收敛", () => {
     // 次级入口：先配置仓库 / 配置认证档案（对应命令栏入口）
     expect(screen.getByRole("link", { name: /先配置仓库/ })).toHaveAttribute("href", "/p/ws/repos");
     expect(screen.getByRole("link", { name: /配置认证档案/ })).toHaveAttribute("href", "/p/ws/auth-profiles");
+  });
+});
+
+// D4（2026-08-24）：correlation 主行 + 嵌套子行列——类型过滤「跨仓关联」档、
+// 🔗 状态徽标、展开三种子行（现扫子仓白盒 / 黑盒验证 run / 复用引用）。
+describe("ScanList correlation 主行 + 嵌套子行（D4）", () => {
+  it("corr 主行默认收起；展开后三种子行：现扫子仓白盒 / 黑盒验证 run / 复用引用", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans",
+      () => HttpResponse.json([corrMain, corrChildScan, corrHistScan])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-corr-1")).toBeInTheDocument());
+    // 收起态：三种子行均不渲染（嵌套行默认收起，列表扫读优先）
+    expect(screen.queryByTestId("nested-runs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("corr-child-child-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("corr-child-hist-9")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开关联子行" }));
+    // ① 现扫子仓白盒行：链接 /p/{ws}/scans/{child.scan_id} + 同 ws 列表富化
+    //    （service 名 / 状态徽标 / 漏洞数），列对齐主表网格
+    const fresh = await screen.findByTestId("corr-child-child-1");
+    expect(within(fresh).getByRole("link", { name: "ws-child-1" })).toHaveAttribute(
+      "href", "/p/ws/scans/child-1");
+    expect(within(fresh).getByText("frontend")).toBeInTheDocument();
+    expect(within(fresh).getByText("已完成")).toBeInTheDocument();
+    expect(within(fresh).getByTestId("corr-child-vulns-child-1").textContent).toBe("2");
+    // ② 黑盒验证 run 行：既有 NestedBlackboxRuns 渲染复用（?run= 选中）
+    const runs = screen.getByTestId("nested-runs");
+    expect(within(runs).getByRole("link", { name: "run-1" })).toHaveAttribute(
+      "href", "/p/ws/scans/corr-1?run=run-1");
+    // ③ 复用子仓引用行：链接历史 scan + 「复用」标注
+    const reused = screen.getByTestId("corr-child-hist-9");
+    expect(within(reused).getByRole("link", { name: "ws-hist-9" })).toHaveAttribute(
+      "href", "/p/ws/scans/hist-9");
+    expect(within(reused).getByText("复用")).toBeInTheDocument();
+  });
+
+  it("corr 主行状态徽标带 🔗（StatusBadge correlation prop 接回）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([corrMain])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-corr-1")).toBeInTheDocument());
+    // 状态徽标文本 = 「已完成 🔗」（非 corr 行无 🔗）
+    expect(screen.getByText("已完成 🔗")).toBeInTheDocument();
+  });
+
+  it("类型过滤「跨仓关联」档：关联行入选；combined=True 也不漏进「组合」档", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans",
+      () => HttpResponse.json([running, corrMain])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("s1")).toBeInTheDocument());
+    // 选「组合」：纯白盒 s1 与关联主行（虽 combined=True）都不在
+    fireEvent.click(screen.getByText("全部类型").closest("button")!);
+    fireEvent.click(await screen.findByRole("option", { name: "组合（白盒+黑盒）" }));
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
+    expect(screen.queryByText("ws-corr-1")).not.toBeInTheDocument();
+    // 切「跨仓关联」：只剩关联主行
+    fireEvent.click(screen.getByText("组合（白盒+黑盒）").closest("button")!);
+    fireEvent.click(await screen.findByRole("option", { name: "跨仓关联" }));
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
+    expect(screen.getByText("ws-corr-1")).toBeInTheDocument();
+  });
+
+  it("复用子仓引用行链接历史 scan；历史行已删（不在列表）仍可渲染跳转（富化 null-safe）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+      { ...corrMain, corr_children: [{ service: "order", scan_id: "gone-1", reused: true }] },
+    ])));
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-corr-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "展开关联子行" }));
+    const reused = await screen.findByTestId("corr-child-gone-1");
+    // 标签回落 scan_id（无富化 workflow_id），链接仍指历史 scan
+    expect(within(reused).getByRole("link", { name: "gone-1" })).toHaveAttribute(
+      "href", "/p/ws/scans/gone-1");
+    expect(within(reused).getByText("复用")).toBeInTheDocument();
+    // 富化缺失：漏洞数弱「—」占位（不空白不报错）
+    expect(within(reused).getByTestId("corr-child-vulns-gone-1").textContent).toBe("—");
   });
 });

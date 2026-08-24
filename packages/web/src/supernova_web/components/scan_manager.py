@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,6 @@ _log = logging.getLogger(__name__)
 from temporalio.client import Client
 
 from supernova_core.models.multi_repo_config import MultiRepoConfig
-from supernova_core.config.parser import parse_multi_repo_config
 from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_WHITEBOX
 from supernova_core.runtime.workflow_timeout import workflow_run_timeout
 from supernova_core.session import SessionManager
@@ -113,6 +112,57 @@ def _dump_multi_repo_yaml(config: MultiRepoConfig, path: Path) -> None:
     path.write_text(
         yaml.safe_dump(config.model_dump(by_alias=True), allow_unicode=True),
         encoding="utf-8")
+
+
+# ── final-fix ①（Critical）：表单 correlation yaml 缺 correlation 段的兜底注入 ──
+# 前端 formToYaml（locked，勿改）只产 repos/relations，而 MultiRepoConfig.correlation
+# 必填（out_workspace 无默认）→ 表单提交的关联扫描恒 422。web 提交通道在两处注入
+# 默认段（temp 文件 / start 解析），用户存档（save_as 写入的 config_store 内容、
+# multi-configs API）保持原文 verbatim 不注入；core 的 parse_multi_repo_config 与
+# MultiRepoConfig 零改动（CLI 零回归）。占位 out_workspace 永不达 worker——C3 落盘
+# 前必被主行 scan_id 覆写（见 start() correlation 分支 ④）。
+_CORR_OUT_WS_PLACEHOLDER = "web-pending"
+
+
+def _corr_raw_with_default_section(raw: Any) -> Any:
+    """dict 顶层且 correlation 缺失（或为 dict）时注入默认 out_workspace 占位。
+
+    其余形状（顶层非 dict / correlation 非 dict / yaml 语法错）原样返回——交给
+    MultiRepoConfig.model_validate 报真 422，不在此猜测修复。"""
+    if not isinstance(raw, dict):
+        return raw
+    corr = raw.get("correlation")
+    if corr is None:
+        corr = raw["correlation"] = {}
+    if not isinstance(corr, dict):
+        return raw  # 形状错（如 list/str）→ 校验报错
+    corr.setdefault("out_workspace", _CORR_OUT_WS_PLACEHOLDER)
+    return raw
+
+
+def _corr_yaml_text_with_default_section(text: str) -> str:
+    """文本版注入（_resolve_correlation_yaml 的 config_content → write_temp 前用）：
+    store 的 validate 会跑 parse_multi_repo_config，无段内容在此就 422——这正是
+    表单提交 422 的首发现场，须在写 temp 前注入（temp 非用户面，注入无损）。"""
+    import yaml
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return text  # 语法错误留给 store 校验报真错
+    if not isinstance(raw, dict):
+        return text  # 形状错误（顶层 list/标量）留给校验报
+    return yaml.safe_dump(
+        _corr_raw_with_default_section(raw), allow_unicode=True, sort_keys=False)
+
+
+def _parse_corr_config_with_defaults(path: Path) -> MultiRepoConfig:
+    """web 提交通道的宽容解析（start() correlation 分支用，替代裸
+    parse_multi_repo_config）：缺 correlation 段注入默认占位后再 model_validate。
+    config_content 路径已在写 temp 时注入（此处 no-op），config_name 存档缺段在此
+    兜底；存档文件本身不改（verbatim）。"""
+    import yaml
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return MultiRepoConfig.model_validate(_corr_raw_with_default_section(raw))
 
 
 class ScanManager:
@@ -232,9 +282,8 @@ class ScanManager:
             raise TooManyScans(self._max_concurrent)
 
         target, yaml_path = await self._resolve_inputs(req)
-        # C3（跨仓关联）：主行落请求 ws——旧 _resolve_out_workspace（从 yaml 推 ws）不再
-        # 走：out_workspace 由下方 correlation 分支覆写为主行 scan_id 落盘 yaml（旧函数
-        # 保留待 D 阶段清理）。
+        # C3（跨仓关联）：主行落请求 ws——旧 _resolve_out_workspace（从 yaml 推 ws）已随
+        # D7 清理删除：out_workspace 由下方 correlation 分支覆写为主行 scan_id 落盘 yaml。
         ws = req.workspace
 
         # HOST only belongs to a blackbox stage.  Resolve it before creating a scan
@@ -258,7 +307,9 @@ class ScanManager:
         corr_repo_paths: dict[str, Path] = {}
         corr_repo_dirs: dict[str, str] = {}
         if req.type == "correlation":
-            corr_config = parse_multi_repo_config(yaml_path)
+            # final-fix ①：宽容解析（缺 correlation 段注入默认占位，详见模块级
+            # _parse_corr_config_with_defaults 注释）；后续校验/规划消费同一对象。
+            corr_config = _parse_corr_config_with_defaults(yaml_path)
             corr_repo_paths = self._validate_reused_children(ws, corr_config)
             for plan in plan_repo_scans(corr_config):
                 if not plan.reuse:
@@ -381,6 +432,22 @@ class ScanManager:
                 # ④ 覆写 out_workspace=主行 scan_id 落盘 yaml（关联 workflow / 漂移
                 # 检测读此文件；表单/yaml 预览中该字段省略，此 dump 是 worker 读到的真值）。
                 corr_config.correlation.out_workspace = scan_id
+                # final-fix ②：落盘前把 spec.path 回填为绝对仓库目录。web 表单的
+                # path 是仓库名（或复用仓 null），worker 侧 orchestrator 会把
+                # spec.path 喂关联 agent 的 repo_paths 上下文（读源码）+ 漂移检测
+                # （Path(spec.path).exists()）——裸名字在 worker 容器不可读 → 源码
+                # 读不到、漂移静默跳过。回填仅动此刻的这个对象（复用/规划已在上
+                # 方用名字语义跑完；下方子仓循环只用 spec.workspace/corr_repo_dirs，
+                # 不消费 plan.repo_path）。复用子仓 best-effort：仓仍在 ws → 回填
+                # （恢复漂移+源码可达）；已删/未就绪 → 留 null（漂移跳过是正解）。
+                for svc, spec in corr_config.repos.items():
+                    if svc in corr_repo_dirs:
+                        spec.path = str(corr_repo_dirs[svc])
+                    elif spec.workspace and spec.path is None:
+                        try:
+                            spec.path = self._resolve_repo_path(ws, svc)
+                        except ValueError:
+                            pass  # 仓不在 ws/未就绪 → 保持 null，不阻塞提交
                 dumped = yaml_path.parent / f"{scan_id}-multi-repo.yaml"
                 _dump_multi_repo_yaml(corr_config, dumped)
                 corr_writer = CorrelationEventWriter(event_file)
@@ -447,6 +514,32 @@ class ScanManager:
         status = _compute_status(scan_dir, mgr.get_status(scan_dir))
         if status not in _RESUMABLE_STATUSES:
             raise ValueError(f"该扫描状态为 {status}，不可恢复，请重新扫描")
+
+        # ── correlation 主行 resume（C4）：首版不做接力重入 ─────────────────────
+        # 接力恢复依赖重新提交子仓白盒（编排协程/子仓 handle 随 web 进程丢失，主行无
+        # 单一可 re-attach 的 workflow），不在首版范围；行为对齐白盒 stale 判活语义收口：
+        # - heartbeat 判活（纯心跳，对齐 cancel ② 轨口径）→ no-op 拒绝：兜底「session
+        #   已显式标 interrupted 但 worker 复活」的 race，不动 session、零提交；
+        # - stale（session 仍 running，reconciler 未及收口）→ 标 interrupted 终态
+        #   （scan_end 缺失才补 + session status/completed_at，_ensure_scan_end 同款
+        #   幂等口径）；已终态（interrupted/crashed）不覆写。
+        # 两路均 ValueError → API 422 引导重新提交（对齐 resume 契约「不可恢复→重扫」）。
+        # 分支置于 _check_temporal 之前：不提交任何 workflow，无需 Temporal。
+        if self._scan_row_is_correlation(scan_dir):
+            if is_scan_recently_active(scan_dir):
+                raise ValueError("该关联扫描仍在运行，无需恢复")
+            if mgr.get_status(scan_dir) == "running":
+                event_file = scan_dir / "events.ndjson"
+                if not self._has_scan_end(event_file):
+                    await self._write_scan_end(
+                        event_file, "interrupted", -1,
+                        "编排随 web 进程重启丢失（关联扫描暂不支持断点恢复）",
+                        scan_dir=scan_dir)
+                mgr.update_session(scan_dir, {
+                    "status": "interrupted", "completed_at": time.time()})
+            raise ValueError(
+                "关联扫描暂不支持断点恢复，请重新提交关联扫描（子仓白盒产物保留可复用）")
+
         await self._check_temporal()
         if len(self._handles) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
@@ -942,8 +1035,9 @@ class ScanManager:
         parse_multi_repo_config 直读）；repo_workspace_paths = {service: 复用白盒 scan_dir}
         （_validate_reused_children 产物，worker 据此收集各仓 exploitation queue）；
         out_ws_dir = workspaces/<ws>/scans/<scan_id>（关联主行 scan 目录，worker 侧
-        SessionManager 幂等建 workspace）；ws = yaml 的 out_workspace（event_file 所在 ws，
-        provider/env 解析亦按它）。write_scan_end 保持默认 False——终态由 web 编排收尾
+        SessionManager 幂等建 workspace）；ws = 请求 workspace（event_file 所在 ws，
+        provider/env 解析亦按它——yaml 的 out_workspace 已被 C3 覆写为主行 scan_id，
+        非 ws）。write_scan_end 保持默认 False——终态由 web 编排收尾
         （_ensure_scan_end），worker 不写。
         """
         from supernova_multi.pipeline.workflows import CorrelationScanWorkflow
@@ -962,10 +1056,16 @@ class ScanManager:
             provider_config=provider_config,
             env_overrides=self._resolve_env_overrides(ws),
         )
+        # final-fix ④（Important）：run_timeout 必须严格大于 workflow 内 activity 的
+        # start_to_close_timeout（CorrelationScanWorkflow 关联 activity 预算 4h）——
+        # 裸 workflow_run_timeout()（默认 3h）会先掐死 4h activity，大 multi-edge run
+        # 必 TIMED_OUT。取 env 超时与 4.5h（4h activity + 30min 余量）的较大者：默认
+        # 3h 时抬到 4.5h，env 调大（如 6h）时尊重 env。wb/bb 提交不受影响（零回归）。
+        corr_run_timeout = max(workflow_run_timeout(), timedelta(hours=4, minutes=30))
         handle = await client.start_workflow(
             CorrelationScanWorkflow.run, inp, id=workflow_id,
             task_queue=WEB_TASK_QUEUE_CORRELATION,
-            run_timeout=workflow_run_timeout(),
+            run_timeout=corr_run_timeout,
         )
         # 提交成功后锚定 submitted_at（scan_liveness 提交宽限门防冷启动误杀；
         # start_workflow 抛错不达此处，提交失败不写）。
@@ -1764,6 +1864,15 @@ class ScanManager:
 
         scan_key = (ws, scan_id)
 
+        # ── 跨仓关联 cancel 级联（C4，spec 2026-08-24 §11）──────────────────────
+        # correlation 主行按 scan_type 分流到 _cancel_correlation（编排协程 + 子仓/
+        # 关联 workflow + 主行终态）。优先于 combined 检查：段③建黑盒 run 会给主行
+        # session 写 combined=True（create_blackbox_run 副作用），但级联目标（现扫子仓
+        # 白盒 + -corr 关联 workflow）与组合扫描不同，必须按行类型分派；组合行
+        # scan_type=whitebox 不受影响（零回归）。
+        if self._scan_row_is_correlation(scan_dir):
+            return await self._cancel_correlation(ws, scan_id, scan_dir, scan_key)
+
         # ── 组合扫描 cancel（spec §11.5）──────────────────────────────────────
         # 按 bb_phase/bb_rerun_attempts 算 workflow_id → re-attach + handle.cancel()；
         # orchestrator task 一并取消（防后台接力继续 submit 黑盒/写 scan_end 与终态竞争）。
@@ -2006,14 +2115,6 @@ class ScanManager:
             raise ValueError(f"仓库未就绪（state={state}），请先在 ws 内完成 clone")
         return str(repo_dir)
 
-    def _resolve_out_workspace(self, yaml_path: Path | None) -> str:
-        """从 correlation yaml 解析 out_workspace，作为 event_file 所在 ws。"""
-        from supernova_core.config.parser import parse_multi_repo_config
-        if yaml_path is None or not Path(yaml_path).exists():
-            raise ValueError("correlation 扫描需可解析的 yaml 以取 out_workspace")
-        cfg = parse_multi_repo_config(yaml_path)
-        return cfg.correlation.out_workspace
-
     async def _resolve_correlation_yaml(self, req: ScanRequest) -> Path:
         assert self._config_store is not None, "correlation 需 config_store"
         if req.config_name:
@@ -2023,7 +2124,11 @@ class ScanManager:
         if req.config_content:
             if req.save_as:
                 return self._config_store.write(req.save_as, req.config_content)
-            return self._config_store.write_temp(req.config_content)
+            # final-fix ①：表单 yaml（formToYaml 产物，无 correlation 段）须注入后
+            # 写 temp——store 的 validate 跑 parse_multi_repo_config，无段内容在此
+            # 422（表单提交的首发现场）。save_as 存档路径保持原文 verbatim 不注入。
+            return self._config_store.write_temp(
+                _corr_yaml_text_with_default_section(req.config_content))
         raise ValueError("correlation 扫描需 config_name 或 config_content")
 
     def _validate_reused_children(self, ws: str,
@@ -2228,6 +2333,77 @@ class ScanManager:
             await self._mark_run(scan_dir, active_run_id, "cancelled", status="cancelled")
         # 清残留 handle 登记（白盒 handle 在 running 阶段仍挂 _handles；对齐 delete 清理）
         self._handles.pop(scan_key, None)
+        await self._mark_cancelled(scan_dir)
+        return {"cancelled": scan_id}
+
+    async def _cancel_correlation(self, ws: str, scan_id: str, scan_dir: Path,
+                                  scan_key: tuple[str, str]) -> dict:
+        """跨仓关联 cancel 级联（C4，镜像 _cancel_combined 模式）：
+
+        取消顺序：
+        ① 编排协程（_orchestrator_tasks）——停三段接力（不再提交关联/黑盒 run、
+          不写 scan_end 与 _mark_cancelled 终态竞争）；orchestrator finally 自 pop
+          同 key（幂等兜底）。
+        ② _handles 中主/子仓 handle 逐个 cancel——现 C3 实现子仓 handle 由编排协程
+          局部持有、不进 _handles（主行亦然），此循环覆盖登记路径/遗留 handle；
+          未登记的 key 直接跳过（真正的 workflow 停止靠 ③ re-attach）。
+        ③ Temporal re-attach best-effort：现扫子仓白盒 workflow（{ws}-{c_id}；复用
+          子仓在提交时已终态，不碰）+ 关联 workflow（{ws}-{scan_id}-corr）。编排协程
+          被 cancel 只停「等待」，workflow 本体须 re-attach cancel 才真停。
+        ④ 段③活跃黑盒 run（latest 非终态）re-attach cancel（-bb-{K}）+ _mark_run
+          标 cancelled——否则 run 永久 pending，delete/续跑的非终态门被永久禁用
+          （对齐 _cancel_combined 的 run 收口语义）。
+        ⑤ heartbeat fresh → cancel.requested 协作式信号（对齐 cancel ② 轨）+ 主行
+          _mark_cancelled 收终态。
+
+        Temporal 连接/cancel 全 best-effort（不可达仍标 cancelled——对齐 _cancel_combined
+        的「不可达不阻断终态」语义）。
+        """
+        # ① 取消编排协程（fire-and-forget：不再 submit 关联/黑盒、不与终态竞争）
+        orch = self._orchestrator_tasks.pop(scan_key, None)
+        if orch is not None and not orch.done():
+            orch.cancel()
+        # ② _handles 直达取消：主行 + 现扫子仓 key（best-effort，逐个隔离异常）
+        session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+        children = [c for c in (session.get("corr_children") or [])
+                    if c.get("scan_id") and not c.get("reused")]
+        for k in [scan_key] + [(ws, c["scan_id"]) for c in children]:
+            handle = self._handles.get(k)
+            if handle is not None:
+                try:
+                    await handle.cancel()
+                except Exception:  # noqa: BLE001 - best-effort; 不阻断后续取消
+                    pass
+        # ③ re-attach cancel 现扫子仓白盒 + 关联 workflow（best-effort）
+        try:
+            client = await Client.connect(self._temporal_address())
+            for c in children:
+                try:
+                    await client.get_workflow_handle(
+                        f"{ws}-{c['scan_id']}").cancel()
+                except Exception:  # noqa: BLE001 - 单仓失败不阻断其余取消
+                    pass
+            try:
+                await client.get_workflow_handle(f"{ws}-{scan_id}-corr").cancel()
+            except Exception:  # noqa: BLE001 - 不在跑/不可达均忽略
+                pass
+        except Exception:  # noqa: BLE001 - Client.connect 失败 → 跳过 re-attach 段
+            pass
+        # ④ 段③活跃黑盒 run：re-attach cancel + 标 cancelled（防永久 pending）
+        runs = self._store.list_blackbox_runs(ws, scan_id)
+        latest = runs[-1] if runs else None
+        if latest and latest.get("status") not in _RUN_TERMINAL_STATUSES:
+            run_id = latest["run_id"]
+            try:
+                client = await Client.connect(self._temporal_address())
+                await client.get_workflow_handle(
+                    self._resolve_run_workflow_id(ws, scan_id, run_id)).cancel()
+            except Exception:  # noqa: BLE001 - best-effort; 不可达仍标终态
+                pass
+            await self._mark_run(scan_dir, run_id, "cancelled", status="cancelled")
+        # ⑤ 协作式信号兜底（heartbeat fresh，兼容 host 侧协作式取消）+ 主行标 cancelled
+        if is_scan_recently_active(scan_dir):
+            (scan_dir / "cancel.requested").write_text("", encoding="utf-8")
         await self._mark_cancelled(scan_dir)
         return {"cancelled": scan_id}
 

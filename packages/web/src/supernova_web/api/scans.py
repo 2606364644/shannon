@@ -432,6 +432,69 @@ async def scan_dataflow(ws: str, scan_id: str, request: Request,
     return _dataflow_view_for(_scan_dir_or_404(request, ws, scan_id))
 
 
+def assemble_correlation_detail(scan_dir: Path) -> dict:
+    """C5: 组装 correlation scan 详情（纯函数，只读 scan_dir 便于单测）。
+
+    关联产物由 run_correlation_phase 写在 deliverables/ 根（无 track 桶——非白盒/
+    黑盒产物，不经 DeliverablesReader），此处原文透传 JSON（不 preview 截断）。
+    缺文件语义（关联未跑完，前端显示进行中/未开始）：topology/report_md → None、
+    boundaries/flows → []、{vc}_exploitation_queue.json 缺 → merged_vulns 键缺席
+    （不用空数组冒充「该类无漏洞」）。drift_warnings 首版保守返回 []（不解析
+    correlation-report.md；事件/report 提取留给后续版本）。
+    """
+    import json
+    from supernova_core.session import SessionManager
+
+    dlv = scan_dir / "deliverables"
+
+    def _read_json(name: str):
+        try:
+            return json.loads((dlv / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def _read_text(name: str) -> str | None:
+        try:
+            return (dlv / name).read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    merged_vulns: dict[str, list] = {}
+    for q in sorted(dlv.glob("*_exploitation_queue.json")):
+        data = _read_json(q.name)
+        if isinstance(data, dict) and isinstance(data.get("vulnerabilities"), list):
+            merged_vulns[q.name[: -len("_exploitation_queue.json")]] = data["vulnerabilities"]
+
+    boundaries = _read_json("trust-boundaries.json")
+    flows = _read_json("cross-service-flows.json")
+    session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+    return {
+        "topology": _read_json("cross-service-topology.json"),
+        "boundaries": boundaries if isinstance(boundaries, list) else [],
+        "flows": flows if isinstance(flows, list) else [],
+        "merged_vulns": merged_vulns,
+        "drift_warnings": [],
+        "corr_children": session.get("corr_children") or [],
+        "report_md": _read_text("correlation-report.md"),
+    }
+
+
+@router.get("/{ws}/scans/{scan_id}/correlation")
+async def get_correlation_detail(ws: str, scan_id: str, request: Request,
+                                 _: User = Depends(workspace_member)) -> dict:
+    """C5: correlation scan 详情（跨仓关联结果视图数据源，spec 2026-08-24）。
+
+    404=scan 不存在；422=非 correlation scan；200=详情（产物未生成时各字段
+    null/[]，前端据此显示「关联阶段进行中/未开始」）。鉴权对齐 scan_report
+    （workspace_member：能访问 ws 就能访问该 ws 所有 scan）。
+    """
+    from supernova_core.session import SessionManager
+    scan_dir = _scan_dir_or_404(request, ws, scan_id)
+    if SessionManager(scan_dir.parent).get_scan_type(scan_dir) != "correlation":
+        raise HTTPException(422, "not a correlation scan")
+    return assemble_correlation_detail(scan_dir)
+
+
 @router.get("/{ws}/scans/{scan_id}/logs")
 async def scan_logs(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member),
                     file: str | None = Query(None)):
