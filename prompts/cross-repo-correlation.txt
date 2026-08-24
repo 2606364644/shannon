@@ -40,7 +40,13 @@ from -> to). Respond with ONE JSON object (no prose outside it) for THAT edge:
   "status":"ok|low|unverified|declared-missing",
   "boundaries":[{"service":"<to>","method":"...",
                  "exposure":"external|internal",
-                 "reachable_from":["..."],"reason":"...","confidence":"high|low"}]
+                 "reachable_from":["..."],"reason":"...","confidence":"high|low"}],
+  "flows":[{"entry":"POST /orders",
+            "method":"order.v1.OrderService/CreateOrder",
+            "call_site":{"file":"src/routes/orders.ts","line":18,"snippet":"client.createOrder(req.body)"},
+            "vuln_refs":[{"service":"<to>","title":"...","severity":"high|medium|low",
+                          "location":"file.go:88"}],
+            "confidence":"high|low","evidence":"how input reaches the sink"}]
 }
 Rules:
 - confidence high = call_site AND handler both located AND flow traceable;
@@ -49,4 +55,10 @@ Rules:
   edge, spec B3), record it with status "declared-missing" and the real
   target in evidence.
 - exposure external = the `to` service reachable from an entrypoint; else internal.
+- flows = candidate attack chains crossing this edge: a from-repo entry (HTTP
+  route/CLI/queue message) whose input reaches a `to`-repo sink via this RPC
+  method. Only include flows where you located BOTH the from-side call_site
+  AND a concrete to-repo sink/vulnerability (in code or in the deliverables
+  queues under <deliverables-from-scans>). vuln_refs.location should point at
+  the to-repo sink. No flow found → "flows":[] (valid).
 </output-format>

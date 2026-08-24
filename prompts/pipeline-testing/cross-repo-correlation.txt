@@ -3,4 +3,4 @@ Output ONE JSON object:
 {"edges":[{"from":"gateway","to":"order-svc","protocol":"grpc",
  "calls":[{"method":"order.Svc/M","call_site":{"file":"a","line":1,"snippet":"x"},
            "confidence":"low","evidence":"fixture"}],"status":"ok"}],
- "boundaries":[]}
+ "boundaries":[],"flows":[]}
