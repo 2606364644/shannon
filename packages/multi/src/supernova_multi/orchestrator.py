@@ -72,74 +72,61 @@ async def _run_edge(from_svc: str, to_svc: str, *, runner) -> dict:
 def _merge_edge_results(edge_results: list[dict]) -> dict:
     edges, boundaries = [], []
     for r in edge_results:
+        # A2 flows 透传:per-edge 候选攻击链原样并进 edges(旧 prompt 无 flows 也合法)
         edges.append({"from": r["from"], "to": r["to"], "protocol": r.get("protocol", "grpc"),
                       "calls": r.get("calls", []), "status": r.get("status", "ok"),
-                      "error": r.get("error")})
+                      "error": r.get("error"), "flows": r.get("flows", [])})
         boundaries.extend(r.get("boundaries", []))
     return {"edges": edges, "boundaries": boundaries}
 
 
-async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_testing: bool = False) -> dict:
-    from supernova_core.config.parser import parse_multi_repo_config
+async def run_correlation_phase(
+    config: MultiRepoConfig,
+    repo_workspace_paths: dict[str, Path],
+    out_ws_dir: Path,
+    event_file: Path,
+    *,
+    pipeline_testing: bool = False,
+    provider_config: dict | None = None,
+    write_scan_end: bool = True,
+) -> dict:
+    """关联段(原 run_cross_repo 第 2 步起,A3 拆出):收集各仓 queue → 关联 workspace
+    → per-edge Agent → 合并落盘。
+
+    repo_workspace_paths / out_ws_dir / event_file 全显式注入,web 编排可直接复用
+    (run_cross_repo 传 CLI 等价值,行为不变);write_scan_end=False 时不写 scan_end
+    事件(web 编排收尾用),heartbeat 两分支都照常进/出。provider_config 为 per-scan
+    provider 穿线(CLI 不传 = None,与拆分前一致)。
+
+    返回 ``{"edge_statuses": [...], "deliverables_path": str}``。
+    """
     from supernova_core.session import SessionManager
     from supernova_core.utils.paths import deliverables_dir_for_workspace
     from supernova_core.agents.executor import AgentExecutor
     from supernova_core.prompts.manager import PromptManager
     from supernova_core.models.agents import AgentName
+    from supernova_core.correlation.schemas import CrossServiceFlow
     from supernova_core.correlation.report import write_correlation_deliverables
-    from supernova_whitebox.worker import run_scan as run_whitebox
-    from supernova_whitebox.pipeline.shared import PipelineInput
-
-    config = parse_multi_repo_config(config_path)
-    plans = plan_repo_scans(config)
-    # workspace 根必须与 run_whitebox 写入根一致(run_whitebox 用 resolve_workspaces_dir(repo_path)),
-    # 否则 SUPERNOVA_WORKER_ROOT 或 cwd≠project-root 时读取会落空(A6 review Important #1)。
-    from supernova_core.utils.paths import resolve_workspaces_dir
     from supernova_multi.correlation_event_writer import CorrelationEventWriter
 
-    # 联动进度 writer：在 repo 扫描开始前就绪，events.ndjson 路径与下方
-    # SessionManager.create_workspace(name=config.correlation.out_workspace) 同根同目录。
-    # （create_workspace 幂等：目录已存在不报错；session.json 仍由它写。）
-    corr_writer = CorrelationEventWriter(
-        resolve_workspaces_dir() / config.correlation.out_workspace / "events.ndjson")
-    overall_failed = False
+    corr_writer = CorrelationEventWriter(event_file)
 
-    # 1. N repo 白盒:复用 or 现扫
-    per_repo_deliverables: dict[str, Path] = {}
+    # 1. 收集各仓 exploitation queue(spec §7 合并, B1)—— 由 repo_workspace_paths 驱动
     per_repo_queue: dict[str, list[dict]] = {}
     drift_warnings: list[str] = []
-    for p in plans:
-        # 每个 repo 的 workspace 都从其写入根(resolve_workspaces_dir(repo_path))读取,
-        # 与 run_whitebox 的 resolve_workspaces_dir(input.repo_path) 对齐。
-        repo_ws_root = resolve_workspaces_dir(p.repo_path)
-        if p.reuse:
-            await corr_writer.repo(p.service, "started")
-            ws_path = repo_ws_root / p.workspace
-            # A2 版本漂移检测(时间戳粗判,仅复用且 repo path 已知且盘上存在时)。
-            # final-review MINOR 5: 复用 workspace 的 path 可能已失配/移动,
-            # getmtime 会 FileNotFoundError 并中止整个编排 —— 加 Path.exists() 守卫优雅降级(跳过漂移检测)。
-            if p.repo_path and (ws_path / "session.json").exists() and Path(p.repo_path).exists():
-                sess = json.loads((ws_path / "session.json").read_text(encoding="utf-8"))
-                rpt = detect_drift(sess.get("created_at", 0.0), os.path.getmtime(p.repo_path))
-                if rpt.drifted:
-                    drift_warnings.append(f"{p.service}: {rpt.note}")
-            await corr_writer.repo(p.service, "completed", detail="reused")
-        else:
-            await corr_writer.repo(p.service, "started")
-            wb_input = PipelineInput(repo_path=p.repo_path, workspace_name=p.workspace,
-                                     config_path=p.scan_config,
-                                     pipeline_testing_mode=pipeline_testing)
-            try:
-                result = await run_whitebox(wb_input, temporal_address)
-            except Exception:
-                overall_failed = True
-                await corr_writer.repo(p.service, "failed", detail="scan error")
-                raise
-            ws_path = repo_ws_root / result["workspace_name"]
-            await corr_writer.repo(p.service, "completed")
+    for service, ws_path in repo_workspace_paths.items():
         dlv = deliverables_dir_for_workspace(ws_path)
-        per_repo_deliverables[p.service] = dlv
-        # 收集该仓所有 exploitation_queue(spec §7 合并, B1)
+        spec = config.repos.get(service)
+        # A2 版本漂移检测(时间戳粗判,仅复用 —— spec.workspace 声明,等价 plan_repo_scans
+        # 的 reuse 判定 —— 且 repo path 已知且盘上存在时)。
+        # final-review MINOR 5: 复用 workspace 的 path 可能已失配/移动,
+        # getmtime 会 FileNotFoundError 并中止整个编排 —— 加 Path.exists() 守卫优雅降级(跳过漂移检测)。
+        if (spec and spec.workspace and spec.path
+                and (ws_path / "session.json").exists() and Path(spec.path).exists()):
+            sess = json.loads((ws_path / "session.json").read_text(encoding="utf-8"))
+            rpt = detect_drift(sess.get("created_at", 0.0), os.path.getmtime(spec.path))
+            if rpt.drifted:
+                drift_warnings.append(f"{service}: {rpt.note}")
         # 白盒 queue 新结构在 whitebox/intermediate/(tiering spec 2026-08-18),
         # 老结构在 whitebox/ 顶层或 deliverables 根;glob 不递归,三处合并去重
         # (intermediate 优先,同名仅补白)。
@@ -159,13 +146,14 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                 logger.warning("跳过损坏的 exploitation queue %s: %s", q, e)
                 entries = []
             per_repo_queue.setdefault(vc, []).extend(
-                [{"__service": p.service, **e} for e in entries])
+                [{"__service": service, **e} for e in entries])
 
-    # 2. 关联 workspace —— 无归属 repo,用标准 workspaces 根(resolve_workspaces_dir() 无参),
-    # 与 run_whitebox 默认写入根一致,Phase B --correlated-workspace 可在该标准位置找到。
-    mgr = SessionManager(resolve_workspaces_dir())
+    # 2. 关联 workspace —— 无归属 repo,SessionManager(out_ws_dir.parent) 幂等
+    # (目录已存在不报错;web 已建主行不覆盖 session.json;CLI 传入
+    # resolve_workspaces_dir()/out_workspace 与原 resolve_workspaces_dir() 根等价)。
+    mgr = SessionManager(out_ws_dir.parent)
     out_ws = mgr.create_workspace(web_url="", repo_path="",
-                                  name=config.correlation.out_workspace,
+                                  name=out_ws_dir.name,
                                   scan_type="correlation")
     out_dlv = deliverables_dir_for_workspace(out_ws)
     mark_owner_if_unset(out_ws, "host")  # CLI 起 owner=host(web 起 scan_manager 已写 web)
@@ -184,7 +172,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
     from supernova_core.config.concurrency import get_max_concurrent
     sem = asyncio.Semaphore(get_max_concurrent())
     # final-review IMPORTANT 1+2: PromptManager 用绝对路径(_prompts_dir() 不受 CWD 影响),
-    # 且单实例提升到 run_cross_repo 作用域 —— N 条 edge 不再重复构造 executor / 重编译 prompt。
+    # 且单实例提升到本函数作用域 —— N 条 edge 不再重复构造 executor / 重编译 prompt。
     executor = AgentExecutor(PromptManager(_prompts_dir()))
     edge_output_schema = {
         "type": "object",
@@ -192,6 +180,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
             "from": {"type": "string"}, "to": {"type": "string"},
             "protocol": {"type": "string"}, "status": {"type": "string"},
             "calls": {"type": "array"}, "boundaries": {"type": "array"},
+            "flows": {"type": "array"},  # A2 per-edge 候选攻击链(不入 required:旧 prompt 无 flows 也合法)
         },
         "required": ["from", "to", "status"],
     }
@@ -213,6 +202,7 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                 pipeline_testing=pipeline_testing,
                 prompt_variables=prompt_vars,
                 structured_output_schema=edge_output_schema,  # 强制单 edge JSON 输出
+                provider_config=provider_config,  # A3: per-scan provider 穿线(web 编排;CLI 恒 None)
             )
             # A6 风险 #3:AgentMetrics 真实属性是 structured_output(非 brief 的 output)。
             # 取不到合法 payload 则降级 unverified(spec §8 per-edge 隔离)。
@@ -244,18 +234,85 @@ async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_t
                for e in merged["edges"]])
     boundaries = [TrustBoundary(**b) for b in merged["boundaries"]]
 
-    # 5. 合并 queue(B1 四字段)+ 落盘
+    # 5. 合并 queue(B1 四字段)+ 组装 flows(A2 透传)+ 落盘
     merged_queues = {vc: merge_exploitation_queues(
         _group_by_service(entries)) for vc, entries in per_repo_queue.items()}
+    flows = [CrossServiceFlow(edge_from=e["from"], edge_to=e["to"],
+                              entry=f["entry"], method=f["method"],
+                              call_site=CallSite(**f["call_site"]),
+                              vuln_refs=f.get("vuln_refs", []),
+                              confidence=f.get("confidence", "low"),
+                              evidence=f.get("evidence", ""))
+             for e in merged["edges"] for f in e.get("flows", [])]
     report_md = _render_report(topology, boundaries, merged_queues, drift_warnings)
-    write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues, report_md)
+    write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues,
+                                   report_md, flows=flows)
 
-    await corr_writer.scan_end("failed" if overall_failed else "completed")
+    # 扫描失败不上探到本函数(现扫异常在 run_cross_repo 已 raise),scan_end 恒 completed;
+    # write_scan_end=False 时收尾事件交由调用方写(web 编排收尾)。heartbeat 两分支都清理。
+    if write_scan_end:
+        await corr_writer.scan_end("completed")
     await heartbeat.__aexit__(None, None, None)
 
-    return {"out_workspace": config.correlation.out_workspace,
-            "deliverables_path": str(out_dlv),
-            "edge_statuses": [e["status"] for e in merged["edges"]]}
+    return {"edge_statuses": [e["status"] for e in merged["edges"]],
+            "deliverables_path": str(out_dlv)}
+
+
+async def run_cross_repo(config_path: Path, temporal_address: str, *, pipeline_testing: bool = False) -> dict:
+    from supernova_core.config.parser import parse_multi_repo_config
+    from supernova_whitebox.worker import run_scan as run_whitebox
+    from supernova_whitebox.pipeline.shared import PipelineInput
+
+    config = parse_multi_repo_config(config_path)
+    plans = plan_repo_scans(config)
+    # workspace 根必须与 run_whitebox 写入根一致(run_whitebox 用 resolve_workspaces_dir(repo_path)),
+    # 否则 SUPERNOVA_WORKER_ROOT 或 cwd≠project-root 时读取会落空(A6 review Important #1)。
+    from supernova_core.utils.paths import resolve_workspaces_dir
+    from supernova_multi.correlation_event_writer import CorrelationEventWriter
+
+    # 联动进度 writer：在 repo 扫描开始前就绪，events.ndjson 路径与下方
+    # run_correlation_phase 的 out_ws_dir 同根同目录（同一文件,两 writer 追加写）。
+    corr_writer = CorrelationEventWriter(
+        resolve_workspaces_dir() / config.correlation.out_workspace / "events.ndjson")
+
+    # 1. N repo 白盒:复用 or 现扫(queue 收集已移入 run_correlation_phase,
+    #    由 repo_workspace_paths 驱动;此处只产出各仓 workspace 目录)
+    repo_workspace_paths: dict[str, Path] = {}
+    for p in plans:
+        # 每个 repo 的 workspace 都从其写入根(resolve_workspaces_dir(repo_path))读取,
+        # 与 run_whitebox 的 resolve_workspaces_dir(input.repo_path) 对齐。
+        repo_ws_root = resolve_workspaces_dir(p.repo_path)
+        if p.reuse:
+            await corr_writer.repo(p.service, "started")
+            ws_path = repo_ws_root / p.workspace
+            await corr_writer.repo(p.service, "completed", detail="reused")
+        else:
+            await corr_writer.repo(p.service, "started")
+            wb_input = PipelineInput(repo_path=p.repo_path, workspace_name=p.workspace,
+                                     config_path=p.scan_config,
+                                     pipeline_testing_mode=pipeline_testing)
+            try:
+                result = await run_whitebox(wb_input, temporal_address)
+            except Exception:
+                # 现扫失败:repo failed 事件留痕后原样上抛(scan_end 不写,靠进程退出 +
+                # heartbeat stale 兜底 —— 与拆分前一致,overall_failed 从不可达至此)。
+                await corr_writer.repo(p.service, "failed", detail="scan error")
+                raise
+            ws_path = repo_ws_root / result["workspace_name"]
+            await corr_writer.repo(p.service, "completed")
+        repo_workspace_paths[p.service] = ws_path
+
+    # 2. 关联段:CLI 等价原行为(write_scan_end=True 收尾事件仍由 phase 写)。
+    out_ws_dir = resolve_workspaces_dir() / config.correlation.out_workspace
+    phase_result = await run_correlation_phase(
+        config,
+        repo_workspace_paths,
+        out_ws_dir,
+        out_ws_dir / "events.ndjson",
+        pipeline_testing=pipeline_testing,
+        write_scan_end=True,
+    )
+    return {**phase_result, "out_workspace": config.correlation.out_workspace}
 
 
 def _group_by_service(entries: list[dict]) -> dict[str, list[dict]]:

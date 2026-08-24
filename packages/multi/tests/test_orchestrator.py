@@ -99,3 +99,81 @@ def test_write_correlation_deliverables_writes_all_files(tmp_path):
     assert (out / "trust-boundaries.json").exists()
     assert (out / "correlation-report.md").read_text() == "# report"
     assert (out / "injection_exploitation_queue.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Task A3: run_correlation_phase 拆出(参数化 paths/event_file/provider/scan_end)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_run_correlation_phase_writes_flows_and_respects_paths(tmp_path, monkeypatch):
+    """phase 参数化：repo_workspace_paths/out_ws_dir/event_file 全显式注入；
+    write_scan_end=False 不写 scan_end；flows 落盘。Agent 以 stub 代（不打 LLM）。"""
+    import json as _json
+    from supernova_multi.orchestrator import run_correlation_phase
+
+    # 两个子仓 workspace 目录：造 deliverables + 一个 queue
+    gw_ws, be_ws = tmp_path / "gw-scan", tmp_path / "be-scan"
+    for w in (gw_ws, be_ws):
+        (w / "deliverables").mkdir(parents=True)
+    (be_ws / "deliverables" / "injection_exploitation_queue.json").write_text(
+        _json.dumps({"vulnerabilities": [
+            {"title": "SQLi", "description": "d", "severity": "high",
+             "location": "dao.go:8"}]}), encoding="utf-8")
+    out_ws = tmp_path / "corr-scan"
+    out_ws.mkdir()
+    event_file = tmp_path / "corr-scan" / "events.ndjson"
+
+    cfg = MultiRepoConfig(
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+               "order-svc": RepoSpec(path="/r/be", role="backend")},
+        relations=[Relation(**{"from": "gateway", "to": "order-svc"})],
+        correlation=CorrelationConfig(out_workspace="corr-scan"))
+
+    async def fake_execute(self, **kw):
+        class _M:  # 最小 metrics stub:edge_runner 只读 structured_output 属性
+            structured_output = {
+                "from": "gateway", "to": "order-svc", "protocol": "grpc",
+                "calls": [], "status": "ok", "boundaries": [],
+                "flows": [{"entry": "POST /orders",
+                           "method": "order.v1.OrderService/CreateOrder",
+                           "call_site": {"file": "c.ts", "line": 1, "snippet": "x"},
+                           "vuln_refs": [{"service": "order-svc", "title": "SQLi",
+                                           "severity": "high", "location": "dao.go:8"}],
+                           "confidence": "high", "evidence": "e"}]}
+        return _M()
+
+    # patch 源头类(orchestrator 在函数内 import AgentExecutor,模块级无该属性)
+    import supernova_core.agents.executor as executor_mod
+    monkeypatch.setattr(executor_mod.AgentExecutor, "execute", fake_execute)
+
+    result = await run_correlation_phase(
+        cfg, {"gateway": gw_ws, "order-svc": be_ws}, out_ws, event_file,
+        write_scan_end=False)
+
+    dlv = out_ws / "deliverables"
+    flows = _json.loads((dlv / "cross-service-flows.json").read_text(encoding="utf-8"))
+    assert flows[0]["method"] == "order.v1.OrderService/CreateOrder"
+    merged = _json.loads((dlv / "injection_exploitation_queue.json").read_text(encoding="utf-8"))
+    assert merged["vulnerabilities"][0]["service"] == "order-svc"
+    events = [_json.loads(l) for l in event_file.read_text(encoding="utf-8").splitlines() if l]
+    assert all(e["type"] != "scan_end" for e in events)   # write_scan_end=False
+    assert result["edge_statuses"] == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_run_correlation_phase_write_scan_end_true(tmp_path, monkeypatch):
+    """write_scan_end=True（CLI 默认）→ scan_end 事件落 ndjson。"""
+    from supernova_multi.orchestrator import run_correlation_phase
+    import json as _json
+    cfg = MultiRepoConfig(
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+               "order-svc": RepoSpec(path="/r/be", role="backend")},
+        relations=[],  # 无边：不调 Agent，纯事件路径
+        correlation=CorrelationConfig(out_workspace="corr-scan"))
+    out_ws = tmp_path / "corr-scan"
+    out_ws.mkdir()
+    event_file = out_ws / "events.ndjson"
+    await run_correlation_phase(cfg, {"gateway": out_ws}, out_ws, event_file,
+                                write_scan_end=True)
+    events = [_json.loads(l) for l in event_file.read_text(encoding="utf-8").splitlines() if l]
+    assert any(e["type"] == "scan_end" and e["status"] == "completed" for e in events)
