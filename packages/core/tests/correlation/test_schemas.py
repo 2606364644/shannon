@@ -54,3 +54,32 @@ def test_edge_from_json_tolerates_extra_llm_fields():
     assert e.from_ == "gateway"
     assert e.to == "order-svc"
     assert e.calls == []
+
+
+def test_flow_serialization_roundtrip():
+    from supernova_core.correlation.schemas import CrossServiceFlow, CallSite
+    f = CrossServiceFlow(
+        edge_from="gateway", edge_to="order-svc", entry="POST /orders",
+        method="order.v1.OrderService/CreateOrder",
+        call_site=CallSite(file="src/grpc-client.ts", line=42, snippet="client.createOrder(req)"),
+        vuln_refs=[{"service": "order-svc", "title": "SQL Injection",
+                     "severity": "high", "location": "internal/dao/order.go:88"}],
+        confidence="high", evidence="handler concatenates SQL from request")
+    data = json.loads(f.to_json())
+    assert data["edge_from"] == "gateway"
+    assert data["vuln_refs"][0]["service"] == "order-svc"
+    rt = CrossServiceFlow.from_json(f.to_json())
+    assert rt.call_site.line == 42
+
+
+def test_flows_file_written(tmp_path):
+    from supernova_core.correlation.report import write_correlation_deliverables
+    from supernova_core.correlation.schemas import (
+        CrossServiceTopology, ServiceNode, CrossServiceFlow, CallSite)
+    topo = CrossServiceTopology(services=[ServiceNode("g", "entrypoint", "/r/g")], edges=[])
+    flows = [CrossServiceFlow(edge_from="g", edge_to="o", entry="POST /x", method="m",
+                               call_site=CallSite("a.ts", 1, "s"), vuln_refs=[],
+                               confidence="low", evidence="e")]
+    write_correlation_deliverables(tmp_path, topo, [], {}, "# r", flows=flows)
+    data = json.loads((tmp_path / "cross-service-flows.json").read_text(encoding="utf-8"))
+    assert data[0]["method"] == "m"

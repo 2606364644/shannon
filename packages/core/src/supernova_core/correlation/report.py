@@ -1,7 +1,9 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from supernova_core.correlation.schemas import CrossServiceTopology, TrustBoundary
+from supernova_core.correlation.schemas import (
+    CrossServiceTopology, TrustBoundary, CrossServiceFlow,
+)
 
 
 def write_correlation_deliverables(
@@ -10,6 +12,7 @@ def write_correlation_deliverables(
     boundaries: list[TrustBoundary],
     merged_queues: dict[str, list[dict]],
     report_md: str,
+    flows: list[CrossServiceFlow] | None = None,
 ) -> None:
     out_deliverables.mkdir(parents=True, exist_ok=True)
     (out_deliverables / "cross-service-topology.json").write_text(
@@ -21,4 +24,9 @@ def write_correlation_deliverables(
     for vc, entries in merged_queues.items():
         (out_deliverables / f"{vc}_exploitation_queue.json").write_text(
             json.dumps({"vulnerabilities": entries}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    if flows is not None:
+        (out_deliverables / "cross-service-flows.json").write_text(
+            json.dumps([json.loads(f.to_json()) for f in flows],
+                       ensure_ascii=False, indent=2),
             encoding="utf-8")

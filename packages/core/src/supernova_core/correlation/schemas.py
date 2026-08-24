@@ -94,3 +94,28 @@ class TrustBoundary:
 class CorrelationResult:
     topology: CrossServiceTopology
     boundaries: list[TrustBoundary]
+
+
+@dataclass
+class CrossServiceFlow:
+    """候选跨服务攻击链（spec 2026-08-24 §5.4）：前端仓入口 → RPC method → 后端仓漏洞。
+
+    概率性 Agent 推断产物，供人工复核；vuln_refs 宽松 dict（title/severity/location/service）。
+    """
+    edge_from: str
+    edge_to: str
+    entry: str
+    method: str
+    call_site: CallSite
+    vuln_refs: list[dict] = field(default_factory=list)
+    confidence: str = "low"
+    evidence: str = ""
+
+    def to_json(self) -> str:
+        return json.dumps(_s(self), ensure_ascii=False)
+
+    @staticmethod
+    def from_json(s: str) -> "CrossServiceFlow":
+        d = json.loads(s)
+        d["call_site"] = CallSite(**d["call_site"])
+        return CrossServiceFlow(**d)
