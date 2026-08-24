@@ -204,6 +204,42 @@ def test_reset_password_short_400(admin_client):
     assert r.status_code == 400
 
 
+def test_reset_password_clears_brute_lock(admin_client):
+    """admin 重置密码应清除该用户的登录失败锁定（BruteGuard）。
+
+    现场场景：新用户反复输错 ≥5 次 → BruteGuard 锁 5 分钟（正确密码也 429，
+    前端显示笼统 "Login failed"）→ admin 重置密码。重置语义 = 旧凭证全部作废，
+    锁定无继续存在的理由 → 用户应能立即用新密码登录。用独立用户名，避免
+    routes.py 模块级 _brute 单例被其他用例的 alice 失败计数污染。
+    """
+    c, app = admin_client
+    # 建独立用户 lockme（走 API，对齐现场：admin 创建 → 用户尝试登录）
+    r = c.post("/api/users", json={"username": "lockme", "password": "lockme-pw", "role": "user"},
+               headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 200
+    lid = app.state.auth_store.get_user_by_username("lockme").id
+    # 连续输错 5 次（BruteGuard 默认 threshold=5）→ 锁定
+    for i in range(5):
+        anon = TestClient(app)
+        tok = anon.get("/api/auth/csrf").json()["csrf_token"]
+        r = anon.post("/api/auth/login", json={"username": "lockme", "password": f"bad-{i}"},
+                      headers={"X-CSRF-Token": tok})
+        assert r.status_code == 401
+    anon = TestClient(app)
+    tok = anon.get("/api/auth/csrf").json()["csrf_token"]
+    r = anon.post("/api/auth/login", json={"username": "lockme", "password": "lockme-pw"},
+                  headers={"X-CSRF-Token": tok})
+    assert r.status_code == 429  # 锁定确认：正确密码也被拒
+    # admin 重置密码 → 锁定应随之清除
+    r = c.post(f"/api/users/{lid}/reset-password", json={"new_password": "reset-pw-1"},
+               headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 200
+    fresh = TestClient(app)
+    tok = fresh.get("/api/auth/csrf").json()["csrf_token"]
+    r = fresh.post("/api/auth/login", json={"username": "lockme", "password": "reset-pw-1"},
+                   headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200  # 修复前：429
+
 
 # --- 归属 ---
 

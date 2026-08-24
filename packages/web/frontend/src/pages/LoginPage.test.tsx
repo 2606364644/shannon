@@ -85,4 +85,29 @@ describe("LoginPage", () => {
     // 左品牌区字标 = 注入的品牌名，而非硬编码 "Supernova"
     expect(screen.getByText("ft-codesec")).toBeTruthy();
   });
+
+  it("登录被锁定（429）时显示锁定提示而非笼统 Login failed", async () => {
+    // BruteGuard：5 次失败锁 5 分钟，期间正确密码也 429。此前前端只区分 401，
+    // 429 落进兜底 "Login failed"，用户误以为密码错继续试 → 恶性循环。
+    const fetchSpy = vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes("/api/auth/login")) {
+        return new Response(JSON.stringify({ detail: "too many attempts, try later" }), { status: 429 });
+      }
+      if (url.includes("/api/auth/csrf")) {
+        return new Response(JSON.stringify({ csrf_token: "tok" }), { status: 200 });
+      }
+      return new Response("{}", { status: 401 }); // /auth/me
+    });
+    wrap();
+    await waitFor(() => expect(screen.getByText("欢迎回来")).toBeTruthy());
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "bob" } });
+      fireEvent.change(screen.getByLabelText("密码"), { target: { value: "whatever" } });
+      fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    });
+    await waitFor(() => expect(screen.getByText(/临时锁定/)).toBeTruthy());
+    expect(screen.queryByText("Login failed")).toBeNull();
+    fetchSpy.mockRestore();
+  });
 });

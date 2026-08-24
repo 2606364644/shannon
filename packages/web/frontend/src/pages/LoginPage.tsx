@@ -35,7 +35,14 @@ export default function LoginPage() {
       await login(username, password);
       nav(next, { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? t("auth.login.invalid") : "Login failed");
+      // 401=凭证错；429=BruteGuard 锁定（5 次失败锁 5 分钟，正确密码也被拒），
+      // 须明确提示"稍后再试"而非笼统 Login failed——否则用户以为密码错继续试。
+      const status = err instanceof ApiError ? err.status : 0;
+      setError(
+        status === 401 ? t("auth.login.invalid")
+          : status === 429 ? t("auth.login.locked")
+          : "Login failed",
+      );
     } finally {
       setBusy(false);
     }

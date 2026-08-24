@@ -10,6 +10,7 @@ from typing import Literal
 from supernova_web.auth.csrf import verify_csrf
 from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
+from supernova_web.auth.routes import clear_login_failures
 from supernova_web.auth.passwords import (
     DEFAULT_NEW_USER_PASSWORD,
     NEW_PASSWORD_MIN_LEN,
@@ -168,9 +169,13 @@ async def reset_password(user_id: int, body: ResetPasswordIn, request: Request,
     if len(body.new_password) < NEW_PASSWORD_MIN_LEN:
         raise HTTPException(400, f"password must be at least {NEW_PASSWORD_MIN_LEN} characters")
     store = request.app.state.auth_store
-    if store.get_user(user_id) is None:
+    target = store.get_user(user_id)
+    if target is None:
         raise HTTPException(404, "user not found")
     store.reset_password(user_id, hash_password(body.new_password))
+    # 重置即解锁：用户多半是因反复输错被 BruteGuard 锁住才找 admin 重置的，
+    # 旧凭证已作废，失败计数/锁定一并清除（否则正确的新密码也 429）。
+    clear_login_failures(target.username)
     return {"ok": True}
 
 

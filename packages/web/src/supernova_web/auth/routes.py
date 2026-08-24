@@ -15,6 +15,16 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 _brute = BruteGuard()
 
 
+def clear_login_failures(username: str) -> None:
+    """清除某用户的登录失败计数/锁定（供 admin 重置密码后调用）。
+
+    重置语义 = 旧凭证全部作废，锁定的依据（失败计数）无继续存在的理由；
+    现场场景：用户反复输错被锁 5 分钟（正确密码也 429），找 admin 重置后
+    应立即可用新密码登录，而非再等锁过期。
+    """
+    _brute.reset(username)
+
+
 class LoginIn(BaseModel):
     username: str
     password: str
