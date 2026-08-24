@@ -18,6 +18,10 @@ class WebConfig:
         self.repos_max_concurrent_clones = max(
             1, int(os.environ.get("SUPERNOVA_REPOS_MAX_CONCURRENT_CLONES", "3"))
         )
+        # 上传 zip 文件本体大小上限（MB）——防超大包占满磁盘/内存（解压上限另在 RepoManager）。
+        self.max_upload_zip_bytes = int(
+            os.environ.get("SUPERNOVA_REPOS_MAX_UPLOAD_ZIP_MB", "1024")
+        ) * 1024 * 1024
         self.configs_dir = Path(os.environ.get("SUPERNOVA_CONFIGS_DIR", "configs"))
         self.frontend_dir = os.environ.get("SUPERNOVA_WEB_FRONTEND_DIR")
         # Web 控制台品牌名(左上角字标 + 浏览器标签页 title);默认 Supernova,部署者可经

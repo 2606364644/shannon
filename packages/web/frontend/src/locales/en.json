@@ -21,6 +21,7 @@
       "password": "Password",
       "submit": "Sign in",
       "invalid": "Invalid username or password",
+      "locked": "Too many failed attempts — account temporarily locked, try again in ~5 minutes",
       "welcome": "Welcome back",
       "sub": "Sign in to continue",
       "defaultHint": "Default account: admin / 123456 (demo only — change it after sign-in)"
@@ -114,7 +115,14 @@
       "stale": "Incomplete",
       "cloning": "Cloning",
       "pulling": "Pulling",
+      "extracting": "Extracting",
       "empty": "Empty"
+    },
+    "kinds": {
+      "git": "git clone",
+      "linked": "Linked",
+      "upload": "Uploaded",
+      "unknown": "Unknown"
     },
     "deleteDialog": {
       "title": "Delete repository",
@@ -152,7 +160,17 @@
       "commitPlaceholder": "Commit (optional)",
       "cloneBtn": "clone",
       "modeClone": "Clone",
+      "modeUpload": "Upload zip",
       "modeLinkDir": "Link directory (batch)",
+      "uploadDesc": "Upload a code zip; it is extracted and snapshotted into the repo list (scannable even without .git).",
+      "uploadDropzone": "Drag zip here, or click to choose files",
+      "uploadHint": ".zip only, multiple allowed; repo name defaults to the file name",
+      "uploadNameLabel": "Repo name (optional, defaults to file name)",
+      "uploadBtn": "Upload",
+      "uploadAccepted": "Accepted {{count}} upload(s); extracting",
+      "uploadNotZip": "Ignored {{count}} non-.zip file(s)",
+      "uploadRemove": "Remove {{name}}",
+      "uploadProgress": "Uploading {{pct}}%",
       "linkDirDesc": "Scan a directory containing multiple repositories; auto-detect git repos and link them in batch.",
       "linkDirPathLabel": "Parent directory absolute path",
       "linkDirPathPlaceholder": "/app/repos/frontend",
@@ -163,7 +181,8 @@
         "exists": "Repository already exists; try update instead",
         "failed": "Add failed ({{status}})",
         "network": "Add failed (network error)",
-        "badPath": "Path does not exist or is not a directory"
+        "badPath": "Path does not exist or is not a directory",
+        "tooLarge": "zip exceeds the size limit"
       }
     },
     "clone": {
@@ -711,6 +730,7 @@
         }
       },
       "typeCombined": "Combined",
+      "typeBlackbox": "Blackbox",
       "typeFilterCombined": "Combined (whitebox + blackbox)",
       "avgCtx": "avg {{avg}} · max {{max}} · min {{min}}"
     },
@@ -982,7 +1002,7 @@
     "deleteConfirmBtn": "Confirm Delete",
     "cancel": "Cancel",
     "password": "Initial Password",
-    "passwordHint": "At least 8 characters; user must change on first login",
+    "passwordHint": "Leave empty for default password 123456; at least 8 characters if set. Change reminder on first login",
     "passwordMinLength": "Password must be at least 8 characters",
     "roleChanged": "Role updated",
     "roleChangeFailed": "Role update failed",

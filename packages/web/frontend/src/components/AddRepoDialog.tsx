@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { createRepo, linkReposInDir, ApiError } from "@/api/client";
+import { createRepo, linkReposInDir, uploadRepoZip, ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import { FileSystemPicker } from "@/components/FileSystemPicker";
+import { cn } from "@/lib/utils";
 
 interface Props {
   /** P2: 仓库落在 ws 内，调用 createRepo(ws, body) / linkReposInDir(ws, body) */
@@ -17,7 +18,7 @@ interface Props {
   onCreated: (name: string) => void;
 }
 
-type Mode = "clone" | "linkdir";
+type Mode = "clone" | "linkdir" | "upload";
 
 export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
   const { t } = useTranslation();
@@ -30,13 +31,29 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
   const [group, setGroup] = useState("");
   const [linkDirPath, setLinkDirPath] = useState("");
   const [busy, setBusy] = useState(false);
+  // upload 模式：多 zip 各成一仓（name 自动取文件名）；name 覆盖仅单文件时生效
+  const [files, setFiles] = useState<File[]>([]);
+  const [customName, setCustomName] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const urlOk = /^(https?:|git@|ssh:)/.test(url.trim());
   const linkDirOk = linkDirPath.trim() !== "";
-  const canSubmit = mode === "clone" ? urlOk : linkDirOk;
+  const derivedName = files.length === 1 ? files[0].name.replace(/\.zip$/i, "") : "";
+  const canSubmit = mode === "clone" ? urlOk : mode === "linkdir" ? linkDirOk : files.length > 0;
 
   function reset() {
     setUrl(""); setBranch(""); setCommit(""); setGroup(""); setLinkDirPath("");
+    setFiles([]); setCustomName(""); setUploadPct(null);
+  }
+
+  function pickFiles(list: FileList | null) {
+    if (!list) return;
+    const zips = Array.from(list).filter((f) => /\.zip$/i.test(f.name));
+    const rejected = list.length - zips.length;
+    if (rejected > 0) toast.error(t("repos.addDialog.uploadNotZip", { count: rejected }));
+    if (zips.length) setFiles(zips);
   }
 
   async function submit() {
@@ -50,6 +67,18 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
           group: group.trim() || undefined,
         });
         onCreated(r.name);
+      } else if (mode === "upload") {
+        // 逐个上传：总进度 = (已完成数 + 当前文件进度) / 总数；name 覆盖仅单文件生效
+        const nameOverride = files.length === 1 ? (customName.trim() || undefined) : undefined;
+        for (let i = 0; i < files.length; i++) {
+          const r = await uploadRepoZip(
+            ws, files[i],
+            { name: nameOverride, group: group.trim() || undefined },
+            (pct) => setUploadPct(Math.round(((i + pct / 100) / files.length) * 100)),
+          );
+          if (i === 0) onCreated(r.name);
+        }
+        toast.success(t("repos.addDialog.uploadAccepted", { count: files.length }));
       } else {
         // 批量关联目录：扫描父目录下所有 git 仓库；toast 汇报 imported/skipped
         const res = await linkReposInDir(ws, { path: linkDirPath.trim() });
@@ -64,6 +93,8 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
         if (mode === "clone" && e.status === 503) toast.error(t("repos.addDialog.errors.noCreds"));
         else if (mode === "clone" && e.status === 409) toast.error(t("repos.addDialog.errors.exists"));
         else if (mode === "linkdir" && e.status === 422) toast.error(t("repos.addDialog.errors.badPath"));
+        else if (mode === "upload" && e.status === 413) toast.error(t("repos.addDialog.errors.tooLarge"));
+        else if (mode === "upload" && e.status === 409) toast.error(t("repos.addDialog.errors.exists"));
         else toast.error(t("repos.addDialog.errors.failed", { status: e.status }));
       } else {
         toast.error(t("repos.addDialog.errors.network"));
@@ -71,6 +102,7 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
       }
     } finally {
       setBusy(false);
+      setUploadPct(null);
     }
   }
 
@@ -80,21 +112,30 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
         <DialogHeader>
           <DialogTitle>{t("repos.addDialog.title")}</DialogTitle>
           <DialogDescription>
-            {mode === "clone" ? t("repos.addDialog.desc") : t("repos.addDialog.linkDirDesc")}
+            {mode === "clone" ? t("repos.addDialog.desc")
+              : mode === "upload" ? t("repos.addDialog.uploadDesc")
+              : t("repos.addDialog.linkDirDesc")}
           </DialogDescription>
         </DialogHeader>
 
-        {/* 模式切换：克隆 git 仓库 / 批量关联目录（扫父目录下所有 git 仓库）。
-            关联为 admin-only（任意磁盘路径较敏感），非 admin 仅可见克隆模式。 */}
-        {isAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              data-testid="mode-clone" size="sm"
-              variant={mode === "clone" ? "default" : "outline"}
-              onClick={() => setMode("clone")}
-            >
-              {t("repos.addDialog.modeClone")}
-            </Button>
+        {/* 模式切换：克隆 git 仓库（所有人）/ 上传 zip（所有人）/ 批量关联目录（admin-only，
+            任意磁盘路径较敏感）。非 admin 可见 clone + upload 两个模式。 */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            data-testid="mode-clone" size="sm"
+            variant={mode === "clone" ? "default" : "outline"}
+            onClick={() => setMode("clone")}
+          >
+            {t("repos.addDialog.modeClone")}
+          </Button>
+          <Button
+            data-testid="mode-upload" size="sm"
+            variant={mode === "upload" ? "default" : "outline"}
+            onClick={() => setMode("upload")}
+          >
+            {t("repos.addDialog.modeUpload")}
+          </Button>
+          {isAdmin && (
             <Button
               data-testid="mode-linkdir" size="sm"
               variant={mode === "linkdir" ? "default" : "outline"}
@@ -102,8 +143,8 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
             >
               {t("repos.addDialog.modeLinkDir")}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
 
         {mode === "clone" ? (
           <div className="space-y-3">
@@ -120,6 +161,71 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
               <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={t("repos.addDialog.branchPlaceholder")} />
               <Input value={commit} onChange={(e) => setCommit(e.target.value)} placeholder={t("repos.addDialog.commitPlaceholder")} />
             </div>
+          </div>
+        ) : mode === "upload" ? (
+          <div className="space-y-3">
+            {/* 拖拽区：drag&drop + 点击选择（双入口）；仅收 .zip */}
+            <div
+              data-testid="upload-dropzone"
+              role="button"
+              tabIndex={0}
+              aria-label={t("repos.addDialog.uploadDropzone")}
+              className={cn(
+                "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-md border border-dashed px-4 py-8 text-center transition-colors",
+                dragOver ? "border-cyan bg-cyan/5" : "border-border hover:bg-muted/40",
+              )}
+              onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); pickFiles(e.dataTransfer.files); }}
+            >
+              <div className="text-sm text-muted-foreground">{t("repos.addDialog.uploadDropzone")}</div>
+              <div className="text-xs text-muted-foreground/60">{t("repos.addDialog.uploadHint")}</div>
+            </div>
+            <input
+              ref={fileInputRef} data-testid="upload-file-input" type="file" accept=".zip" multiple
+              className="hidden"
+              onChange={(e) => { pickFiles(e.target.files); e.target.value = ""; }}
+            />
+            {files.length > 0 && (
+              <ul data-testid="upload-file-list" className="max-h-28 space-y-1 overflow-auto rounded-md border border-border bg-muted/30 p-2">
+                {files.map((f) => (
+                  <li key={f.name} className="flex items-center justify-between gap-2 font-mono text-xs">
+                    <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                    <button
+                      type="button" className="text-xs text-muted-foreground hover:text-destructive"
+                      aria-label={t("repos.addDialog.uploadRemove", { name: f.name })}
+                      disabled={busy}
+                      onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {files.length === 1 && (
+              <div className="space-y-1">
+                <Label htmlFor="upload-name">{t("repos.addDialog.uploadNameLabel")}</Label>
+                {/* 自定义仓库名（后端表单字段覆盖 zip 文件名派生）；留空 = 用文件名。
+                    File.name 只读，customName 是独立 state 而非改 File。 */}
+                <Input
+                  id="upload-name" data-testid="upload-name" value={customName}
+                  placeholder={derivedName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                />
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label htmlFor="upload-group">{t("repos.addDialog.groupLabel")}</Label>
+              <Input id="upload-group" value={group} onChange={(e) => setGroup(e.target.value)} placeholder={t("repos.addDialog.groupPlaceholder")} />
+            </div>
+            {uploadPct !== null && (
+              <div data-testid="upload-progress" className="text-xs text-muted-foreground">
+                {t("repos.addDialog.uploadProgress", { pct: uploadPct })}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
@@ -138,7 +244,9 @@ export function AddRepoDialog({ ws, open, onOpenChange, onCreated }: Props) {
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button data-testid="submit" disabled={!canSubmit || busy} onClick={submit}>
-            {mode === "clone" ? t("repos.addDialog.cloneBtn") : t("repos.addDialog.linkDirBtn")}
+            {mode === "clone" ? t("repos.addDialog.cloneBtn")
+              : mode === "upload" ? t("repos.addDialog.uploadBtn")
+              : t("repos.addDialog.linkDirBtn")}
           </Button>
         </DialogFooter>
       </DialogContent>

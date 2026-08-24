@@ -124,6 +124,44 @@ export const createRepo = (
 export const linkReposInDir = (ws: string, body: { path: string }) =>
   apiPost<{ imported: { name: string; path: string }[]; skipped: { name?: string; path: string; reason: string }[] }>(
     `/workspaces/${encWs(ws)}/repos/link-dir`, body);
+
+/** 上传 zip 添加仓库（所有成员，与 clone 一致）。返回 202 {name}——解压 + git 快照在
+ *  后端后台进行（state=extracting → ready，列表轮询/SSE 可见进度）。
+ *  fetch 无上传进度，故用 XHR；multipart 不手设 Content-Type（浏览器自动带 boundary）。 */
+export function uploadRepoZip(
+  ws: string,
+  file: File,
+  opts: { name?: string; group?: string } = {},
+  onProgress?: (pct: number) => void,
+): Promise<{ name: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/workspaces/${encWs(ws)}/repos/upload`);
+    xhr.withCredentials = true;
+    const tok = readCookie("sn-csrf");
+    if (tok) xhr.setRequestHeader("X-CSRF-Token", tok);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* 非 JSON 错误体 */ }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as { name: string });
+      } else {
+        if (xhr.status === 401) onUnauthorized();
+        reject(new ApiError(xhr.status, body));
+      }
+    };
+    xhr.onerror = () => reject(new Error("network error"));
+    xhr.onabort = () => reject(new Error("aborted"));
+    const fd = new FormData();
+    fd.append("file", file);
+    if (opts.name) fd.append("name", opts.name);
+    if (opts.group) fd.append("group", opts.group);
+    xhr.send(fd);
+  });
+}
 export const deleteRepo = (ws: string, name: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/repos/${encRepo(name)}`);
 

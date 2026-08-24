@@ -21,6 +21,7 @@
       "password": "密码",
       "submit": "登录",
       "invalid": "用户名或密码错误",
+      "locked": "尝试次数过多，账号已临时锁定，请约 5 分钟后再试",
       "welcome": "欢迎回来",
       "sub": "登录以继续",
       "defaultHint": "默认账号 admin / 密码 123456（演示用，登录后请尽快修改）"
@@ -114,7 +115,14 @@
       "stale": "未完成",
       "cloning": "clone 中",
       "pulling": "pull 中",
+      "extracting": "解压中",
       "empty": "空目录"
+    },
+    "kinds": {
+      "git": "git 克隆",
+      "linked": "关联",
+      "upload": "上传",
+      "unknown": "未知"
     },
     "deleteDialog": {
       "title": "删除仓库",
@@ -152,7 +160,17 @@
       "commitPlaceholder": "commit(可选)",
       "cloneBtn": "clone",
       "modeClone": "克隆",
+      "modeUpload": "上传 zip",
       "modeLinkDir": "批量关联目录",
+      "uploadDesc": "上传代码包 zip，自动解压并快照化后加入仓库列表（无 .git 也可扫描）。",
+      "uploadDropzone": "拖拽 zip 到此处，或点击选择文件",
+      "uploadHint": "仅支持 .zip，可多选；仓库名默认取文件名",
+      "uploadNameLabel": "仓库名（可选，默认取文件名）",
+      "uploadBtn": "上传",
+      "uploadAccepted": "已接收 {{count}} 个上传，解压处理中",
+      "uploadNotZip": "已忽略 {{count}} 个非 .zip 文件",
+      "uploadRemove": "移除 {{name}}",
+      "uploadProgress": "上传中 {{pct}}%",
       "linkDirDesc": "扫描一个含多个仓库的目录，自动识别其中的 git 仓库并批量关联。",
       "linkDirPathLabel": "父目录绝对路径",
       "linkDirPathPlaceholder": "/app/repos/frontend",
@@ -163,7 +181,8 @@
         "exists": "仓库已存在，可改用更新",
         "failed": "添加失败（{{status}}）",
         "network": "添加失败（网络错误）",
-        "badPath": "路径不存在或非目录"
+        "badPath": "路径不存在或非目录",
+        "tooLarge": "zip 超过大小上限"
       }
     },
     "clone": {
@@ -711,6 +730,7 @@
         }
       },
       "typeCombined": "组合",
+      "typeBlackbox": "黑盒",
       "typeFilterCombined": "组合（白盒+黑盒）",
       "avgCtx": "平均耗时 {{avg}} · 最长 {{max}} · 最短 {{min}}"
     },
@@ -982,7 +1002,7 @@
     "deleteConfirmBtn": "确认删除",
     "cancel": "取消",
     "password": "初始密码",
-    "passwordHint": "至少 8 位；用户首次登录需改密",
+    "passwordHint": "留空使用默认密码 123456；手填需至少 8 位。首次登录会提醒改密",
     "passwordMinLength": "密码至少 8 位",
     "roleChanged": "角色已更新",
     "roleChangeFailed": "角色更新失败",

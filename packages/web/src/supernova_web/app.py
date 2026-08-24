@@ -478,7 +478,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
         auth_profile_store=app.state.auth_profile_store,
         host_profile_store=app.state.host_profile_store)
     app.state.repo_manager = overrides.get("repo_manager") or RepoManager(
-        cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones)
+        cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones,
+        max_upload_zip_bytes=cfg.max_upload_zip_bytes)
 
     from .auth.dependencies import current_user
     _require_auth = [Depends(current_user)]

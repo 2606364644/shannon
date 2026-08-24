@@ -75,6 +75,63 @@ describe("ReposTab", () => {
     expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy();  // icon-only 删除
   });
 
+  it("上传仓库：来源显 kind 文案、无更新按钮（静态快照 405）、有删除", async () => {
+    const fm = vi.spyOn(window, "fetch");
+    fm.mockResolvedValueOnce(
+      new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 }),
+    );
+    fm.mockResolvedValue(
+      new Response(JSON.stringify([
+        { name: "up1", state: "ready",
+          source: { kind: "upload", branch: "main", commit: "abc1234" } },
+      ]), { status: 200 }),
+    );
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("up1")).toBeTruthy());
+    // 来源列：无 url → 本地化 kind 文案（i18n mock 返回 key）
+    expect(screen.getByText("repos.kinds.upload")).toBeTruthy();
+    // 分支列：kind != git → 只读文本（非 combobox），显示 meta 的 branch
+    expect(screen.getByText("main")).toBeTruthy();
+    // 静态快照无 pull（后端 405），删除仍可用
+    expect(screen.queryByLabelText("repos.updateAria")).toBeNull();
+    expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy();
+  });
+
+  it("解压中仓库：轮询刷新启用（extracting → 定时 listRepos 直到 ready）", async () => {
+    vi.useFakeTimers();
+    try {
+      const fm = vi.spyOn(window, "fetch");
+      fm.mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 }),
+      );
+      let calls = 0;
+      fm.mockImplementation(async () => {
+        calls += 1;
+        // 首拉（extracting）→ 轮询第 1 次（ready）→ 停
+        const body = calls <= 1
+          ? [{ name: "up1", state: "extracting", source: { kind: "upload" } }]
+          : [{ name: "up1", state: "ready", source: { kind: "upload", branch: "main" } }];
+        return new Response(JSON.stringify(body), { status: 200 });
+      });
+      render(
+        <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+      );
+      await vi.waitFor(() => expect(screen.getByText("up1")).toBeTruthy());
+      const listCallsAfterFirst = calls;
+      await vi.advanceTimersByTimeAsync(2100);  // 越过一个 2s 轮询周期
+      expect(calls).toBeGreaterThan(listCallsAfterFirst);  // 轮询确实发生
+      // ready 后（下一次刷新）轮询停止：再等一个周期不新增请求
+      await vi.advanceTimersByTimeAsync(2100);
+      const settled = calls;
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(calls).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("批量删除：勾全选 → 删除选中 → 确认 → POST batch-delete 带 names 并刷新", async () => {
     const fm = vi.spyOn(window, "fetch");
     fm.mockImplementation(async (input: RequestInfo | URL) => {

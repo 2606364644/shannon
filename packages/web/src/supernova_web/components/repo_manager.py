@@ -5,8 +5,10 @@ import json
 import os
 import re
 import shutil
+import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from uuid import uuid4
 
 import aiofiles
 
@@ -116,6 +118,80 @@ class RepoExists(Exception):
         super().__init__(f"仓库已存在：{name}")
 
 
+class UploadTooLarge(Exception):
+    """上传 zip 文件本体超过大小上限（→ API 413）。"""
+    def __init__(self, size: int, limit: int) -> None:
+        self.size = size
+        self.limit = limit
+        super().__init__(f"zip 超过大小上限：{size} > {limit} 字节")
+
+
+# ---- 上传 ZIP：安全解压辅助（模块级纯函数，便于独立测试） ----
+
+def _safe_unzip(zip_path: Path, dest: Path, max_bytes: int, max_entries: int) -> None:
+    """安全解压 zip 到 dest：防 zip slip（逐条目 resolve 校验在 dest 内）+ zip bomb
+    （解压总大小 / 条目数上限，超限中止）。条目名为绝对路径或含 ``..`` 分量直接拒绝。
+
+    symlink 条目经 ``zf.open`` 读出目标路径文本、落为普通文件——不构成符号链接，
+    无遍历风险（Linux 下 ``\\`` 是合法文件名字符，非路径分隔符，resolve 不展开）。
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        infos = zf.infolist()
+        if not infos:
+            raise ValueError("zip 为空（无任何条目）")
+        if len(infos) > max_entries:
+            raise ValueError(f"zip 条目数超上限（{len(infos)} > {max_entries}）")
+        dest_resolved = dest.resolve()
+        total = 0
+        for info in infos:
+            parts = PurePosixPath(info.filename).parts
+            if info.filename.startswith("/") or ".." in parts or not parts:
+                raise ValueError(f"zip 条目路径非法：{info.filename!r}")
+            target = (dest / info.filename).resolve()
+            if not target.is_relative_to(dest_resolved):
+                raise ValueError(f"zip 条目路径越界：{info.filename!r}")
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            total += info.file_size
+            if total > max_bytes:
+                raise ValueError(f"zip 解压总大小超上限（>{max_bytes} 字节）")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+
+
+def _strip_single_root_wrapper(dest: Path) -> None:
+    """zip 顶层是单一目录（repo-main/ 包裹，GitHub/GitLab 下载包常见）→ 内容上移一层。
+
+    仅剥正常命名的单一顶层目录；顶层是单一隐藏目录（如只有 ``.git``）或多个条目则不动。
+    """
+    entries = list(dest.iterdir())
+    if len(entries) != 1 or not entries[0].is_dir() or entries[0].name.startswith("."):
+        return
+    wrapper = entries[0]
+    staging = dest.parent / (dest.name + ".unwrap-staging")
+    staging.mkdir()
+    for e in wrapper.iterdir():
+        e.rename(staging / e.name)
+    wrapper.rmdir()
+    for e in staging.iterdir():
+        e.rename(dest / e.name)
+    staging.rmdir()
+
+
+def _remove_git_hooks(repo: Path) -> None:
+    """删除 zip 自带 .git 的 hooks 目录。
+
+    git commit / 部分 porcelain 操作会执行 ``.git/hooks`` 下脚本——解压内容里的
+    hooks 是任意代码执行面，对扫描无用，一律清除。``.git`` 为文件（worktree 指针）
+    时 ``hooks`` 非 is_dir，安全跳过。
+    """
+    hooks = repo / ".git" / "hooks"
+    if hooks.is_dir():
+        shutil.rmtree(hooks, ignore_errors=True)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -177,15 +253,22 @@ def resolve_linked_repo_path(workspaces_dir: Path, ws: str, name: str) -> str | 
 
 
 class RepoManager:
+    # 上传 zip 限制：文件本体大小（构造注入，来自 SUPERNOVA_REPOS_MAX_UPLOAD_ZIP_MB）、
+    # 解压总大小与条目数（zip bomb 防护，类常量不做 env——磁盘/内存兜底值）。
+    MAX_EXTRACT_BYTES = 4 * 1024 ** 3
+    MAX_EXTRACT_ENTRIES = 100_000
+
     def __init__(self, workspaces_dir: Path, git_fetcher: GitFetcher,
-                 max_concurrent: int = 3) -> None:
+                 max_concurrent: int = 3,
+                 max_upload_zip_bytes: int = 1024 ** 3) -> None:
         self._workspaces_dir = Path(workspaces_dir)
         self._git = git_fetcher
         self._max_concurrent = max(1, max_concurrent)
+        self.MAX_UPLOAD_ZIP_BYTES = max_upload_zip_bytes
         self._sem = asyncio.Semaphore(self._max_concurrent)
         self._jobs: dict[tuple[str, str], asyncio.Task] = {}
-        # 内存登记正在跑的 job 阶段（"cloning"/"pulling"），供 _repo_view 在 target 尚无
-        # ready meta 时显示准确状态。与 _jobs 同生命周期（task finally 一并 pop）。
+        # 内存登记正在跑的 job 阶段（"cloning"/"pulling"/"extracting"），供 _repo_view 在
+        # target 尚无 ready meta 时显示准确状态。与 _jobs 同生命周期（task finally 一并 pop）。
         self._job_phase: dict[tuple[str, str], str] = {}
 
     # ---- ws 解析 + 校验 ----
@@ -305,10 +388,10 @@ class RepoManager:
         meta = self._read_meta(ws, name)
         state = meta.get("state", "ready")
         if busy:
-            # 内存有 job → 正在 clone/pull，覆盖磁盘 meta（clone 期间 target 尚无 ready meta）
+            # 内存有 job → 正在 clone/pull/extracting，覆盖磁盘 meta（期间 target 尚无 ready meta）
             state = self._job_phase.get((ws, name), "cloning")
-        elif state in ("cloning", "pulling"):
-            state = "stale"  # 磁盘标 cloning/pulling 但内存无 job → 重启后未完成
+        elif state in ("cloning", "pulling", "extracting"):
+            state = "stale"  # 磁盘标进行中但内存无 job → 重启后未完成
         group = name.split("/", 1)[0] if "/" in name else None
         view = {"name": name, "group": group, **meta, "state": state}
         # 出站兜底：source.url 剥离 userinfo，防止历史/手动写入的带凭据 URL 泄露给前端
@@ -464,6 +547,134 @@ class RepoManager:
         finally:
             self._jobs.pop((ws, name), None)
             self._job_phase.pop((ws, name), None)
+
+    # ---- 上传 ZIP（upload repos）----
+    async def upload_zip(self, ws: str, zip_path: Path, filename: str,
+                         name: str | None, group: str | None = None) -> str:
+        """上传 zip 添加仓库（异步，与 clone 同款 202 + 后台 task 模式）。
+
+        流程：校验（扩展/大小/重名/并发）→ 后台解压到 repos 根下隐藏临时目录
+        （防 zip slip / zip bomb）→ 剥单一顶层包裹目录 → 清 .git/hooks → 无 .git 则
+        git init 单 commit 快照化（扫描链路 preflight/GitNexus 全兼容）→ meta
+        kind=upload state=ready。失败落 failed meta（可见可删可重传）。
+
+        zip_path 所有权：task 启动成功即移交组件——_upload_task 结束（成功/失败/
+        异常）时删除该文件；本方法抛异常（校验失败，task 未启动）则由调用方自理。
+        """
+        if not filename.lower().endswith(".zip"):
+            raise ValueError(f"仅支持 .zip 文件：{filename!r}")
+        # multipart filename 可带路径分量——取 basename 再剥后缀，segment 校验二道防线
+        base_name = Path(filename).name[: -len(".zip")]
+        name = name or base_name
+        _validate_repo_segment(name, "仓库名")
+        if group:
+            _validate_repo_segment(group, "分组名")
+            final_name = f"{group}/{name}"
+        else:
+            final_name = name
+        size = zip_path.stat().st_size
+        if size > self.MAX_UPLOAD_ZIP_BYTES:
+            raise UploadTooLarge(size, self.MAX_UPLOAD_ZIP_BYTES)
+        target = self._repo_dir(ws, final_name)
+        if target.exists():
+            raise ValueError(f"仓库已存在：{final_name}（请先删除或改名）")
+        if len(self._jobs) >= self._max_concurrent:
+            raise TooManyClones(self._max_concurrent)
+        # 先落可见骨架（空 target + extracting meta）：解压期间列表可见 state=extracting
+        # （_shell_kind 的 meta 分支 + _repo_view busy 覆盖）。内容解压在隐藏临时目录
+        # （.upload-* 前缀，list_repos 跳过），成功后同文件系统 rename 原子挪入。
+        target.mkdir(parents=True, exist_ok=False)
+        self._write_meta(ws, final_name, state="extracting",
+                         source={"kind": "upload"}, cloned_at=_now_iso())
+        self._job_phase[(ws, final_name)] = "extracting"
+        task = asyncio.create_task(self._upload_task(ws, final_name, zip_path, target))
+        self._jobs[(ws, final_name)] = task
+        return final_name
+
+    async def _upload_task(self, ws: str, name: str, zip_path: Path, target: Path) -> None:
+        tmp_dir = self._repos_root(ws) / f".upload-{uuid4().hex[:12]}"
+        try:
+            await self._append_event(ws, name, {
+                "ts": _now_iso(), "phase": "extracting", "status": "progress",
+                "message": "解压上传包"})
+            try:
+                await asyncio.to_thread(
+                    _safe_unzip, zip_path, tmp_dir,
+                    self.MAX_EXTRACT_BYTES, self.MAX_EXTRACT_ENTRIES)
+                _strip_single_root_wrapper(tmp_dir)
+                _remove_git_hooks(tmp_dir)
+                # 剔除 zip 内夹带的同名管理文件：meta/事件只能出自上传流程本身
+                # （防伪造 state/source、污染事件流；最终 meta 稍后也会覆盖，双保险）
+                for junk in (".supernova-repo.json", "clone.ndjson"):
+                    (tmp_dir / junk).unlink(missing_ok=True)
+            except (ValueError, RuntimeError, zipfile.BadZipFile, OSError) as e:
+                self._mark_failed(ws, name, f"上传解压失败：{e}")
+                return
+            for e in sorted(tmp_dir.iterdir()):
+                e.rename(target / e.name)
+            tmp_dir.rmdir()
+            if (target / ".git").exists():
+                # zip 自带 .git：保留真实历史，branch/commit 从工作树现状读
+                branch, _url = self._infer_from_git(target)
+                head = await self._head_commit(target)
+            else:
+                await self._append_event(ws, name, {
+                    "ts": _now_iso(), "phase": "extracting", "status": "progress",
+                    "message": "创建快照（git init + commit）"})
+                try:
+                    branch, head = await self._git_snapshot(target)
+                except RuntimeError as e:
+                    self._mark_failed(ws, name, str(e))
+                    return
+            self._write_meta(ws, name, state="ready", last_error=None,
+                             cloned_at=_now_iso(), last_pull_at=_now_iso(),
+                             size_bytes=_dir_size(target),
+                             source={"kind": "upload", "url": None,
+                                     "branch": branch, "commit": head})
+            await self._append_event(ws, name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
+        except Exception as e:  # 兜底：磁盘满等意外也落 failed（可见可删可重传）
+            self._mark_failed(ws, name, f"上传失败：{e}")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            zip_path.unlink(missing_ok=True)  # 临时 zip 用完即删（API 层移交的所有权）
+            self._jobs.pop((ws, name), None)
+            self._job_phase.pop((ws, name), None)
+
+    async def _git_snapshot(self, repo: Path) -> tuple[str | None, str | None]:
+        """无 .git 的上传目录 → git init + add -A + 单 commit 快照（--allow-empty 兜空仓）。
+
+        git 身份用 -c 临时注入（不污染全局/仓库 config）。返回 (branch, commit)。
+        抛 RuntimeError（含 stderr 摘要）由调用方落 failed。
+        """
+        argvs = [
+            ["git", "-C", str(repo), "init", "-q"],
+            ["git", "-C", str(repo), "add", "-A"],
+            ["git", "-C", str(repo), "-c", "user.name=supernova-upload",
+             "-c", "user.email=upload@supernova.local",
+             "commit", "-q", "--allow-empty", "-m", "supernova upload snapshot"],
+        ]
+        for argv in argvs:
+            proc = await asyncio.create_subprocess_exec(
+                *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"git 快照化失败：{err.decode(errors='replace').strip()[:200]}")
+        return await self._current_branch(repo), await self._head_commit(repo)
+
+    async def _current_branch(self, target: Path) -> str | None:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(target), "branch", "--show-current",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, _ = await proc.communicate()
+            return out.decode("utf-8", "replace").strip() or None
+        except Exception:
+            return None
+
+    def _is_upload(self, ws: str, name: str) -> bool:
+        """私有仓库是否为上传来源（kind=upload）。上传仓是静态快照：无 remote 可
+        pull / checkout，端点据此挡 405（对齐 linked 仓做法）。"""
+        return self._read_meta(ws, name).get("source", {}).get("kind") == "upload"
 
     # ---- checkout / delete ----
     async def checkout(self, ws: str, name: str, branch: str) -> None:

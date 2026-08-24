@@ -40,15 +40,21 @@ const STATE_BADGE: Record<RepoState, { key: string; cls: string; Icon: LucideIco
   stale:   { key: "repos.states.stale",   cls: "border-yellow/40 text-yellow", Icon: AlertTriangle },
   cloning: { key: "repos.states.cloning", cls: "border-cyan/40 text-cyan",     Icon: AlertTriangle },
   pulling: { key: "repos.states.pulling", cls: "border-cyan/40 text-cyan",     Icon: AlertTriangle },
+  extracting: { key: "repos.states.extracting", cls: "border-cyan/40 text-cyan", Icon: AlertTriangle },
   // 空壳目录（占名挡 clone 的空目录残留）：安静的中性配色——非异常、非就绪，仅待清理
   empty:   { key: "repos.states.empty",   cls: "border-border text-muted-foreground", Icon: FolderX },
 };
 
 function StateBadge({ ws, repo }: { ws: string; repo: Repo }) {
   const { t } = useTranslation();
-  // cloning/pulling 复用 CloneProgress（含进度条 + "clone 中" 文本）
-  if (repo.state === "cloning" || repo.state === "pulling") {
-    return <CloneProgress ws={ws} name={repo.name} />;
+  // cloning/pulling/extracting 复用 CloneProgress（SSE 事件流；extracting 换文案"解压中"）
+  if (repo.state === "cloning" || repo.state === "pulling" || repo.state === "extracting") {
+    return (
+      <CloneProgress
+        ws={ws} name={repo.name}
+        busyLabelKey={repo.state === "extracting" ? "repos.states.extracting" : undefined}
+      />
+    );
   }
   const m = STATE_BADGE[repo.state];
   return (
@@ -61,7 +67,7 @@ function StateBadge({ ws, repo }: { ws: string; repo: Repo }) {
 
 // 异常态左侧色条（signature 扫读锚点）：就绪保持安静不显色，异常态显语义色。
 function stateAccent(state: RepoState): string | null {
-  if (state === "cloning" || state === "pulling") return "bg-cyan";
+  if (state === "cloning" || state === "pulling" || state === "extracting") return "bg-cyan";
   if (state === "failed") return "bg-red";
   if (state === "stale") return "bg-yellow";
   return null;
@@ -102,6 +108,14 @@ export function ReposTab({ workspace: wsProp }: Props) {
   // 加载失败 toast（旧 refresh catch 行为）：error 变化时提示一次。
   useEffect(() => { if (error) toast.error(t("repos.errors.loadFailed")); }, [error, t]);
   useEffect(() => () => { if (pullTimerRef.current) clearTimeout(pullTimerRef.current); }, []);
+  // 后台任务（clone/pull/上传解压）进行中 → 轻量轮询刷新列表（结束后停）。
+  // 状态列的实时进度走 SSE（CloneProgress），轮询只为收尾后刷新徽标/大小等列。
+  const hasBusyRepo = repos.some((r) => r.state === "cloning" || r.state === "pulling" || r.state === "extracting");
+  useEffect(() => {
+    if (!hasBusyRepo) return;
+    const id = setInterval(() => { void refresh(); }, 2000);
+    return () => clearInterval(id);
+  }, [hasBusyRepo, refresh]);
 
   async function doDelete() {
     if (!pendingDelete) return;
@@ -339,7 +353,10 @@ export function ReposTab({ workspace: wsProp }: Props) {
                             />
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">{r.source?.kind ?? "-"}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {/* 无 URL 的来源（linked 无 url 罕见 / upload / unknown）→ 本地化 kind 文案 */}
+                            {r.source?.kind ? t(`repos.kinds.${r.source.kind}`, { defaultValue: r.source.kind }) : "-"}
+                          </span>
                         )}
                       </TableCell>
                       {/* 分支列：ready+git+私有克隆 → 行内切换下拉（点开 lazy 拉远端分支，
@@ -368,8 +385,8 @@ export function ReposTab({ workspace: wsProp }: Props) {
                       <TableCell className="py-2.5 px-3 text-center">
                         <span className="inline-flex justify-center gap-1">
                           {/* 空壳目录（empty）无更新入口——pull 对其必报"仓库不存在"；
-                              残留清理走删除 */}
-                          {!r.linked && r.state !== "empty" && (
+                              upload 仓是静态快照（后端 405），更新走重新上传 */}
+                          {!r.linked && r.state !== "empty" && r.source?.kind !== "upload" && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button

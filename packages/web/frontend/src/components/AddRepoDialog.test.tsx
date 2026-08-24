@@ -4,11 +4,13 @@ import { AddRepoDialog } from "./AddRepoDialog";
 
 const mockCreateRepo = vi.fn();
 const mockLinkReposInDir = vi.fn();
+const mockUploadRepoZip = vi.fn();
 const mockUseAuth = vi.fn();
 
 vi.mock("@/api/client", () => ({
   createRepo: (...a: any[]) => mockCreateRepo(...a),
   linkReposInDir: (...a: any[]) => mockLinkReposInDir(...a),
+  uploadRepoZip: (...a: any[]) => mockUploadRepoZip(...a),
   ApiError: class ApiError extends Error {
     status: number;
     body: unknown;
@@ -69,13 +71,15 @@ describe("AddRepoDialog", () => {
     expect((screen.getByTestId("submit") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("非 admin：不显示批量关联模式（link-dir 为 admin-only）", async () => {
+  it("非 admin：不显示批量关联模式（link-dir 为 admin-only），但可见克隆/上传", async () => {
     mockUseAuth.mockReturnValue({ user: { id: 2, username: "member", role: "user" } });
     render(<AddRepoDialog {...props()} />);
     await screen.findByTestId("submit");
     expect(screen.queryByTestId("mode-linkdir")).toBeNull();
     expect(screen.queryByTestId("fs-picker")).toBeNull();
-    expect(screen.queryByTestId("mode-clone")).toBeNull();  // 单模式无需切换器
+    // 上传对所有成员开放（与 clone 一致）→ 非 admin 也有模式切换（clone + upload）
+    expect(screen.getByTestId("mode-clone")).toBeTruthy();
+    expect(screen.getByTestId("mode-upload")).toBeTruthy();
   });
 
   it("克隆模式：admin 默认克隆，提交调 createRepo", async () => {
@@ -88,5 +92,59 @@ describe("AddRepoDialog", () => {
     fireEvent.click(screen.getByTestId("submit"));
     await waitFor(() => expect(mockCreateRepo).toHaveBeenCalled());
     expect(onCreated).toHaveBeenCalledWith("foo");
+  });
+
+  // ---- 上传模式（upload）：拖拽/选择 zip → uploadRepoZip ----
+
+  function makeZip(name: string): File {
+    return new File([new Uint8Array([0x50, 0x4b])], name, { type: "application/zip" });
+  }
+
+  it("上传模式：未选文件时提交禁用，选择 zip 后启用并提交", async () => {
+    mockUploadRepoZip.mockResolvedValue({ name: "app" });
+    const onCreated = vi.fn();
+    const onOpenChange = vi.fn();
+    render(<AddRepoDialog {...props({ onCreated, onOpenChange })} />);
+    fireEvent.click(await screen.findByTestId("mode-upload"));
+    expect((screen.getByTestId("submit") as HTMLButtonElement).disabled).toBe(true);
+    const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeZip("app.zip")] } });
+    expect((screen.getByTestId("submit") as HTMLButtonElement).disabled).toBe(false);
+    // 文件列表渲染 + 单文件 name 输入（placeholder = 文件名派生）
+    expect(screen.getByTestId("upload-file-list").textContent).toContain("app.zip");
+    expect((screen.getByTestId("upload-name") as HTMLInputElement).placeholder).toBe("app");
+    fireEvent.click(screen.getByTestId("submit"));
+    await waitFor(() => expect(mockUploadRepoZip).toHaveBeenCalledTimes(1));
+    // 单文件 + 无自定义名 → name 不覆盖（undefined = 后端取文件名派生）
+    expect(mockUploadRepoZip).toHaveBeenCalledWith("ws1", expect.any(File),
+      { name: undefined, group: undefined }, expect.any(Function));
+    expect(onCreated).toHaveBeenCalledWith("app");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("上传模式：非 .zip 文件被忽略", async () => {
+    render(<AddRepoDialog {...props()} />);
+    fireEvent.click(await screen.findByTestId("mode-upload"));
+    const input = screen.getByTestId("upload-file-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeZip("a.zip"), new File([], "b.tar.gz")] } });
+    expect((screen.getByTestId("submit") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId("upload-file-list").textContent).toContain("a.zip");
+    expect(screen.getByTestId("upload-file-list").textContent).not.toContain("b.tar.gz");
+  });
+
+  it("上传模式：多文件逐个上传，name 覆盖不生效（仅单文件）", async () => {
+    mockUploadRepoZip.mockResolvedValue({ name: "x" });
+    const onCreated = vi.fn();
+    render(<AddRepoDialog {...props({ onCreated })} />);
+    fireEvent.click(await screen.findByTestId("mode-upload"));
+    fireEvent.change(screen.getByTestId("upload-file-input") as HTMLInputElement,
+      { target: { files: [makeZip("a.zip"), makeZip("b.zip")] } });
+    fireEvent.click(screen.getByTestId("submit"));
+    await waitFor(() => expect(mockUploadRepoZip).toHaveBeenCalledTimes(2));
+    expect(mockUploadRepoZip).toHaveBeenNthCalledWith(1, "ws1", expect.any(File),
+      { name: undefined, group: undefined }, expect.any(Function));
+    expect(mockUploadRepoZip).toHaveBeenNthCalledWith(2, "ws1", expect.any(File),
+      { name: undefined, group: undefined }, expect.any(Function));
+    expect(onCreated).toHaveBeenCalledTimes(1);  // 只回调首个（列表刷新触发）
   });
 });
