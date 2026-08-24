@@ -56,4 +56,17 @@ describe("CreateUserDialog", () => {
     await waitFor(() => expect(screen.getByText("users.passwordMinLength")).toBeInTheDocument());
     expect(fm).not.toHaveBeenCalled();
   });
+
+  it("密码留空可提交，透传空串由后端落默认密码", async () => {
+    const fm = vi.spyOn(window, "fetch");
+    fm.mockResolvedValue(new Response(JSON.stringify({ user: { id: 3 } }), { status: 200 }));
+    const onCreated = vi.fn(), onOpenChange = vi.fn();
+    renderDialog(true, onOpenChange, onCreated);
+    fill("bob", "");
+    expect(screen.getByLabelText("users.password")).not.toHaveAttribute("required");
+    fireEvent.click(screen.getByRole("button", { name: "users.create" }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    const body = JSON.parse(fm.mock.calls[0][1]?.body as string);
+    expect(body).toEqual({ username: "bob", password: "", role: "user" });
+  });
 });

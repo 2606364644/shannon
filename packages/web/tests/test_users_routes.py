@@ -107,6 +107,38 @@ def test_create_user_bad_role_422(admin_client):
     assert r.status_code == 422
 
 
+def test_create_user_empty_password_uses_default(admin_client):
+    """密码留空 -> 落默认密码 123456（与 bootstrap admin 同语义），must_change=True，
+    且新用户能用默认密码登录（登录后弹一次可稍后的改密提醒，不阻断）。"""
+    c, app = admin_client
+    r = c.post("/api/users", json={"username": "bob", "password": "", "role": "user"},
+               headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 200
+    bob = app.state.auth_store.get_user_by_username("bob")
+    assert bob.must_change_password is True
+    fresh = TestClient(app)
+    tok = fresh.get("/api/auth/csrf").json()["csrf_token"]
+    r = fresh.post("/api/auth/login", json={"username": "bob", "password": "123456"},
+                   headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+
+
+def test_create_user_missing_password_field_defaults(admin_client):
+    """password 字段整个不传 -> 等价留空，同样落默认密码。"""
+    c, app = admin_client
+    r = c.post("/api/users", json={"username": "bob", "role": "user"},
+               headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 200
+
+
+def test_create_user_explicit_default_pw_still_400(admin_client):
+    """手填 "123456"（6 位 < 8）仍 400 —— 只有留空才走默认密码，手填路径校验不变。"""
+    c, app = admin_client
+    r = c.post("/api/users", json={"username": "bob", "password": "123456", "role": "user"},
+               headers={"X-CSRF-Token": _csrf(c)})
+    assert r.status_code == 400
+
+
 # --- 删除 ---
 
 def test_delete_user_clears_members(admin_client):
@@ -170,6 +202,7 @@ def test_reset_password_short_400(admin_client):
     r = c.post(f"/api/users/{aid}/reset-password", json={"new_password": "123"},
                headers={"X-CSRF-Token": _csrf(c)})
     assert r.status_code == 400
+
 
 
 # --- 归属 ---

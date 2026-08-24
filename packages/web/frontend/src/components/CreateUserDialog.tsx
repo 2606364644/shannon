@@ -27,7 +27,8 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < PASSWORD_MIN_LEN) {
+    // 留空 -> 后端落默认密码（DEFAULT_NEW_USER_PASSWORD）；手填才校验长度。
+    if (password && password.length < PASSWORD_MIN_LEN) {
       toast.error(t("users.passwordMinLength"));
       return;
     }
@@ -57,7 +58,7 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="cu-pw">{t("users.password")}</Label>
-            <Input id="cu-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <Input id="cu-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             <p className="text-xs text-muted-foreground">{t("users.passwordHint")}</p>
           </div>
           <div className="space-y-2">

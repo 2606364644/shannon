@@ -10,7 +10,11 @@ from typing import Literal
 from supernova_web.auth.csrf import verify_csrf
 from supernova_web.auth.dependencies import current_user, require_admin
 from supernova_web.auth.models import User
-from supernova_web.auth.passwords import NEW_PASSWORD_MIN_LEN, hash_password
+from supernova_web.auth.passwords import (
+    DEFAULT_NEW_USER_PASSWORD,
+    NEW_PASSWORD_MIN_LEN,
+    hash_password,
+)
 from supernova_web.components.workspace_provisioner import (
     ensure_global_admin_access,
     ensure_user_workspace,
@@ -50,7 +54,7 @@ async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
 
 class CreateUserIn(BaseModel):
     username: str
-    password: str
+    password: str = ""  # 留空 -> 落 DEFAULT_NEW_USER_PASSWORD（免 admin 手填）
     role: Literal["admin", "user"] = "user"
 
 
@@ -85,8 +89,14 @@ async def list_users(request: Request, _: User = Depends(require_admin)):
 @router.post("")
 async def create_user(body: CreateUserIn, request: Request, _: User = Depends(require_admin)):
     _check_csrf(request)
-    if len(body.password) < NEW_PASSWORD_MIN_LEN:
+    # 留空 -> 默认密码（6 位，同 bootstrap admin 语义，must_change=True 兜底）；
+    # 手填 -> 仍走长度校验。
+    if not body.password:
+        password = DEFAULT_NEW_USER_PASSWORD
+    elif len(body.password) < NEW_PASSWORD_MIN_LEN:
         raise HTTPException(400, f"password must be at least {NEW_PASSWORD_MIN_LEN} characters")
+    else:
+        password = body.password
     store = request.app.state.auth_store
     if store.get_user_by_username(body.username) is not None:
         raise HTTPException(409, "username exists")
@@ -98,7 +108,7 @@ async def create_user(body: CreateUserIn, request: Request, _: User = Depends(re
     if workspace_preexisted:
         raise HTTPException(409, "workspace already exists for username")
 
-    u = store.create_user(body.username, hash_password(body.password),
+    u = store.create_user(body.username, hash_password(password),
                           role=body.role, must_change=True)
     try:
         ensure_user_workspace(workspaces_dir, store, u)
