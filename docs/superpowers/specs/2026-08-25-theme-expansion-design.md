@@ -16,7 +16,7 @@
 | 决策点 | 结论 |
 |---|---|
 | 选型 | 深：Sentry / Arc / Mission Control；浅：GitHub / Notion / kami |
-| 实施范围 | 方案 A：全量 6 主题 + 设置页 2 列网格配套 + 纪律注释修订 |
+| 实施范围 | 方案 A：全量 6 主题 + 设置页网格可用性验证 + 纪律注释修订 |
 | primary 策略 | 每主题本色（见 §3 分层纪律）；arc 例外——玻璃是身份，primary 保持 coral |
 | 字体策略 | 默认共享 IBM Plex；仅 kami 覆盖 `--font-sans` 为衬线栈 |
 | 默认主题对 | 不变：浅=Mac / 深=Claude 深色（`defaultThemeFor` 不动） |
@@ -153,7 +153,7 @@
 |---|---|
 | `packages/web/frontend/src/styles/tokens.css` | +6 palette 块（各含层 A/B/C/D/E；arc 另含层 F + `.dark.theme-arc body` 环境光层；sentry 含层 F float）；头部与扩展主题段纪律注释按 §3 改写 |
 | `packages/web/frontend/src/lib/theme.ts` | `ThemeId` +6；`THEMES` +6 项（含 preview 硬编码 hsl，与 tokens.css 对应块同步维护——沿用现约定）；`normalizeStored` +6 合法值 |
-| `packages/web/frontend/src/pages/SettingsPage.tsx` | 深/浅两组选择区纵向列表 → **2 列网格**（`grid grid-cols-2`，11 项不再纵向过长） |
+| `packages/web/frontend/src/pages/SettingsPage.tsx` | 深/浅两组**已是 `grid grid-cols-3` 网格**（实现期勘误：非纵向列表）；11 主题下深 6 浅 5 各 2 行，默认零改动，仅当视觉走查发现主题名标签挤压时将两组降为 `grid-cols-2` |
 | `packages/web/frontend/src/locales/zh.json` / `en.json` | 各 +6 个 `settings.themes.*` key（现成 kebab→camel 机制：sentry/arc/mission/github/notion/kami） |
 | `packages/web/frontend/index.html` | **不动**（FOAC 默认主题对语义不变） |
 | 测试 | `theme.test.ts`（新 id 归一/applyClass 挂双类/preview 结构完整）；`tokens.test.ts`（漂移断言扩 6 主题 + kami `--font-sans` 衬线覆盖断言 + arc/sentry 层 F 存在性断言）；`SettingsPage.test.tsx`（11 主题 + system 渲染、网格结构）；`ThemeToggle.test.tsx` / `theme-context.test.tsx` 回归 |
