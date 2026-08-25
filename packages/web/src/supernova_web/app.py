@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI):
         while True:
             try:
                 app.state.session_manager.purge_expired()
+                # SSO 防重放表周期清理：删 24h 前已用 ticket（now_iso 须 UTC isoformat）
+                app.state.auth_store.purge_used_tickets(datetime.now(timezone.utc).isoformat())
             except Exception:
                 pass
             await asyncio.sleep(3600)
@@ -265,7 +268,6 @@ def _migrate_legacy_scans(app: FastAPI) -> None:
     """
     import json
     import shutil
-    from datetime import datetime
 
     from .components.workspaces_indexer import _to_unix
 

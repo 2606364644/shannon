@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import logging
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
+from . import sso as sso_mod
 from .brute import BruteGuard
 from .csrf import generate_csrf_token, verify_csrf
-from .dependencies import current_user
+from .dependencies import current_user, require_admin
 from .models import User
 from .passwords import hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 _brute = BruteGuard()
+_log = logging.getLogger("supernova_web.auth")
 
 
 def clear_login_failures(username: str) -> None:
@@ -60,9 +65,10 @@ def _cookie_secure(cfg, request: Request) -> bool:
     return scheme == "https"
 
 
-def _cookie_kwargs(cfg, request: Request) -> dict:
+def _cookie_kwargs(cfg, request: Request, ttl_hours: int | None = None) -> dict:
+    ttl = ttl_hours if ttl_hours is not None else cfg.session_ttl_hours
     return {"httponly": True, "samesite": "lax", "secure": _cookie_secure(cfg, request),
-            "max_age": cfg.session_ttl_hours * 3600}
+            "max_age": ttl * 3600}
 
 
 @router.get("/csrf")
@@ -116,6 +122,70 @@ def change_password(body: ChangePasswordIn, request: Request, user: User = Depen
         raise HTTPException(status_code=401, detail="invalid credentials")
     store.update_password(user.id, hash_password(body.new_password))
     return {"ok": True}
+
+
+# ── SSO（富途 OA passport，spec 2026-08-25 §5.2）──────────────────────────────
+
+@router.get("/sso/config")
+def sso_config(request: Request):
+    """公开：前端登录页据此渲染/隐藏「使用 OA 账号登录」按钮。"""
+    return {"enabled": request.app.state.config.sso_enabled}
+
+
+@router.get("/sso/login")
+def sso_login(request: Request, next: str = "/"):
+    cfg = request.app.state.config
+    if not cfg.sso_enabled:
+        raise HTTPException(status_code=404, detail="sso disabled")
+    url = sso_mod.build_passport_login_url(cfg.sso_passport_base, cfg.sso_public_base_url, next)
+    return RedirectResponse(url, status_code=302)
+
+
+@router.get("/sso/callback")
+def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
+    """OA 登录后 302 回调。校验链（spec §5.2）：开关→ticket 存在→防重放→
+    validateTicket→白名单→JIT 建户→建 session。任一失败 302 /login?sso_error=<code>。"""
+    cfg = request.app.state.config
+    store = request.app.state.auth_store
+    if not cfg.sso_enabled:
+        raise HTTPException(status_code=404, detail="sso disabled")
+    next_path = sso_mod.safe_next(next)
+
+    def _fail(code: str) -> RedirectResponse:
+        return RedirectResponse(f"/login?sso_error={code}", status_code=302)
+
+    if not AUTH_TICKET:
+        return _fail("missing_ticket")
+    if store.is_ticket_used(AUTH_TICKET):
+        return _fail("replayed_ticket")
+    try:
+        info = sso_mod.validate_ticket(cfg.sso_passport_base, cfg.sso_auth_domain, AUTH_TICKET)
+    except sso_mod.SsoTicketError as exc:
+        # 安全收口：只落机器码 + ticket 前 8 位掩码——upstream_error 的 message 含完整
+        # validateTicket URL（即 ticket 明文），禁 str(exc)/__cause__/traceback 入日志。
+        _log.warning("sso ticket rejected: %s (ticket=%s…)", exc.code, AUTH_TICKET[:8])
+        return _fail(exc.code)
+    if not store.is_nick_whitelisted(info.nick):
+        _log.warning("sso nick not whitelisted: %r", info.nick)
+        return _fail("not_whitelisted")
+    store.mark_ticket_used(AUTH_TICKET)
+
+    # JIT 建户：随机不可逆密码 hash——SSO 户无法走账密登录（spec §5.2）
+    user = store.get_user_by_username(info.nick)
+    if user is None:
+        user = store.create_user(info.nick, hash_password(secrets.token_urlsafe(32)),
+                                 role="user", auth_provider="sso")
+    store.update_avatar(user.id, info.avatar_url)
+
+    sid = request.app.state.session_manager.create(
+        user.id, ttl_hours=cfg.sso_session_ttl_hours, auth_method="sso")
+    resp = RedirectResponse(next_path, status_code=302)
+    resp.set_cookie("sn-sid", sid, **_cookie_kwargs(cfg, request, ttl_hours=cfg.sso_session_ttl_hours))
+    tok = generate_csrf_token()  # 对齐账密登录：建会话后续签 csrf
+    resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax",
+                    secure=_cookie_secure(cfg, request),
+                    max_age=cfg.sso_session_ttl_hours * 3600)
+    return resp
 
 
 @router.post("/logout")
