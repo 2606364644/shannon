@@ -94,7 +94,7 @@
 - [auth-profile-system-seed](specs/2026-08-06-auth-profile-system-seed-design.md) — configs/*.yaml 启动 seed 成全局共享系统档案（store 透明 fallback + .system 保留段）📐
 
 ### web 登录 / SSO
-- [sso-auth](specs/2026-08-25-sso-auth-design.md) — 富途 OA passport SSO 接入（账密共存 + nick 白名单 JIT 建户 + 防重放 + 头像展示）📐
+- [sso-auth](plans/2026-08-25-sso-auth.md) / [spec](specs/2026-08-25-sso-auth-design.md) — 富途 OA passport SSO 接入（账密共存 + nick 白名单 JIT 建户 + 防重放 + 头像展示）🔧
 
 ### audit / attribution
 - [audit-session-agent-attribution](plans/2026-06-22-audit-session-agent-attribution.md) / [spec](specs/2026-06-22-audit-session-agent-attribution-design.md) — AuditSession 归因 race 🔧
