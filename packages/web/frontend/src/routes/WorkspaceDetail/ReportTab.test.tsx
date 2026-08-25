@@ -1,11 +1,20 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { SWRConfig } from "swr";
 import i18n from "@/i18n";
 import { ReportTab } from "./ReportTab";
+import { downloadTextFile } from "@/lib/download";
+
+// 下载器单测在 lib/download.test.ts（真 Blob/URL）；此处 mock 以断言组件接线
+// （md 全文 + 文件名），reportDownloadFilename 保持真实现（文件名规则被覆盖）。
+vi.mock("@/lib/download", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/download")>();
+  return { ...actual, downloadTextFile: vi.fn() };
+});
+beforeEach(() => vi.mocked(downloadTextFile).mockClear());
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
@@ -44,6 +53,17 @@ describe("ReportTab", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument(),
     );
+  });
+
+  it("报告渲染后点「下载 .md」→ downloadTextFile 收 md 全文 + 单报告文件名", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/report", () =>
+        new HttpResponse(MD, { headers: { "content-type": "text/plain" } }),
+      ),
+    );
+    renderAt("/p/ws/scans/scan1/report");
+    fireEvent.click(await screen.findByRole("button", { name: /下载 \.md/ }));
+    expect(vi.mocked(downloadTextFile)).toHaveBeenCalledWith("scan1-report.md", MD);
   });
 
   it("加载中渲染 Skeleton（animate-pulse）", async () => {

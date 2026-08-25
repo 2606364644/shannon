@@ -1,16 +1,19 @@
 """Severity 兜底规则（spec §4）：LLM 未给 severity 时按确定性规则定档。"""
 from __future__ import annotations
 
+import re
+
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 SEVERITY_ZH = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
-# RCE 级 sink 关键词（命令/代码执行）——命中即 critical
-_RCE_SINK_KEYWORDS = ("eval", "exec", "system(", "popen", "spawn", "child_process")
+# RCE 级 sink 关键词（命令/代码执行）——命中即 critical。词边界匹配：裸子串
+# "exec" 会误吞 "cursor.execute"（SQLi sink 应 high）、"eval" 误吞 "reevaluate"（F9c）。
+_RCE_SINK_RE = re.compile(r"\b(?:eval|exec|system|popen|spawn|child_process)\b")
 
 def derive_fallback_severity(vuln) -> str:
     sink = (getattr(vuln, "sink_function", None)
             or getattr(vuln, "sink_call", None) or "") or ""
     lowered = sink.lower()
-    if any(k in lowered for k in _RCE_SINK_KEYWORDS):
+    if _RCE_SINK_RE.search(lowered):
         return "critical"
     if getattr(vuln, "vulnerability_type", "") == "injection":
         return "high"

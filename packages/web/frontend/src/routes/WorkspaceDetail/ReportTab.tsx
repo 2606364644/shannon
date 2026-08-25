@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Download } from "lucide-react";
 import { scanReportPath, blackboxRunReportPath } from "../../api/client";
 // useTranslation 在子组件 SingleReport/CombinedReport 内使用；顶层 ReportTab 仅路由态。
 import { MarkdownView } from "../../components/MarkdownView";
@@ -8,12 +9,30 @@ import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { RunFailureBanner, isRunFailureStatus } from "./runStatus";
 import { useScanDetail } from "./useScanDetail";
 import { useApiText } from "@/api/useApiResource";
+import { downloadTextFile, reportDownloadFilename } from "@/lib/download";
 import type { BlackboxRunSummary } from "@/api/types";
 
 type Track = "whitebox" | "blackbox" | "combined";
+
+/** 报告卡右上「下载 .md」：直接落已在内存的 md 全文（/report 无截断），不重发请求。 */
+function ReportDownloadButton({ filename, md }: { filename: string; md: string }) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-muted-foreground"
+      onClick={() => downloadTextFile(filename, md)}
+    >
+      <Download aria-hidden />
+      {t("workspaceDetail.report.download")}
+    </Button>
+  );
+}
 
 /**
  * 报告 tab。
@@ -59,6 +78,9 @@ function SingleReport({ ws, scanId }: { ws: string; scanId: string }) {
     // 会铺到 ~2300px 行太长。max-w-5xl(1024px) 居中 = 文档阅读标准做法，与 live/logs 满宽控制台
     // 形成有意的对比。scan header/tabs 仍满宽（在 ReportTab 之外的 ScanDetail 层）。
     <div className="mx-auto max-w-5xl rounded-md border border-border bg-card p-4 [backdrop-filter:var(--backdrop-card,none)]">
+      <div className="mb-2 flex justify-end">
+        <ReportDownloadButton filename={reportDownloadFilename(scanId)} md={md} />
+      </div>
       <MarkdownView markdown={md} />
     </div>
   );
@@ -77,6 +99,9 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
     ? blackboxRunReportPath(ws, scanId, selectedRun, track === "combined" ? "combined" : undefined)
     : scanReportPath(ws, scanId, track);
   const { text: md, loading, error: err } = useApiText(path);
+  // 下载文件名的 run 段与 path 派生同条件（同一 selectedRun 门控）。
+  const runId = selectedRun && (track === "blackbox" || track === "combined") ? selectedRun : null;
+  const filename = reportDownloadFilename(scanId, track, runId);
 
   // 选中 run 终态失败且无可用报告 → 黑盒/融合子 tab 优先展示失败原因横幅（而非通用 Empty/Error）。
   const showRunFailure = (track === "blackbox" || track === "combined")
@@ -104,6 +129,9 @@ function CombinedReport({ ws, scanId }: { ws: string; scanId: string }) {
         <Empty title={t("workspaceDetail.report.emptyTitle")} hint={t("workspaceDetail.report.emptyHint")} />
       ) : (
         <div className="rounded-md border border-border bg-card p-4">
+          <div className="mb-2 flex justify-end">
+            <ReportDownloadButton filename={filename} md={md} />
+          </div>
           <MarkdownView markdown={md} />
         </div>
       )}

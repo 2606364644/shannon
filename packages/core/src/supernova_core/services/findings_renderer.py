@@ -299,12 +299,11 @@ def _gn_description(cls_name: str, colon: str, param, sink, loc_part: str) -> st
 
 def _description_lines(vuln, gn_only: bool, cls_name: str, colon: str,
                        param, sink, loc_part: str) -> list[str]:
-    """漏洞说明：LLM 卡走 title/notes/source→sink 叙述；GN-only/无线索走确定性描述。"""
-    if gn_only or not (vuln.title or vuln.notes):
+    """漏洞说明：LLM 卡走 notes/source→sink/endpoint 叙述；GN-only/无线索走确定性
+    描述。title 已在卡片标题行（### ID 类名：title），说明段不再重复（F9a）。"""
+    if gn_only:
         return [_gn_description(cls_name, colon, param, sink, loc_part)]
     desc: list[str] = []
-    if vuln.title:
-        desc.append(vuln.title)
     if vuln.notes:
         desc.append(vuln.notes)
     source = getattr(vuln, "source", None)
@@ -314,6 +313,8 @@ def _description_lines(vuln, gn_only: bool, cls_name: str, colon: str,
     endpoint = getattr(vuln, "endpoint", None) or extract_endpoint(path)
     if endpoint and not any(endpoint in d for d in desc):
         desc.append(f"{_M.get('desc_endpoint')}{endpoint}")
+    if not desc:
+        return [_gn_description(cls_name, colon, param, sink, loc_part)]
     return desc
 
 
@@ -430,14 +431,17 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
             f"| {_M.get('tbl_param')} | {_M.get('tbl_sink_loc')} | "
             f"{_M.get('tbl_chain_id')} |")
         lines.append("|---|---|---|")
+        vcl = getattr(vuln, "vulnerable_code_location", None)
         for e in entries:
             if not isinstance(e, dict):
                 continue
             p = str(e.get("parameter") or "")
             if e.get("direct") is False:
                 p += _M.get("suspected_indirect")
-            lines.append(
-                f"| {p} | {e.get('sink_location') or ''} | {e.get('chain_id') or ''} |")
+            sl = e.get("sink_location") or vcl or ""
+            if not (p or sl or e.get("chain_id")):
+                continue  # 三列全空不渲染（F8）：authz Horizontal 无参无位置不成空行
+            lines.append(f"| {p} | {sl} | {e.get('chain_id') or ''} |")
         lines.append("")
 
     # 漏洞说明

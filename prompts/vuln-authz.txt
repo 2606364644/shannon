@@ -166,6 +166,8 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 		"impact": "危害一句话（结论先行，≤3 句）——报告卡片'危害'段直接采用。",
 		"remediation": "修复建议一句话：代码级具体（改哪个函数、换成什么写法），不写'建议加强输入校验'这类空话。",
 		"cwe_id": "CWE 编号，如 'CWE-95'、'CWE-79'。",
+		"cvss": "可选：CVSS 向量串与估分，如 'AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H 9.8'。按向量估分；不确定时省略，不要编造。",
+		"owasp_category": "可选：OWASP Top 10 分类，如 'A03:2021-Injection'；不确定时省略。",
 		"notes": "any assumptions, related findings, or special conditions"
 	}
 </finding_submission>

@@ -321,3 +321,46 @@ def test_merger_keeps_different_endpoint_separate():
     gn[0].sink_call = "app/routes/memos.js:MemosHandler:render:27:19"
     merged = merge_dual_track_queues(llm, gn)
     assert len(merged) == 2                  # 不同接口不合并
+
+
+# --- F4（spec 2026-08-25 终审）：跨轨 sink 限定名失配 → under-merge ---
+# LLM 轨 sink_function 可写 `cursor.execute`，GN 轨 sink_call id 解析出裸名
+# `execute`——同一漏洞单位因带不带 receiver 永不合键。归一化后须落同一把 key。
+
+def test_llm_qualified_sink_merges_with_gn_bare_sink_name():
+    """LLM `cursor.execute` + GN `...:execute:32:10` → 同单位合并 1 条 both。"""
+    llm = [InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="injection",
+        externally_exploitable=True, confidence="high",
+        endpoint="POST /api/x", sink_function="cursor.execute",
+        verdict="vulnerable")]
+    gn = [InjectionVulnerability(
+        ID="INJ-GN-01", vulnerability_type="injection",
+        externally_exploitable=True, confidence="low",
+        path="POST /api/x", sink_call="repo/db.py:Handler:execute:32:10",
+        verdict="vulnerable", source_track="gitnexus")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "both"
+
+
+def test_sink_name_case_variants_still_merge():
+    """大写变体（GN 函数段 `Execute` / LLM `Cursor.Execute`）归一化后同样合并。"""
+    variants = [
+        ("cursor.execute", "repo/db.py:Handler:Execute:32:10"),  # GN 函数段大写
+        ("Cursor.Execute", "repo/db.py:Handler:execute:32:10"),  # LLM receiver+函数大写
+    ]
+    for llm_sink, gn_sink_call in variants:
+        llm = [InjectionVulnerability(
+            ID="INJ-VULN-01", vulnerability_type="injection",
+            externally_exploitable=True, confidence="high",
+            endpoint="POST /api/x", sink_function=llm_sink,
+            verdict="vulnerable")]
+        gn = [InjectionVulnerability(
+            ID="INJ-GN-01", vulnerability_type="injection",
+            externally_exploitable=True, confidence="low",
+            path="POST /api/x", sink_call=gn_sink_call,
+            verdict="vulnerable", source_track="gitnexus")]
+        out = merge_dual_track_queues(llm, gn, mode="verdict")
+        assert len(out) == 1, (llm_sink, gn_sink_call)
+        assert out[0].merge_source == "both", (llm_sink, gn_sink_call)

@@ -641,6 +641,32 @@ describe("parseMetaSeverity · 新版卡片元信息行真数据优先（spec 20
     }
   });
 
+  it("F7b：en 元信息行（Severity: High ｜ Verification: …）四档全映射，不再落回启发式", () => {
+    const cases = [
+      ["Critical", "Critical"],
+      ["High", "High"],
+      ["Medium", "Medium"],
+      ["Low", "Low"],
+    ] as const;
+    for (const [en, sev] of cases) {
+      const b = parseVulnBlock(
+        `### INJ-VULN-01 Injection Vulnerabilities: Command Injection\n` +
+          `Severity: ${en} ｜ CWE-95 ｜ Verification: Static Analysis ｜ Confidence: High`,
+      );
+      expect(parseMetaSeverity(b)).toBe(sev);
+      expect(inferSeverity(b)).toBe(sev);
+    }
+  });
+
+  it("F7b：en 旧格式无中英元信息行 → null（落回启发式）", () => {
+    const seg = vulnSegs("### INJ-VULN-04 Old en style\n\nsome body").find(
+      (s) => s.block.id === "INJ-VULN-04",
+    );
+    expect(seg).toBeDefined();
+    expect(parseMetaSeverity(seg!.block)).toBeNull();
+    expect(["Critical", "High", "Medium", "Low"]).toContain(inferSeverity(seg!.block));
+  });
+
   it("元信息行是权威：优先于启发式的 ★/topRisk 升档", () => {
     const b = parseVulnBlock("### XSS-VULN-02 反射 ★\n严重程度：低危 ｜ 验证：静态分析");
     expect(b.starred).toBe(true);

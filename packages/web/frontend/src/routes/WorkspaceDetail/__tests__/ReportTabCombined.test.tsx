@@ -8,6 +8,14 @@ import i18n from "@/i18n";
 import ScanDetail from "../ScanDetail";
 import { ReportTab } from "../ReportTab";
 import { DeliverablesTab } from "../DeliverablesTab";
+import { downloadTextFile } from "@/lib/download";
+
+// 下载器真测在 lib/download.test.ts；此处 mock 只验组件接线（md + 文件名）。
+vi.mock("@/lib/download", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/download")>();
+  return { ...actual, downloadTextFile: vi.fn() };
+});
+beforeEach(() => vi.mocked(downloadTextFile).mockClear());
 
 // toast 隔离（续跑反馈用），避免 sonner 全局副作用。
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
@@ -213,7 +221,8 @@ describe("ReportTab 组合扫描 - 三子 tab", () => {
     );
     renderReport();
     await screen.findByRole("tab", { name: /融合报告/ });
-    fireEvent.click(screen.getByRole("tab", { name: /融合报告/ }));
+    // mouseDown（非 click）：Radix TabsTrigger 激活在 onMouseDown，裸 click 不触发切换。
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /融合报告/ }));
     await waitFor(() => {
       expect(fetched).toContain("combined");
       expect(screen.getByRole("heading", { level: 1, name: /融合报告/ })).toBeInTheDocument();
@@ -251,6 +260,50 @@ describe("DeliverablesTab 组合扫描 - 三桶", () => {
   });
 });
 
+// =================================================================
+// ReportTab —— 下载 .md 原文
+// =================================================================
+describe("ReportTab 报告下载", () => {
+  function trackReportHandler() {
+    return http.get("/api/workspaces/:ws/scans/:scanId/report", ({ request }) => {
+      const track = new URL(request.url).searchParams.get("track") ?? "whitebox";
+      const body = track === "combined" ? "# 融合报告" : track === "blackbox" ? "# 黑盒报告" : "# 白盒报告";
+      return new HttpResponse(body, { headers: { "content-type": "text/plain" } });
+    });
+  }
+
+  it("组合默认融合 tab：点「下载 .md」→ c1-report-combined.md + 融合报告全文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(combinedScan)),
+      trackReportHandler(),
+    );
+    renderReport();
+    fireEvent.click(await screen.findByRole("button", { name: /下载 \.md/ }));
+    expect(vi.mocked(downloadTextFile)).toHaveBeenCalledWith("c1-report-combined.md", "# 融合报告");
+  });
+
+  it("run 级黑盒 tab：点「下载 .md」→ c1-run-run-2-report-blackbox.md + 该 run 报告全文", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json({
+        ...combinedScan, status: "completed", bb_phase: "completed",
+        latest_bb_run: "run-2",
+        bb_runs: [{ run_id: "run-2", status: "completed" }],
+      })),
+      trackReportHandler(),
+      http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report",
+        () => new HttpResponse("# 黑盒报告 run2", { headers: { "content-type": "text/plain" } })),
+    );
+    renderDetailReport();
+    // Radix TabsTrigger（1.1.17）激活在 onMouseDown（button=0 非 ctrl），无 onClick——
+    // 裸 fireEvent.click 不触发 onValueChange（诊断对照实验 2026-08-25）。
+    const tab = await screen.findByRole("tab", { name: /黑盒报告/ });
+    fireEvent.mouseDown(tab);
+    fireEvent.click(await screen.findByRole("button", { name: /下载 \.md/ }));
+    expect(vi.mocked(downloadTextFile))
+      .toHaveBeenCalledWith("c1-run-run-2-report-blackbox.md", "# 黑盒报告 run2");
+  });
+});
+
 // 嵌套 ScanDetail 父：ReportTab 的 runSummary 经 Outlet context 传入（spec 2026-08-14 可见性）。
 function renderDetailReport() {
   return render(
@@ -284,7 +337,9 @@ describe("ReportTab 失败 run 横幅", () => {
     // 默认 combined track → 失败横幅。
     expect(await screen.findAllByText(/工作区 LLM 凭据未配置/)).not.toHaveLength(0);
     // 切到黑盒子 tab 仍显横幅（runSummary 经 outlet context 透传）。
-    fireEvent.click(await screen.findByRole("tab", { name: /黑盒报告/ }));
+    // mouseDown（非 click）：Radix TabsTrigger 激活在 onMouseDown，裸 click 不触发切换
+    // （此前此用例实际从未真正切到黑盒 tab——假验证，2026-08-25 修正）。
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /黑盒报告/ }));
     expect(await screen.findAllByText(/工作区 LLM 凭据未配置/)).not.toHaveLength(0);
   });
 });

@@ -51,6 +51,18 @@ def _normalize_endpoint(endpoint: object) -> str | None:
     return f"{method} {path}".strip()
 
 
+def _normalize_sink_func(name: object) -> str | None:
+    """Sink 函数名归一化（F4）：小写 + 剥调用括号与 receiver 限定
+    （`cursor.execute(sql)` → `execute`、`Cursor.Execute` → `execute`），
+    使 LLM 轨带 receiver 的 sink 与 GN sink_call id 解析出的裸函数名
+    落同一把 key。无括号无点的自然语言 sink（如 "eval at file:32"）
+    原样小写保留（与现状同粒度，不劣化）。"""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    s = name.strip().lower().split("(", 1)[0].rsplit(".", 1)[-1]
+    return s.strip() or None
+
+
 def _strict_key(finding: Vulnerability) -> tuple:
     """Legacy strict key: full location + sink field tuples (exact-match)."""
     loc = tuple(getattr(finding, field, None) for field in _LOCATION_FIELDS)
@@ -93,6 +105,7 @@ def _finding_key(finding: Vulnerability) -> tuple:
     sink_func, _loc = parse_sink_call_site_id(raw_sink or "")
     if not sink_func and isinstance(raw_sink, str) and raw_sink.strip():
         sink_func = raw_sink.strip()  # LLM 自然语言 sink（如 "eval at file:32"）整体作 key
+    sink_func = _normalize_sink_func(sink_func)
     if endpoint and sink_func:
         return (vtype, endpoint, sink_func)
     return _strict_key(finding)

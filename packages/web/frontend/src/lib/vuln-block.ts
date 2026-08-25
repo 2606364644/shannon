@@ -53,17 +53,29 @@ const META_SEVERITY_ZH: Record<string, Severity> = {
   低危: "Low",
 };
 
-/** 元信息行 severity 片段：`严重程度：严重 ｜ CWE-95 ｜ …`（全角/半角冒号容错）。 */
-const META_SEVERITY_RE = /严重程度[：:]\s*(严重|高危|中危|低危)/;
+/** 新版卡片元信息行英文严重程度词 → Severity（F7b：en 报告同享真数据）。 */
+const META_SEVERITY_EN: Record<string, Severity> = {
+  Critical: "Critical",
+  High: "High",
+  Medium: "Medium",
+  Low: "Low",
+};
+
+/** 元信息行 severity 片段（双语，全角/半角冒号容错）：
+ * `严重程度：严重 ｜ CWE-95 ｜ …`（分组 1=中文词）或 `Severity: Critical ｜ …`（分组 2=英文词）。 */
+const META_SEVERITY_RE =
+  /严重程度[：:]\s*(严重|高危|中危|低危)|Severity[：:]\s*(Critical|High|Medium|Low)/;
 
 /**
- * 从卡片元信息行读真数据 severity（新版四要素卡，报告渲染层写入）。
- * 匹配卡片 raw 内首个 `严重程度：严重|高危|中危|低危` → Severity；
- * 旧报告（无该行 / 老格式如 `- **严重程度:** high`）不匹配 → null，调用方落回启发式。
+ * 从卡片元信息行读真数据 severity（新版四要素卡，报告渲染层写入，zh/en 双语）。
+ * 匹配卡片 raw 内首个 `严重程度：严重|高危|中危|低危` 或 `Severity: Critical|High|Medium|Low`
+ * → Severity；旧报告（无该行 / 老格式如 `- **严重程度:** high`）不匹配 → null，调用方落回启发式。
  */
 export function parseMetaSeverity(block: ParsedVulnBlock): Severity | null {
   const m = META_SEVERITY_RE.exec(block.raw);
-  return m ? META_SEVERITY_ZH[m[1]] : null;
+  if (!m) return null;
+  // alternation 双分支互斥：zh 分支命中 → m[1] 有值（m[2] undefined）；en 分支反之
+  return m[1] ? META_SEVERITY_ZH[m[1]] : META_SEVERITY_EN[m[2] ?? ""];
 }
 
 /**

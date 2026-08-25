@@ -193,7 +193,7 @@ def test_parse_lenient_never_raises_on_non_str_input():
 
 # --- regression: crAPI-20260731 injection 渲染为"渲染错误"占位 ---
 # injection vuln agent 输出的字段是 XSS 风格(sink_function/render_context/...),
-# smart-union 把它误判为 XssVulnerability → render_injection_entry 访问 sink_call 崩。
+# smart-union 把它误判为 XssVulnerability → render_vuln_card 访问 sink_call 崩。
 # parse_lenient 必须支持按 class 强制解析成对应子类型。
 
 def _injection_entry_with_llm_fields():

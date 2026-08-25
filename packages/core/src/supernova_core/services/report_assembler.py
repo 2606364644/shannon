@@ -106,9 +106,13 @@ def _params_cell(vuln) -> str:
 
 
 def _severity_cell(vuln) -> str:
-    """严重度列：effective_severity（含 Task 1 兜底）→ SEVERITY_ZH 中文。"""
+    """严重度列：effective_severity（含 Task 1 兜底）→ 语言本地化
+    （zh 中文档位 / en 首字母大写——F7a：en 报告速查表不再夹中文）。
+    对齐 findings_renderer.render_vuln_card 的 sev_disp 双语模式。"""
     severity = effective_severity(vuln)
-    return SEVERITY_ZH.get(severity, severity)
+    if current_lang() == "zh":
+        return SEVERITY_ZH.get(severity, severity)
+    return severity.capitalize()
 
 
 def _verification_cell(vuln) -> str:

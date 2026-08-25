@@ -132,7 +132,7 @@ _VulnerabilityAdapter = TypeAdapter(Vulnerability)
 
 # 按 vuln_class 强制解析的子类 adapter——规避 smart-union 在字段重叠时误判类型
 # (injection 与 xss 共用 LLM 输出 schema,injection entry 会被误判为 XssVulnerability →
-# render_injection_entry 访问 sink_call 崩 → 整章"渲染错误"占位)。
+# render_vuln_card 访问 sink_call 崩 → 整章"渲染错误"占位)。
 # 调用方已知 queue 的 class 时(如 findings_renderer 按 CLASS_CONFIG key 遍历)应传
 # vuln_class 用对应子类解析,而非让通用 Union 猜类型。
 _CLASS_ADAPTERS: dict[str, TypeAdapter] = {

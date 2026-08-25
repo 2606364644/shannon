@@ -843,6 +843,7 @@
       }
     },
     "report": {
+      "download": "Download .md",
       "loadError": "Report load failed: {{error}}",
       "emptyTitle": "Report not generated yet",
       "emptyHint": "Will appear here once the scan completes",

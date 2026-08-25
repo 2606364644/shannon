@@ -12,7 +12,15 @@ from pathlib import Path
 
 import pytest
 
-from supernova_core.collectors.vuln import make_vuln_sections
+from supernova_core.collectors.vuln import _FINDING_SCHEMAS, _finding_props, make_vuln_sections
+from supernova_core.models.queue_schemas import (
+    AuthVulnerability,
+    AuthzVulnerability,
+    BaseVulnerability,
+    InjectionVulnerability,
+    SsrfVulnerability,
+    XssVulnerability,
+)
 
 PROMPTS_DIR = Path(__file__).resolve().parents[4] / "prompts"
 
@@ -64,15 +72,19 @@ def test_injection_schema_keeps_ts_native_field_family():
     assert "sink_call" in inj and "sink_function" not in inj
 
 
-# 报告可读性改造（spec 2026-08-25 Task 7）：报告卡片四字段双向锁定——
+# 报告可读性改造（spec 2026-08-25 Task 7）：报告卡片字段双向锁定——
 # prompt 字段表所教 + collector schema 声明，两侧任一漂移即红。
-_REPORT_CARD_FIELDS = ["severity", "impact", "remediation", "cwe_id"]
+# cvss/owasp_category 是终审遗留 F5 复活（2026-08-25：BaseVulnerability 有、
+# 渲染层也渲染，但工具契约从不教 ⇒ 死字段），一并纳入锁定。
+_REPORT_CARD_FIELDS = ["severity", "impact", "remediation", "cwe_id", "cvss",
+                       "owasp_category"]
 
 
 @pytest.mark.parametrize("vuln_class", VULN_CLASSES)
 def test_report_card_fields_in_prompt_and_schema(vuln_class):
-    """severity/impact/remediation/cwe_id 必须同时出现在 prompt 字段表与
-    submit_finding schema（optional 字段，不动 _FINDING_BASE_REQUIRED）。
+    """报告卡片字段（severity/impact/remediation/cwe_id/cvss/owasp_category）
+    必须同时出现在 prompt 字段表与 submit_finding schema（optional 字段，
+    不动 _FINDING_BASE_REQUIRED）。
 
     反向锁定的意义：只进 schema 不进 prompt ⇒ 模型不知道要交（字段永远空）；
     只进 prompt 不进 schema ⇒ 上面的方向一测试会红（同 2026-08-20
@@ -93,3 +105,38 @@ def test_report_card_fields_in_prompt_and_schema(vuln_class):
         f"submit_finding schema 缺报告卡片字段（collector 会静默丢弃）: "
         f"{missing_schema}"
     )
+
+
+# 各 vuln class 落盘解析用的 pydantic 子类（queue_schemas._CLASS_ADAPTERS 同款
+# 映射；子类 model_fields 含继承自 BaseVulnerability 的字段）。
+_CLASS_MODELS = {
+    "injection": InjectionVulnerability,
+    "xss": XssVulnerability,
+    "auth": AuthVulnerability,
+    "ssrf": SsrfVulnerability,
+    "authz": AuthzVulnerability,
+}
+
+
+def test_schema_fields_land_in_pydantic_models():
+    """工具 schema 声明的每个 finding 字段必须能落进 pydantic 落盘模型。
+
+    2026-08-20 教训（authentication_required 被静默丢弃）：L0 工具 schema 教了、
+    落盘 pydantic 模型没字段 ⇒ model_validate 静默丢弃、字段永远空。双层锁定：
+    1. 共通 props（_finding_props 基线块，含 cvss/owasp_category）⊆
+       BaseVulnerability.model_fields——报告卡片字段须进基类，全 class 统一落盘；
+    2. 各 class schema 全量 properties ⊆ 对应子类 model_fields——injection 的
+       sink_call 族等 class 特有字段按设计落在子类（不在基类），由子类兜住。
+    """
+    dropped_base = set(_finding_props({})) - set(BaseVulnerability.model_fields)
+    assert not dropped_base, (
+        f"_finding_props 共通字段未进 BaseVulnerability（pydantic 会静默丢弃）: "
+        f"{sorted(dropped_base)}"
+    )
+    for vuln_class, schema in _FINDING_SCHEMAS.items():
+        model = _CLASS_MODELS[vuln_class]
+        dropped = set(schema["properties"]) - set(model.model_fields)
+        assert not dropped, (
+            f"{vuln_class} submit_finding schema 字段未进落盘模型 "
+            f"{model.__name__}（pydantic 会静默丢弃）: {sorted(dropped)}"
+        )

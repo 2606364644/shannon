@@ -843,6 +843,7 @@
       }
     },
     "report": {
+      "download": "下载 .md",
       "loadError": "报告加载失败：{{error}}",
       "emptyTitle": "报告尚未生成",
       "emptyHint": "扫描完成后将在此呈现",

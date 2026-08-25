@@ -724,3 +724,52 @@ async def test_render_findings_with_repo_root_injects_snippet(tmp_path):
     # direct 回填：preTax 在 snippet 中（无标注）；nothere 不在（疑似间接）
     assert "| preTax | app/routes.js:2 | C1 |" in findings
     assert "| nothere (suspected indirect) | app/routes.js:4 | C2 |" in findings
+
+
+# --- F8 / F9a（spec 2026-08-25 终审）---
+
+def test_authz_horizontal_gn_entry_table_no_empty_rows():
+    """F8：Horizontal GN 条目无参数无 sink_location → sink 位置回退
+    vulnerable_code_location；三列全空的 entry 不渲染表行（不成 `|  |  |  |`）。"""
+    vuln = AuthzVulnerability(
+        ID="HZN-GN-01", vulnerability_type="Horizontal",
+        externally_exploitable=True, confidence="low",
+        vulnerable_code_location="middleware/auth.js:45",
+        affected_entries=[{"parameter": None, "sink_location": None,
+                           "chain_id": "HZN-GN-01", "track": "gitnexus"}],
+    )
+    card = render_vuln_card(vuln, "authz")
+    assert "|  | middleware/auth.js:45 | HZN-GN-01 |" in card
+
+    # 三列全 None（且无 vulnerable_code_location 可回退）→ 只剩表头，不出数据行
+    empty = AuthzVulnerability(
+        ID="HZN-GN-02", vulnerability_type="Horizontal",
+        externally_exploitable=True, confidence="low",
+        affected_entries=[{"parameter": None, "sink_location": None,
+                           "chain_id": None, "track": "gitnexus"}],
+    )
+    card2 = render_vuln_card(empty, "authz")
+    rows = [l for l in card2.splitlines() if l.startswith("|")]
+    assert rows == ["| Parameter | Sink Location | Chain ID |", "|---|---|---|"]
+
+
+def test_card_title_not_repeated_in_description_section(monkeypatch):
+    """F9a：title 已在卡片标题行（### ID 类名：title），漏洞说明段不再重复。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln()
+    card = render_vuln_card(v, "injection", None)
+    assert card.count(v.title) == 1          # 仅标题行出现一次
+    # 说明段仍保留 source→path 线索叙述（丢 title 不丢其余）
+    desc = card.split("**漏洞说明**", 1)[1].split("**危害**", 1)[0]
+    assert "preTax & req.body" in desc
+
+
+def test_card_description_falls_back_to_deterministic_without_clues():
+    """F9a 边界：LLM 卡无 notes/source/path/endpoint → 说明段回退确定性描述非空。"""
+    v = InjectionVulnerability(
+        ID="INJ-VULN-03", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        title="bare title", sink_function="eval")
+    card = render_vuln_card(v, "injection")
+    desc = card.split("**Description**", 1)[1].split("**Impact**", 1)[0]
+    assert desc.strip()  # 回退确定性描述，说明段不为空

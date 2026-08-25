@@ -357,6 +357,17 @@ def _finding_props(class_props: dict) -> dict:
         "remediation": _str_field(
             "修复建议一句话：代码级具体（改哪个函数、换成什么写法），不写空话。"),
         "cwe_id": _str_field('CWE 编号，如 "CWE-95"、"CWE-79"。'),
+        # 终审遗留 F5（2026-08-25）：cvss/owasp_category 是死字段——schema 有、
+        # 渲染层也渲染，但工具契约从不教 ⇒ 无人填。此处复活：进 collector 共通
+        # props + prompt 字段表同步所教（同样全 optional，不确定就省略，不编造）。
+        "cvss": {
+            "type": "string",
+            "description": (
+                "可选：CVSS 向量串与估分，如 'AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H 9.8'。"
+                "按向量估分；不确定时省略，不要编造。"),
+        },
+        "owasp_category": _str_field(
+            "可选：OWASP Top 10 分类，如 'A03:2021-Injection'；不确定时省略。"),
     }
     props.update(class_props)
     return props

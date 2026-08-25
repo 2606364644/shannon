@@ -281,6 +281,23 @@ def test_summary_table_en_lang(monkeypatch):
     assert "Static Analysis" in row and row.endswith("| High |")
 
 
+def test_summary_table_severity_localized_en(monkeypatch):
+    """F7a：en 报告速查表严重度列首字母大写（Critical/High/Medium/Low），
+    不再无条件 SEVERITY_ZH 夹中文（严重/高危/中危/低危）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+    table = render_summary_table({"injection": [
+        _sv("INJ-VULN-71", "critical", ["a"]),
+        _sv("INJ-VULN-72", "high", ["b"]),
+        _sv("INJ-VULN-73", "medium", ["c"]),
+        _sv("INJ-VULN-74", "low", ["d"]),
+    ]})
+    rows = [l for l in table.splitlines() if l.startswith("| INJ-")]
+    assert "| Critical |" in rows[0] and "| High |" in rows[1]
+    assert "| Medium |" in rows[2] and "| Low |" in rows[3]
+    for zh_word in ("严重", "高危", "中危", "低危"):
+        assert zh_word not in table
+
+
 @pytest.mark.asyncio
 async def test_assemble_injects_summary_table_as_first_section(tmp_path):
     """queue 可读 → 速查表注入 sections[0]（正文第一章），后接 per-class 产物。"""
