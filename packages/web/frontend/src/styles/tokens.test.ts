@@ -122,7 +122,8 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(m).not.toBeNull();
     const githubBlock = m![1];
     expect(githubBlock).toMatch(/--border:\s*210 18% 84%;/);
-    expect(githubBlock).toMatch(/--primary:\s*212 92% 45%;/);
+    // 2026-08-25 身份色归业务：Primer 蓝 → coral 赤褐 16 64% 44%
+    expect(githubBlock).toMatch(/--primary:\s*16 64% 44%;/);
     expect(githubBlock).toMatch(/--radius:\s*6px;/);
     expect(githubBlock).toMatch(/--c-red:\s*5\s/);
     expect(githubBlock).toMatch(/--c-yellow:\s*38\s/);
@@ -136,7 +137,8 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     const notionBlock = m![1];
     expect(notionBlock).toMatch(/--secondary:\s*30 10% 96%;/);
     expect(notionBlock).toMatch(/--border:\s*0 0% 0% \/ 0\.1;/);
-    expect(notionBlock).toMatch(/--primary:\s*208 100% 44%;/);
+    // 2026-08-25 身份色归业务：Notion 蓝 → coral 陶土 14 58% 46%
+    expect(notionBlock).toMatch(/--primary:\s*14 58% 46%;/);
     expect(notionBlock).toMatch(/--radius:\s*6px;/);
     expect(notionBlock).toMatch(/--c-orange:\s*24\s/);
     // 禁玻璃：notion 不定义 --backdrop-*
@@ -148,11 +150,34 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(m).not.toBeNull();
     const kamiBlock = m![1];
     expect(kamiBlock).toMatch(/--background:\s*53 29% 95%;/);
-    expect(kamiBlock).toMatch(/--primary:\s*215 55% 24%;/);
+    // 2026-08-25 身份色归业务：墨蓝 → 铅印朱砂 10 52% 40%
+    expect(kamiBlock).toMatch(/--primary:\s*10 52% 40%;/);
     expect(kamiBlock).toMatch(/--radius:\s*6px;/);
     expect(kamiBlock).toMatch(/--font-sans:\s*"Charter", Georgia, Palatino, "Songti SC", "Source Han Serif SC", serif;/);
     expect(kamiBlock).toMatch(/--c-red:\s*5\s/);
     // 禁玻璃：kami 不定义 --backdrop-*
     expect(kamiBlock).not.toContain("--backdrop-");
+  });
+
+  it("mac 块：SF Pro 字体栈 + 胶囊 CTA + 玻璃减法（卡片实色、浮层留玻璃）+ coral 主色", () => {
+    const m = tokens.match(/\.light\.theme-mac\s*\{([\s\S]*?)\n\}/);
+    expect(m).not.toBeNull();
+    const macBlock = m![1];
+    // 字体（2026-08-25 质感修订，kami 之外唯一覆盖 --font-sans 的主题）：
+    // Apple 设备 -apple-system 解析 SF Pro/苹方；其他平台 Inter（OpenDesign 官方替代）
+    expect(macBlock).toMatch(/--font-sans:\s*-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", Inter,/);
+    expect(macBlock).toMatch(/--font-mono:\s*ui-monospace, "SF Mono", "IBM Plex Mono",/);
+    // 胶囊主操作（macOS Big Sur+ 原生按钮几何；其他主题不定义该 token，组件回落）
+    expect(macBlock).toMatch(/--radius-cta:\s*980px;/);
+    // 玻璃减法：卡片实色（无 alpha）、不定义 --backdrop-card（card/磁贴回落 none），
+    // 浮层玻璃保留（--popover 半透 + --backdrop-float）
+    expect(macBlock).toMatch(/--card:\s*0 0% 100%;/);
+    expect(macBlock).not.toContain("--backdrop-card");
+    expect(macBlock).toMatch(/--popover:\s*0 0% 100% \/ 0\.72;/);
+    expect(macBlock).toMatch(/--backdrop-float:/);
+    // primary 维持 coral（身份色归业务纪律不动）
+    expect(macBlock).toMatch(/--primary:\s*14 76% 52%;/);
+    // 环境光层保留（TopBar/浮层磨砂的可透之物）
+    expect(tokens).toMatch(/\.light\.theme-mac body\s*\{/);
   });
 });

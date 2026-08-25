@@ -73,7 +73,7 @@ export const THEMES: readonly ThemeDef[] = [
     id: "mac",
     mode: "light",
     paletteClass: "theme-mac",
-    preview: { bg: "hsl(240 6% 96%)", card: "hsl(0 0% 100%)", primary: "hsl(211 100% 45%)", border: "hsl(240 6% 10% / 0.14)" },
+    preview: { bg: "hsl(240 6% 96%)", card: "hsl(0 0% 100%)", primary: "hsl(14 76% 52%)", border: "hsl(240 6% 10% / 0.14)" },
   },
   {
     id: "warm-paper",
@@ -85,19 +85,19 @@ export const THEMES: readonly ThemeDef[] = [
     id: "github",
     mode: "light",
     paletteClass: "theme-github",
-    preview: { bg: "hsl(0 0% 100%)", card: "hsl(210 29% 97%)", primary: "hsl(212 92% 45%)", border: "hsl(210 18% 84%)" },
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(210 29% 97%)", primary: "hsl(16 64% 44%)", border: "hsl(210 18% 84%)" },
   },
   {
     id: "notion",
     mode: "light",
     paletteClass: "theme-notion",
-    preview: { bg: "hsl(0 0% 100%)", card: "hsl(30 10% 96%)", primary: "hsl(208 100% 44%)", border: "hsl(0 0% 0% / 0.10)" },
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(30 10% 96%)", primary: "hsl(14 58% 46%)", border: "hsl(0 0% 0% / 0.10)" },
   },
   {
     id: "kami",
     mode: "light",
     paletteClass: "theme-kami",
-    preview: { bg: "hsl(53 29% 95%)", card: "hsl(48 33% 97%)", primary: "hsl(215 55% 24%)", border: "hsl(50 21% 89%)" },
+    preview: { bg: "hsl(53 29% 95%)", card: "hsl(48 33% 97%)", primary: "hsl(10 52% 40%)", border: "hsl(50 21% 89%)" },
   },
 ];
 

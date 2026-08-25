@@ -127,6 +127,17 @@ describe("TopBar sticky 吸顶", () => {
     expect(header.className).toContain("z-40");
     expect(header.className).toContain("print:static");
   });
+
+  it("导航=浮层材质档（2026-08-25 mac 玻璃减法：TopBar 随浮层留玻璃，卡片实色）", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    const header = screen.getByTestId("topbar");
+    expect(header.className).toContain("bg-popover");
+    expect(header.className).toContain("[backdrop-filter:var(--backdrop-float,none)]");
+  });
 });
 
 describe("TopBar admin 入口", () => {

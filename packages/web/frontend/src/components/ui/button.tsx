@@ -22,8 +22,12 @@ const buttonVariants = cva(
         // cta · 主命令按钮：coral 实心 + sans 字体 + 柔和材质阴影 + hover 微浮。
         // 不再用 ❯ 提示符 / mono / neon 光晕（过重且与文案 + 号重复）。
         // 靠质感（阴影 + hover 浮起）区分主次，尺寸同 default(h-9)，不加大。
+        // 2026-08-25 mac 质感修订：经 --radius-cta 消费胶囊几何（mac 980px）；
+        // 未定义该 token 的主题回落 calc(var(--radius) - 2px) = rounded-md 等值，
+        // 与 --backdrop-* 同一套「未定义即回落」idiom（tailwind 3.4 同 utility
+        // 任意值输出在具名值之后，覆盖基类 rounded-md 生效）。
         cta:
-          "bg-primary text-primary-foreground font-medium shadow-[var(--shadow-cta)] hover:shadow-[var(--shadow-cta-hover)] hover:-translate-y-px active:translate-y-0 transition-all",
+          "bg-primary text-primary-foreground font-medium shadow-[var(--shadow-cta)] hover:shadow-[var(--shadow-cta-hover)] hover:-translate-y-px active:translate-y-0 transition-all [border-radius:var(--radius-cta,calc(var(--radius)_-_2px))]",
         // toolbar · 工作区页操作条按钮（切换工作区/成员/仓库/认证/HOST/置顶）：card 表面
         // 浮于页面 + hover 上浮 -2px + 暖色柔阴影 + 图标染 coral（与 cta 同一浮动语言）。
         // 图标默认 muted，hover 跟随按钮整体上浮后点亮，给出可点击反馈。
