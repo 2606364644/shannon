@@ -44,10 +44,10 @@ _M = Messages({
     "vulnerable_location": {"zh": "脆弱位置", "en": "Vulnerable Location"},
     "source_detail": {"zh": "来源详情", "en": "Source Detail"},
     "verdict": {"zh": "判定", "en": "Verdict"},
-    "witness_payload": {"zh": "验证 payload", "en": "Witness Payload"},
+    "witness_payload": {"zh": "PoC", "en": "PoC"},
     "sink_call": {"zh": "Sink 调用", "en": "Sink Call"},
     "concat_occurrences": {"zh": "拼接出现", "en": "Concat Occurrences"},
-    "sanitization_observed": {"zh": "净化情况", "en": "Sanitization Observed"},
+    "sanitization_observed": {"zh": "防护情况", "en": "Protection Observed"},
     "sink_function": {"zh": "Sink 函数", "en": "Sink Function"},
     "render_context": {"zh": "渲染上下文", "en": "Render Context"},
     "encoding_observed": {"zh": "编码情况", "en": "Encoding Observed"},
@@ -106,11 +106,11 @@ _M = Messages({
     "tbl_sink_loc": {"zh": "Sink 位置", "en": "Sink Location"},
     "tbl_chain_id": {"zh": "链 ID", "en": "Chain ID"},
     "suspected_indirect": {"zh": "（疑似间接）", "en": " (suspected indirect)"},
-    "sec_description": {"zh": "**漏洞说明**", "en": "**Description**"},
+    "sec_description": {"zh": "**漏洞成因（研判依据）**", "en": "**Root Cause (Basis)**"},
     "sec_impact": {"zh": "**危害**", "en": "**Impact**"},
-    "sec_code": {"zh": "**问题代码**", "en": "**Vulnerable Code**"},
+    "sec_code": {"zh": "**问题点**", "en": "**Vulnerable Code**"},
     "sec_remediation": {"zh": "**修复建议**", "en": "**Remediation**"},
-    "sec_tech_detail": {"zh": "#### 技术细节", "en": "#### Technical Detail"},
+    "sec_tech_detail": {"zh": "#### 漏洞细节", "en": "#### Vulnerability Details"},
     "desc_endpoint": {"zh": "受影响接口：", "en": "Affected endpoint: "},
     "det_into": {"zh": "传入", "en": "flows into"},
     "det_unfiltered_into": {
@@ -299,33 +299,110 @@ def _gn_description(cls_name: str, colon: str, param, sink, loc_part: str) -> st
 
 def _description_lines(vuln, gn_only: bool, cls_name: str, colon: str,
                        param, sink, loc_part: str) -> list[str]:
-    """漏洞说明：LLM 卡走 notes/source→sink/endpoint 叙述；GN-only/无线索走确定性
-    描述。title 已在卡片标题行（### ID 类名：title），说明段不再重复（F9a）。"""
-    if gn_only:
-        return [_gn_description(cls_name, colon, param, sink, loc_part)]
-    desc: list[str] = []
-    if vuln.notes:
-        desc.append(vuln.notes)
-    source = getattr(vuln, "source", None)
-    path = getattr(vuln, "path", None)
-    if source or path:
-        desc.append(f"{source or 'N/A'} → {path or 'N/A'}")
-    endpoint = getattr(vuln, "endpoint", None) or extract_endpoint(path)
-    if endpoint and not any(endpoint in d for d in desc):
-        desc.append(f"{_M.get('desc_endpoint')}{endpoint}")
-    if not desc:
-        return [_gn_description(cls_name, colon, param, sink, loc_part)]
-    return desc
+    """漏洞成因（研判依据）：LLM 卡走 notes 叙述；GN-only/无 notes 走确定性描述。
+    title 已在卡片标题行（F9a）。链 dump（source→path）与接口行不混排本节——
+    链在漏洞细节区 vulnerable_location，接口在受影响入口节。"""
+    if not gn_only and vuln.notes:
+        return [vuln.notes]
+    return [_gn_description(cls_name, colon, param, sink, loc_part)]
+
+
+def _entry_section_lines(vuln, loc: str | None) -> list[str]:
+    """受影响入口节（承担「涉及参数 × 涉及接口」呈现）：接口行（endpoint 不在
+    标题时补一行）+ 参数×sink 表。affected_entries 优先；LLM-only 无 entries 时由
+    affected_parameters / vulnerable_parameter × loc 合成（链 ID 留空）。参数、接口
+    全无 → 返回空（整节省略）。"""
+    lines: list[str] = []
+    title = getattr(vuln, "title", None) or ""
+    endpoint = (getattr(vuln, "endpoint", None)
+                or extract_endpoint(getattr(vuln, "path", None))
+                or getattr(vuln, "source_endpoint", None))
+    if endpoint and endpoint not in title:
+        lines.append(f"{_M.get('desc_endpoint')}{endpoint}")
+    entries = getattr(vuln, "affected_entries", None) or []
+    rows: list[tuple[str, str, str]] = []
+    if entries:
+        vcl = getattr(vuln, "vulnerable_code_location", None)
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            p = str(e.get("parameter") or "")
+            if e.get("direct") is False:
+                p += _M.get("suspected_indirect")
+            sl = e.get("sink_location") or vcl or ""
+            if not (p or sl or e.get("chain_id")):
+                continue  # F8：三列全空不渲染
+            rows.append((p, str(sl), str(e.get("chain_id") or "")))
+    else:
+        params = [str(p) for p in (getattr(vuln, "affected_parameters", None) or [])]
+        vp = getattr(vuln, "vulnerable_parameter", None)
+        if vp and vp not in params:
+            params.append(str(vp))
+        rows = [(p, loc or "", "") for p in params]
+    if not rows and not lines:
+        return []
+    if rows:
+        lines.append(_M.get("meta_affected_entries"))
+        lines.append(
+            f"| {_M.get('tbl_param')} | {_M.get('tbl_sink_loc')} | "
+            f"{_M.get('tbl_chain_id')} |")
+        lines.append("|---|---|---|")
+        lines.extend(f"| {p} | {sl} | {cid} |" for p, sl, cid in rows)
+    return lines
+
+
+def _dataflow_item_lines(vuln) -> list[str]:
+    """数据流分点（用户口径 2026-08-25：不要混成一团）：dataflow_steps 优先
+    （结构化，每步 label + file:line）；无 steps 按 evidence_chain 的 →/-> 拆。
+    `- **数据流:**` 标签行 + 2 空格缩进编号子列表；无素材返回空。"""
+    steps = getattr(vuln, "dataflow_steps", None)
+    items: list[str] = []
+    if steps:
+        for s in steps:
+            if not isinstance(s, dict):
+                continue
+            label = str(s.get("label") or "?")
+            f = s.get("file")
+            if f:
+                label += f" ({f}:{s.get('line')})" if s.get("line") else f" ({f})"
+            items.append(label)
+    else:
+        chain = getattr(vuln, "evidence_chain", None)
+        if isinstance(chain, str) and chain:
+            items = [p.strip() for p in re.split(r"\s*(?:→|->)\s*", chain)
+                     if p.strip()]
+    if not items:
+        return []
+    return [_label("dataflow")] + [f"  {i}. {t}" for i, t in enumerate(items, 1)]
 
 
 def _tech_detail_lines(vuln) -> list[str]:
-    """技术细节折叠区（spec §5）：现有判定字段全量降级收纳，沿用 _label 行式。"""
+    """漏洞细节折叠区（用户口径 2026-08-25）：PoC → 数据流（分点）→ 防护情况
+    置顶，判定/CVSS/OWASP 随后，其余判定字段全量收纳，沿用 _label 行式。
+    evidence_chain 不再单行 dump——数据流分点已覆盖（steps 优先，链拆分兜底）。"""
     lines: list[str] = []
 
     def add(key: str, value) -> None:
         if value:
             lines.append(f"{_label(key)} {value}")
 
+    # 1. PoC（用户口径小节名；原「验证 payload」）
+    add("witness_payload", getattr(vuln, "witness_payload", None))
+    # 2. 数据流（分点编号，不混排）
+    lines.extend(_dataflow_item_lines(vuln))
+    # 3. 防护情况：taint 净化（encoding/sanitization）+ authz 防护证据 +
+    #    auth/ssrf 缺失防护（同属防护语义，收拢置顶）
+    if getattr(vuln, "encoding_observed", None):
+        add("encoding_observed", vuln.encoding_observed)
+    else:
+        add("sanitization_observed", getattr(vuln, "sanitization_observed", None))
+    add("guard_evidence", getattr(vuln, "guard_evidence", None))
+    add("missing_defense", getattr(vuln, "missing_defense", None))
+    # 4. 判定三件套
+    add("verdict", getattr(vuln, "verdict", None))
+    add("cvss", getattr(vuln, "cvss", None))
+    add("owasp_category", getattr(vuln, "owasp_category", None))
+    # 5. 其余判定字段照旧全量
     if getattr(vuln, "source", None) or getattr(vuln, "path", None):
         add("vulnerable_location",
             f"{getattr(vuln, 'source', None) or 'N/A'} → "
@@ -338,49 +415,26 @@ def _tech_detail_lines(vuln) -> list[str]:
         add("sink_call", getattr(vuln, "sink_call", None))
     add("render_context", getattr(vuln, "render_context", None))
     add("concat_occurrences", getattr(vuln, "concat_occurrences", None))
-    # 编码/sanitizer：优先 LLM 输出的 encoding_observed，回退旧 sanitization_observed
-    if getattr(vuln, "encoding_observed", None):
-        add("encoding_observed", vuln.encoding_observed)
-    else:
-        add("sanitization_observed", getattr(vuln, "sanitization_observed", None))
     add("source_endpoint", getattr(vuln, "source_endpoint", None))
     add("endpoint", getattr(vuln, "endpoint", None))
     add("vulnerable_parameter", getattr(vuln, "vulnerable_parameter", None))
     add("vulnerable_code_location", getattr(vuln, "vulnerable_code_location", None))
-    add("missing_defense", getattr(vuln, "missing_defense", None))
     add("exploitation_hypothesis", getattr(vuln, "exploitation_hypothesis", None))
     add("suggested_exploit_technique", getattr(vuln, "suggested_exploit_technique", None))
     add("role_context", getattr(vuln, "role_context", None))
-    add("guard_evidence", getattr(vuln, "guard_evidence", None))
     add("side_effect", getattr(vuln, "side_effect", None))
     add("reason", getattr(vuln, "reason", None))
     add("minimal_witness", getattr(vuln, "minimal_witness", None))
-    add("verdict", getattr(vuln, "verdict", None))
-    add("witness_payload", getattr(vuln, "witness_payload", None))
-    add("cvss", getattr(vuln, "cvss", None))
-    add("owasp_category", getattr(vuln, "owasp_category", None))
-    add("evidence_chain", getattr(vuln, "evidence_chain", None))
-    steps = getattr(vuln, "dataflow_steps", None)
-    if steps:
-        segs: list[str] = []
-        for s in steps:
-            if not isinstance(s, dict):
-                continue
-            label = str(s.get("label") or "?")
-            f = s.get("file")
-            if f:
-                label += f" ({f}:{s.get('line')})" if s.get("line") else f" ({f})"
-            segs.append(label)
-        add("dataflow", " → ".join(segs))
     return lines
 
 
 def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
-    """四要素统一漏洞卡（spec 2026-08-25 §5/§6）。
+    """统一漏洞卡（用户口径 2026-08-25：正文叙事 + 漏洞细节折叠）。
 
     结构：`### {ID} {类名}：{title}` → 元信息行（严重程度/CWE/验证/置信度，
-    双轨确认、GN-only 追加待复核）→ 受影响入口表 → 漏洞说明 → 危害 →
-    问题代码（snippet fence）→ 修复建议 → 技术细节（判定字段全量收纳）。
+    双轨确认、GN-only 追加待复核）→ **漏洞成因（研判依据）** → **危害** →
+    **问题点**（snippet fence）→ **受影响入口**（涉及参数×涉及接口，表）→
+    **修复建议** → #### 漏洞细节（PoC/数据流分点/防护情况置顶 + 判定字段全量收纳）。
     内部标签（llm-pass-failed/needs_review/unparseable-llm）零泄漏。
     """
     zh = current_lang() == "zh"
@@ -423,28 +477,7 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.append(_M.get("meta_sep").join(meta_parts))
     lines.append("")
 
-    # 受影响入口表（有 affected_entries 时）
-    entries = getattr(vuln, "affected_entries", None) or []
-    if entries:
-        lines.append(_M.get("meta_affected_entries"))
-        lines.append(
-            f"| {_M.get('tbl_param')} | {_M.get('tbl_sink_loc')} | "
-            f"{_M.get('tbl_chain_id')} |")
-        lines.append("|---|---|---|")
-        vcl = getattr(vuln, "vulnerable_code_location", None)
-        for e in entries:
-            if not isinstance(e, dict):
-                continue
-            p = str(e.get("parameter") or "")
-            if e.get("direct") is False:
-                p += _M.get("suspected_indirect")
-            sl = e.get("sink_location") or vcl or ""
-            if not (p or sl or e.get("chain_id")):
-                continue  # 三列全空不渲染（F8）：authz Horizontal 无参无位置不成空行
-            lines.append(f"| {p} | {sl} | {e.get('chain_id') or ''} |")
-        lines.append("")
-
-    # 漏洞说明
+    # 漏洞成因（研判依据）：notes 叙述 / 确定性描述；链 dump 与接口行不混排
     lines.append(_M.get("sec_description"))
     lines.extend(_description_lines(vuln, gn_only, cls_name, colon, param, sink_name, loc_part))
     lines.append("")
@@ -460,7 +493,7 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.append(impact)
     lines.append("")
 
-    # 问题代码：snippet 非空时 fence（按扩展名语言标注）+ 一句指出问题
+    # 问题点（SINK 代码片段）：snippet 非空时 fence（按扩展名语言标注）+ 一句指出问题
     if snippet:
         lines.append(_M.get("sec_code"))
         lines.append(f"```{_snippet_lang_tag(loc or '')}")
@@ -471,6 +504,12 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
             lines.append(_M.get("code_issue_line", param=p_disp, sink=sink_name))
         lines.append("")
 
+    # 受影响入口（涉及参数×涉及接口）：接口行 + 表（entries 或合成）
+    entry_lines = _entry_section_lines(vuln, loc)
+    if entry_lines:
+        lines.extend(entry_lines)
+        lines.append("")
+
     # 修复建议：remediation（并行任务加的字段）→ GN-only 人工确认提示 → 类级兜底
     remediation = getattr(vuln, "remediation", None)
     if not remediation:
@@ -479,7 +518,7 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.append(remediation)
     lines.append("")
 
-    # 技术细节（折叠附录区）
+    # 漏洞细节（折叠附录区）
     lines.append(_M.get("sec_tech_detail"))
     lines.extend(_tech_detail_lines(vuln))
 

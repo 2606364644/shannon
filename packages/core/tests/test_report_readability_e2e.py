@@ -73,12 +73,13 @@ async def test_e2e_nine_gn_one_llm_become_one_card(monkeypatch):
     assert set(m.affected_parameters) == {"preTax", "afterTax", "roth"}
 
     card = render_vuln_card(m, "injection", SNIPPET)
-    # 四要素齐 + 受影响入口 + 卡标题带 LLM title
+    # 正文四节齐 + 受影响入口 + 卡标题带 LLM title
     assert card.startswith("### INJ-VULN-01 注入漏洞：命令注入")
-    for s in ("**漏洞说明**", "**危害**", "**问题代码**", "**修复建议**", "**受影响入口**"):
-        assert s in card, f"卡片缺四要素小节: {s}"
+    for s in ("**漏洞成因（研判依据）**", "**危害**", "**问题点**",
+              "**修复建议**", "**受影响入口**", "#### 漏洞细节"):
+        assert s in card, f"卡片缺正文小节: {s}"
     assert "双轨确认" in card                    # merge_source=both 的元信息
-    assert SNIPPET in card                       # 问题代码 fence
+    assert SNIPPET in card                       # 问题点 fence
     # 受影响入口表按归并单位渲染：9 行数据（GN 笛卡尔积不平铺成 9 张卡）
     entry_rows = re.findall(
         r"^\| (?:preTax|afterTax|roth) \| app/routes/contributions\.js:\d+ \|",

@@ -46,9 +46,9 @@ def test_render_injection_card_full():
     assert "**Vulnerable Location:** user input → /api/users" in result
     assert "**Sink Call:** sqlite3.execute" in result
     assert "**Concat Occurrences:** query + user_input" in result
-    assert "**Sanitization Observed:** None" in result
+    assert "**Protection Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
-    assert "**Witness Payload:** ' OR 1=1 --" in result
+    assert "**PoC:** ' OR 1=1 --" in result
     # notes 现作为「危害」叙述（impact 字段缺省时的 fallback）
     assert "**Impact**" in result
     assert "Critical finding" in result
@@ -114,7 +114,7 @@ def test_render_xss_card_full():
     assert "**Render Context:** HTML context" in result
     assert "**Encoding Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
-    assert "**Witness Payload:** <script>alert(1)</script>" in result
+    assert "**PoC:** <script>alert(1)</script>" in result
 
 
 def test_render_auth_card_full():
@@ -253,10 +253,95 @@ def test_card_four_elements_and_meta_line(monkeypatch):
     assert card.startswith("### INJ-VULN-01 注入漏洞：命令注入")
     assert "严重程度：严重" in card and "CWE-95" in card
     assert "验证：静态分析" in card and "双轨确认" in card
-    for section in ("**受影响入口**", "**漏洞说明**", "**危害**", "**问题代码**", "**修复建议**", "#### 技术细节"):
+    for section in ("**漏洞成因（研判依据）**", "**危害**", "**问题点**",
+                    "**受影响入口**", "**修复建议**", "#### 漏洞细节"):
         assert section in card, section
     assert "| preTax | app/routes/contributions.js:32 |" in card
-    assert SNIPPET in card  # 问题代码 fence 内
+    assert SNIPPET in card  # 问题点 fence 内
+
+
+def test_card_section_order(monkeypatch):
+    """节顺序（用户口径 2026-08-25）：成因 → 危害 → 问题点 → 受影响入口（参数×
+    接口）→ 修复建议 → 漏洞细节（PoC/数据流/防护收纳折叠区）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(_vuln(), "injection", SNIPPET)
+    order = ["**漏洞成因（研判依据）**", "**危害**", "**问题点**",
+             "**受影响入口**", "**修复建议**", "#### 漏洞细节"]
+    pos = [card.index(s) for s in order]
+    assert pos == sorted(pos), f"节顺序错乱: {order}"
+
+
+def test_card_details_section_order_poc_dataflow_protection(monkeypatch):
+    """漏洞细节区置顶顺序：PoC → 数据流 → 防护情况 → 判定（其余判定字段随后）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(
+        witness_payload="preTax=require('child_process').execSync('id')",
+        sanitization_observed="无。eval 后 isNaN 校验无法阻止执行",
+        dataflow_steps=[
+            {"label": "handleContributionsUpdate 读取 req.body.preTax",
+             "file": "app/routes/contributions.js", "line": 42, "protection": None},
+            {"label": "eval() 服务端 JS 求值",
+             "file": "app/routes/contributions.js", "line": 34, "protection": None},
+        ])
+    card = render_vuln_card(v, "injection", None)
+    details = card.split("#### 漏洞细节", 1)[1]
+    order = ["**PoC:**", "**数据流:**", "**防护情况:**", "**判定:**"]
+    pos = [details.index(s) for s in order]
+    assert pos == sorted(pos), f"漏洞细节区字段顺序错乱: {order}"
+
+
+def test_dataflow_steps_rendered_as_numbered_list(monkeypatch):
+    """数据流分点（用户口径）：dataflow_steps → 编号列表，不再 `A → B → C` 单行 dump。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(dataflow_steps=[
+        {"label": "handleContributionsUpdate 读取 req.body.preTax",
+         "file": "app/routes/contributions.js", "line": 42},
+        {"label": "eval() 服务端 JS 求值",
+         "file": "app/routes/contributions.js", "line": 34},
+    ])
+    card = render_vuln_card(v, "injection", None)
+    assert "- **数据流:**" in card
+    assert "  1. handleContributionsUpdate 读取 req.body.preTax (app/routes/contributions.js:42)" in card
+    assert "  2. eval() 服务端 JS 求值 (app/routes/contributions.js:34)" in card
+    # 不再出现 steps 拼接的单行 dump
+    assert "读取 req.body.preTax → eval()" not in card
+
+
+def test_evidence_chain_split_into_numbered_list(monkeypatch):
+    """GN 卡无 dataflow_steps 时，evidence_chain 按 →/-> 拆成编号分点。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(evidence_chain="preTax -> app/routes/contributions.js:eval:32")
+    card = render_vuln_card(v, "injection", None)
+    assert "  1. preTax" in card
+    assert "  2. app/routes/contributions.js:eval:32" in card
+
+
+def test_llm_card_synthesizes_entry_table(monkeypatch):
+    """无 affected_entries 的 LLM 卡：affected_parameters + endpoint → 合成入口表
+    （涉及参数 × 涉及接口 呈现一致）；接口不在标题时补「受影响接口：」行。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(
+        title="命令注入：贡献值请求体直接 eval()（RCE）",  # title 不含接口 → 补接口行
+        affected_entries=None,
+        endpoint="POST /contributions",
+        sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23")
+    card = render_vuln_card(v, "injection", None)
+    assert "受影响接口：POST /contributions" in card
+    assert "| preTax | app/routes/contributions.js:32 |  |" in card
+    assert "| afterTax | app/routes/contributions.js:32 |  |" in card
+
+
+def test_description_section_no_inline_chain_dump(monkeypatch):
+    """成因节不混排 source→path 链 dump（用户口径：不要混成一团）；线索保留在
+    漏洞细节区 vulnerable_location。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(notes="服务端无沙箱，eval 直接求值请求体。")
+    card = render_vuln_card(v, "injection", None)
+    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
+    assert "preTax & req.body" not in desc
+    assert "服务端无沙箱" in desc
+    details = card.split("#### 漏洞细节", 1)[1]
+    assert "**脆弱位置:**" in details
 
 def test_card_no_internal_labels(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
@@ -625,7 +710,8 @@ def test_render_injection_card_zh_labels(monkeypatch):
     result = render_vuln_card(vuln, "injection")
     assert "**Sink 调用:** sqlite3.execute" in result
     assert "严重程度：" in result
-    assert "**漏洞说明**" in result and "**危害**" in result and "#### 技术细节" in result
+    assert ("**漏洞成因（研判依据）**" in result and "**危害**" in result
+            and "#### 漏洞细节" in result)
     assert "测试备注" in result  # notes 作为危害叙述
     assert "Summary" not in result
 
@@ -741,7 +827,8 @@ def test_authz_horizontal_gn_entry_table_no_empty_rows():
     card = render_vuln_card(vuln, "authz")
     assert "|  | middleware/auth.js:45 | HZN-GN-01 |" in card
 
-    # 三列全 None（且无 vulnerable_code_location 可回退）→ 只剩表头，不出数据行
+    # 三列全 None（且无 vulnerable_code_location 可回退、无接口）→ 整节省略：
+    # 无参无位置无接口不出空表头
     empty = AuthzVulnerability(
         ID="HZN-GN-02", vulnerability_type="Horizontal",
         externally_exploitable=True, confidence="low",
@@ -749,27 +836,27 @@ def test_authz_horizontal_gn_entry_table_no_empty_rows():
                            "chain_id": None, "track": "gitnexus"}],
     )
     card2 = render_vuln_card(empty, "authz")
-    rows = [l for l in card2.splitlines() if l.startswith("|")]
-    assert rows == ["| Parameter | Sink Location | Chain ID |", "|---|---|---|"]
+    assert not [l for l in card2.splitlines() if l.startswith("|")]
 
 
 def test_card_title_not_repeated_in_description_section(monkeypatch):
-    """F9a：title 已在卡片标题行（### ID 类名：title），漏洞说明段不再重复。"""
+    """F9a：title 已在卡片标题行（### ID 类名：title），成因段不再重复。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     v = _vuln()
     card = render_vuln_card(v, "injection", None)
     assert card.count(v.title) == 1          # 仅标题行出现一次
-    # 说明段仍保留 source→path 线索叙述（丢 title 不丢其余）
-    desc = card.split("**漏洞说明**", 1)[1].split("**危害**", 1)[0]
-    assert "preTax & req.body" in desc
+    # source→path 链 dump 不再混排成因段（移居漏洞细节区 vulnerable_location）
+    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
+    assert " → " not in desc
+    assert "**脆弱位置:**" in card.split("#### 漏洞细节", 1)[1]
 
 
 def test_card_description_falls_back_to_deterministic_without_clues():
-    """F9a 边界：LLM 卡无 notes/source/path/endpoint → 说明段回退确定性描述非空。"""
+    """F9a 边界：LLM 卡无 notes/source/path/endpoint → 成因段回退确定性描述非空。"""
     v = InjectionVulnerability(
         ID="INJ-VULN-03", vulnerability_type="SQLi",
         externally_exploitable=True, confidence="high",
         title="bare title", sink_function="eval")
     card = render_vuln_card(v, "injection")
-    desc = card.split("**Description**", 1)[1].split("**Impact**", 1)[0]
-    assert desc.strip()  # 回退确定性描述，说明段不为空
+    desc = card.split("**Root Cause (Basis)**", 1)[1].split("**Impact**", 1)[0]
+    assert desc.strip()  # 回退确定性描述，成因段不为空

@@ -1,5 +1,5 @@
 # packages/core/src/supernova_core/services/code_snippet.py
-"""问题代码片段确定性提取（spec §5/§10.4）：sink 行 ±width 行，零 LLM 成本。"""
+"""问题点代码片段确定性提取（spec §5/§10.4）：sink 行 ±width 行，零 LLM 成本。"""
 from __future__ import annotations
 
 import re
