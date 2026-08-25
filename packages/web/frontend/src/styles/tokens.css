@@ -455,22 +455,28 @@
 }
 
 /* Mac（浅 · Apple HIG 系统级对齐，2026-08-24 由霜白 frost 全面升级改名；
-   2026-08-25 质感修订——按 OpenDesign Apple 真值转向「apple.com 编辑式」语言）：
+   2026-08-25 质感修订——按 OpenDesign Apple 真值转向「apple.com 编辑式」语言；
+   2026-08-26 材质补课——从「带光斑的玻璃」纠偏到「macOS 系统设置」）：
    HIG 精确系统色——#F2F2F7 systemGroupedBackground 画布 + 纯白实色卡（去 alpha：
    OpenDesign Don't「核心 UI 不过度使用阴影/发光/渐变」，Apple 靠色调对比与表面
    阶梯分层，不靠全卡玻璃）；severity 用 Apple 系统色浅底文本变体
    （red=#D70015 / orange=#C93400 / green=#248A3D 系）；文本 Apple 近黑 #1D1D1F +
    次级 #6E6E73；主操作 coral 系 accent 红橙档（身份色归业务，材质/severity 仍
    Apple 真值）。
-   Apple 质感三信号（2026-08-25 增补）：
+   Apple 质感信号（2026-08-25 增补 / 2026-08-26 补课收敛）：
    ① 字体：--font-sans 覆盖 SF 栈——Apple 设备 -apple-system 解析 SF Pro/苹方，
      其他平台回落 Inter（OpenDesign 官方免费替代）；--font-mono 同步 SF Mono 栈；
    ② 几何：--radius-cta 980px 胶囊主操作（macOS Big Sur+ 原生按钮即胶囊；
      button cta 变体经 var 消费，其他主题未定义回落 rounded-md 等值）；
    ③ 玻璃减法：磨砂只留浮层档（TopBar/Popover/Select/Command/Dialog——OpenDesign
-     「玻璃感功能栏在导航与控件」），卡片不定义 --backdrop-card（组件回落 none），
-     body 环境色光层保留并微加强，供浮层磨砂可透之物。
-   hairline 细边 + 极柔双层影 + 12px 桌面窗口圆角保持。 */
+     「玻璃感功能栏在导航与控件」），卡片不定义 --backdrop-card（组件回落 none）；
+   ④ 平面卡（2026-08-26）：卡片无描边环、whisper 影——纯白卡浮灰画布靠色调对比
+     （systemGrouped inset-grouped 语言），主题类隐去卡片面 border（见块后 CSS）；
+   ⑤ 分段控件导航（2026-08-26）：激活 nav 项 = 灰胶囊段（macOS segmented
+     control），替代 web 下划线范式（见块后 CSS）；
+   ⑥ 环境色光斑已删（2026-08-26）：三团 radial 是 Arc 的语言非 Apple 的——
+     macOS 桌面不透彩，画布干净 #F2F2F7；TopBar 磨砂透滚动内容即可成立。
+   12px 桌面窗口圆角保持。 */
 .light.theme-mac {
   /* 层 A · shadcn token（卡片实色；仅浮层 popover 带 alpha = 玻璃「透」） */
   --background: 240 6% 96%;
@@ -522,8 +528,9 @@
   --prose-bullets: 240 4% 42%;
   --prose-hr: 240 5% 10% / 0.12;
 
-  /* 层 E · elevation（macOS 窗口材质：hairline + 近距细影 + 远距极柔氛围） */
-  --shadow-card: 0 0 0 1px hsl(240 6% 20% / 0.04), 0 1px 2px hsl(240 6% 20% / 0.05), 0 10px 30px -10px hsl(240 6% 20% / 0.12);
+  /* 层 E · elevation（2026-08-26 平面化：无外描边环——白卡浮灰画布靠色调对比，
+     卡影压到 whisper（systemGrouped 语言：Apple 的卡不靠 ring/投影分层）） */
+  --shadow-card: 0 1px 2px hsl(240 6% 20% / 0.03), 0 8px 24px -12px hsl(240 6% 20% / 0.07);
   --shadow-cta: 0 1px 2px hsl(14 76% 25% / 0.18), 0 6px 16px -6px hsl(14 76% 52% / 0.28);
   --shadow-cta-hover: 0 2px 4px hsl(14 76% 25% / 0.22), 0 10px 22px -6px hsl(14 76% 52% / 0.36);
   --shadow-toolbar: 0 1px 2px hsl(240 6% 20% / 0.06);
@@ -531,21 +538,33 @@
 
   /* 层 F · vibrancy 磨砂（2026-08-25 玻璃减法：仅浮层档——TopBar/Popover/Select/
      Command/Dialog 经 [backdrop-filter:var(--backdrop-float,none)] 消费；卡片层
-     磨砂 token 不再定义 → card/磁贴自动回落 none 实色。其他主题不定义 → none 零影响） */
+     磨砂 token 不再定义 → card/磁贴自动回落 none 实色。其他主题不定义 → none 零影响。
+     2026-08-26 光斑删除后磨砂透的是滚动内容本身——macOS 工具栏 vibrancy 正是如此） */
   --backdrop-float: saturate(180%) blur(32px);
 }
 
-/* mac 环境色光层：画布上三团浅 radial（蓝/桃/薰衣草，模拟桌面壁纸透进窗口的光），
-   fixed 随滚动不动；玻璃减法后仅 TopBar/浮层的磨砂采它们（2026-08-25 微加强
-   L88→85/alpha+0.05——实色卡片不再采色，浮层磨砂需要可感知的透彩之物）。
-   色斑饱和度仍刻意压低——安全工具的克制，不是壁纸狂欢。 */
-.light.theme-mac body {
-  background-image:
-    radial-gradient(52rem 34rem at 8% -6%, hsl(211 80% 85% / 0.60), transparent 60%),
-    radial-gradient(46rem 30rem at 96% 12%, hsl(20 85% 87% / 0.55), transparent 62%),
-    radial-gradient(50rem 36rem at 55% 108%, hsl(260 45% 87% / 0.55), transparent 65%);
-  background-attachment: fixed;
+/* mac 平面卡（2026-08-26 材质补课 ④）：卡片面（div/section/article 上的 bg-card +
+   border 组合）隐去描边——Apple 卡不描边（toolbar 按钮是 border-input 的 button，
+   不在 :is() 范围不受影响；卡内分隔线/输入框/TopBar hairline 走 --border 原值）。 */
+.light.theme-mac :is(div, section, article).bg-card.border {
+  border-color: transparent;
 }
+
+/* mac 分段控件导航（2026-08-26 材质补课 ⑤）：激活 nav 项 = 灰胶囊段（macOS
+   segmented control 语言；TopBar 的 topbar-nav-item[data-active] 挂钩，其他主题
+   无此规则、维持下划线范式）。特异性 (0,4,0) 压过 tailwind 单类 border/text 工具类。 */
+.light.theme-mac .topbar-nav-item[data-active="true"] {
+  border-color: transparent;
+  background: hsl(240 5% 88%);
+  color: hsl(240 5% 12%);
+  border-radius: 999px;
+}
+.light.theme-mac .topbar-nav-item[data-active="true"]:hover {
+  background: hsl(240 5% 85%);
+}
+
+/* mac SF 标题紧排：不做——PageHeader/CardTitle 全局已 tracking-tight（-0.025em），
+   主题级再覆盖只会更松或冗余；SF 字体本身即承载 Apple 信号（2026-08-26 自检裁掉）。 */
 
 /* GitHub（浅 · Primer，2026-08-25 移植自 OpenDesign design-system-github）：
    代码优先的蓝白画布精准——实色细线边框哲学（非 alpha hairline）、信息密度即
@@ -573,6 +592,9 @@
   --border: 210 18% 84%;
   --input: 210 18% 84%;
   --ring: 16 64% 44%;
+  /* 2026-08-26 材质补课：TopBar 灰带（GitHub 全局头 subtle #f6f8fa——最强 Primer
+     结构信号；TopBar 经 --topbar-bg 消费，其他主题未定义回落 popover） */
+  --topbar-bg: 210 29% 97%;
 
   /* 层 B · 语义色（green=GitHub 绿 #1a7f37；yellow=#9a6700 黄棕气质 hue 锁 38；severity hue 锁定） */
   --c-cyan: 190 65% 32%;
@@ -597,17 +619,19 @@
   --prose-bullets: 212 8% 40%;
   --prose-hr: 213 13% 17% / 0.10;
 
-  /* 层 E · elevation（ring + 1px 微影 + 远距柔影，无玻璃无大阴影） */
-  --shadow-card: 0 0 0 1px hsl(210 18% 84%), 0 1px 3px hsl(213 13% 14% / 0.12), 0 8px 24px hsl(212 12% 32% / 0.12);
+  /* 层 E · elevation（2026-08-26 减影：边框类已画线（card 的 border=同色），卡影
+     只留 Primer 式 1px 微投影 + 远距极淡——Primer 靠线不靠影，无玻璃无大阴影） */
+  --shadow-card: 0 1px 0 hsl(213 13% 14% / 0.05), 0 8px 24px hsl(212 12% 32% / 0.07);
   --shadow-cta: 0 1px 0 hsl(213 13% 14% / 0.1), 0 1px 2px hsl(16 60% 25% / 0.2);
   --shadow-cta-hover: 0 1px 0 hsl(213 13% 14% / 0.1), 0 2px 6px hsl(16 60% 25% / 0.3);
   --shadow-toolbar: 0 1px 0 hsl(213 13% 14% / 0.08);
   --shadow-toolbar-hover: 0 0 0 1px hsl(210 18% 84%), 0 1px 3px hsl(213 13% 14% / 0.12), 0 8px 24px hsl(212 12% 32% / 0.16);
 }
 
-/* Notion（浅 · 暖灰极简，2026-08-25 移植自 OpenDesign design-system-notion）：
-   暖中性灰（黄棕 undertone，无冷灰）+ 低语边框 rgba(0,0,0,0.1) + 多层极低透明度
-   阴影叠加（每层 ≤0.05，「感受到而非看到」）。primary=coral 陶土 14 58% 46%
+/* Notion（浅 · 暖灰极简，2026-08-25 移植自 OpenDesign design-system-notion；
+   2026-08-26 材质补课——无边软影）：暖中性灰（黄棕 undertone，无冷灰）+ 控件级
+   低语边框 rgba(0,0,0,0.1)（按钮/输入框用）+ 卡面无边、多层软影浮起（Notion
+   标志性「影即边界」——与 github 的线框派形成两极）。primary=coral 陶土 14 58% 46%
    （2026-08-25 身份色归业务，柔和一档贴暖灰极简）。
    字体共享（真值 NotionInter 本就无衬线——衬线例外归 kami）。 */
 .light.theme-notion {
@@ -655,23 +679,34 @@
   --prose-bullets: 30 4% 40%;
   --prose-hr: 0 0% 0% / 0.08;
 
-  /* 层 E · elevation（4 层低透明度叠加 0.04/0.027/0.02/0.01，18px→1px 模糊梯度） */
-  --shadow-card: 0 0 0 1px hsl(0 0% 0% / 0.06), 0 4px 18px hsl(0 0% 0% / 0.04), 0 2px 7.85px hsl(0 0% 0% / 0.027), 0 0.8px 2.93px hsl(0 0% 0% / 0.02);
+  /* 层 E · elevation（2026-08-26 材质补课：对齐 Notion 真配方——ring 0.05 +
+     中距 0.07 + 远距 0.10（移植版 whisper 全档 ≤0.04 在纯白画布上层次发闷）；
+     卡面本身去边框（块后 CSS 类覆盖），浮起全靠这套多层软影——Notion 的辨识度 */
+  --shadow-card: 0 0 0 1px hsl(0 0% 0% / 0.05), 0 3px 6px hsl(0 0% 0% / 0.07), 0 9px 24px hsl(0 0% 0% / 0.10);
   --shadow-cta: 0 1px 3px hsl(0 0% 0% / 0.04), 0 0.8px 2.93px hsl(0 0% 0% / 0.02), 0 6px 18px hsl(14 58% 30% / 0.18);
   --shadow-cta-hover: 0 1px 3px hsl(0 0% 0% / 0.04), 0 2px 7px hsl(0 0% 0% / 0.04), 0 10px 24px hsl(14 58% 32% / 0.24);
   --shadow-toolbar: 0 0.8px 2.93px hsl(0 0% 0% / 0.027);
   --shadow-toolbar-hover: 0 0 0 1px hsl(0 0% 0% / 0.06), 0 1px 3px hsl(0 0% 0% / 0.04), 0 4px 18px hsl(0 0% 0% / 0.05);
 }
 
-/* kami（浅 · 纸质报告，2026-08-25 移植自 OpenDesign design-system-kami）：
-   羊皮纸 #f5f4ed 画布（绝不用纯白）+ 铅印朱砂 10 52% 40% 唯一彩色（≤5% 面积，
-   2026-08-25 身份色归业务——蓝墨换印泥朱，批注/圈阅的纸感）+
-   全暖灰四级文本——「高质量印刷品」而非 UI 面板，报告页白皮书阅读场景。
-   材质 ring + whisper（0 4px 24px / 0.05），禁硬阴影/玻璃/渐变（DESIGN.md 反模式）。
+/* notion 无边软影卡（2026-08-26 材质补课）：卡片面（div/section/article 上的
+   bg-card + border）隐去描边，边缘由 shadow-card 的 ring 层交代——Notion 的卡
+   = 纯影无边；--border 原值留给按钮/输入框等控件。 */
+.light.theme-notion :is(div, section, article).bg-card.border {
+  border-color: transparent;
+}
+
+/* kami（浅 · 纸质报告，2026-08-25 移植自 OpenDesign design-system-kami；
+   2026-08-26 材质补课——层次拉开）：羊皮纸画布（绝不用纯白；真值 #f5f4ed 在
+   ivory 卡旁明度差仅 2% 层次发闷，压深至 93% 让「纸上的卡」读得出）+
+   铅印朱砂 10 52% 40% 唯一彩色（≤5% 面积，2026-08-25 身份色归业务——蓝墨换
+   印泥朱，批注/圈阅的纸感）+ 全暖灰四级文本——「高质量印刷品」而非 UI 面板，
+   报告页白皮书阅读场景。材质 ring + whisper（0 4px 24px / 0.06），禁硬阴影/
+   玻璃/渐变（DESIGN.md 反模式）。warm sand ring 同步加深半档。
    唯一字体覆盖主题：--font-sans 衬线栈（EN Charter/Georgia/Palatino + CN 宋体回退）。 */
 .light.theme-kami {
-  /* 层 A · shadcn token（parchment #f5f4ed / ivory 卡 #faf9f5 / warm sand #e8e6dc） */
-  --background: 53 29% 95%;
+  /* 层 A · shadcn token（parchment 93% / ivory 卡 #faf9f5 97% / warm sand ring 86%） */
+  --background: 52 30% 93%;
   --foreground: 60 3% 8%;
   --card: 48 33% 97%;
   --card-foreground: 60 3% 8%;
@@ -687,8 +722,8 @@
   --accent-foreground: 60 3% 8%;
   --destructive: 5 48% 36%;
   --destructive-foreground: 48 33% 97%;
-  --border: 50 21% 89%;
-  --input: 50 21% 89%;
+  --border: 50 22% 86%;
+  --input: 50 22% 86%;
   --ring: 10 52% 40%;
 
   /* 层 B · 语义色（降饱和印刷色，danger #8a3a30 hue 7°→5 微调天然合） */
@@ -715,11 +750,11 @@
   --prose-bullets: 43 5% 30%;
   --prose-hr: 60 3% 8% / 0.10;
 
-  /* 层 E · elevation（ring + whisper；禁硬阴影/玻璃/渐变） */
-  --shadow-card: 0 0 0 1px hsl(50 21% 89%), 0 4px 24px hsl(0 0% 0% / 0.05);
+  /* 层 E · elevation（ring + whisper；禁硬阴影/玻璃/渐变；ring 同步 warm sand 86%） */
+  --shadow-card: 0 0 0 1px hsl(50 22% 86%), 0 4px 24px hsl(0 0% 0% / 0.06);
   --shadow-cta: 0 0 0 1px hsl(10 52% 40%), 0 4px 24px hsl(0 0% 0% / 0.05);
   --shadow-cta-hover: 0 0 0 1px hsl(10 52% 40%), 0 6px 28px hsl(0 0% 0% / 0.07);
-  --shadow-toolbar: 0 0 0 1px hsl(50 21% 89%);
+  --shadow-toolbar: 0 0 0 1px hsl(50 22% 86%);
   --shadow-toolbar-hover: 0 0 0 1px hsl(50 20% 80%), 0 4px 24px hsl(0 0% 0% / 0.06);
 }
 

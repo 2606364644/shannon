@@ -135,8 +135,18 @@ describe("TopBar sticky 吸顶", () => {
       </MemoryRouter>
     );
     const header = screen.getByTestId("topbar");
-    expect(header.className).toContain("bg-popover");
+    // 2026-08-26 材质补课：--topbar-bg 消费（github #f6f8fa 灰带等主题级顶栏底色；
+    // 未定义主题回落 popover——mac 半透磨砂/其余白）。与 --radius-cta 同一套
+    // 「未定义即回落」var idiom。
+    expect(header.className).toContain("bg-[hsl(var(--topbar-bg,var(--popover)))]");
     expect(header.className).toContain("[backdrop-filter:var(--backdrop-float,none)]");
+  });
+
+  it("nav 项挂 topbar-nav-item 语义类（mac 分段控件 CSS 的主题级挂钩）", () => {
+    renderAt("/scan/new");
+    const scan = screen.getByText("扫描");
+    expect(scan.className).toContain("topbar-nav-item");
+    expect(scan.getAttribute("data-active")).toBe("true");
   });
 });
 

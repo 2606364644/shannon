@@ -97,7 +97,8 @@ export const THEMES: readonly ThemeDef[] = [
     id: "kami",
     mode: "light",
     paletteClass: "theme-kami",
-    preview: { bg: "hsl(53 29% 95%)", card: "hsl(48 33% 97%)", primary: "hsl(10 52% 40%)", border: "hsl(50 21% 89%)" },
+    // 2026-08-26 材质补课：画布 95→93 / sand ring 89→86（与 tokens.css kami 块同步）
+    preview: { bg: "hsl(52 30% 93%)", card: "hsl(48 33% 97%)", primary: "hsl(10 52% 40%)", border: "hsl(50 22% 86%)" },
   },
 ];
 

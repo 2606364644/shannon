@@ -127,11 +127,16 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(githubBlock).toMatch(/--radius:\s*6px;/);
     expect(githubBlock).toMatch(/--c-red:\s*5\s/);
     expect(githubBlock).toMatch(/--c-yellow:\s*38\s/);
+    // 2026-08-26 材质补课：TopBar 灰带（GitHub 全局头 #f6f8fa = subtle 灰，
+    // 最强结构信号；TopBar 经 --topbar-bg 消费，其他主题未定义回落 popover）
+    expect(githubBlock).toMatch(/--topbar-bg:\s*210 29% 97%;/);
+    // 阴影再轻一档（Primer 靠线不靠影：边框类已画线，卡影只留微投影）
+    expect(githubBlock).toMatch(/--shadow-card:\s*0 1px 0 hsl\(213 13% 14% \/ 0\.05\), 0 8px 24px hsl\(212 12% 32% \/ 0\.07\);/);
     // 禁玻璃：github 不定义 --backdrop-*
     expect(githubBlock).not.toContain("--backdrop-");
   });
 
-  it("notion 块：暖灰交替面 + 低语边框 + Notion 蓝 + 多层低透明阴影", () => {
+  it("notion 块：暖灰交替面 + 无边软影卡（Notion 标志性多层影）+ coral 主色", () => {
     const m = tokens.match(/\.light\.theme-notion\s*\{([\s\S]*?)\n\}/);
     expect(m).not.toBeNull();
     const notionBlock = m![1];
@@ -141,15 +146,22 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(notionBlock).toMatch(/--primary:\s*14 58% 46%;/);
     expect(notionBlock).toMatch(/--radius:\s*6px;/);
     expect(notionBlock).toMatch(/--c-orange:\s*24\s/);
+    // 2026-08-26 材质补课：阴影对齐 Notion 真配方（ring + 0.07 中距 + 0.10 远距，
+    // 比移植版 whisper 一档强——纯白画布上「层次弱」的主因），卡面去边框（类覆盖）
+    expect(notionBlock).toMatch(/--shadow-card:\s*0 0 0 1px hsl\(0 0% 0% \/ 0\.05\), 0 3px 6px hsl\(0 0% 0% \/ 0\.07\), 0 9px 24px hsl\(0 0% 0% \/ 0\.10\);/);
+    expect(tokens).toMatch(/\.light\.theme-notion :is\(div, section, article\)\.bg-card\.border\s*\{/);
     // 禁玻璃：notion 不定义 --backdrop-*
     expect(notionBlock).not.toContain("--backdrop-");
   });
 
-  it("kami 块：羊皮纸底 + 墨蓝主色 + 衬线字体覆盖（唯一例外）+ whisper 阴影", () => {
+  it("kami 块：羊皮纸底 + 朱砂主色 + 衬线字体覆盖（唯一例外）+ 层次拉开", () => {
     const m = tokens.match(/\.light\.theme-kami\s*\{([\s\S]*?)\n\}/);
     expect(m).not.toBeNull();
     const kamiBlock = m![1];
-    expect(kamiBlock).toMatch(/--background:\s*53 29% 95%;/);
+    // 2026-08-26 材质补课：画布 95→93 拉开与 ivory 卡（97）的明度差，
+    // 「纸上的卡」读得出（DESIGN.md 真值 #f5f4ed 在 97 卡旁层次发闷）
+    expect(kamiBlock).toMatch(/--background:\s*52 30% 93%;/);
+    expect(kamiBlock).toMatch(/--border:\s*50 22% 86%;/);
     // 2026-08-25 身份色归业务：墨蓝 → 铅印朱砂 10 52% 40%
     expect(kamiBlock).toMatch(/--primary:\s*10 52% 40%;/);
     expect(kamiBlock).toMatch(/--radius:\s*6px;/);
@@ -177,7 +189,15 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(macBlock).toMatch(/--backdrop-float:/);
     // primary 维持 coral（身份色归业务纪律不动）
     expect(macBlock).toMatch(/--primary:\s*14 76% 52%;/);
-    // 环境光层保留（TopBar/浮层磨砂的可透之物）
-    expect(tokens).toMatch(/\.light\.theme-mac body\s*\{/);
+    // 2026-08-26 材质补课（macOS 系统设置语言）：卡片 whisper 影（无外描边环——
+    // 白卡浮灰画布靠色调对比，ring 是 web 通用解法非 Apple 解法）
+    expect(macBlock).toMatch(/--shadow-card:\s*0 1px 2px hsl\(240 6% 20% \/ 0\.03\), 0 8px 24px -12px hsl\(240 6% 20% \/ 0\.07\);/);
+    // 平面卡：卡片面（div/section/article 上的 bg-card+border）隐去描边；
+    // 卡内分隔线/输入框/TopBar hairline 走 --border 原值不受影响
+    expect(tokens).toMatch(/\.light\.theme-mac :is\(div, section, article\)\.bg-card\.border\s*\{/);
+    // 分段控件导航：激活项 = 灰胶囊段（macOS segmented control，替代 web 下划线范式）
+    expect(tokens).toMatch(/\.light\.theme-mac \.topbar-nav-item\[data-active="true"\]\s*\{/);
+    // 环境色光斑已删（Arc 的语言非 Apple 的——macOS 桌面不透彩，画布干净 #F2F2F7）
+    expect(tokens).not.toMatch(/\.light\.theme-mac body\s*\{/);
   });
 });
