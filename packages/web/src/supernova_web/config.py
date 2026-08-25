@@ -48,6 +48,26 @@ class WebConfig:
         ) not in ("0", "false", "False")
         self.default_admin_username = os.environ.get("SUPERNOVA_WEB_DEFAULT_ADMIN_USERNAME", "admin")
         self.default_admin_password = os.environ.get("SUPERNOVA_WEB_DEFAULT_ADMIN_PASSWORD", "123456")
+        # ── SSO（富途 OA passport，spec 2026-08-25 §7）─────────────────────────
+        # 总开关：关闭（默认）时 SSO 端点 404、前端不渲染 OA 登录按钮——零回归硬标准。
+        self.sso_enabled = os.environ.get("SUPERNOVA_WEB_SSO_ENABLED", "0") not in ("0", "false", "False")
+        # AUTH_DOMAIN = 本站裸域名（OA 侧登记的接入方标识），传 validateTicket 的 authDomain。
+        self.sso_auth_domain = os.environ.get("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "")
+        # returnUrl 拼接用完整 origin；默认 https://{auth_domain}，内网 http 部署可覆盖。
+        self.sso_public_base_url = (
+            os.environ.get("SUPERNOVA_WEB_SSO_PUBLIC_BASE_URL")
+            or (f"https://{self.sso_auth_domain}" if self.sso_auth_domain else "")
+        ).rstrip("/")
+        self.sso_passport_base = os.environ.get(
+            "SUPERNOVA_WEB_SSO_PASSPORT_BASE", "https://passport.futuoa.com"
+        ).rstrip("/")
+        # SSO 会话时长（cookie max_age 同步）；账密会话仍走 session_ttl_hours（12h）。
+        self.sso_session_ttl_hours = int(os.environ.get("SUPERNOVA_WEB_SSO_SESSION_TTL_HOURS", "24"))
+        if self.sso_enabled and not self.sso_auth_domain:
+            raise RuntimeError(
+                "SUPERNOVA_WEB_SSO_ENABLED=1 需同时配置 SUPERNOVA_WEB_SSO_AUTH_DOMAIN"
+                "（OA 侧登记的本站域名），见 docs/superpowers/specs/2026-08-25-sso-auth-design.md §7"
+            )
 
     @property
     def workspaces_dir(self) -> Path:

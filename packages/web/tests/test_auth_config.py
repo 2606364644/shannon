@@ -1,3 +1,5 @@
+import pytest
+
 from supernova_web.config import get_config
 
 
@@ -36,3 +38,46 @@ def test_bootstrap_default_admin_config_env_override(tmp_workspaces, monkeypatch
     assert cfg.bootstrap_default_admin_enabled is False
     assert cfg.default_admin_username == "root"
     assert cfg.default_admin_password == "hunter2"
+
+
+# ---------- SSO config（spec 2026-08-25 §7）----------
+
+def test_sso_defaults(monkeypatch):
+    for k in ("SUPERNOVA_WEB_SSO_ENABLED", "SUPERNOVA_WEB_SSO_AUTH_DOMAIN",
+              "SUPERNOVA_WEB_SSO_PUBLIC_BASE_URL", "SUPERNOVA_WEB_SSO_PASSPORT_BASE",
+              "SUPERNOVA_WEB_SSO_SESSION_TTL_HOURS"):
+        monkeypatch.delenv(k, raising=False)
+    from supernova_web.config import WebConfig
+    cfg = WebConfig()
+    assert cfg.sso_enabled is False
+    assert cfg.sso_passport_base == "https://passport.futuoa.com"
+    assert cfg.sso_session_ttl_hours == 24
+
+
+def test_sso_enabled_requires_domain(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
+    monkeypatch.delenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", raising=False)
+    from supernova_web.config import WebConfig
+    with pytest.raises(RuntimeError, match="SSO_AUTH_DOMAIN"):
+        WebConfig()
+
+
+def test_sso_public_base_derivation(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "codescan.test.local")
+    monkeypatch.delenv("SUPERNOVA_WEB_SSO_PUBLIC_BASE_URL", raising=False)
+    from supernova_web.config import WebConfig
+    cfg = WebConfig()
+    assert cfg.sso_enabled is True
+    assert cfg.sso_public_base_url == "https://codescan.test.local"
+
+
+def test_sso_public_base_override_and_trailing_slash(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "d.local")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_PUBLIC_BASE_URL", "http://d.local:7878/")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_PASSPORT_BASE", "https://passport.test/")
+    from supernova_web.config import WebConfig
+    cfg = WebConfig()
+    assert cfg.sso_public_base_url == "http://d.local:7878"
+    assert cfg.sso_passport_base == "https://passport.test"
