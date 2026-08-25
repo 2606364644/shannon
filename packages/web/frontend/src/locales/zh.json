@@ -1104,6 +1104,18 @@
       "saveFailed": "部分更新失败,已刷新",
       "notMember": "未加入",
       "empty": "该用户未加入任何工作区"
+    },
+    "ssoWhitelist": {
+      "title": "SSO 登录白名单",
+      "subtitle": "白名单内的 OA 昵称（nick）可通过 SSO 登录，首次登录自动创建账号",
+      "placeholder": "OA 昵称（nick）",
+      "add": "添加",
+      "empty": "白名单为空",
+      "disabledHint": "SSO 未启用（SUPERNOVA_WEB_SSO_ENABLED=0）",
+      "added": "已添加",
+      "addFailed": "添加失败",
+      "removed": "已移除",
+      "removeFailed": "移除失败"
     }
   },
   "branding": {

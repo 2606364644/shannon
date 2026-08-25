@@ -1104,6 +1104,18 @@
       "saveFailed": "Some updates failed; refreshed",
       "notMember": "Not a member",
       "empty": "Not a member of any workspace"
+    },
+    "ssoWhitelist": {
+      "title": "SSO sign-in whitelist",
+      "subtitle": "Whitelisted OA nicks can sign in via SSO; an account is created on first sign-in",
+      "placeholder": "OA nick",
+      "add": "Add",
+      "empty": "Whitelist is empty",
+      "disabledHint": "SSO is disabled (SUPERNOVA_WEB_SSO_ENABLED=0)",
+      "added": "Added",
+      "addFailed": "Failed to add",
+      "removed": "Removed",
+      "removeFailed": "Failed to remove"
     }
   },
   "branding": {

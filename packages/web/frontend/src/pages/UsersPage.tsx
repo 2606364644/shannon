@@ -12,6 +12,7 @@ import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
 import { ConfirmDeleteUserDialog } from "@/components/ConfirmDeleteUserDialog";
 import { UserWorkspacesPanel } from "@/components/UserWorkspacesPanel";
+import { SsoWhitelistPanel } from "@/components/SsoWhitelistPanel";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/auth/AuthContext";
@@ -114,6 +115,7 @@ export function UsersPage() {
           </Table>
         </Card>
       )}
+      <SsoWhitelistPanel />
       {resetTarget && <ResetPasswordDialog userId={resetTarget.id} open={resetOpen} onOpenChange={setResetOpen} />}
       {delTarget && <ConfirmDeleteUserDialog user={delTarget} open={delOpen} onOpenChange={setDelOpen} onDeleted={refresh} />}
     </div>
