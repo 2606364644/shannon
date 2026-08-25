@@ -11,6 +11,8 @@ export type AuthUser = {
   must_change_password: boolean;
   // per-user 置顶工作区（IA 重设计 §2.3）。null=未置顶。经 /auth/me 返回。
   pinned_workspace?: string | null;
+  // SSO 用户头像（OA userInfo.avatarUrl；浏览器 <img> 直连加载，服务端不代理）
+  avatar_url?: string | null;
 };
 export type AuthState = {
   user: AuthUser | null;
@@ -43,8 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    await apiPost("/auth/logout", {});
+    // SSO 会话登出：后端返 OA 登出页地址（账密会话为 null）。本地态先清再跳——
+    // 即使 OA 侧跳转失败，本地也已登出。
+    const r = await apiPost<{ ok: boolean; sso_logout_url?: string | null }>("/auth/logout", {});
     setUser(null);
+    if (r.sso_logout_url) window.location.assign(r.sso_logout_url);
   }
 
   async function refreshUser() {

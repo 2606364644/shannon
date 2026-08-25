@@ -24,7 +24,11 @@
       "locked": "Too many failed attempts — account temporarily locked, try again in ~5 minutes",
       "welcome": "Welcome back",
       "sub": "Sign in to continue",
-      "defaultHint": "Default account: admin / 123456 (demo only — change it after sign-in)"
+      "defaultHint": "Default account: admin / 123456 (demo only — change it after sign-in)",
+      "or": "or",
+      "ssoButton": "Sign in with OA account",
+      "ssoNotWhitelisted": "Account not authorized — contact an administrator",
+      "ssoFailed": "SSO sign-in failed, please retry"
     },
     "logout": "Sign out",
     "sessionExpired": "Session expired, please sign in again",

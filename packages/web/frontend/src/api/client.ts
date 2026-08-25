@@ -335,6 +335,11 @@ export const mergedScanEventsUrl = (ws: string, scanId: string, rev?: number | s
 export const deleteScan = (ws: string, scanId: string) =>
   apiDelete<{ deleted: string }>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}`);
 
+// ── SSO（spec 2026-08-25 §5.2）：公开配置，登录页据此渲染 OA 登录按钮 ──────────
+// silent：未登录 /login 页拉取，401/不可达不触发 session 过期整页跳转；
+// 调用侧（LoginPage）catch 后按 disabled 处理（按钮不渲染，不阻塞账密登录）。
+export const getSsoConfig = () => apiGet<{ enabled: boolean }>("/auth/sso/config", { silent: true });
+
 /** report 端点返 text/plain，deliverables?path= 单文件内容也走文本。不做 JSON.parse。
  *  注：此端点不经统一 request()，故不带 CSRF/401 处理——仅为兼容现有 text 调用。 */
 export async function apiGetText(path: string): Promise<string> {

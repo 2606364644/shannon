@@ -24,7 +24,11 @@
       "locked": "尝试次数过多，账号已临时锁定，请约 5 分钟后再试",
       "welcome": "欢迎回来",
       "sub": "登录以继续",
-      "defaultHint": "默认账号 admin / 密码 123456（演示用，登录后请尽快修改）"
+      "defaultHint": "默认账号 admin / 密码 123456（演示用，登录后请尽快修改）",
+      "or": "或",
+      "ssoButton": "使用 OA 账号登录",
+      "ssoNotWhitelisted": "账号未授权，请联系管理员开通",
+      "ssoFailed": "SSO 登录失败，请重试"
     },
     "logout": "登出",
     "sessionExpired": "会话已过期，请重新登录",

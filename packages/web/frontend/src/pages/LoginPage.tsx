@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/auth/AuthContext";
 import { useBrand } from "@/brand/BrandContext";
-import { ApiError } from "@/api/client";
+import { ApiError, getSsoConfig } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,10 +23,23 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  // SSO 回跳错误码（/api/auth/sso/callback 失败重定向回 /login?sso_error=...）
+  const ssoError = params.get("sso_error");
+
+  useEffect(() => {
+    // silent+catch：config 端点不可达按 disabled 处理（按钮不渲染，不阻塞账密登录）
+    getSsoConfig().then((c) => setSsoEnabled(!!c.enabled)).catch(() => setSsoEnabled(false));
+  }, []);
 
   if (user) return <Navigate to="/" replace />;
   const expired = params.get("expired") === "1";
   const next = params.get("next") || "/";
+
+  function onSsoLogin() {
+    // 整页跳后端 302 到 OA 授权页；next 编码回跳地址，SSO 回调成功后送回前端
+    window.location.assign(`/api/auth/sso/login?next=${encodeURIComponent(next)}`);
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -79,6 +92,11 @@ export default function LoginPage() {
           </div>
           {expired && <p className="text-sm text-destructive">{t("auth.sessionExpired")}</p>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {ssoError && (
+            <p role="alert" className="text-sm text-destructive">
+              {ssoError === "not_whitelisted" ? t("auth.login.ssoNotWhitelisted") : t("auth.login.ssoFailed")}
+            </p>
+          )}
           <div className="space-y-2">
             <Label htmlFor="u">{t("auth.login.username")}</Label>
             <Input id="u" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
@@ -90,6 +108,18 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={busy}>
             {busy ? "…" : t("auth.login.submit")}
           </Button>
+          {ssoEnabled && (
+            <>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                {t("auth.login.or")}
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button type="button" variant="outline" className="w-full" onClick={onSsoLogin} data-testid="sso-login-btn">
+                {t("auth.login.ssoButton")}
+              </Button>
+            </>
+          )}
           <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-center text-xs text-muted-foreground">
             {t("auth.login.defaultHint")}
           </div>

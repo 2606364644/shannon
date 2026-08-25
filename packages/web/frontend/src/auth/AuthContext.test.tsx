@@ -52,4 +52,76 @@ describe("AuthContext", () => {
     );
     expect(handler).not.toHaveBeenCalled();
   });
+
+  // ---- SSO 登出（spec 2026-08-25 §8）----
+  // jsdom 的 location.assign 属性不可配置，vi.spyOn 会抛 "Cannot redefine property"，
+  // 沿 client.test.ts 既有模式整对象替换 window.location；用完 restore 恢复原对象。
+  function mockLocationAssign(): { assign: ReturnType<typeof vi.fn>; restore: () => void } {
+    const assign = vi.fn();
+    const origLoc = window.location;
+    Object.defineProperty(window, "location", {
+      value: { pathname: "/login", assign } as unknown as Location,
+      writable: true,
+      configurable: true,
+    });
+    return {
+      assign,
+      restore: () => Object.defineProperty(window, "location", { value: origLoc, writable: true, configurable: true }),
+    };
+  }
+
+  it("logout 响应带 sso_logout_url 时清态并跳转 OA 登出", async () => {
+    vi.spyOn(window, "fetch").mockImplementation((url) => {
+      const s = String(url);
+      if (s.includes("/auth/logout"))
+        return Promise.resolve(new Response(
+          JSON.stringify({ ok: true, sso_logout_url: "https://passport.test/site/logout.html?returnUrl=x" }),
+          { status: 200 }));
+      return Promise.resolve(new Response(
+        JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 }));
+    });
+    const { assign, restore } = mockLocationAssign();
+    function Probe() {
+      const { user, logout } = useAuth();
+      return (
+        <div>
+          <div>{user ? `user:${user.username}` : "anon"}</div>
+          <button onClick={() => void logout()}>go</button>
+        </div>
+      );
+    }
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByText("user:alice")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    await waitFor(() => expect(screen.getByText("anon")).toBeTruthy());
+    expect(assign).toHaveBeenCalledWith("https://passport.test/site/logout.html?returnUrl=x");
+    restore();
+  });
+
+  it("logout 无 sso_logout_url 维持原行为（不跳转）", async () => {
+    vi.spyOn(window, "fetch").mockImplementation((url) => {
+      const s = String(url);
+      if (s.includes("/auth/logout"))
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, sso_logout_url: null }), { status: 200 }));
+      return Promise.resolve(new Response(
+        JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 }));
+    });
+    const { assign, restore } = mockLocationAssign();
+    function Probe() {
+      const { user, logout } = useAuth();
+      return (
+        <div>
+          <div>{user ? `user:${user.username}` : "anon"}</div>
+          <button onClick={() => void logout()}>go</button>
+        </div>
+      );
+    }
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByText("user:alice")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "go" }));
+    // 等 logout 跑完（本地态已清）再断言：账密会话无 sso_logout_url，不应触发 OA 跳转
+    await waitFor(() => expect(screen.getByText("anon")).toBeTruthy());
+    expect(assign).not.toHaveBeenCalled();
+    restore();
+  });
 });

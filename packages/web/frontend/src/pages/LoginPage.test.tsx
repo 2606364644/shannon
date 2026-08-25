@@ -22,6 +22,35 @@ function wrap() {
   );
 }
 
+// ---- SSO（spec 2026-08-25 §8）----
+// jsdom 的 location.assign 属性不可配置，vi.spyOn 会抛 "Cannot redefine property"，
+// 沿 client.test.ts 既有模式整对象替换 window.location（pathname 钉 /login，兼
+// default handler 的「已在 /login 不重复跳转」防御）；用完 restore 恢复原对象。
+function mockLocationAssign(): { assign: ReturnType<typeof vi.fn>; restore: () => void } {
+  const assign = vi.fn();
+  const origLoc = window.location;
+  Object.defineProperty(window, "location", {
+    value: { pathname: "/login", assign } as unknown as Location,
+    writable: true,
+    configurable: true,
+  });
+  return {
+    assign,
+    restore: () => Object.defineProperty(window, "location", { value: origLoc, writable: true, configurable: true }),
+  };
+}
+
+// 按 URL 子串分流：命中 key 返回其 JSON；其余 401（/auth/me 未登录）
+function mockFetchByRoute(map: Record<string, unknown>) {
+  vi.spyOn(window, "fetch").mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : (input as Request).url;
+    for (const [k, v] of Object.entries(map)) {
+      if (url.includes(k)) return Promise.resolve(new Response(JSON.stringify(v), { status: 200 }));
+    }
+    return Promise.resolve(new Response("{}", { status: 401 }));
+  });
+}
+
 describe("LoginPage", () => {
   // jsdom navigator.language 默认 en-US，i18n LanguageDetector 会渲染英文，
   // 本测试断言中文文案，故每个测试钉回 zh（遵循 App.test.tsx / WorkspaceListPage.test.tsx 既有模式）。
@@ -109,5 +138,48 @@ describe("LoginPage", () => {
     await waitFor(() => expect(screen.getByText(/临时锁定/)).toBeTruthy());
     expect(screen.queryByText("Login failed")).toBeNull();
     fetchSpy.mockRestore();
+  });
+
+  it("SSO enabled 时渲染 OA 登录按钮并跳转 sso/login", async () => {
+    mockFetchByRoute({ "/auth/sso/config": { enabled: true } });
+    const { assign, restore } = mockLocationAssign();
+    wrap();
+    const btn = await screen.findByTestId("sso-login-btn");
+    expect(btn.textContent).toContain("使用 OA 账号登录");
+    fireEvent.click(btn);
+    expect(assign).toHaveBeenCalledWith("/api/auth/sso/login?next=%2F");
+    restore();
+  });
+
+  it("SSO disabled 时不渲染按钮", async () => {
+    // config 端点 401/不可达 → 按 disabled 处理，不渲染 OA 按钮、不阻塞账密表单
+    vi.spyOn(window, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    wrap();
+    await waitFor(() => expect(screen.getByText("欢迎回来")).toBeTruthy());
+    expect(screen.queryByTestId("sso-login-btn")).toBeNull();
+  });
+
+  it("sso_error=not_whitelisted 显示未授权文案", async () => {
+    mockFetchByRoute({ "/auth/sso/config": { enabled: true } });
+    render(
+      <BrandProvider><AuthProvider><ThemeProvider>
+        <MemoryRouter initialEntries={["/login?sso_error=not_whitelisted"]}>
+          <Routes><Route path="/login" element={<LoginPage />} /></Routes>
+        </MemoryRouter>
+      </ThemeProvider></AuthProvider></BrandProvider>
+    );
+    expect(await screen.findByText("账号未授权，请联系管理员开通")).toBeTruthy();
+  });
+
+  it("sso_error 其他 code 显示通用失败文案", async () => {
+    mockFetchByRoute({ "/auth/sso/config": { enabled: true } });
+    render(
+      <BrandProvider><AuthProvider><ThemeProvider>
+        <MemoryRouter initialEntries={["/login?sso_error=upstream_error"]}>
+          <Routes><Route path="/login" element={<LoginPage />} /></Routes>
+        </MemoryRouter>
+      </ThemeProvider></AuthProvider></BrandProvider>
+    );
+    expect(await screen.findByText("SSO 登录失败，请重试")).toBeTruthy();
   });
 });
