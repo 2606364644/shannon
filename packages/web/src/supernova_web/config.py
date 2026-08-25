@@ -68,6 +68,14 @@ class WebConfig:
                 "SUPERNOVA_WEB_SSO_ENABLED=1 需同时配置 SUPERNOVA_WEB_SSO_AUTH_DOMAIN"
                 "（OA 侧登记的本站域名），见 docs/superpowers/specs/2026-08-25-sso-auth-design.md §7"
             )
+        # spec §9：validateTicket 调用强制 https——ticket 明文经该基址传输，http 会被
+        # 链路窃听/中间人截获再重放。内网 http passport 放开档暂不做（YAGNI，将来加 env 档）。
+        if self.sso_enabled and not self.sso_passport_base.startswith("https://"):
+            raise RuntimeError(
+                "SUPERNOVA_WEB_SSO_ENABLED=1 时 SUPERNOVA_WEB_SSO_PASSPORT_BASE 必须以 https://"
+                " 开头（validateTicket 传输 ticket 明文，禁止明文 http），"
+                "见 docs/superpowers/specs/2026-08-25-sso-auth-design.md §9"
+            )
 
     @property
     def workspaces_dir(self) -> Path:

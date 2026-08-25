@@ -113,6 +113,21 @@ def test_callback_jit_idempotent_and_avatar_refresh(sso_client, monkeypatch):
     assert len(users) == 1 and users[0].avatar_url == "https://cdn.test/b.png"
 
 
+def test_callback_nick_conflicts_with_local_password_user(sso_client, monkeypatch):
+    """JIT 撞名护栏（最终审查 Important-1）：OA nick 命中本地账密户（auth_provider=password）
+    → nick_conflict 拒绝——不静默合并/接管本地账户（不建会话、不覆写本地户 avatar）。"""
+    _mock_validate(monkeypatch)
+    store = sso_client.app.state.auth_store
+    store.create_user("niu", hash_password("x" * 60), role="admin")  # 本地账密户，与白名单 nick 撞名
+    r = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-conf"},
+                       follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/login?sso_error=nick_conflict"
+    u = store.get_user_by_username("niu")
+    assert u.auth_provider == "password" and u.avatar_url is None  # 本地户未被触碰
+    assert sso_client.get("/api/auth/me").status_code == 401  # 无新会话
+
+
 def test_callback_not_whitelisted(sso_client, monkeypatch):
     _mock_validate(monkeypatch, payload={**_payload(), "data": {
         **_payload()["data"], "userInfo": {"uid": 1, "nick": "outsider", "avatarUrl": None}}})
@@ -164,19 +179,30 @@ def admin_sso_client(sso_client):
 
 
 def test_whitelist_crud(admin_sso_client):
+    csrf = {"X-CSRF-Token": admin_sso_client.cookies.get("sn-csrf")}
     r = admin_sso_client.get("/api/auth/sso/whitelist")
     assert r.status_code == 200
     assert [w["nick"] for w in r.json()["whitelist"]] == ["niu"]  # fixture 预置
-    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}).status_code == 200
-    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}).status_code == 200  # 幂等
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}, headers=csrf).status_code == 200
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}, headers=csrf).status_code == 200  # 幂等
     r = admin_sso_client.get("/api/auth/sso/whitelist")
     assert sorted(w["nick"] for w in r.json()["whitelist"]) == ["mate", "niu"]
-    assert admin_sso_client.delete("/api/auth/sso/whitelist/mate").status_code == 200
+    assert admin_sso_client.delete("/api/auth/sso/whitelist/mate", headers=csrf).status_code == 200
     assert [w["nick"] for w in admin_sso_client.get("/api/auth/sso/whitelist").json()["whitelist"]] == ["niu"]
 
 
+def test_whitelist_write_requires_csrf(admin_sso_client):
+    """白名单写端点显式 CSRF（对齐 users.py _check_csrf / logout 惯例）：无/错 token → 403，读端点不受影响。"""
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "x"}).status_code == 403
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "x"},
+                                 headers={"X-CSRF-Token": "bad"}).status_code == 403
+    assert admin_sso_client.delete("/api/auth/sso/whitelist/niu").status_code == 403
+    assert admin_sso_client.get("/api/auth/sso/whitelist").status_code == 200
+
+
 def test_whitelist_rejects_blank_nick(admin_sso_client):
-    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "  "}).status_code == 422
+    csrf = {"X-CSRF-Token": admin_sso_client.cookies.get("sn-csrf")}
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "  "}, headers=csrf).status_code == 422
 
 
 def test_whitelist_requires_admin(sso_client):

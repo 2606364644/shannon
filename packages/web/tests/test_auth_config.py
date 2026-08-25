@@ -62,6 +62,17 @@ def test_sso_enabled_requires_domain(monkeypatch):
         WebConfig()
 
 
+def test_sso_enabled_requires_https_passport_base(monkeypatch):
+    """spec §9：validateTicket 传输 ticket 明文，passport 基址必须 https——启动 fail-fast。
+    （默认 https://passport.futuoa.com 不抛已由 test_sso_public_base_derivation 覆盖。）"""
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "codescan.test.local")
+    monkeypatch.setenv("SUPERNOVA_WEB_SSO_PASSPORT_BASE", "http://passport.test")
+    from supernova_web.config import WebConfig
+    with pytest.raises(RuntimeError, match="PASSPORT_BASE"):
+        WebConfig()
+
+
 def test_sso_public_base_derivation(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
     monkeypatch.setenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "codescan.test.local")

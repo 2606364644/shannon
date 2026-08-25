@@ -43,7 +43,10 @@ _ADD_MUST_CHANGE_COL = "ALTER TABLE users ADD COLUMN must_change_password INTEGE
 # ALTER TABLE ADD COLUMN 无 IF NOT EXISTS，对已建库幂等补列：列已存 -> OperationalError 吞掉。
 _ADD_PINNED_WS_COL = "ALTER TABLE users ADD COLUMN pinned_workspace TEXT"
 
-# SSO（spec 2026-08-25 §6）：users/sessions 补列 + 两新表。补列同上幂等模式。
+# SSO（spec 2026-08-25 §6）：users/sessions 补列 + 两新表。补列注意与上面两列相反：
+# 基础 _SCHEMA 不含这三个新列——新库（或 pre-SSO 老库）首次 init 时 ALTER 是成功
+# 路径（此处真正建列）；「列已存在」吞 OperationalError 分支服务的是二次 init /
+# 已升级过的库（列已补上再跑），幂等不崩语义与上面一致。
 _ADD_AVATAR_COL = "ALTER TABLE users ADD COLUMN avatar_url TEXT"
 _ADD_PROVIDER_COL = "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'"
 _ADD_AUTH_METHOD_COL = "ALTER TABLE sessions ADD COLUMN auth_method TEXT DEFAULT 'password'"
@@ -81,15 +84,15 @@ class AuthStore:
             except sqlite3.OperationalError:
                 pass
             try:
-                c.execute(_ADD_AVATAR_COL)  # SSO 旧库补列；新库已含 -> OperationalError 吞掉
+                c.execute(_ADD_AVATAR_COL)  # _SCHEMA 不含此列：首次 init ALTER 成功建列；列已存（二次 init/已升级库）-> 吞掉
             except sqlite3.OperationalError:
                 pass
             try:
-                c.execute(_ADD_PROVIDER_COL)  # SSO 旧库补列；新库已含 -> OperationalError 吞掉
+                c.execute(_ADD_PROVIDER_COL)  # 同上：首次 init 建列成功；列已存 -> 吞掉
             except sqlite3.OperationalError:
                 pass
             try:
-                c.execute(_ADD_AUTH_METHOD_COL)  # SSO 旧库补列；新库已含 -> OperationalError 吞掉
+                c.execute(_ADD_AUTH_METHOD_COL)  # 同上：首次 init 建列成功；列已存 -> 吞掉
             except sqlite3.OperationalError:
                 pass
 

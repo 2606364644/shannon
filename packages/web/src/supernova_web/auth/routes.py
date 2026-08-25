@@ -53,6 +53,12 @@ def _user_out(u: User) -> dict:
             "auth_provider": u.auth_provider}
 
 
+def _check_csrf(request: Request) -> None:
+    """写端点显式 CSRF 校验（名字/签名对齐 api/users.py 同名惯例；无效 token → 403）。"""
+    if not verify_csrf(request.headers.get("x-csrf-token"), request.cookies.get("sn-csrf")):
+        raise HTTPException(status_code=403, detail="invalid csrf token")
+
+
 def _cookie_secure(cfg, request: Request) -> bool:
     """sn-sid/sn-csrf 是否打 Secure 标志。
 
@@ -172,8 +178,14 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
         return _fail("not_whitelisted")
     store.mark_ticket_used(AUTH_TICKET)
 
-    # JIT 建户：随机不可逆密码 hash——SSO 户无法走账密登录（spec §5.2）
+    # JIT 建户：随机不可逆密码 hash——SSO 户无法走账密登录（spec §5.2）。
+    # 撞名护栏（最终审查 Important-1）：OA nick 命中本地账密户（auth_provider != "sso"）
+    # 时拒绝——静默合并等于把本地账户拱手让给 OA 同 nick 持有者（接管面）；
+    # 不建会话、不 update_avatar，仅既有 SSO 户走复用 + avatar 刷新。
     user = store.get_user_by_username(info.nick)
+    if user is not None and user.auth_provider != "sso":
+        _log.warning("sso nick conflicts with local password account: %r", info.nick)
+        return _fail("nick_conflict")
     if user is None:
         user = store.create_user(info.nick, hash_password(secrets.token_urlsafe(32)),
                                  role="user", auth_provider="sso")
@@ -208,6 +220,9 @@ def sso_whitelist_list(request: Request):
 
 @router.post("/sso/whitelist")
 def sso_whitelist_add(body: WhitelistIn, request: Request, admin: User = Depends(require_admin)):
+    # 写端点显式 CSRF（最终审查采纳项）：对齐 users.py/_check_csrf 惯例；
+    # 前端 client.ts 对 POST/DELETE 自动注入 X-CSRF-Token，零适配成本。
+    _check_csrf(request)
     nick = body.nick.strip()
     if not nick:
         raise HTTPException(status_code=422, detail="nick must not be blank")
@@ -217,6 +232,7 @@ def sso_whitelist_add(body: WhitelistIn, request: Request, admin: User = Depends
 
 @router.delete("/sso/whitelist/{nick}")
 def sso_whitelist_remove(nick: str, request: Request, _admin: User = Depends(require_admin)):
+    _check_csrf(request)  # 同上：写端点显式 CSRF
     request.app.state.auth_store.remove_sso_whitelist(nick)
     return {"ok": True}
 
