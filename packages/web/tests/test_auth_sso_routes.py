@@ -218,6 +218,55 @@ def test_whitelist_disabled_404(plain_client):
     assert plain_client.get("/api/auth/sso/whitelist").status_code == 404
 
 
+def test_whitelist_off_allows_any_nick(sso_client, monkeypatch):
+    """运行时开关关闭：非白名单 nick 可登录建户（用户确认的全员可登录语义）；
+    撞本地账密户护栏（nick_conflict）不随开关变化（防账号接管）。"""
+    _mock_validate(monkeypatch, payload={**_payload(), "data": {
+        **_payload()["data"], "userInfo": {"uid": 9, "nick": "anyone", "avatarUrl": None}}})
+    r1 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w1"}, follow_redirects=False)
+    assert r1.headers["location"] == "/login?sso_error=not_whitelisted"  # 默认开：拒
+    # admin 关闭开关（login + csrf + toggle POST）
+    sso_client.app.state.auth_store.create_user("admin", hash_password("pw12345"), role="admin")
+    tok = sso_client.get("/api/auth/csrf").json()["csrf_token"]
+    sso_client.post("/api/auth/login", json={"username": "admin", "password": "pw12345"},
+                    headers={"X-CSRF-Token": tok})
+    r2 = sso_client.post("/api/auth/sso/whitelist/enabled", json={"enabled": False},
+                         headers={"X-CSRF-Token": sso_client.cookies.get("sn-csrf")})
+    assert r2.status_code == 200 and r2.json()["enabled"] is False
+    r3 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w2"}, follow_redirects=False)
+    assert r3.status_code == 302 and r3.headers["location"] == "/"
+    assert sso_client.app.state.auth_store.get_user_by_username("anyone") is not None  # JIT 建户
+    # 护栏不随开关变化：关闭态下撞本地账密户仍拒（nick_conflict，不接管）
+    sso_client.app.state.auth_store.create_user("bob", hash_password("pw12345"))
+    _mock_validate(monkeypatch, payload={**_payload(), "data": {
+        **_payload()["data"], "userInfo": {"uid": 10, "nick": "bob", "avatarUrl": None}}})
+    r4 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w3"}, follow_redirects=False)
+    assert r4.headers["location"] == "/login?sso_error=nick_conflict"
+    assert sso_client.app.state.auth_store.get_user_by_username("bob").auth_provider == "password"
+
+
+def test_whitelist_toggle_guard(sso_client):
+    """toggle 需登录 + admin + CSRF：未登录 401；非 admin 403；admin 无 CSRF 403。"""
+    assert sso_client.post("/api/auth/sso/whitelist/enabled", json={"enabled": False}).status_code == 401
+    sso_client.app.state.auth_store.create_user("plain", hash_password("pw12345"))
+    tok = sso_client.get("/api/auth/csrf").json()["csrf_token"]
+    sso_client.post("/api/auth/login", json={"username": "plain", "password": "pw12345"},
+                    headers={"X-CSRF-Token": tok})
+    assert sso_client.post("/api/auth/sso/whitelist/enabled", json={"enabled": False},
+                           headers={"X-CSRF-Token": sso_client.cookies.get("sn-csrf")}).status_code == 403
+
+
+def test_whitelist_toggle_requires_csrf(admin_sso_client):
+    assert admin_sso_client.post("/api/auth/sso/whitelist/enabled",
+                                 json={"enabled": False}).status_code == 403
+
+
+def test_whitelist_get_includes_enabled(admin_sso_client):
+    r = admin_sso_client.get("/api/auth/sso/whitelist")
+    assert r.status_code == 200
+    assert r.json()["enabled"] is True  # 默认开
+
+
 # ---------- logout sso_logout_url / _user_out 扩展 ----------
 
 def test_me_includes_avatar_fields(sso_client, monkeypatch):

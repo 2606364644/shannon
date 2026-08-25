@@ -37,6 +37,7 @@
 | SSO 用户与本地用户关系 | **白名单内 JIT 自动建户**（默认 role=user）；admin 在 /users 页提角色/分配工作区，与现有体系完全兼容 |
 | 登录入口形态 | **登录页共存两种方式**：账密表单保留 + SSO 按钮；未登录访问受保护页照旧跳 `/login`，不自动跳 OA |
 | 白名单管理 | **/users 页（admin-only）新增「SSO 白名单」管理块**，存 auth.db 新表 |
+| 白名单管控 | **运行时开关**（web toggle，默认开；关闭=全员可登录，撞名护栏保留） |
 | 流程架构 | **后端主导 302 链**：安全逻辑（ticket 校验/有效期/防重放/白名单）全在服务端，ticket 不进前端路由与 SPA 历史 |
 | SSO 会话时长 | 24h（用户要求 cookie 有效期 1 天），账密会话维持 12h 不变 |
 | 登出 returnUrl | 指向本系统登录页 `https://AUTH_DOMAIN/login` |
@@ -85,9 +86,10 @@
 | `GET /api/auth/sso/login?next=<path>` | 公开 | 校验 next（§5.3）→ 302 passport login.html，returnUrl=`{public_base}/api/auth/sso/callback?next={enc}` 整体 URL 编码 |
 | `GET /api/auth/sso/callback?AUTH_TICKET=..&next=..` | 公开 | 校验链全过 → 建 session → 302 next；任一失败 → 302 `/login?sso_error=<code>` |
 | `POST /api/auth/logout`（现有，扩展） | 登录 | 响应加可选 `sso_logout_url`（仅 session `auth_method='sso'` 且 SSO 开启） |
-| `GET /api/auth/sso/whitelist` | admin | `{whitelist: [nick,...]}` |
+| `GET /api/auth/sso/whitelist` | admin | `{whitelist: [nick,...], enabled}`（响应含 enabled=管控开关现值，默认开） |
 | `POST /api/auth/sso/whitelist` | admin | body `{nick}` 增白名单（重复幂等 200） |
 | `DELETE /api/auth/sso/whitelist/{nick}` | admin | 删除 |
+| `POST /api/auth/sso/whitelist/enabled` | admin | 运行时切换白名单管控（body `{enabled}`；关闭=所有 OA 认证用户可登录，JIT 建户照常；nick_conflict 护栏不随开关变化） |
 
 **callback 校验链（顺序，失败即 302 `/login?sso_error=<code>`）：**
 
@@ -96,7 +98,7 @@
 3. **防重放**：ticket 未在 `sso_used_tickets` 表中（校验通过后写入；清理挂到现有周期任务 `purge_expired_sessions` 顺带执行，删 >24h 记录）。
 4. validateTicket HTTP 200 且 `result==0 && code==0` 且 `data.userInfo.nick` 非空。
 5. **有效期**：`oaTokenInitTime <= now < oaTokenInvalidTime`（服务器 UTC，Unix 秒）。
-6. **白名单**：`nick ∈ sso_whitelist`，否则 `sso_error=not_whitelisted`。
+6. **白名单（运行时开关开启时）**：`nick ∈ sso_whitelist`，否则 `sso_error=not_whitelisted`（开关关闭=跳过本步）。
 
 **成功路径：**
 
@@ -149,7 +151,7 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
 - **LoginPage**：账密表单下方加分隔线 + 「使用 OA 账号登录」按钮（仅 `sso/config.enabled` 时渲染）→ `window.location.assign('/api/auth/sso/login?next=' + encodeURIComponent(next))`。解析 `?sso_error=` 显示 i18n 错误文案（`not_whitelisted` → 「账号未授权，请联系管理员开通」；其余 → 通用 SSO 失败文案）。
 - **AuthContext**：`AuthUser` 加 `avatar_url?: string | null`；`logout()` 若响应含 `sso_logout_url` → `window.location.assign`（OA 登出后回 `/login`），否则维持现状。
 - **UserMenu**：有 `avatar_url` → 圆形 `<img src referrerPolicy="no-referrer">`（浏览器直连 CDN，服务端零参与）；无 → 现状首字母回退。用户名即 nick，无需改。
-- **UsersPage**：新增「SSO 白名单」管理块：nick 输入 + 添加 + 列表删除；SSO 关闭时显示「未启用」提示块。
+- **UsersPage**：新增「SSO 白名单」管理块：nick 输入 + 添加 + 列表删除；SSO 关闭时显示「未启用」提示块；头部含管控开关（admin 运行时切换，存 auth.db `sso_whitelist_state` 单行表，默认开）。
 - **i18n**：zh/en 新增键（注意 kebab→camel 转换陷阱，对齐现有 locales 结构）。
 
 ## 9. 安全设计汇总

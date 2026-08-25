@@ -59,3 +59,13 @@ def test_session_auth_method_roundtrip(tmp_workspaces):
     sid = sm.create(u.id, ttl_hours=24, auth_method="sso")
     row = store.get_session(sid)
     assert row.auth_method == "sso"
+
+
+def test_whitelist_state_toggle(tmp_workspaces):
+    """白名单运行时开关（Task 10）：单行状态表，无行默认开（存量库零回归）。"""
+    store = _store(tmp_workspaces)
+    assert store.get_whitelist_enabled() is True  # 无行默认开
+    store.set_whitelist_enabled(False, "admin")
+    assert store.get_whitelist_enabled() is False
+    store.set_whitelist_enabled(True, "admin")
+    assert store.get_whitelist_enabled() is True  # 幂等 upsert

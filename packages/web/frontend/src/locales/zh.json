@@ -1115,7 +1115,11 @@
       "added": "已添加",
       "addFailed": "添加失败",
       "removed": "已移除",
-      "removeFailed": "移除失败"
+      "removeFailed": "移除失败",
+      "toggleLabel": "白名单管控",
+      "offWarning": "白名单未启用：所有 OA 用户均可登录并自动创建账号",
+      "toggled": "白名单管控已更新",
+      "toggleFailed": "切换失败"
     }
   },
   "branding": {

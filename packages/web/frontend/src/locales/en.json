@@ -1115,7 +1115,11 @@
       "added": "Added",
       "addFailed": "Failed to add",
       "removed": "Removed",
-      "removeFailed": "Failed to remove"
+      "removeFailed": "Failed to remove",
+      "toggleLabel": "Whitelist enforcement",
+      "offWarning": "Whitelist is off: all OA users can sign in and get an account",
+      "toggled": "Whitelist enforcement updated",
+      "toggleFailed": "Failed to toggle"
     }
   },
   "branding": {

@@ -173,7 +173,9 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
         # validateTicket URL（即 ticket 明文），禁 str(exc)/__cause__/traceback 入日志。
         _log.warning("sso ticket rejected: %s (ticket=%s…)", exc.code, AUTH_TICKET[:8])
         return _fail(exc.code)
-    if not store.is_nick_whitelisted(info.nick):
+    # 白名单为运行时开关管控（admin 可在 /users 页关闭=全员可登录）；
+    # nick_conflict 撞本地账密户护栏不随开关变化（防账号接管）。
+    if store.get_whitelist_enabled() and not store.is_nick_whitelisted(info.nick):
         _log.warning("sso nick not whitelisted: %r", info.nick)
         return _fail("not_whitelisted")
     store.mark_ticket_used(AUTH_TICKET)
@@ -215,7 +217,9 @@ def sso_whitelist_list(request: Request):
         raise HTTPException(status_code=404, detail="sso disabled")
     require_admin(request)
     rows = request.app.state.auth_store.get_sso_whitelist()
-    return {"whitelist": [{"nick": r[0], "added_by": r[1], "created_at": r[2]} for r in rows]}
+    # enabled=白名单运行时开关现值（前端 toggle 回显，无行默认开）
+    return {"whitelist": [{"nick": r[0], "added_by": r[1], "created_at": r[2]} for r in rows],
+            "enabled": request.app.state.auth_store.get_whitelist_enabled()}
 
 
 @router.post("/sso/whitelist")
@@ -235,6 +239,22 @@ def sso_whitelist_remove(nick: str, request: Request, _admin: User = Depends(req
     _check_csrf(request)  # 同上：写端点显式 CSRF
     request.app.state.auth_store.remove_sso_whitelist(nick)
     return {"ok": True}
+
+
+class WhitelistToggleIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/sso/whitelist/enabled")
+def sso_whitelist_set_enabled(body: WhitelistToggleIn, request: Request, admin: User = Depends(require_admin)):
+    """运行时切换白名单管控：关闭=所有 OA 认证用户可登录（JIT 建户照常）。"""
+    # 检查顺序照抄同文件白名单写端点（sso_whitelist_add）：Depends(require_admin)
+    # 先于函数体（未登录 401 / 非 admin 403）→ _check_csrf（403）→ SSO 关闭 404。
+    _check_csrf(request)
+    if not request.app.state.config.sso_enabled:
+        raise HTTPException(status_code=404, detail="sso disabled")
+    request.app.state.auth_store.set_whitelist_enabled(body.enabled, admin.username)
+    return {"ok": True, "enabled": body.enabled}
 
 
 @router.post("/logout")

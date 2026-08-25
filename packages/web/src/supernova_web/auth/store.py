@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
   ticket TEXT PRIMARY KEY,
   used_at TEXT NOT NULL
 );
+-- Task 10 白名单运行时开关：单行状态表（id 恒 1），无行=默认开（存量库零回归）。
+CREATE TABLE IF NOT EXISTS sso_whitelist_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
 """
 
 
@@ -321,6 +328,26 @@ class AuthStore:
     def remove_sso_whitelist(self, nick: str) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM sso_whitelist WHERE nick=?", (nick,))
+
+    def get_whitelist_enabled(self) -> bool:
+        """白名单运行时开关：无行视为默认开（True）——存量库零回归。"""
+        with self._conn() as c:
+            row = c.execute("SELECT enabled FROM sso_whitelist_state WHERE id=1").fetchone()
+        return True if row is None else bool(row[0])
+
+    def set_whitelist_enabled(self, enabled: bool, updated_by: str) -> None:
+        """admin 运行时切换白名单管控（单行 upsert，两步式对齐仓库惯例）。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO sso_whitelist_state(id, enabled, updated_at, updated_by) VALUES(1,?,?,?)",
+                (1 if enabled else 0, now, updated_by),
+            )
+            c.execute(
+                "UPDATE sso_whitelist_state SET enabled=?, updated_at=?, updated_by=? WHERE id=1",
+                (1 if enabled else 0, now, updated_by),
+            )
 
     def is_ticket_used(self, ticket: str) -> bool:
         with self._conn() as c:
