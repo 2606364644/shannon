@@ -10,13 +10,16 @@ from .store import AuthStore, SessionRow
 class SessionManager:
     def __init__(self, store: AuthStore, ttl_hours: int = 12) -> None:
         self.store = store
+        self.ttl_hours = ttl_hours  # 默认 TTL（小时）；create 可按会话覆盖（SSO 24h）
         self.ttl = timedelta(hours=ttl_hours)
 
-    def create(self, user_id: int) -> str:
+    def create(self, user_id: int, ttl_hours: int | None = None, auth_method: str = "password") -> str:
         sid = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
+        ttl = timedelta(hours=ttl_hours) if ttl_hours is not None else self.ttl
         self.store.insert_session(
-            SessionRow(id=sid, user_id=user_id, expires_at=(now + self.ttl).isoformat(), last_seen_at=now.isoformat())
+            SessionRow(id=sid, user_id=user_id, expires_at=(now + ttl).isoformat(),
+                       last_seen_at=now.isoformat(), auth_method=auth_method)
         )
         return sid
 

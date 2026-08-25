@@ -14,6 +14,10 @@ class User(BaseModel):
     # per-user 置顶工作区（IA 重设计 §2.3）：用户从归属 ws 里 pin 一个，
     # 顶栏「工作区」默认跳它。None = 未置顶（跳最近归属 ws）。多对多关系不动。
     pinned_workspace: str | None = None
+    # SSO（OA passport，spec 2026-08-25 §6）：头像 URL（浏览器直连加载；账密用户 None）
+    avatar_url: str | None = None
+    # 'password' | 'sso'——账号来源（信息性；SSO 户密码为随机不可逆 hash）
+    auth_provider: str = "password"
 
 
 class SessionRow(BaseModel):
@@ -21,3 +25,4 @@ class SessionRow(BaseModel):
     user_id: int
     expires_at: str  # ISO8601
     last_seen_at: str  # ISO8601
+    auth_method: str = "password"  # 登录来源；登出时判定是否返回 OA 登出跳转
