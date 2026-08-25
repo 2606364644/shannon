@@ -12,11 +12,7 @@ from supernova_core.models.queue_schemas import (
     VulnerabilityQueue,
 )
 from supernova_core.services.findings_renderer import (
-    render_injection_entry,
-    render_xss_entry,
-    render_auth_entry,
-    render_authz_entry,
-    render_ssrf_entry,
+    render_vuln_card,
     filter_vulnerabilities,
     FindingsRenderer,
 )
@@ -29,7 +25,7 @@ def _en_lang_default(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
 
 
-def test_render_injection_entry_full():
+def test_render_injection_card_full():
     vuln = InjectionVulnerability(
         ID="INJECTION-VULN-001",
         vulnerability_type="SQL Injection",
@@ -44,36 +40,39 @@ def test_render_injection_entry_full():
         witness_payload="' OR 1=1 --",
         notes="Critical finding",
     )
-    result = render_injection_entry(vuln)
+    result = render_vuln_card(vuln, "injection")
     assert "### INJECTION-VULN-001" in result
+    # 判定字段全量降级收纳进「技术细节」区（spec §5，有意变更）
     assert "**Vulnerable Location:** user input → /api/users" in result
     assert "**Sink Call:** sqlite3.execute" in result
     assert "**Concat Occurrences:** query + user_input" in result
     assert "**Sanitization Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
     assert "**Witness Payload:** ' OR 1=1 --" in result
-    assert "**Notes:** Critical finding" in result
+    # notes 现作为「危害」叙述（impact 字段缺省时的 fallback）
+    assert "**Impact**" in result
+    assert "Critical finding" in result
 
 
-def test_render_injection_entry_minimal():
+def test_render_injection_card_minimal():
     vuln = InjectionVulnerability(
         ID="INJECTION-VULN-002",
         vulnerability_type="SQL Injection",
         externally_exploitable=True,
         confidence="medium",
     )
-    result = render_injection_entry(vuln)
+    result = render_vuln_card(vuln, "injection")
     assert "### INJECTION-VULN-002" in result
     assert "Sink Call" not in result
     assert "Notes" not in result
 
 
-def test_render_injection_entry_llm_output_fields():
+def test_render_injection_card_llm_output_fields():
     """LLM 实际输出的 injection vuln(携带 sink_function/render_context/encoding_observed/
     source_detail 等 XSS 风格字段)必须正确渲染并显示 sink_function。
 
     回归 crAPI-20260731:injection vuln agent 输出 XSS 风格字段,smart-union 把 entry
-    误判为 XssVulnerability,render_injection_entry 访问 vuln.sink_call 时 AttributeError
+    误判为 XssVulnerability,渲染访问 vuln.sink_call 时 AttributeError
     → 整章渲染为 'render error' 占位。"""
     vuln = InjectionVulnerability(
         ID="INJ-VULN-01",
@@ -87,14 +86,14 @@ def test_render_injection_entry_llm_output_fields():
         verdict="vulnerable",
         witness_payload="' UNION SELECT version()--",
     )
-    result = render_injection_entry(vuln)
+    result = render_vuln_card(vuln, "injection")
     assert "### INJ-VULN-01" in result
     assert "cursor.execute" in result  # sink_function rendered
     assert "vulnerable" in result
     assert "' UNION SELECT version()--" in result
 
 
-def test_render_xss_entry_full():
+def test_render_xss_card_full():
     vuln = XssVulnerability(
         ID="XSS-VULN-001",
         vulnerability_type="Reflected XSS",
@@ -108,7 +107,7 @@ def test_render_xss_entry_full():
         verdict="Exploitable",
         witness_payload="<script>alert(1)</script>",
     )
-    result = render_xss_entry(vuln)
+    result = render_vuln_card(vuln, "xss")
     assert "### XSS-VULN-001" in result
     assert "**Vulnerable Location:** query param → /search" in result
     assert "**Sink Function:** innerHTML" in result
@@ -118,7 +117,7 @@ def test_render_xss_entry_full():
     assert "**Witness Payload:** <script>alert(1)</script>" in result
 
 
-def test_render_auth_entry_full():
+def test_render_auth_card_full():
     vuln = AuthVulnerability(
         ID="AUTH-VULN-001",
         vulnerability_type="Broken Authentication",
@@ -130,7 +129,7 @@ def test_render_auth_entry_full():
         exploitation_hypothesis="Brute force possible",
         suggested_exploit_technique="Dictionary attack",
     )
-    result = render_auth_entry(vuln)
+    result = render_vuln_card(vuln, "auth")
     assert "### AUTH-VULN-001" in result
     assert "**Source Endpoint:** /api/login" in result
     assert "**Vulnerable Code Location:** auth/handlers.py:42" in result
@@ -139,7 +138,7 @@ def test_render_auth_entry_full():
     assert "**Suggested Exploit Technique:** Dictionary attack" in result
 
 
-def test_render_authz_entry_full():
+def test_render_authz_card_full():
     vuln = AuthzVulnerability(
         ID="AUTHZ-VULN-001",
         vulnerability_type="IDOR",
@@ -153,7 +152,7 @@ def test_render_authz_entry_full():
         reason="Missing authorization middleware",
         minimal_witness="GET /api/users/1234 → 200 OK",
     )
-    result = render_authz_entry(vuln)
+    result = render_vuln_card(vuln, "authz")
     assert "### AUTHZ-VULN-001" in result
     assert "**Endpoint:** /api/users/{id}" in result
     assert "**Role Context:** Authenticated user" in result
@@ -163,7 +162,7 @@ def test_render_authz_entry_full():
     assert "**Minimal Witness:** GET /api/users/1234 → 200 OK" in result
 
 
-def test_render_ssrf_entry_full():
+def test_render_ssrf_card_full():
     vuln = SsrfVulnerability(
         ID="SSRF-VULN-001",
         vulnerability_type="SSRF",
@@ -176,54 +175,107 @@ def test_render_ssrf_entry_full():
         exploitation_hypothesis="Internal network scan",
         suggested_exploit_technique="URL manipulation",
     )
-    result = render_ssrf_entry(vuln)
+    result = render_vuln_card(vuln, "ssrf")
     assert "### SSRF-VULN-001" in result
     assert "**Source Endpoint:** /api/fetch" in result
     assert "**Vulnerable Parameter:** url" in result
     assert "**Missing Defense:** No URL allowlist" in result
 
 
-# --- title 字段（spec 2026-08-06）：### ID: title ---
+# --- title（spec 2026-08-25 §5）：### {ID} {类名}: {title} ---
 
-def test_render_injection_entry_with_title():
-    """有 title → 渲染 ### ID: title。"""
+def test_render_injection_card_with_title():
+    """有 title → 渲染 ### {ID} {类名}: title。"""
     vuln = InjectionVulnerability(
         ID="INJ-VULN-01", vulnerability_type="SQLi",
         externally_exploitable=True, confidence="high",
         title="PostgreSQL SQL Injection via Coupon Validation",
     )
-    result = render_injection_entry(vuln)
-    assert result.startswith("### INJ-VULN-01: PostgreSQL SQL Injection via Coupon Validation")
+    result = render_vuln_card(vuln, "injection")
+    assert result.startswith(
+        "### INJ-VULN-01 Injection: PostgreSQL SQL Injection via Coupon Validation")
 
 
-def test_render_injection_entry_without_title_is_bare():
-    """无 title → 渲染裸 ### ID（冒号都不留，留给 report-executive 第二道补）。"""
+def test_render_injection_card_without_title_degrades_to_deterministic():
+    """无 title → 确定性描述兜底；完全无线索时仍保类名（不再裸 ID，属有意变更）。"""
     vuln = InjectionVulnerability(
         ID="INJ-VULN-02", vulnerability_type="SQLi",
         externally_exploitable=True, confidence="high",
     )
-    result = render_injection_entry(vuln)
-    assert result.startswith("### INJ-VULN-02\n")
+    result = render_vuln_card(vuln, "injection")
+    assert result.startswith("### INJ-VULN-02 Injection")
 
 
-@pytest.mark.parametrize("cls,render_fn,vtype", [
-    (InjectionVulnerability, render_injection_entry, "SQLi"),
-    (XssVulnerability, render_xss_entry, "Reflected"),
-    (SsrfVulnerability, render_ssrf_entry, "SSRF"),
-    (AuthVulnerability, render_auth_entry, "Auth"),
-    (AuthzVulnerability, render_authz_entry, "IDOR"),
+@pytest.mark.parametrize("cls,vuln_class,vtype,display", [
+    (InjectionVulnerability, "injection", "SQLi", "Injection"),
+    (XssVulnerability, "xss", "Reflected", "XSS"),
+    (SsrfVulnerability, "ssrf", "SSRF", "SSRF"),
+    (AuthVulnerability, "auth", "Auth", "Authentication"),
+    (AuthzVulnerability, "authz", "IDOR", "Authorization"),
 ])
-def test_all_render_functions_append_title_when_present(cls, render_fn, vtype):
-    """5 个 render 函数都在有 title 时拼 ### ID: title。"""
+def test_all_classes_render_title_when_present(cls, vuln_class, vtype, display):
+    """5 类卡片都在有 title 时拼 ### {ID} {类名}: title。"""
     vuln = cls(
         ID="X-VULN-01", vulnerability_type=vtype,
         externally_exploitable=True, confidence="high",
         title="descriptive one-liner",
     )
-    result = render_fn(vuln)
-    assert result.startswith("### X-VULN-01: descriptive one-liner")
+    result = render_vuln_card(vuln, vuln_class)
+    assert result.startswith(f"### X-VULN-01 {display}: descriptive one-liner")
 
 
+
+# --- 四要素统一卡片（spec 2026-08-25 §5/§6，brief Step 1 逐字断言） ---
+# （额外补一行 monkeypatch zh：本文件 autouse fixture 默认 en，brief 断言基于 zh）
+
+def _vuln(**kw):
+    base = dict(ID="INJ-VULN-01", vulnerability_type="injection",
+                externally_exploitable=True, confidence="high",
+                title="命令注入：POST /contributions 直接 eval()（RCE）",
+                source="preTax & req.body",
+                path="POST /contributions → eval(req.body.preTax)",
+                sink_function="eval", verdict="vulnerable", severity="critical",
+                cwe_id="CWE-95", merge_source="both",
+                affected_parameters=["preTax", "afterTax", "roth"],
+                affected_entries=[
+                    {"parameter": "preTax", "sink_location": "app/routes/contributions.js:32",
+                     "chain_id": "INJ-GN-01", "track": "gitnexus"},
+                    {"parameter": "afterTax", "sink_location": "app/routes/contributions.js:33",
+                     "chain_id": "INJ-GN-04", "track": "gitnexus"}])
+    base.update(kw)
+    return InjectionVulnerability(**base)
+
+SNIPPET = "preTax = eval(req.body.preTax);\ncontributions.preTax = preTax;"
+
+def test_card_four_elements_and_meta_line(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(_vuln(), "injection", SNIPPET)
+    assert card.startswith("### INJ-VULN-01 注入漏洞：命令注入")
+    assert "严重程度：严重" in card and "CWE-95" in card
+    assert "验证：静态分析" in card and "双轨确认" in card
+    for section in ("**受影响入口**", "**漏洞说明**", "**危害**", "**问题代码**", "**修复建议**", "#### 技术细节"):
+        assert section in card, section
+    assert "| preTax | app/routes/contributions.js:32 |" in card
+    assert SNIPPET in card  # 问题代码 fence 内
+
+def test_card_no_internal_labels(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(evidence_chain="preTax -> x (llm-pass-failed, needs_review)")
+    card = render_vuln_card(v, "injection", None)
+    assert "llm-pass-failed" not in card and "needs_review" not in card
+
+def test_gn_only_card_degrades_gracefully(monkeypatch):
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(ID="INJ-GN-01", source_track="gitnexus", confidence="low",
+              title=None, severity=None, cwe_id=None, merge_source=None,
+              source="preTax (app/routes/contributions.js:ContributionsHandler:7)",
+              affected_entries=[{"parameter": "preTax",
+                                 "sink_location": "app/routes/contributions.js:32",
+                                 "chain_id": "INJ-GN-01", "track": "gitnexus"}])
+    card = render_vuln_card(v, "injection", None)
+    assert "待复核" in card
+    assert "eval" in card  # 确定性说明含 sink 函数名
+    assert "静态链路发现，建议人工确认" in card
 
 
 def test_filter_by_confidence():
@@ -562,18 +614,19 @@ async def test_render_findings_with_subdirs_reads_legacy_queue_at_root(tmp_path)
     assert "### INJECTION-LEGACY" in bb_findings.read_text()
 
 
-def test_render_injection_entry_zh_labels(monkeypatch):
-    """zh 模式：漏洞卡标签为中文。"""
+def test_render_injection_card_zh_labels(monkeypatch):
+    """zh 模式：卡片标签为中文。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     vuln = InjectionVulnerability(
         ID="INJECTION-VULN-ZH", vulnerability_type="SQL Injection",
         externally_exploitable=True, confidence="high",
         sink_call="sqlite3.execute", notes="测试备注",
     )
-    result = render_injection_entry(vuln)
-    assert "**摘要:**" in result
+    result = render_vuln_card(vuln, "injection")
     assert "**Sink 调用:** sqlite3.execute" in result
-    assert "**备注:** 测试备注" in result
+    assert "严重程度：" in result
+    assert "**漏洞说明**" in result and "**危害**" in result and "#### 技术细节" in result
+    assert "测试备注" in result  # notes 作为危害叙述
     assert "Summary" not in result
 
 
@@ -600,7 +653,7 @@ async def test_render_findings_injection_llm_queue_no_render_error(tmp_path):
 
     回归 crAPI-20260731:injection 7 张卡片全部显示 '### INJ-VULN-0X — render error',
     而底层 queue 数据完整正确(根因:smart-union 把 injection entry 误判为
-    XssVulnerability,render_injection_entry 访问 sink_call 崩)。"""
+    XssVulnerability,渲染访问 sink_call 崩)。"""
     deliverables = tmp_path / "deliverables"
     deliverables.mkdir()
     content = json.dumps({"vulnerabilities": [
@@ -629,3 +682,45 @@ async def test_render_findings_injection_llm_queue_no_render_error(tmp_path):
     assert "render error" not in findings.lower()
     assert "cursor.execute" in findings
     assert "Collection.FindOne" in findings
+
+
+@pytest.mark.asyncio
+async def test_render_findings_with_repo_root_injects_snippet(tmp_path):
+    """repo_root 提取链路（spec §10.4）：sink_location → extract_snippet ±3 行 →
+    问题代码 fence + annotate_direct 回填（direct=False 的参数标疑似间接）。"""
+    repo = tmp_path / "repo"
+    (repo / "app").mkdir(parents=True)
+    (repo / "app" / "routes.js").write_text(
+        "const express = require('express');\n"
+        "const preTax = eval(req.body.preTax);\n"
+        "router.post('/contributions', handler);\n"
+        "const afterTax = eval(req.body.afterTax);\n"
+        "module.exports = router;\n"
+    )
+    deliverables = tmp_path / "deliverables"
+    deliverables.mkdir()
+    queue = VulnerabilityQueue(vulnerabilities=[
+        InjectionVulnerability(
+            ID="INJ-SNIP-01", vulnerability_type="injection",
+            externally_exploitable=True, confidence="high",
+            sink_function="eval",
+            affected_entries=[
+                {"parameter": "preTax", "sink_location": "app/routes.js:2",
+                 "chain_id": "C1", "track": "gitnexus"},
+                {"parameter": "nothere", "sink_location": "app/routes.js:4",
+                 "chain_id": "C2", "track": "gitnexus"},
+            ],
+        ),
+    ])
+    (deliverables / "injection_exploitation_queue.json").write_text(
+        queue.model_dump_json())
+
+    await FindingsRenderer.render_findings_from_queues(deliverables, repo_root=repo)
+
+    findings = (deliverables / "injection_findings.md").read_text()
+    assert "**Vulnerable Code**" in findings
+    assert "```js" in findings          # fence + 按扩展名语言标注
+    assert "eval(req.body.preTax)" in findings
+    # direct 回填：preTax 在 snippet 中（无标注）；nothere 不在（疑似间接）
+    assert "| preTax | app/routes.js:2 | C1 |" in findings
+    assert "| nothere (suspected indirect) | app/routes.js:4 | C2 |" in findings

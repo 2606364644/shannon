@@ -5,8 +5,10 @@ import {
   VULN_HEADING_RE,
   VULN_ID_RE,
   parseVulnBlock,
+  parseMetaSeverity,
   parseTableRowToBlock,
   isVulnTable,
+  isSummaryTable,
   extractTableVulns,
   splitByVulnBlocks,
 } from "./vuln-block";
@@ -420,6 +422,83 @@ describe("extractTableVulns", () => {
   });
 });
 
+describe("速查表跳过提取（终审 F1：防双计/双卡/DOM id 重复）", () => {
+  // 渲染层确定性注入的「漏洞速查表」（report_assembler.render_summary_table）：
+  // 首列=ID + 接口/严重度列，每行与同 ID 的 `### ` 完整卡并存。旧逻辑按漏洞表
+  // 提取每行成迷你块 → 报告页统计翻倍、每洞双卡、DOM id 重复。修法：识别签名
+  // （含接口/Endpoint 列且含严重度/Severity 列）整表跳过，普通漏洞表格零变化。
+
+  const SUMMARY_MD = [
+    "## 漏洞速查表",
+    "",
+    "### 注入漏洞",
+    "",
+    "| ID | 漏洞 | 接口 | 参数 | 严重度 | 验证 | 置信度 |",
+    "|---|---|---|---|---|---|---|",
+    "| INJ-VULN-01 | 命令注入 | POST /contributions | preTax | 严重 | 静态分析 | 高 |",
+    "",
+    "---",
+    "",
+    "## 注入漏洞",
+    "",
+    "### INJ-VULN-01 注入漏洞：命令注入",
+    "严重程度：严重 ｜ CWE-95 ｜ 验证：静态分析 ｜ 置信度：高",
+    "",
+    "**漏洞说明**",
+    "preTax 直接传入 eval()。",
+  ].join("\n");
+
+  it("速查表 + ### 卡同 ID → 解析块数 = ### 卡数（无迷你块、无重复 id），速查表留 prose", () => {
+    const segs = splitByVulnBlocks(SUMMARY_MD);
+    const vulnSegs = segs.filter((s): s is Extract<typeof s, { type: "vuln" }> => s.type === "vuln");
+    expect(vulnSegs.length).toBe(1); // 只有 ### 完整卡，无表格迷你块
+    expect(vulnSegs[0].block.id).toBe("INJ-VULN-01");
+    const ids = vulnSegs.map((s) => s.block.id);
+    expect(new Set(ids).size).toBe(ids.length); // 无重复 DOM id
+    // 速查表整表留在 prose（react-markdown 原样渲染）
+    const prose = segs
+      .filter((s): s is Extract<typeof s, { type: "prose" }> => s.type === "prose")
+      .map((s) => s.md)
+      .join("\n");
+    expect(prose).toContain("| INJ-VULN-01 | 命令注入 |");
+  });
+
+  it("en 速查表（Endpoint/Severity 列）同样跳过", () => {
+    const md = [
+      "## Vulnerability Summary Table",
+      "",
+      "| ID | Vulnerability | Endpoint | Parameters | Severity | Verification | Confidence |",
+      "|---|---|---|---|---|---|---|",
+      "| INJ-VULN-01 | Command Injection | POST /contributions | preTax | Critical | Static Analysis | High |",
+      "",
+      "### INJ-VULN-01 注入漏洞：命令注入",
+      "- **vulnerability_type:** CommandInjection",
+    ].join("\n");
+    const vulnSegs = splitByVulnBlocks(md).filter(
+      (s): s is Extract<typeof s, { type: "vuln" }> => s.type === "vuln",
+    );
+    expect(vulnSegs.length).toBe(1);
+    expect(vulnSegs[0].block.id).toBe("INJ-VULN-01");
+  });
+
+  it("isSummaryTable：接口+严重度签名命中 zh/en；普通漏洞表/汇总表不命中", () => {
+    expect(isSummaryTable(["ID", "漏洞", "接口", "参数", "严重度", "验证", "置信度"])).toBe(true);
+    expect(
+      isSummaryTable(["ID", "Vulnerability", "Endpoint", "Parameters", "Severity", "Verification", "Confidence"]),
+    ).toBe(true);
+    // Injection Queue / Authz 裁决概览（无接口+严重度列组合）→ 不是速查表
+    expect(isSummaryTable(["ID", "类型", "源", "Sink", "认证", "置信度"])).toBe(false);
+    expect(isSummaryTable(["ID", "端点", "类型", "置信度", "核心缺陷"])).toBe(false);
+    expect(isSummaryTable(["类型", "数量"])).toBe(false);
+  });
+
+  it("普通漏洞表行为零变化：仍逐行提取成 vuln 段", () => {
+    const md = "| ID | 类型 |\n|----|------|\n| INJ-VULN-01 | RCE |\n";
+    const segs = extractTableVulns(md);
+    expect(segs.filter((s) => s.type === "vuln").length).toBe(1);
+  });
+});
+
 describe("GitNexus 轨 ID 兼容（双轨隔离设计，-GN- 须保留，不统一为 -VULN-）", () => {
   // 背景：GitNexus 轨产 PREFIX-GN-N / PREFIX-GN-EXPLORE-N / PREFIX-GN-LOGIC-N（PREFIX=类前缀，
   // GN=GitNexus 缩写，EXPLORE/LOGIC=深度 agent 子类型）；LLM 轨产 PREFIX-VULN-N。两套 ID 是有意的
@@ -521,5 +600,67 @@ describe("parseVulnBlock · 纯 ID 标题 prefix 提取（回归 NodeGoat 报告
     for (const s of segs)
       if (s.type === "vuln") byPrefix[s.block.prefix] = (byPrefix[s.block.prefix] || 0) + 1;
     expect(byPrefix).toEqual({ INJ: 1, XSS: 2 });
+  });
+});
+
+describe("parseMetaSeverity · 新版卡片元信息行真数据优先（spec 2026-08-25 §5）", () => {
+  // 新版四要素卡首行元信息：`严重程度：X ｜ CWE-xx ｜ 验证：… ｜ 置信度：…`（X ∈ 严重/高危/中危/低危）。
+  // severity 从"关键词启发式猜测"升级为"读渲染层写入的真数据"；旧报告无该行 → null → 启发式兜底。
+  const CARD_MD = [
+    "### INJ-VULN-01 注入漏洞：命令注入",
+    "严重程度：严重 ｜ CWE-95 ｜ 验证：静态分析 ｜ 置信度：高（双轨确认）",
+    "",
+    "**漏洞说明**",
+    "preTax 直接传入 eval()。",
+  ].join("\n");
+
+  const vulnSegs = (md: string) =>
+    splitByVulnBlocks(md).filter(
+      (s): s is Extract<typeof s, { type: "vuln" }> => s.type === "vuln",
+    );
+
+  it("读元信息行真数据：严重 → Critical，inferSeverity 同步优先", () => {
+    const seg = vulnSegs(CARD_MD).find((s) => s.block.id === "INJ-VULN-01");
+    expect(seg).toBeDefined();
+    // 启发式本身只会给 Medium（中文标题无英文关键词命中）→ Critical 只能来自元信息行
+    expect(parseMetaSeverity(seg!.block)).toBe("Critical");
+    expect(inferSeverity(seg!.block)).toBe("Critical");
+  });
+
+  it("四档中文词全映射（严重/高危/中危/低危 → Critical/High/Medium/Low）", () => {
+    const cases = [
+      ["严重", "Critical"],
+      ["高危", "High"],
+      ["中危", "Medium"],
+      ["低危", "Low"],
+    ] as const;
+    for (const [zh, sev] of cases) {
+      const b = parseVulnBlock(`### INJ-VULN-01 注入漏洞：命令注入\n严重程度：${zh} ｜ CWE-95`);
+      expect(parseMetaSeverity(b)).toBe(sev);
+      expect(inferSeverity(b)).toBe(sev);
+    }
+  });
+
+  it("元信息行是权威：优先于启发式的 ★/topRisk 升档", () => {
+    const b = parseVulnBlock("### XSS-VULN-02 反射 ★\n严重程度：低危 ｜ 验证：静态分析");
+    expect(b.starred).toBe(true);
+    // 无元信息时启发式会给 High（Medium + ★ 至少 High）；有元信息 → 低危即 Low
+    expect(parseMetaSeverity(b)).toBe("Low");
+    expect(inferSeverity(b)).toBe("Low");
+  });
+
+  it("旧报告无元信息行 → null，inferSeverity 落回启发式（不抛错）", () => {
+    const seg = vulnSegs("### INJ-VULN-02 Old style\n\nsome body").find(
+      (s) => s.block.id === "INJ-VULN-02",
+    );
+    expect(seg).toBeDefined();
+    expect(parseMetaSeverity(seg!.block)).toBeNull();
+    expect(["Critical", "High", "Medium", "Low"]).toContain(inferSeverity(seg!.block));
+  });
+
+  it("老格式 severity 行（- **严重程度:** high，冒号后有 **）不误读 → 落回启发式", () => {
+    const b = parseVulnBlock("### INJ-VULN-03 eval RCE\n- **严重程度:** high");
+    expect(parseMetaSeverity(b)).toBeNull();
+    expect(inferSeverity(b)).toBe("High"); // 启发式：eval 关键词 → High
   });
 });

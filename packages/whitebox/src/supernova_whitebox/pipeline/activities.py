@@ -1123,13 +1123,15 @@ async def render_findings(input: ActivityInput) -> None:
         from supernova_core.services.findings_renderer import FindingsRenderer
         from supernova_core.config.parser import parse_config
 
-        _, deliverables, _ = _get_paths(input)
+        repo, deliverables, _ = _get_paths(input)
         async with get_audit_session().track_step("reporting", "render-findings", intent=intent_for("render-findings")):
             report_config = None
             if input.config_path:
                 cfg = parse_config(input.config_path)
                 report_config = cfg.report
-            await FindingsRenderer.render_findings_from_queues(deliverables, report_config)
+            # repo_root：卡片「问题代码」snippet 确定性提取（spec 2026-08-25 §10.4）
+            await FindingsRenderer.render_findings_from_queues(
+                deliverables, report_config, repo_root=repo)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

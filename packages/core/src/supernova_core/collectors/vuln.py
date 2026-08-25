@@ -340,6 +340,23 @@ def _finding_props(class_props: dict) -> dict:
         "notes": _str_field(
             "Relevant details: required session state, applicable roles, observed headers, "
             "links to related findings."),
+        # 报告可读性改造（spec 2026-08-25 Task 7）：报告四要素卡片字段进 collector
+        # 共通 props（全 optional，不动 _FINDING_BASE_REQUIRED——旧 collector 消息
+        # 向后兼容）。prompt 字段表同步所教（<report-style> 风格指南约束写法），
+        # 一致性由 test_vuln_prompt_schema_contract.py 锁定。落盘走
+        # BaseVulnerability（impact/remediation 已入 schema，不静默丢弃）。
+        "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"],
+            "description": (
+                "critical/high/medium/low 之一，按实际影响定档（见 <report-style> "
+                "风格指南），不要一律 critical。"),
+        },
+        "impact": _str_field(
+            "危害一句话（结论先行，不超过 3 句）——报告卡片'危害'段的权威来源。"),
+        "remediation": _str_field(
+            "修复建议一句话：代码级具体（改哪个函数、换成什么写法），不写空话。"),
+        "cwe_id": _str_field('CWE 编号，如 "CWE-95"、"CWE-79"。'),
     }
     props.update(class_props)
     return props

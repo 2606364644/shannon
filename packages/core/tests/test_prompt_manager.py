@@ -695,17 +695,22 @@ def test_shared_session_stripped_even_with_auth_state_file(prompts_dir):
     assert "Before" in result and "After" in result
 
 
-def test_vuln_summary_subsections_counts_only_single_point_cards() -> None:
-    """类型汇总模板须明确：只数 ### 单点卡片，攻击链(llm-chain)不计入。"""
+def test_vuln_summary_subsections_read_counts_from_summary_table(monkeypatch) -> None:
+    """类型汇总模板（2026-08-25 F3）：Count/Severity 从「漏洞速查表」读取、
+    禁止自行清点漏洞卡片；类名走映射表（### Xss 病例大小写不再出现）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     mgr = PromptManager(Path("/nonexistent"))  # 只调方法，不读文件
     out = mgr._build_vuln_summary_subsections(["injection", "xss"])
-    # 含单点卡片口径限定
-    assert "PREFIX-VULN-NN" in out or "PREFIX-GN-NN" in out or "单点" in out
-    # 含「攻击链不计入」类限定
-    assert "攻击链" in out or "llm-chain" in out or "不计入" in out
-    # 仍为每个 class 生成子节
-    assert "### Injection" in out
-    assert "### Xss" in out
+    # Count 指令从速查表读取（与 report-executive 执行摘要②同口径）
+    assert "漏洞速查表" in out
+    assert "禁止自行清点漏洞卡片" in out
+    # 攻击链排除限定仍在（速查表不含攻击链 + Key findings 勿混入）
+    assert "攻击链" in out
+    # 类名映射表：中文类名，title-case 病例（Xss）不再出现
+    assert "### 注入漏洞" in out
+    assert "### 跨站脚本 (XSS)" in out
+    assert "### Xss" not in out
+    assert "### Injection" not in out
 
 
 # ---------------------------------------------------------------------------

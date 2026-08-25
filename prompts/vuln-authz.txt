@@ -162,6 +162,10 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 		"reason": "1-2 lines explaining why this is vulnerable",
 		"minimal_witness": "brief description of how to trigger (e.g., 'change user_id param to another user', 'call admin endpoint as regular user')",
 		"confidence": "high | med | low",
+		"severity": "critical | high | medium | low — 按实际影响定档，不要一律 critical（写作遵守 <report-style> 风格指南）。",
+		"impact": "危害一句话（结论先行，≤3 句）——报告卡片'危害'段直接采用。",
+		"remediation": "修复建议一句话：代码级具体（改哪个函数、换成什么写法），不写'建议加强输入校验'这类空话。",
+		"cwe_id": "CWE 编号，如 'CWE-95'、'CWE-79'。",
 		"notes": "any assumptions, related findings, or special conditions"
 	}
 </finding_submission>
@@ -375,3 +379,5 @@ The harness injects each tool's complete description and per-field guidance into
 
 **FAILURE TO COMPLETE TODOS = INCOMPLETE ANALYSIS** - You will be considered to have failed the mission if you emit deliverable calls before completing comprehensive testing of all authorization vectors.
 </conclusion_trigger>
+
+@include(shared/_report-style.txt)

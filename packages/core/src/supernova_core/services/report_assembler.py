@@ -1,10 +1,25 @@
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
+from supernova_core.code_index.gn_collapse import extract_endpoint
 from supernova_core.i18n import Messages, current_lang
+from supernova_core.models.queue_schemas import VulnerabilityQueue
+from supernova_core.services.findings_renderer import (
+    CLASS_CONFIG as _FINDINGS_CLASS_CONFIG,
+)
+from supernova_core.services.findings_renderer import _M as _FINDINGS_MESSAGES
+from supernova_core.services.severity_rules import (
+    SEVERITY_ORDER,
+    SEVERITY_ZH,
+    effective_severity,
+)
 from supernova_core.utils.file_io import async_path_exists, async_read_file, async_write_file
+from supernova_core.utils.paths import resolve_intermediate
+
+logger = logging.getLogger(__name__)
 
 # 对齐前端报告页解析契约(packages/web/frontend/src/lib/vuln-block.ts 的
 # VULN_HEADING_RE = /^### ([A-Z]+)(?:-[A-Z]+)+-(\d+)\b/):统计完全依赖节级标题结构,
@@ -27,10 +42,160 @@ _M = Messages({
     "model_label": {"zh": "- **模型:**", "en": "- **Model:**"},
     "exec_summary_h2": {"zh": "## 执行摘要", "en": "## Executive Summary"},
     "assessment_date_label": {"zh": "- 评估日期:", "en": "- Assessment Date:"},
+    # 漏洞速查表（spec 2026-08-25 §7）——正文第一章，确定性渲染
+    "summary_table_h2": {"zh": "## 漏洞速查表",
+                         "en": "## Vulnerability Summary Table"},
+    "summary_table_header": {
+        "zh": "| ID | 漏洞 | 接口 | 参数 | 严重度 | 验证 | 置信度 |",
+        "en": ("| ID | Vulnerability | Endpoint | Parameters | Severity | "
+               "Verification | Confidence |"),
+    },
+    "params_join": {"zh": "、", "en": ", "},
+    "params_more_suffix": {"zh": " 等 {n} 个", "en": " +{n} more"},
+    "no_findings_generic": {"zh": "本类无发现。", "en": "No findings in this class."},
+    "verif_static": {"zh": "静态分析", "en": "Static Analysis"},
+    "verif_dynamic": {"zh": "已动态验证", "en": "Dynamically Verified"},
+    "conf_high": {"zh": "高", "en": "High"},
+    "conf_medium": {"zh": "中", "en": "Medium"},
+    "conf_low": {"zh": "低", "en": "Low"},
+    # 内部置信度标签（merger 单轨分支写 needs_review 等）→ 读者可读文案，
+    # 不让流水线内部术语泄漏进报告正文（spec 2026-08-25 §9）。
+    "conf_pending_review": {"zh": "待复核", "en": "Pending Review"},
 })
+
+# 速查表分隔行（7 列，语言中性）
+_SUMMARY_TABLE_SEP = "|---|---|---|---|---|---|---|"
+_PLACEHOLDER = "-"
+
+_VERIFICATION_KEYS = {"static_analysis": "verif_static",
+                      "dynamically_verified": "verif_dynamic"}
+_CONFIDENCE_KEYS = {"high": "conf_high", "medium": "conf_medium", "low": "conf_low"}
+
+
+def _type_title(vuln) -> str:
+    """title 缺省回退：vulnerability_type → 类中文名。
+
+    复用 findings_renderer 的 CLASS_CONFIG heading message key（勿自造映射，
+    与类小标题同源）；未知类型显示原值。
+    """
+    vtype = (getattr(vuln, "vulnerability_type", None) or "").strip().lower()
+    cfg = _FINDINGS_CLASS_CONFIG.get(vtype)
+    if cfg is not None:
+        return _FINDINGS_MESSAGES.get(cfg.heading)
+    return vtype or _PLACEHOLDER
+
+
+def _endpoint_cell(vuln) -> str:
+    """接口列：vuln.endpoint（extract 归一化，失败用原值）→ extract_endpoint(path) → '-'。"""
+    endpoint = getattr(vuln, "endpoint", None)
+    if endpoint:
+        # endpoint 可能带 " → file:line" 尾巴（GN 归并产物），归一化成 METHOD /route
+        return extract_endpoint(endpoint) or endpoint
+    return extract_endpoint(getattr(vuln, "path", None)) or _PLACEHOLDER
+
+
+def _params_cell(vuln) -> str:
+    """参数列：affected_parameters join；>3 个取前 3 + "等 N 个"。"""
+    params = [str(p) for p in (getattr(vuln, "affected_parameters", None) or []) if p]
+    if not params:
+        return _PLACEHOLDER
+    if len(params) > 3:
+        return (_M.get("params_join").join(params[:3])
+                + _M.get("params_more_suffix", n=len(params)))
+    return _M.get("params_join").join(params)
+
+
+def _severity_cell(vuln) -> str:
+    """严重度列：effective_severity（含 Task 1 兜底）→ SEVERITY_ZH 中文。"""
+    severity = effective_severity(vuln)
+    return SEVERITY_ZH.get(severity, severity)
+
+
+def _verification_cell(vuln) -> str:
+    """验证列：static_analysis/dynamically_verified 枚举映射中文；缺省静态分析。"""
+    verification = (getattr(vuln, "verification", None) or "").strip()
+    key = _VERIFICATION_KEYS.get(verification.lower())
+    if key:
+        return _M.get(key)
+    return verification or _M.get("verif_static")
+
+
+def _confidence_cell(vuln) -> str:
+    """置信度列：high/medium/low → 高/中/低；needs_review 及其它未知非空值 →
+    待复核（内部标签不进正文——泄漏源=dual_track_merger 单轨分支给条目写
+    confidence="needs_review"）；空值显示 '-'。"""
+    confidence = (getattr(vuln, "confidence", None) or "").strip().lower()
+    key = _CONFIDENCE_KEYS.get(confidence)
+    if key:
+        return _M.get(key)
+    if confidence:
+        return _M.get("conf_pending_review")
+    return _PLACEHOLDER
+
+
+def render_summary_table(queues_by_class: dict[str, list]) -> str:
+    """漏洞速查表（spec 2026-08-25 §7）：确定性渲染，注入正文第一章。
+
+    每类一小节（``###`` 类标题复用 findings_renderer CLASS_CONFIG heading
+    message key——渲染层生成，根治 LLM 手写 ``### Xss``）+ 本类表格
+    （ID/漏洞/接口/参数/严重度/验证/置信度），行按 effective severity 降序
+    （同档稳定序，保持队列原序）；空类输出一行 none_* 文案。已知类按
+    CLASS_CONFIG 配置序输出，不受调用方 dict 序影响。
+    """
+    lines: list[str] = [_M.get("summary_table_h2")]
+    ordered = [c for c in _FINDINGS_CLASS_CONFIG if c in queues_by_class]
+    ordered += [c for c in queues_by_class if c not in _FINDINGS_CLASS_CONFIG]
+    for vuln_class in ordered:
+        cfg = _FINDINGS_CLASS_CONFIG.get(vuln_class)
+        heading = (_FINDINGS_MESSAGES.get(cfg.heading) if cfg is not None
+                   else str(vuln_class))
+        lines.extend(["", f"### {heading}", ""])
+        vulns = queues_by_class.get(vuln_class) or []
+        if not vulns:
+            lines.append(_FINDINGS_MESSAGES.get(cfg.none_found_label)
+                         if cfg is not None else _M.get("no_findings_generic"))
+            continue
+        lines.append(_M.get("summary_table_header"))
+        lines.append(_SUMMARY_TABLE_SEP)
+        ranked = sorted(vulns, key=lambda v: -SEVERITY_ORDER.get(effective_severity(v), 0))
+        for vuln in ranked:
+            title = getattr(vuln, "title", None) or _type_title(vuln)
+            lines.append(
+                f"| {vuln.ID} | {title} | {_endpoint_cell(vuln)} | {_params_cell(vuln)} "
+                f"| {_severity_cell(vuln)} | {_verification_cell(vuln)} "
+                f"| {_confidence_cell(vuln)} |")
+    return "\n".join(lines)
 
 
 class ReportAssembler:
+    @staticmethod
+    async def _read_queues_by_class(
+        deliverables_path: Path,
+        vuln_classes: list[str],
+    ) -> dict[str, list]:
+        """读全部 vuln queue（intermediate/ 优先 + 平铺兜底，同 findings_renderer 读法）。
+
+        缺 queue 的类直接跳过（不进速查表）；读失败 graceful 跳过该类不致命。
+        """
+        queues: dict[str, list] = {}
+        for vuln_class in vuln_classes:
+            cfg = _FINDINGS_CLASS_CONFIG.get(vuln_class)
+            if cfg is None:
+                continue
+            queue_path = resolve_intermediate(deliverables_path, cfg.queue_file)
+            if queue_path is None or not await async_path_exists(queue_path):
+                continue
+            try:
+                content = await async_read_file(queue_path)
+                parsed = VulnerabilityQueue.parse_lenient(
+                    content, vuln_class=vuln_class)
+            except Exception as exc:  # noqa: BLE001 — 速查表缺一类不致命
+                logger.warning(
+                    "summary table: queue %s unreadable: %s", cfg.queue_file, exc)
+                continue
+            queues[vuln_class] = list(parsed.queue.vulnerabilities)
+        return queues
+
     @staticmethod
     async def _assemble_sections(
         deliverables_path: Path,
@@ -42,6 +207,14 @@ class ReportAssembler:
         (内存数节,零临时文件)共用。
         """
         sections: list[str] = []
+        # 漏洞速查表（spec 2026-08-25 §7）：正文第一章——report-executive 之前由
+        # 渲染层确定性注入（后续 agent 在其上加执行摘要）。queue 全缺（analysis-only
+        # 底稿兜底 / 黑盒 blackbox/ 目录——黑盒 queue 在 whitebox/ 子目录）时不注入，
+        # 保持旧输出零回归。速查表行非 ### ID 节，verify_vuln_block_coverage 口径不受影响。
+        queues_by_class = await ReportAssembler._read_queues_by_class(
+            deliverables_path, vuln_classes)
+        if queues_by_class:
+            sections.append(render_summary_table(queues_by_class))
         for vuln_class in vuln_classes:
             evidence = deliverables_path / f"{vuln_class}_exploitation_evidence.md"
             findings = deliverables_path / f"{vuln_class}_findings.md"
@@ -101,7 +274,6 @@ class ReportAssembler:
         """
         # tiering（spec 2026-08-18）：attack_chains.json 是中间产物 -> intermediate/
         # 优先，平铺老结构兜底；None = 缺失 -> 空章节（graceful）。
-        from supernova_core.utils.paths import resolve_intermediate
         chains_path = resolve_intermediate(deliverables_path, "attack_chains.json")
         if chains_path is None:
             return ""

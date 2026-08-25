@@ -49,6 +49,17 @@ _ATTACK_CHAIN_HEADING = {
     "zh": "## 攻击链（多步利用路径）",
     "en": "## Attack Chains (Multi-step Exploitation Paths)",
 }
+# 类型汇总子节类名映射（zh/en）——与 findings_renderer.CLASS_CONFIG 的 heading
+# 文案同源，改这里须同步（勿 import findings_renderer：services 包 eager import
+# 链复杂，防循环导入；旧实现 `vc.replace("-"," ").title()` 产 "Xss"/"Ssrf" 病例
+# 大小写，spec 2026-08-25 §9 点名）。未知类回落旧 title-case。
+_VULN_CLASS_LABELS = {
+    "injection": {"zh": "注入漏洞", "en": "Injection Vulnerabilities"},
+    "xss": {"zh": "跨站脚本 (XSS)", "en": "Cross-Site Scripting (XSS)"},
+    "auth": {"zh": "认证漏洞", "en": "Authentication Vulnerabilities"},
+    "authz": {"zh": "授权漏洞", "en": "Authorization Vulnerabilities"},
+    "ssrf": {"zh": "服务端请求伪造 (SSRF)", "en": "Server-Side Request Forgery (SSRF)"},
+}
 
 
 class PromptManager:
@@ -293,33 +304,37 @@ class PromptManager:
     def _build_vuln_summary_subsections(self, vuln_classes: list[str]) -> str:
         """Generate per-class summary subsection templates.
 
-        口径（2026-07-14，修 hr_20260713-104726 口径脱节）：Count 只数报告正文里的
-        ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN / PREFIX-GN-NN）。攻击链
-        （## 攻击链 章节 / llm-chain-N）里发现的缺陷【不计入】此处——它们在攻击链
-        章节单独体现，避免「单点漏洞总数」与「类型汇总」口径脱节。
+        口径（2026-08-25 F3，与 report-executive.txt 执行摘要②同口径）：Count/
+        Severity 一律从「漏洞速查表」章节读取（确定性渲染、按归并单位计数），
+        禁止 agent 自行清点漏洞卡片——速查表与 ### 单点卡片是同一批数据，
+        两种数法互斥且 agent 自数易错（数漏 GN 卡 / 数进攻击链）。速查表
+        数据不含攻击链（## 攻击链）内容，天然排除 llm-chain-N（口径承接
+        hr_20260713-104726「单点漏洞总数与类型汇总不脱节」）。
         """
         lang = current_lang()
         lines = []
         for vc in vuln_classes:
-            label = vc.replace("-", " ").title()
+            label = (_VULN_CLASS_LABELS.get(vc, {}).get(lang)
+                     or vc.replace("-", " ").title())
             if lang == "zh":
                 lines.append(
                     f"### {label}\n"
-                    f"Count: {{只数本报告正文 ### 单点漏洞卡片（ID 形如 PREFIX-VULN-NN 或 PREFIX-GN-NN，属于 {label} 类）的数量。"
-                    f"攻击链（## 攻击链 / llm-chain-N）里发现的缺陷【不计入】此处——它们单独成章。"
-                    f"若该类无单点卡片，写 0}}\n"
-                    f"Severity range: {{仅基于上述单点卡片的 range；无单点卡片则 N/A}}\n"
+                    f"Count: {{从「漏洞速查表」章节读取本类（{label}）的条目计数与严重度分布；"
+                    f"禁止自行清点漏洞卡片；速查表数据不含攻击链（## 攻击链）内容。"
+                    f"若速查表本类无条目，写 0}}\n"
+                    f"Severity range: {{从「漏洞速查表」本类条目的「严重度」列读取分布；本类无条目则 N/A}}\n"
                     f"Key findings: {{1-2 句，仅概述单点卡片；勿混入攻击链内容}}"
                 )
             else:
                 lines.append(
                     f"### {label}\n"
-                    f"Count: {{count ONLY standalone single-point vulnerability cards in the report body "
-                    f"(IDs like PREFIX-VULN-NN or PREFIX-GN-NN, of the {label} class). "
-                    f"Defects found only inside the attack-chain section (## Attack Chains / llm-chain-N) "
-                    f"are NOT counted here — they are listed in their own section. "
-                    f"If this class has zero single-point cards, write 0}}\n"
-                    f"Severity range: {{range based only on the single-point cards above; N/A if none}}\n"
+                    f"Count: {{read the entry count and severity distribution for this class ({label}) "
+                    f"from the \"Vulnerability Summary Table\" section; "
+                    f"do NOT count vulnerability cards yourself; "
+                    f"the summary table does not include attack-chain (## Attack Chains) content. "
+                    f"If this class has no entries in the table, write 0}}\n"
+                    f"Severity range: {{read the distribution from the \"Severity\" column of this class's "
+                    f"summary-table entries; N/A if this class has no entries}}\n"
                     f"Key findings: {{1-2 sentences, summarizing only single-point cards; do not mix in attack-chain content}}"
                 )
         return "\n\n".join(lines)

@@ -229,9 +229,12 @@ def test_finding_schema_class_specific_fields():
     """per-class finding schema：class 特有字段各不相同（宽松 optional，无 enum）。"""
     def _props(vc):
         sub = make_vuln_sections(vc)[0]
-        # 基线字段（_finding_props，对所有 class 生效）
+        # 基线字段（_finding_props，对所有 class 生效）；severity/impact/
+        # remediation/cwe_id 是报告卡片共通字段（spec 2026-08-25 Task 7）。
         return set(sub.json_schema["properties"]) - {
-            "ID", "vulnerability_type", "externally_exploitable", "confidence", "title", "notes"}
+            "ID", "vulnerability_type", "externally_exploitable", "confidence",
+            "title", "notes",
+            "severity", "impact", "remediation", "cwe_id"}
 
     assert _props("auth") == {
         "source_endpoint", "vulnerable_code_location", "missing_defense",

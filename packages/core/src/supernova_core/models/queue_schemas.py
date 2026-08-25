@@ -24,6 +24,21 @@ class BaseVulnerability(BaseModel):
     # 精确标注随之落盘（spec §4 P1 原文「不再用完即丢」）。放基类对所有子类
     # 生效（append-only，roster 对账按 ID 不按字段，与 Phase 2 无冲突）。
     sanitizer_annotations: list | None = None
+    # 报告可读性改造（spec 2026-08-25 §4）：全部 append-only，旧 queue 兼容。
+    severity: str | None = None            # critical/high/medium/low；缺省渲染层兜底
+    cvss: str | None = None                # 如 "AV:N/AC:L/PR:L/UI:N 8.8"
+    cwe_id: str | None = None              # "CWE-95"
+    owasp_category: str | None = None      # "A03:2021-Injection"
+    endpoint: str | None = None            # 归一化 "POST /contributions"
+    affected_parameters: list[str] | None = None
+    affected_entries: list[dict] | None = None  # {parameter, sink_location, chain_id, track, direct}
+    verification: str | None = None        # static_analysis | dynamically_verified
+    code_snippet: str | None = None        # 渲染层注入，不落 queue
+    # spec 2026-08-25（Task 7）：LLM 轨 collector（submit_finding）新输出字段，
+    # append-only 兼容旧 queue——不落 schema 的话 pydantic 会静默丢弃 collector
+    # 产出的这两个字段（同 2026-08-20 authentication_required 静默丢弃教训）。
+    impact: str | None = None          # 危害一句话（LLM 轨 collector 输出，报告卡片"危害"段权威来源）
+    remediation: str | None = None     # 修复建议一句话（LLM 轨 collector 输出）
 
 class InjectionVulnerability(BaseVulnerability):
     # injection 输出契约 = TS 原版 injectionFields（sink_call 族，vuln-injection.txt

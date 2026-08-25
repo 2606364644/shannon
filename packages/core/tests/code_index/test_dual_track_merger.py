@@ -271,3 +271,53 @@ def test_gitnexus_only_branch_keeps_gitnexus_track_title():
     assert len(out) == 1
     assert out[0].merge_source == "gitnexus-only"
     assert out[0].title == "GN-only title"
+
+
+# --- Task 3（spec 2026-08-25 §3.3）：merger 单位 key + GN 收敛接线 + both 并集 ---
+
+def _llm_inj(**kw):
+    base = dict(ID="INJ-VULN-01", vulnerability_type="injection",
+                externally_exploitable=True, confidence="high",
+                title="命令注入：POST /contributions 直接 eval()（RCE）",
+                source="preTax & req.body",
+                path="POST /contributions → handleContributionsUpdate → eval(req.body.preTax)",
+                sink_function="eval", verdict="vulnerable", severity="high",
+                affected_entries=[{"parameter": "preTax",
+                                   "sink_location": "app/routes/contributions.js:32",
+                                   "chain_id": None, "track": "llm"}])
+    base.update(kw)
+    return InjectionVulnerability(**base)
+
+def _gn_inj(id_, param, line):
+    return InjectionVulnerability(
+        ID=id_, vulnerability_type="injection", externally_exploitable=True,
+        confidence="low", source=f"{param} (app/routes/contributions.js:ContributionsHandler:7)",
+        path="POST /contributions → chain",
+        sink_call=f"app/routes/contributions.js:ContributionsHandler:eval:{line}:{line}",
+        verdict="vulnerable", source_track="gitnexus")
+
+def test_merger_collapses_and_cross_track_dedup():
+    """9 条 GN 同单位收敛后与 LLM 轨同单位条目合并为 1 条 both。"""
+    llm = [_llm_inj()]
+    gn = [_gn_inj(f"INJ-GN-{i:02d}", p, ln)
+          for i, (p, ln) in enumerate([(p, ln) for p in ("preTax", "afterTax", "roth")
+                                       for ln in (32, 33, 34)], start=1)]
+    merged = merge_dual_track_queues(llm, gn)
+    assert len(merged) == 1
+    m = merged[0]
+    assert m.merge_source == "both"
+    assert m.ID == "INJ-VULN-01"            # LLM 轨为 base（叙述权威）
+    assert m.severity == "critical"          # GN 兜底 eval=critical 取高
+    # LLM 1 行 + GN 9 行并集：LLM 行 (preTax, contributions.js:32) 与 GN 收敛
+    # 9 行中第 1 行同 (parameter, sink_location) 重复 → 去重后 9 行（brief 原文
+    # 写 10 未计该重复；Step 3 合并策略按 (parameter, sink_location) 去重为准）。
+    assert len(m.affected_entries) == 9
+    assert set(m.affected_parameters) == {"preTax", "afterTax", "roth"}
+
+def test_merger_keeps_different_endpoint_separate():
+    llm = [_llm_inj()]
+    gn = [_gn_inj("INJ-GN-01", "memo", 27)]
+    gn[0].path = "GET /memos → chain"
+    gn[0].sink_call = "app/routes/memos.js:MemosHandler:render:27:19"
+    merged = merge_dual_track_queues(llm, gn)
+    assert len(merged) == 2                  # 不同接口不合并

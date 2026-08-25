@@ -37,6 +37,11 @@ def test_vuln_summary_subsections_zh(monkeypatch):
     mgr = PromptManager(PROMPTS)
     out = mgr._build_vuln_summary_subsections(["injection"])
     assert "攻击链" in out  # zh 指令
+    # 2026-08-25 F3：Count 从速查表读取（与执行摘要②同口径）+ 类名映射表
+    assert "漏洞速查表" in out
+    assert "禁止自行清点漏洞卡片" in out
+    assert "### 注入漏洞" in out
+    assert "### Injection" not in out
 
 
 def test_vuln_summary_subsections_en(monkeypatch):
@@ -45,6 +50,10 @@ def test_vuln_summary_subsections_en(monkeypatch):
     out = mgr._build_vuln_summary_subsections(["injection"])
     assert "攻击链" not in out
     assert "attack chain" in out.lower() or "Attack Chains" in out
+    # 2026-08-25 F3：en 版对应（速查表读取 + 映射类名）
+    assert "Vulnerability Summary Table" in out
+    assert "do NOT count vulnerability cards" in out
+    assert "### Injection Vulnerabilities" in out
 
 
 def test_keep_rules_no_dead_heading_placeholders():

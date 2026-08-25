@@ -16,7 +16,8 @@ function clampRank(r: number): number {
 
 /**
  * base 等级：按 vulnerability_type + title 关键词匹配（中英双覆盖，大小写无关）。
- * 报告 markdown 无逐条 severity 字段，这是前端启发式推断——见 plan「severity 数据源」。
+ * 仅作旧报告兜底——新版四要素卡首行元信息带真数据 severity，由 parseMetaSeverity
+ * 优先读取（见 spec 2026-08-25「severity 数据源」）。
  */
 function baseSeverity(vulnType: string, title: string): Severity {
   const t = `${vulnType} ${title}`.toLowerCase();
@@ -44,10 +45,33 @@ function baseSeverity(vulnType: string, title: string): Severity {
   return "Medium"; // 兜底
 }
 
+/** 新版卡片元信息行（spec 2026-08-25 §5）中文严重程度词 → Severity。 */
+const META_SEVERITY_ZH: Record<string, Severity> = {
+  严重: "Critical",
+  高危: "High",
+  中危: "Medium",
+  低危: "Low",
+};
+
+/** 元信息行 severity 片段：`严重程度：严重 ｜ CWE-95 ｜ …`（全角/半角冒号容错）。 */
+const META_SEVERITY_RE = /严重程度[：:]\s*(严重|高危|中危|低危)/;
+
+/**
+ * 从卡片元信息行读真数据 severity（新版四要素卡，报告渲染层写入）。
+ * 匹配卡片 raw 内首个 `严重程度：严重|高危|中危|低危` → Severity；
+ * 旧报告（无该行 / 老格式如 `- **严重程度:** high`）不匹配 → null，调用方落回启发式。
+ */
+export function parseMetaSeverity(block: ParsedVulnBlock): Severity | null {
+  const m = META_SEVERITY_RE.exec(block.raw);
+  return m ? META_SEVERITY_ZH[m[1]] : null;
+}
+
 /**
  * 推断单条漏洞的危害等级（透明启发式，非权威评级）。
  *
  * 规则：
+ *   0. 元信息行真数据优先：新版卡片首行 `严重程度：X`（parseMetaSeverity）非 null → 直接返回；
+ *      以下启发式仅为旧报告兜底
  *   1. base：vulnType + title 关键词 → High / Medium
  *   2. +1 档：externally_exploitable==true && authentication_required==false（公网 pre-auth）
  *   3. -1 档：confidence=="low"（大小写容错）
@@ -58,6 +82,9 @@ function baseSeverity(vulnType: string, title: string): Severity {
  * @param topRiskIds 执行摘要「最高风险发现」里出现的 vuln ID 集合（可选）
  */
 export function inferSeverity(block: ParsedVulnBlock, topRiskIds?: Set<string>): Severity {
+  const meta = parseMetaSeverity(block);
+  if (meta) return meta;
+
   let rank = SEVERITY_RANK[baseSeverity(block.vulnType, block.title)];
 
   if (block.externallyExploitable === true && block.authRequired === false) {
@@ -191,6 +218,19 @@ export function isVulnTable(headerFirstCell: string, firstDataCell: string): boo
   return headerFirstCell.trim().toLowerCase() === "id" && VULN_ID_RE.test(firstDataCell.trim());
 }
 
+/** 判断一张表是否是「漏洞速查表」（渲染层确定性注入，表头 7 列：
+ * ID/漏洞|Vulnerability/接口|Endpoint/参数|Parameters/严重度|Severity/验证|Verification/置信度|Confidence）。
+ * 判定签名：表头含「接口/Endpoint」列且含「严重度/Severity」列——普通漏洞表格
+ * （Injection Exploitation Queue / Authz 裁决概览）没有这两列。速查表行与同 ID 的
+ * `### ` 完整卡并存，若照漏洞表提取会产生迷你块双计/每洞双卡/DOM id 重复
+ * （终审 F1），故整表跳过留 prose（react-markdown 原样渲染）。 */
+export function isSummaryTable(headers: string[]): boolean {
+  const cols = headers.map((h) => h.trim().toLowerCase());
+  const hasEndpoint = cols.some((c) => c === "接口" || c === "endpoint");
+  const hasSeverity = cols.some((c) => c === "严重度" || c === "severity");
+  return hasEndpoint && hasSeverity;
+}
+
 /** 把漏洞表的一行（表头驱动）解析成 ParsedVulnBlock。 */
 export function parseTableRowToBlock(headers: string[], row: string[]): ParsedVulnBlock {
   const colMap: Record<string, string> = {};
@@ -242,7 +282,8 @@ export function parseTableRowToBlock(headers: string[], row: string[]): ParsedVu
 /**
  * 从 prose 段文本里提取漏洞表格，返回交替的 prose/vuln 段序列。
  * 仅当表头首列 = ID 且首列数据单元格匹配 VULN_ID_RE 才拆成 vuln 段；
- * 普通表格（如 `| 类型 | 数量 |`）原样留在 prose。
+ * 「漏洞速查表」（isSummaryTable 命中：接口+严重度列）与普通表格
+ * （如 `| 类型 | 数量 |`）整张原样留在 prose。
  */
 export function extractTableVulns(proseMd: string): Segment[] {
   const lines = proseMd.split(/\r?\n/);
@@ -271,7 +312,11 @@ export function extractTableVulns(proseMd: string): Segment[] {
       }
       const dataRows = tableLines.slice(2).map(splitTableRow);
       const firstCell = dataRows[0]?.[0] ?? "";
-      if (isVulnTable(headers[0] ?? "", firstCell)) {
+      if (isSummaryTable(headers)) {
+        // 速查表（含接口+严重度列）→ 整表留 prose，不提取迷你块（防与 ### 完整卡
+        // 双计/双卡/DOM id 重复，见 isSummaryTable 注释）
+        proseAccum.push(...tableLines);
+      } else if (isVulnTable(headers[0] ?? "", firstCell)) {
         flushProse();
         for (const row of dataRows) {
           const block = parseTableRowToBlock(headers, row);

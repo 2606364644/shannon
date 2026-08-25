@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import logging
 
+from supernova_core.code_index.gn_collapse import (
+    collapse_gn_entries,
+    extract_endpoint,
+    parse_sink_call_site_id,
+)
 from supernova_core.models.queue_schemas import Vulnerability
+from supernova_core.services.severity_rules import effective_severity, max_severity
 
 logger = logging.getLogger(__name__)
 
@@ -45,24 +51,51 @@ def _normalize_endpoint(endpoint: object) -> str | None:
     return f"{method} {path}".strip()
 
 
+def _strict_key(finding: Vulnerability) -> tuple:
+    """Legacy strict key: full location + sink field tuples (exact-match)."""
+    loc = tuple(getattr(finding, field, None) for field in _LOCATION_FIELDS)
+    sink = tuple(getattr(finding, field, None) for field in _SINK_FIELDS)
+    return (getattr(finding, "vulnerability_type", None), loc, sink)
+
+
 def _finding_key(finding: Vulnerability) -> tuple:
-    """Build a cross-track dedup key from vulnerability type, location, and sink.
+    """Build a cross-track dedup key (spec 2026-08-25 §3.3: 漏洞单位).
 
     Horizontal authz (IDOR) is deduped by normalized endpoint ALONE: the two
     tracks describe the same IDOR with different code locations (LLM points at
     the service layer; GitNexus at controller+service), so a location-bearing key
-    would never collapse them. Other classes keep the strict type+location+sink
-    key to avoid merging distinct problems. If a Horizontal finding lacks an
-    endpoint, fall back to the strict key (cannot endpoint-dedup blindly).
+    would never collapse them. If a Horizontal finding lacks an endpoint, fall
+    back to the strict key (cannot endpoint-dedup blindly).
+
+    Other classes use the unit key — (vuln_class, normalized endpoint, sink
+    function) — replacing the old whole-chain exact match: the two tracks phrase
+    the same unit differently (LLM narrates a chain; GitNexus emits one entry
+    per param×line), so exact keys never collapse them. The sink function comes
+    from `sink_function`, or is parsed out of a GitNexus `sink_call` id; a
+    natural-language LLM sink ("eval at file:32") is used whole. When the unit
+    identity is incomplete (no endpoint AND/OR no sink — e.g. authz classes,
+    route-less chains), fall back to the strict key: keying everything of a
+    class under (vtype, None, None) would blindly merge distinct findings.
     """
     vtype = getattr(finding, "vulnerability_type", None)
     if vtype == "Horizontal":
         norm = _normalize_endpoint(getattr(finding, "endpoint", None))
         if norm:
             return ("Horizontal", norm)
-    loc = tuple(getattr(finding, field, None) for field in _LOCATION_FIELDS)
-    sink = tuple(getattr(finding, field, None) for field in _SINK_FIELDS)
-    return (vtype, loc, sink)
+        return _strict_key(finding)
+    endpoint = (
+        extract_endpoint(getattr(finding, "endpoint", None))
+        or extract_endpoint(getattr(finding, "path", None))
+        or _normalize_endpoint(getattr(finding, "source_endpoint", None))
+        or _normalize_endpoint(getattr(finding, "endpoint", None))
+    )
+    raw_sink = getattr(finding, "sink_function", None) or getattr(finding, "sink_call", None)
+    sink_func, _loc = parse_sink_call_site_id(raw_sink or "")
+    if not sink_func and isinstance(raw_sink, str) and raw_sink.strip():
+        sink_func = raw_sink.strip()  # LLM 自然语言 sink（如 "eval at file:32"）整体作 key
+    if endpoint and sink_func:
+        return (vtype, endpoint, sink_func)
+    return _strict_key(finding)
 
 
 def _is_vulnerable(finding: Vulnerability) -> bool:
@@ -98,6 +131,10 @@ def _clone_with_merge_fields(
     vulnerable: bool,
     evidence_chain: str | None = None,
     externally_exploitable_override: bool | None = None,
+    other_severity: str | None = None,
+    other_entries: list[dict] | None = None,
+    other_params: list[str] | None = None,
+    other_endpoint: str | None = None,
 ) -> Vulnerability:
     data = finding.model_dump()
     data["merge_source"] = merge_source
@@ -114,6 +151,26 @@ def _clone_with_merge_fields(
         data["externally_exploitable"] = externally_exploitable_override
     if evidence_chain and not data.get("evidence_chain"):
         data["evidence_chain"] = evidence_chain
+    # Spec 2026-08-25 §3.3 both 分支合并策略：severity 取高、受影响入口/参数并集、
+    # endpoint base 缺失时补 other 侧。other_* 仅 both 分支传值（单轨分支默认 None，
+    # 行为不变）。severity 两侧先经 effective_severity() 化再比较——max_severity
+    # (None, "low") 会返回 None 丢档（T1 遗留 Minor），预归一规避之。
+    if merge_source == "both":
+        data["severity"] = max_severity(effective_severity(finding), other_severity)
+        merged_entries = list(data.get("affected_entries") or [])
+        seen = {(e.get("parameter"), e.get("sink_location")) for e in merged_entries}
+        for e in other_entries or []:
+            k = (e.get("parameter"), e.get("sink_location"))
+            if k not in seen:
+                merged_entries.append(e)
+                seen.add(k)
+        data["affected_entries"] = merged_entries or None
+        params = list(data.get("affected_parameters") or [])
+        for p in other_params or []:
+            if p not in params:
+                params.append(p)
+        data["affected_parameters"] = params or None
+        data["endpoint"] = data.get("endpoint") or other_endpoint
     if data.get("verdict") is not None:
         data["verdict"] = "vulnerable" if vulnerable else "safe"
     return type(finding).model_validate(data)
@@ -131,7 +188,13 @@ def merge_dual_track_queues(
     present in both tracks get `merge_source="both"` and `confidence="high"`;
     single-track findings get `needs_review`. Vulnerability status is an OR:
     any vulnerable track makes the merged finding vulnerable.
+
+    GitNexus findings are first collapsed per unit (spec 2026-08-25 §3,
+    `collapse_gn_entries`): the param×line cartesian entries of one unit fold
+    into a primary record + affected_entries list, so the merger sees units —
+    not raw chains — and cross-track dedup keys line up.
     """
+    gitnexus_findings = collapse_gn_entries(gitnexus_findings)
     if mode == "intel":
         return _merge_intel(llm_findings, gitnexus_findings)
     if mode != "verdict":
@@ -166,6 +229,10 @@ def merge_dual_track_queues(
                     vulnerable=vulnerable,
                     evidence_chain=evidence_chain,
                     externally_exploitable_override=_authz_ee_or(llm, gitnexus),
+                    other_severity=effective_severity(gitnexus),
+                    other_entries=getattr(gitnexus, "affected_entries", None),
+                    other_params=getattr(gitnexus, "affected_parameters", None),
+                    other_endpoint=getattr(gitnexus, "endpoint", None),
                 )
             )
         elif llm is not None:

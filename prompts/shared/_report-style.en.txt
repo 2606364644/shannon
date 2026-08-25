@@ -1,0 +1,18 @@
+<report-style>
+Writing style (mandatory for ALL narrative output):
+- Conclusion first: the first sentence of every paragraph states the verdict;
+  evidence follows. No preamble.
+- One idea per paragraph: keep impact descriptions within 3 sentences; use lists
+  for enumerations instead of inline (1)(2)(3) numbering inside paragraphs.
+- Do not use ALL-CAPS words for emphasis (e.g. CONFIRM/PROVE), no dramatic
+  phrasing (e.g. closing lines like undeniable proof / total compromise), and no
+  meta-commentary (e.g. "for leadership's reference").
+- Plain yet professional language: use standard security terminology (stored
+  XSS, broken access control, unauthorized access, injection); avoid
+  analyzer-internal jargon (never let words like taint/sink/verdict-chain appear
+  in the narrative).
+- Remediation must be code-level specific: name the function to change and the
+  exact rewrite; no empty advice like "strengthen input validation".
+- severity only takes critical/high/medium/low, graded by actual impact — do
+  not default everything to critical.
+</report-style>

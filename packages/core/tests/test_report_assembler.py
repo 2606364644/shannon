@@ -57,8 +57,13 @@ async def test_assemble_skips_missing_classes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_inject_model_info_inserts_after_assessment_date(tmp_path):
-    """inject_model_info 在 Assessment Date 行后插入 Model 行。"""
+async def test_inject_model_info_inserts_after_assessment_date(tmp_path, monkeypatch):
+    """inject_model_info 在 Assessment Date 行后插入 Model 行。
+
+    断言基于英文标签（i18n 前行为），显式钉 en——默认 zh 下该断言必挂
+    （对齐 blackbox test_finalize_report.py 的 _en_lang_default 先例）。
+    """
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
     report = tmp_path / "report.md"
     report.write_text("## Executive Summary\n- Assessment Date: 2026-06-22\n正文", encoding="utf-8")
     session = tmp_path / "session.json"

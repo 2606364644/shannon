@@ -17,6 +17,7 @@ Combine reported findings into multi-step chains by linkage pattern:
 
 @include(shared/_target.txt)
 @include(shared/_output-language.txt)
+@include(shared/_report-style.txt)
 
 <context>
 Recon deliverable: `{{DELIVERABLES_PATH}}/recon_deliverable.md`

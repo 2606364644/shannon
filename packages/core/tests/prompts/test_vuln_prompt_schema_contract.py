@@ -62,3 +62,34 @@ def test_injection_schema_keeps_ts_native_field_family():
             "concat_occurrences"} <= inj
     assert "sink_function" in xss and "sink_call" not in xss
     assert "sink_call" in inj and "sink_function" not in inj
+
+
+# 报告可读性改造（spec 2026-08-25 Task 7）：报告卡片四字段双向锁定——
+# prompt 字段表所教 + collector schema 声明，两侧任一漂移即红。
+_REPORT_CARD_FIELDS = ["severity", "impact", "remediation", "cwe_id"]
+
+
+@pytest.mark.parametrize("vuln_class", VULN_CLASSES)
+def test_report_card_fields_in_prompt_and_schema(vuln_class):
+    """severity/impact/remediation/cwe_id 必须同时出现在 prompt 字段表与
+    submit_finding schema（optional 字段，不动 _FINDING_BASE_REQUIRED）。
+
+    反向锁定的意义：只进 schema 不进 prompt ⇒ 模型不知道要交（字段永远空）；
+    只进 prompt 不进 schema ⇒ 上面的方向一测试会红（同 2026-08-20
+    authentication_required 被静默丢弃的教训）。"""
+    missing_prompt = [
+        f for f in _REPORT_CARD_FIELDS
+        if f not in _prompt_finding_fields(vuln_class)
+    ]
+    assert not missing_prompt, (
+        f"vuln-{vuln_class}.txt 字段表缺报告卡片字段（模型不会被教到）: "
+        f"{missing_prompt}"
+    )
+    missing_schema = [
+        f for f in _REPORT_CARD_FIELDS
+        if f not in _schema_finding_fields(vuln_class)
+    ]
+    assert not missing_schema, (
+        f"submit_finding schema 缺报告卡片字段（collector 会静默丢弃）: "
+        f"{missing_schema}"
+    )

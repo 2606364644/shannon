@@ -65,3 +65,67 @@ def test_legacy_queue_without_new_fields_parses():
 def test_needs_review_confidence_value_allowed():
     v = _base(confidence="needs_review")
     assert v.confidence == "needs_review"
+
+
+# 报告可读性改造（spec 2026-08-25 §4）：BaseVulnerability 报告字段 append-only 扩展。
+_REPORT_FIELDS = (
+    "severity",
+    "cvss",
+    "cwe_id",
+    "owasp_category",
+    "endpoint",
+    "affected_parameters",
+    "affected_entries",
+    "verification",
+    "code_snippet",
+)
+
+
+def test_report_readability_fields_default_none():
+    v = _base()
+    for name in _REPORT_FIELDS:
+        assert getattr(v, name) is None, name
+
+
+def test_report_readability_fields_accept_values():
+    v = _base(
+        severity="high",
+        cvss="AV:N/AC:L/PR:L/UI:N 8.8",
+        cwe_id="CWE-95",
+        owasp_category="A03:2021-Injection",
+        endpoint="POST /contributions",
+        affected_parameters=["name"],
+        affected_entries=[
+            {
+                "parameter": "name",
+                "sink_location": "eval:32:23",
+                "chain_id": "C1",
+                "track": "llm",
+                "direct": True,
+            }
+        ],
+        verification="static_analysis",
+        code_snippet="eval(userInput)",
+    )
+    assert v.severity == "high"
+    assert v.cvss == "AV:N/AC:L/PR:L/UI:N 8.8"
+    assert v.cwe_id == "CWE-95"
+    assert v.owasp_category == "A03:2021-Injection"
+    assert v.endpoint == "POST /contributions"
+    assert v.affected_parameters == ["name"]
+    assert v.affected_entries[0]["parameter"] == "name"
+    assert v.verification == "static_analysis"
+    assert v.code_snippet == "eval(userInput)"
+
+
+def test_report_readability_fields_inherited_by_subclass():
+    v = InjectionVulnerability(
+        ID="I2",
+        vulnerability_type="injection",
+        externally_exploitable=True,
+        confidence="high",
+        severity="critical",
+        endpoint="GET /search",
+    )
+    assert v.severity == "critical"
+    assert v.endpoint == "GET /search"
