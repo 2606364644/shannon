@@ -48,7 +48,9 @@ _NEW_PASSWORD_MIN_LEN = 8
 def _user_out(u: User) -> dict:
     return {"id": u.id, "username": u.username, "role": u.role,
             "must_change_password": u.must_change_password,
-            "pinned_workspace": u.pinned_workspace}
+            "pinned_workspace": u.pinned_workspace,
+            "avatar_url": u.avatar_url,
+            "auth_provider": u.auth_provider}
 
 
 def _cookie_secure(cfg, request: Request) -> bool:
@@ -188,14 +190,54 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
     return resp
 
 
+class WhitelistIn(BaseModel):
+    nick: str
+
+
+@router.get("/sso/whitelist")
+def sso_whitelist_list(request: Request):
+    # 关闭态 404 必须先于 admin 判定：Depends(require_admin) 在函数体之前执行，
+    # 未登录请求会先撞 401（spec「SSO 关闭 404」且不向未认证方泄露端点存在），
+    # 故此处函数体内先查开关再手动调 require_admin（其读 request.state.user，直接调用等价）。
+    if not request.app.state.config.sso_enabled:
+        raise HTTPException(status_code=404, detail="sso disabled")
+    require_admin(request)
+    rows = request.app.state.auth_store.get_sso_whitelist()
+    return {"whitelist": [{"nick": r[0], "added_by": r[1], "created_at": r[2]} for r in rows]}
+
+
+@router.post("/sso/whitelist")
+def sso_whitelist_add(body: WhitelistIn, request: Request, admin: User = Depends(require_admin)):
+    nick = body.nick.strip()
+    if not nick:
+        raise HTTPException(status_code=422, detail="nick must not be blank")
+    request.app.state.auth_store.add_sso_whitelist(nick, admin.username)
+    return {"ok": True}
+
+
+@router.delete("/sso/whitelist/{nick}")
+def sso_whitelist_remove(nick: str, request: Request, _admin: User = Depends(require_admin)):
+    request.app.state.auth_store.remove_sso_whitelist(nick)
+    return {"ok": True}
+
+
 @router.post("/logout")
 def logout(request: Request):
     if not verify_csrf(request.headers.get("x-csrf-token"), request.cookies.get("sn-csrf")):
         raise HTTPException(status_code=403, detail="invalid csrf token")
+    cfg = request.app.state.config
     sid = request.cookies.get("sn-sid")
+    # SSO 会话登出：响应带 OA 登出跳转 URL（前端清态后 assign；账密会话为 None 维持原行为）。
+    # 顺序铁律：先 get_session 拿 auth_method 再 revoke——revoke 后 get_session 返 None。
+    sso_logout_url = None
+    if cfg.sso_enabled and sid:
+        row = request.app.state.auth_store.get_session(sid)
+        if row is not None and row.auth_method == "sso":
+            sso_logout_url = sso_mod.build_passport_logout_url(
+                cfg.sso_passport_base, cfg.sso_public_base_url)
     if sid:
         request.app.state.session_manager.revoke(sid)
-    resp = JSONResponse({"ok": True})
+    resp = JSONResponse({"ok": True, "sso_logout_url": sso_logout_url})
     resp.delete_cookie("sn-sid")
     resp.delete_cookie("sn-csrf")
     return resp

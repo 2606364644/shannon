@@ -149,3 +149,77 @@ def test_callback_ticket_error_codes(sso_client, monkeypatch):
 def test_callback_disabled_404(plain_client):
     assert plain_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T"},
                             follow_redirects=False).status_code == 404
+
+
+# ---------- whitelist admin API ----------
+
+@pytest.fixture
+def admin_sso_client(sso_client):
+    sso_client.app.state.auth_store.create_user("admin", hash_password("pw12345"), role="admin")
+    tok = sso_client.get("/api/auth/csrf").json()["csrf_token"]
+    r = sso_client.post("/api/auth/login", json={"username": "admin", "password": "pw12345"},
+                        headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    return sso_client
+
+
+def test_whitelist_crud(admin_sso_client):
+    r = admin_sso_client.get("/api/auth/sso/whitelist")
+    assert r.status_code == 200
+    assert [w["nick"] for w in r.json()["whitelist"]] == ["niu"]  # fixture 预置
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}).status_code == 200
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "mate"}).status_code == 200  # 幂等
+    r = admin_sso_client.get("/api/auth/sso/whitelist")
+    assert sorted(w["nick"] for w in r.json()["whitelist"]) == ["mate", "niu"]
+    assert admin_sso_client.delete("/api/auth/sso/whitelist/mate").status_code == 200
+    assert [w["nick"] for w in admin_sso_client.get("/api/auth/sso/whitelist").json()["whitelist"]] == ["niu"]
+
+
+def test_whitelist_rejects_blank_nick(admin_sso_client):
+    assert admin_sso_client.post("/api/auth/sso/whitelist", json={"nick": "  "}).status_code == 422
+
+
+def test_whitelist_requires_admin(sso_client):
+    sso_client.app.state.auth_store.create_user("plain", hash_password("pw12345"))
+    tok = sso_client.get("/api/auth/csrf").json()["csrf_token"]
+    sso_client.post("/api/auth/login", json={"username": "plain", "password": "pw12345"},
+                    headers={"X-CSRF-Token": tok})
+    assert sso_client.get("/api/auth/sso/whitelist").status_code == 403
+    assert sso_client.get("/api/auth/sso/config").status_code == 200  # config 仍公开
+
+
+def test_whitelist_disabled_404(plain_client):
+    assert plain_client.get("/api/auth/sso/whitelist").status_code == 404
+
+
+# ---------- logout sso_logout_url / _user_out 扩展 ----------
+
+def test_me_includes_avatar_fields(sso_client, monkeypatch):
+    _mock_validate(monkeypatch)
+    sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-av"}, follow_redirects=False)
+    me = sso_client.get("/api/auth/me").json()["user"]
+    assert me["username"] == "niu"
+    assert me["avatar_url"] == "https://cdn.test/a.png"
+    assert me["auth_provider"] == "sso"
+
+
+def test_logout_sso_session_returns_logout_url(sso_client, monkeypatch):
+    _mock_validate(monkeypatch)
+    sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-lo"}, follow_redirects=False)
+    tok = sso_client.cookies.get("sn-csrf")
+    r = sso_client.post("/api/auth/logout", headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert r.json()["sso_logout_url"] == (
+        "https://passport.futuoa.com/site/logout.html?returnUrl="
+        "https%3A%2F%2Fcodescan.test.local%2Flogin")
+    assert sso_client.get("/api/auth/me").status_code == 401
+
+
+def test_logout_password_session_has_no_sso_url(sso_client):
+    sso_client.app.state.auth_store.create_user("bob", hash_password("pw12345"))
+    tok = sso_client.get("/api/auth/csrf").json()["csrf_token"]
+    sso_client.post("/api/auth/login", json={"username": "bob", "password": "pw12345"},
+                    headers={"X-CSRF-Token": tok})
+    tok = sso_client.cookies.get("sn-csrf")
+    r = sso_client.post("/api/auth/logout", headers={"X-CSRF-Token": tok})
+    assert r.json()["sso_logout_url"] is None
