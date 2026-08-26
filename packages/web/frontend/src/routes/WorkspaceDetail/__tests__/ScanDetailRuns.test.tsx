@@ -31,10 +31,18 @@ const combinedWithRuns = {
 const fetched: string[] = [];
 const server = setupServer(
   http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json(combinedWithRuns)),
+  http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report-data",
+    () => new HttpResponse(null, { status: 404 })),
   http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report", ({ params }) => {
     fetched.push(String(params.run));
     return new HttpResponse(`# ${params.run} 融合报告`, { headers: { "content-type": "text/plain" } });
   }),
+  // T6（spec 2026-08-26 §7.1）：报告页先探 report-data（结构化 SSOT）。本组用例为
+  // 旧 scan md 流--404 -> ReportTab 回退 md 渲染路径（下方 /report handler）。
+  http.get("/api/workspaces/:ws/scans/:id/report-data", () =>
+    new HttpResponse("", { status: 404 })),
+  http.get("/api/workspaces/:ws/scans/:id/blackbox-runs/:run/report-data", () =>
+    new HttpResponse("", { status: 404 })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));

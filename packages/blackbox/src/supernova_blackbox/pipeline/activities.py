@@ -37,6 +37,8 @@ from supernova_core.services.host_proxy import (
 from .shared import BlackboxActivityInput, is_engine_failure
 from supernova_blackbox.services.exploitation_checker import QueueValidationResult
 
+logger = logging.getLogger(__name__)
+
 
 # Phase 2（HOST 档案）：per-scan 本地代理句柄注册表。
 # ``run_host_proxy_setup`` 写入（key=proxy_url），``stop_host_proxy`` pop 清理。
@@ -438,6 +440,28 @@ async def assemble_report(input: BlackboxActivityInput) -> None:
         bb = blackbox_dir(deliverables)
         bb.mkdir(parents=True, exist_ok=True)
         report_path = bb / "comprehensive_security_assessment_report.md"
+
+        # T7（spec 2026-08-26 §6.1）：verdicts → blackbox/report_data.json（确定性
+        # 结构化 SSOT，md 链路不变）。先于 md 链跑——report_data 只依赖 verdicts
+        # （已在盘），md 侧失败/重试不影响其产出与幂等重写。non-fatal：失败
+        # warning 不阻塞 md 报告（旧链路行为不变）。
+        try:
+            from supernova_core.services.report_data_blackbox import (
+                write_blackbox_report_data,
+            )
+            session_path = (
+                Path(input.workspace_path) / "session.json"
+                if input.workspace_path else None)
+            fallback_id = (
+                input.workspace_name
+                or (Path(input.workspace_path).name if input.workspace_path else "")
+                or "blackbox")
+            out = await write_blackbox_report_data(
+                deliverables, session_path, fallback_id)
+            logger.info("blackbox report_data.json written: %s", out)
+        except Exception as exc:  # noqa: BLE001 — 结构化报告失败不阻塞 md 链路
+            logger.warning(
+                "blackbox report_data.json assembly failed (non-fatal): %s", exc)
 
         report_config = None
         if input.config_path:

@@ -1,6 +1,13 @@
 /**
  * 报告章节级切分：把「攻击链」二级章节从报告 md 中独立切出。
  *
+ * 【T6 状态（spec 2026-08-26 §7.2）】报告页主路径已迁 ReportView（report_data.json
+ * 纯渲染）；本文件的 PoC 章节切出/按 ID 归并（splitPocSection/parsePocEntries/
+ * stripCardPocLines）与攻击链切分（splitAttackChainSection）只剩 md 降级分支
+ * （ReportTab 404 回退，旧 scan 必须能渲染）与交付物页 md 预览在用。
+ * TODO(T6b)：md 降级分支下线时随 MarkdownView 一起删除（攻击链届时走
+ * report_data.attack_chains）。
+ *
  * 架构语义（见 spec 2026-07-14-report-attack-chain-section-design §2）：
  * - 单点漏洞（vuln agent / GitNexus 轨产，ID 形如 PREFIX-VULN-NN / PREFIX-GN-NN）→ 单漏洞卡片网格
  * - 攻击链（仅 attack-chain agent 产，ID 形如 llm-chain-N）→ 独立攻击链 section，**不进**单漏洞网格

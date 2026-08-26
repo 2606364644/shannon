@@ -1,5 +1,11 @@
 import type { ParsedVulnBlock, ParsedVulnField, Severity } from "../api/types";
 
+// 【T6 状态（spec 2026-08-26 §7.2）】报告页主路径已迁 ReportView（report_data.json
+// 纯渲染，severity 由数据带出）；本文件的 severity 关键词推断（inferSeverity/
+// baseSeverity）与 md 卡解析（parseVulnBlock/parseTableRowToBlock）只剩 md 降级
+// 分支（ReportTab 404 回退，旧 scan 必须能渲染）与交付物页 md 预览在用。
+// TODO(T6b)：md 降级分支下线时随 MarkdownView 一起删除。
+
 /** Severity → 数值档位，便于加减调整后映射回 Severity。 */
 export const SEVERITY_RANK = {
   Low: 1,

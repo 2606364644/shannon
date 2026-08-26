@@ -371,6 +371,30 @@ def test_gn_only_card_degrades_gracefully(monkeypatch):
     assert "静态链路发现，建议人工确认" in card
 
 
+# --- spec 2026-08-26 §5.7：unadjudicated（判定通道失败）显式化，与待复核区分 ---
+
+def test_unadjudicated_confidence_renders_distinct_zh_label(monkeypatch):
+    """zh：unadjudicated → 「未判定（判定通道失败）」；不再追加「待复核」
+    （不静默混入待复核——needs_review 是另一语义）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(ID="INJ-GN-01", source_track="gitnexus",
+              merge_source="gitnexus-only", confidence="unadjudicated",
+              evidence_chain="preTax -> app/routes/contributions.js:eval:32")
+    card = render_vuln_card(v, "injection", None)
+    assert "置信度：未判定（判定通道失败）" in card
+    assert "待复核" not in card            # 与 needs_review 语义区分
+    assert "unadjudicated" not in card     # 内部枚举值不泄漏正文
+
+
+def test_unadjudicated_confidence_renders_distinct_en_label():
+    """en（autouse 默认）：unadjudicated → "Unadjudicated (verdict pass failed)"。"""
+    v = _vuln(ID="INJ-GN-01", source_track="gitnexus",
+              merge_source="gitnexus-only", confidence="unadjudicated")
+    card = render_vuln_card(v, "injection", None)
+    assert "Unadjudicated (verdict pass failed)" in card
+    assert "pending review" not in card
+
+
 def test_filter_by_confidence():
     vulns = [
         InjectionVulnerability(

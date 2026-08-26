@@ -170,7 +170,8 @@ def _preview_max_bytes() -> int:
         return _PREVIEW_MAX_BYTES_DEFAULT
 
 
-def deliverables_summary_for(scan_dir, path: str | None, *, strip_track: bool = False):
+def deliverables_summary_for(scan_dir, path: str | None, *, strip_track: bool = False,
+                             download: bool = False):
     reader = DeliverablesReader(scan_dir, strip_track_prefix="blackbox" if strip_track else None)
     if path is None:
         return reader.summary()
@@ -182,6 +183,16 @@ def deliverables_summary_for(scan_dir, path: str | None, *, strip_track: bool = 
         track, filename = "blackbox", path
     else:
         track, filename = "whitebox", path  # legacy 兜底（无 track 前缀）
+    if download:
+        # 下载（产物 tab FileStage 下载按钮）：FileResponse 附件返磁盘原文——无
+        # preview_limit 截断、无 json.loads（big_json/empty_json/other 也可下）。
+        # 附件文件名由前端 <a download> 属性定（track 前缀区分三桶同名），此处
+        # Content-Disposition basename 兜底。
+        from fastapi.responses import FileResponse
+        try:
+            return FileResponse(reader.resolve_path(filename, track), filename=Path(filename).name)
+        except FileNotFoundError:
+            raise HTTPException(404, "file not found")
     try:
         content = reader.read(filename, track, preview_limit=_preview_max_bytes())
     except FileNotFoundError:
@@ -299,9 +310,10 @@ def _run_dir_or_404(request: Request, ws: str, scan_id: str, run_id: str) -> Pat
 @router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/deliverables")
 async def run_deliverables_summary(ws: str, scan_id: str, run_id: str, request: Request,
                                    _: User = Depends(workspace_member),
-                                   path: str | None = Query(None)):
+                                   path: str | None = Query(None),
+                                   download: bool = Query(False)):
     return deliverables_summary_for(_run_dir_or_404(request, ws, scan_id, run_id), path,
-                                    strip_track=True)
+                                    strip_track=True, download=download)
 
 
 @router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/deliverables/{filename}")
@@ -328,6 +340,44 @@ async def run_report(ws: str, scan_id: str, run_id: str, request: Request,
             raise HTTPException(404, "融合报告未生成")
         return p.read_text("utf-8")
     return report_for(_run_dir_or_404(request, ws, scan_id, run_id), track="blackbox")
+
+
+# report_data.json 文件名（spec 2026-08-26-report-generation-agent-design §4：
+# deliverables/{track}/report_data.json；融合在 combined/run-K/）。
+REPORT_DATA_FILENAME = "report_data.json"
+
+
+def _read_report_data(path: Path) -> dict:
+    """读 report_data.json 原文 JSON。缺文件 / 坏 JSON → 404（旧 scan / 写一半中断：
+    前端按 404 回退 md 渲染路径，不让 500 冒出）。"""
+    import json
+    p = Path(path)
+    if not p.is_file():
+        raise HTTPException(404, "report data not generated")
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(404, "report data not generated")
+
+
+@router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/report-data")
+async def run_report_data(ws: str, scan_id: str, run_id: str, request: Request,
+                          _: User = Depends(workspace_member),
+                          track: str = Query("blackbox")) -> dict:
+    """run 级 report_data.json（spec §7.1）：track=combined 读 combined/run-K/report_data.json
+    （融合报告 SSOT）；默认 track=blackbox 读 run 黑盒桶。缺产物 404（前端回退 md）。
+    先经 _run_dir_or_404 验 run 存在性（run_id 路径校验拒越界）。"""
+    if track == "combined":
+        from supernova_core.utils.paths import combined_run_dir
+        wb_dir = _store(request).get_scan_dir(ws, scan_id)
+        if wb_dir is None:
+            raise HTTPException(404, "scan not found")
+        _run_dir_or_404(request, ws, scan_id, run_id)  # run 存在性 + ^run-\\d+$ 校验
+        return _read_report_data(combined_run_dir(wb_dir, run_id) / REPORT_DATA_FILENAME)
+    if track != "blackbox":
+        raise HTTPException(422, "track 须为 blackbox|combined")
+    run_dir = _run_dir_or_404(request, ws, scan_id, run_id)
+    return _read_report_data(run_dir / "deliverables" / "blackbox" / REPORT_DATA_FILENAME)
 
 
 @router.get("/{ws}/scans/{scan_id}/blackbox-runs/{run_id}/logs")
@@ -404,8 +454,10 @@ async def delete_blackbox_run(ws: str, scan_id: str, run_id: str, request: Reque
 @router.get("/{ws}/scans/{scan_id}/deliverables")
 async def scan_deliverables_summary(ws: str, scan_id: str, request: Request,
                                     _: User = Depends(workspace_member),
-                                    path: str | None = Query(None)):
-    return deliverables_summary_for(_scan_dir_or_404(request, ws, scan_id), path)
+                                    path: str | None = Query(None),
+                                    download: bool = Query(False)):
+    return deliverables_summary_for(_scan_dir_or_404(request, ws, scan_id), path,
+                                    download=download)
 
 
 @router.get("/{ws}/scans/{scan_id}/deliverables/{filename}")
@@ -421,6 +473,27 @@ async def scan_report(ws: str, scan_id: str, request: Request, _: User = Depends
     """综合报告（text/plain）。track 可选（spec §10.1 三视图）：whitebox/blackbox/combined
     取该桶报告；不传则 auto-infer（纯白盒/纯黑盒零回归）。"""
     return report_for(_scan_dir_or_404(request, ws, scan_id), track)
+
+
+@router.get("/{ws}/scans/{scan_id}/report-data")
+async def scan_report_data(ws: str, scan_id: str, request: Request,
+                           _: User = Depends(workspace_member),
+                           track: str | None = Query(None)) -> dict:
+    """report_data.json（spec 2026-08-26 §4/§7.1）——三轨报告结构化 SSOT，前端
+    ReportView 纯渲染的数据源（md 渲染降级路径之外的优先路径）。
+
+    track=whitebox|blackbox 读对应 deliverables 桶；缺省 auto-infer（对齐 scan_report
+    零回归语义；组合扫描 infer 到 combined 时回落白盒桶——融合产物是 per-run 的，
+    由 blackbox-runs/{run_id}/report-data?track=combined 服务）。缺产物 404：前端据此
+    回退旧 md 渲染路径（旧 scan 兼容）。
+    """
+    scan_dir = _scan_dir_or_404(request, ws, scan_id)
+    if track in (None, ""):
+        resolved = DeliverablesReader(scan_dir)._infer_track()
+        track = "whitebox" if resolved == "combined" else resolved
+    if track not in ("whitebox", "blackbox"):
+        raise HTTPException(422, "track 须为 whitebox|blackbox（combined 走 blackbox-runs 端点）")
+    return _read_report_data(scan_dir / "deliverables" / track / REPORT_DATA_FILENAME)
 
 
 @router.get("/{ws}/scans/{scan_id}/dataflow")

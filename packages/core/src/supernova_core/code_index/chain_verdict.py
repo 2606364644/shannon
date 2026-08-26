@@ -385,8 +385,11 @@ async def judge_chain_verdict(
 ) -> ChainVerdict:
     """Light LLM pass: judge one candidate chain -> verdict.
 
-    Graceful on LLM failure: never crash; return a needs_review-flavored
-    verdict so the merger still processes it (Plan 3 OR is conservative).
+    Graceful on LLM failure: never crash; return a conservative vulnerable
+    verdict with confidence="unadjudicated" (spec 2026-08-26 §5.7 — the verdict
+    CHANNEL failed, which is a different statement than the LLM judging with
+    low confidence) so the merger still processes it (Plan 3 OR is
+    conservative).
     """
     prompt = _VERDICT_PROMPT.format(
         vuln_class=candidate.vuln_class,
@@ -412,13 +415,15 @@ async def judge_chain_verdict(
     try:
         raw = await llm_client(prompt, output_format=CHAIN_VERDICT_SCHEMA)
     except Exception as exc:
-        logger.warning("chain-verdict LLM pass failed (%s); marking needs_review", exc)
+        logger.warning("chain-verdict LLM pass failed (%s); marking unadjudicated", exc)
         return ChainVerdict(
             verdict="vulnerable",  # conservative: OR-friendly (do not silently clear)
             witness_payload=None,
             evidence_chain=f"{candidate.source_param} -> {candidate.sink_call_site_id} (llm-pass-failed, needs_review)",
             mismatch_reason="llm chain-verdict pass failed; needs human/LLM-track review",
-            confidence="low",
+            # spec 2026-08-26 §5.7：判定通道失败 ≠ LLM 判了且低置信——confidence 用
+            # "unadjudicated" 显式化，不再用 low 冒充已判定（渲染层显示「未判定」）。
+            confidence="unadjudicated",
             title=_fallback_title(candidate),
         )
 
@@ -442,7 +447,8 @@ async def judge_chain_verdict(
             witness_payload=None,
             evidence_chain=f"{candidate.source_param} -> {candidate.sink_call_site_id} (unparseable-llm, needs_review)",
             mismatch_reason=reason,
-            confidence="low",
+            # 同上（spec 2026-08-26 §5.7）：unparseable 降级属判定通道失败。
+            confidence="unadjudicated",
             title=_fallback_title(candidate),
         )
 

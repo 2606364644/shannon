@@ -1,5 +1,6 @@
 import useSWR from "swr";
-import { apiGet, apiGetText } from "./client";
+import { ApiError, apiGet, apiGetText } from "./client";
+import type { ReportData } from "./types";
 
 /**
  * 按 path 拉取的通用 SWR 资源 hook（2026-08-17 批次 Task 4）。
@@ -36,5 +37,28 @@ export function useApiJson<T>(path: string | null): UseApiJsonResult<T> {
     data: data ?? null,
     loading: isLoading && data === undefined,
     error: error ? (error instanceof Error ? error.message : String(error)) : null,
+  };
+}
+
+export interface UseReportDataResult {
+  data: ReportData | null;
+  loading: boolean;
+  error: string | null;
+  /** 404（旧 scan 无 report_data.json）→ 调用方回退 md 渲染路径（降级分支）。 */
+  notFound: boolean;
+}
+
+/**
+ * report_data.json（spec 2026-08-26 §7.1，T6）：结构化报告 SSOT 的 SWR 拉取。
+ * key 即 path（与 useApiText 同缓存策略）。notFound 单列——404 是「旧 scan 走 md
+ * 降级」的正常分流信号，非错误态；其余错误（网络/5xx）交调用方显 ErrorState。
+ */
+export function useReportData(path: string | null): UseReportDataResult {
+  const { data, error, isLoading } = useSWR(path, (p: string) => apiGet<ReportData>(p));
+  return {
+    data: data ?? null,
+    loading: isLoading && data === undefined,
+    error: error ? (error instanceof Error ? error.message : String(error)) : null,
+    notFound: error instanceof ApiError && error.status === 404,
   };
 }

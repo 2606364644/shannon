@@ -25,8 +25,12 @@ logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
-CONFIDENCE_ZH = {"high": "高", "medium": "中", "low": "低"}
-CONFIDENCE_EN = {"high": "High", "medium": "Medium", "low": "Low"}
+CONFIDENCE_ZH = {"high": "高", "medium": "中", "low": "低",
+                 # spec 2026-08-26 §5.7：判定通道失败（非 LLM 判了且低置信）——
+                 # 与 needs_review 的「待复核」显式区分，不静默混入。
+                 "unadjudicated": "未判定（判定通道失败）"}
+CONFIDENCE_EN = {"high": "High", "medium": "Medium", "low": "Low",
+                 "unadjudicated": "Unadjudicated (verdict pass failed)"}
 
 # 内部标签零泄漏（spec §9）：pipeline 内部判定状态串不得出现在报告正文。
 # 先吃掉「纯标签括号组」（如 "(llm-pass-failed, needs_review)" 整体删除），
@@ -500,9 +504,10 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     if getattr(vuln, "merge_source", None) == "both":
         conf_line += _M.get("meta_dual_track")
     meta_parts.append(conf_line)
-    if gn_only:
+    if gn_only and conf != "unadjudicated":
         pending = _M.get("gn_pending_review")
-        # §4.4：confidence 已显示「待复核」（needs_review 内部标签替换）时不再追加
+        # §4.4：confidence 已显示「待复核」（needs_review 内部标签替换）时不再追加；
+        # §5.7：unadjudicated 已显示「未判定（判定通道失败）」——语义不同，同样不追加
         if pending not in conf_line:
             meta_parts.append(pending)
     lines.append(_M.get("meta_sep").join(meta_parts))

@@ -2935,21 +2935,50 @@ class ScanManager:
         return False
 
     async def _generate_combined_report(self, scan_dir: Path, run_id: str) -> None:
-        """生成 per-run 融合报告（spec §9/§10.2）→ combined/run-K/combined_report.md。
+        """生成 per-run 融合报告（T8，spec 2026-08-26-report-generation-agent §6.2）。
 
-        按 vuln_class（injection/xss/ssrf/authz）交叉白盒 queue + 黑盒 verdicts。
-        白盒根 = scan_dir/deliverables/whitebox/，黑盒根 = run 子目录 deliverables/blackbox/，
-        输出根 = scan_dir/combined/{run_id}/。实现在 ``combined_report_renderer``；本 async
-        入口仅包装（文件读 inline，无须 offload），供 ``_run_blackbox_phase`` / reconcile
-        在黑盒完成后 await。
+        主路径：白盒 report_data.json + 黑盒 report_data.json →
+        ``fuse_report_data``（cross_verification 三态 + verification_gaps，
+        白盒叙事 × 黑盒实测证据融合卡）→ ``combined/run-K/report_data.json``
+        （前端 report-data 端点消费）+ ``combined_report.md``（md 导出，
+        /report?track=combined 兼容）。
+        降级：fusion 任一步失败 → 旧 ``combined_report_renderer``（md 链路不断）。
+        供 ``_run_blackbox_phase`` / reconcile 在黑盒完成后 await。
         """
-        from supernova_web.components.combined_report_renderer import (
-            render_combined_report)
         run_dir = blackbox_run_dir(scan_dir, run_id)
-        render_combined_report(
-            whitebox_root=whitebox_dir(scan_dir / "deliverables"),
-            blackbox_root=blackbox_dir(run_dir / "deliverables"),
-            out_dir=combined_run_dir(scan_dir, run_id))
+        out_dir = combined_run_dir(scan_dir, run_id)
+        try:
+            from supernova_core.models.report_data import ScanMeta
+            from supernova_core.services import report_data_builder
+            from supernova_core.services.report_data_blackbox import (
+                build_blackbox_report_data,
+            )
+            from supernova_core.services.report_fusion import fuse_report_data
+            from supernova_core.services.report_markdown_exporter import (
+                export_report_markdown,
+            )
+
+            scan_meta = ScanMeta(id=scan_dir.name, track="whitebox")
+            wb_rd = await report_data_builder.build_report_data(
+                whitebox_dir(scan_dir / "deliverables"), scan_meta)
+            # 黑盒 builder 期望 deliverables 根（内部经 resolve_track_deliverable
+            # 自拼 blackbox/intermediate/），与白盒（直接吃白盒桶）口径不同。
+            bb_rd = await build_blackbox_report_data(
+                run_dir / "deliverables",
+                scan_meta.model_copy(update={"track": "blackbox"}))
+            fused = fuse_report_data(wb_rd, bb_rd)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            await report_data_builder.write_report_data(
+                fused, out_dir / "report_data.json")
+            (out_dir / "combined_report.md").write_text(
+                export_report_markdown(fused), encoding="utf-8")
+        except Exception:  # noqa: BLE001 — fusion 失败回退旧 renderer（md 链路不断）
+            from supernova_web.components.combined_report_renderer import (
+                render_combined_report)
+            render_combined_report(
+                whitebox_root=whitebox_dir(scan_dir / "deliverables"),
+                blackbox_root=blackbox_dir(run_dir / "deliverables"),
+                out_dir=out_dir)
 
     async def _ensure_scan_end(self, scan_dir: Path, status: str = "completed") -> None:
         """幂等收尾（spec §7.4，修原 bug）：events 无 scan_end 才补写。

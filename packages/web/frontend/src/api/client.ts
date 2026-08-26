@@ -272,6 +272,24 @@ export const blackboxRunReportPath = (
     ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report?track=combined`
     : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report`;
 
+// ── report_data.json（spec 2026-08-26 §7.1，T6）───────────────────────────────
+// 结构化报告 SSOT（三轨统一 schema），前端 ReportView 纯渲染的优先数据源；
+// 旧 scan 无产物时端点 404 → ReportTab 回退上方 md 渲染路径。
+
+/** scan 级 report-data path（喂 apiGet，JSON）。track=whitebox|blackbox；
+ *  combined 是 per-run 产物，走 blackboxRunReportDataPath。 */
+export const scanReportDataPath = (
+  ws: string, scanId: string, track: "whitebox" | "blackbox") =>
+  `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/report-data?track=${track}`;
+
+/** run 级 report-data path：track=combined 读 combined/run-K/report_data.json；
+ *  默认 track 读 run 黑盒桶。 */
+export const blackboxRunReportDataPath = (
+  ws: string, scanId: string, runId: string, track: "blackbox" | "combined" = "blackbox") =>
+  track === "combined"
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report-data?track=combined`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/report-data`;
+
 /** run 级产物摘要（无 file）或单产物（带 file）path。 */
 export const blackboxRunDeliverablesPath = (
   ws: string, scanId: string, runId: string, file?: string) =>

@@ -39,6 +39,15 @@ const HL_LANGS = { bash, json, python, javascript, typescript, java, sql, http, 
 // 嵌套元组形态（react-markdown 约定）：rehypePlugins 数组的单个元素 = [plugin, options]。
 const HIGHLIGHT_PLUGIN = [[rehypeHighlightSubset, { languages: HL_LANGS }]] as const;
 
+// 【T6 状态（spec 2026-08-26 §7.2）】报告页主路径已迁 ReportView（report_data.json
+// 纯渲染，见 components/report/）；本组件只剩两个消费方：
+//   (a) ReportTab 的 md 降级分支（旧 scan 无 report_data.json -> 404 回退，功能不
+//       破坏优先）；
+//   (b) 交付物页 / 关联页的 md 文件预览（DeliverablesTab/CorrelationTab/FileStage）。
+// 其内的解析/推断/归并逻辑（extractVulnIds/parseStructure/vulnPreview/groupSegments/
+// pocById 归并等）均因 (a)(b) 保留。TODO(T6b)：(a) 下线时删报告页相关解析
+// （vuln-block/report-sections/report-stats 同批），(b) 只需一个轻量 md 预览。
+
 interface Heading {
   id: string;
   text: string;

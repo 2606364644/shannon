@@ -138,6 +138,15 @@ def _authz_ee_or(llm: Vulnerability, gitnexus: Vulnerability) -> bool | None:
     return None
 
 
+def _single_track_confidence(finding: Vulnerability) -> str:
+    """单轨分支 confidence：GitNexus 轨 chain_verdict 判定通道失败（unadjudicated）
+    显式保留（spec 2026-08-26 §5.7——不静默混入 needs_review 待复核，两种语义）；
+    其余单轨卡照旧 needs_review。"""
+    if str(getattr(finding, "confidence", None) or "").strip().lower() == "unadjudicated":
+        return "unadjudicated"
+    return "needs_review"
+
+
 def _clone_with_merge_fields(
     finding: Vulnerability,
     *,
@@ -264,7 +273,7 @@ def merge_dual_track_queues(
                 _clone_with_merge_fields(
                     gitnexus,
                     merge_source="gitnexus-only",
-                    confidence="needs_review",
+                    confidence=_single_track_confidence(gitnexus),
                     vulnerable=_is_vulnerable(gitnexus),
                 )
             )
@@ -285,10 +294,13 @@ def _has_danger(value: object) -> bool:
     return any(keyword in lowered for keyword in _DANGER_KEYWORDS)
 
 
-# --- LLM 辅助跨轨配对归并（spec 2026-08-26 §6.1）---
+# --- LLM 辅助跨轨配对归并（spec 2026-08-26 §6.1 + §5.1 ①归并终审）---
 # 确定性 _finding_key 配不上的同洞卡（sink 粒度/称谓不同、跨接口存储型链各见半条），
-# 由轻量 LLM 单次比对配对；仅 high 置信对应用合并——误合并（两个不同的洞合成一张
-# 卡、叙事互相污染）比漏合并更伤报告可信度，保守优先。
+# 由轻量 LLM 单次比对配对；仅 high 置信对应用——误合并（两个不同的洞合成一张卡、
+# 叙事互相污染）比漏合并更伤报告可信度，保守优先。
+# 配对结果两种形态（§5.1）：mode=merge 并成 both（字段融合，现行为）；mode=attach
+# 挂靠——LLM 卡为主体，GN 卡 ID 写入主体卡 merged_from、不再独立出现（呈现层同洞
+# 合并，不改主体判定字段——spec §8「不改双轨判定结果」）。
 
 @dataclass(frozen=True)
 class TrackPair:
@@ -297,6 +309,7 @@ class TrackPair:
     llm_id: str
     confidence: str  # high | medium | low
     reason: str | None = None
+    mode: str = "merge"   # merge=并成 both | attach=挂靠 merged_from
 
 
 def _pairing_summary_line(f: Vulnerability) -> str:
@@ -316,14 +329,28 @@ def _pairing_summary_line(f: Vulnerability) -> str:
 
 def build_pairing_prompt(llm_findings: list[Vulnerability],
                          gitnexus_findings: list[Vulnerability]) -> str:
-    """每 class 一次的批量配对 prompt：双列摘要 → JSON pairs 输出契约。"""
+    """每 class 一次的批量配对 prompt：双列摘要 → JSON 输出契约（两种形态）。
+
+    输出每对带 mode："merge"（同 param→同 sink 单位，并成 both 字段融合）或
+    "attach"（同洞但确定性细节对不上——粒度/文件/端点失配，LLM 卡为主体、GN 卡
+    ID 挂靠 merged_from、不再独立出现）。
+    """
     llm_lines = "\n".join(_pairing_summary_line(f) for f in llm_findings) or "- (none)"
     gn_lines = "\n".join(_pairing_summary_line(f) for f in gitnexus_findings) or "- (none)"
     return f"""Two vulnerability lists below describe findings from independent analysis tracks
 of the SAME codebase. Some entries describe the SAME underlying vulnerability
 (e.g. a stored XSS where one track names the template-expression sink and the
 other the template render function; a chain seen from its write endpoint vs its
-trigger endpoint). Match them.
+trigger endpoint; the LLM card recording the sink at memos.html:31 while the
+GitNexus chain has it at memos.js:27). Match each such pair and choose a mode:
+
+- "merge": the two cards clearly describe the same param -> same sink unit —
+  fuse the GitNexus card into the LLM card (dual-track confirmed, fields merged).
+- "attach": same underlying hole but the deterministic details do not line up
+  (different granularity, file, or endpoint of one stored/reflected flow) —
+  keep the LLM card as the primary and attach the GitNexus card by ID into its
+  `merged_from` list (the GitNexus card stops appearing on its own; NO field
+  fusion, NO verdict/severity change on the primary card).
 
 LLM-track findings:
 {llm_lines}
@@ -332,26 +359,34 @@ GitNexus-track findings:
 {gn_lines}
 
 Output STRICT JSON only (no markdown fence, no prose):
-{{"pairs": [{{"gn_id": "<GitNexus ID>", "llm_id": "<LLM ID>",
-             "confidence": "high|medium|low", "reason": "<one line>"}}]}}
+{{"merge": [{{"llm_id": "<LLM ID>", "gn_id": "<GitNexus ID>",
+             "mode": "merge|attach", "confidence": "high|medium|low",
+             "reason": "<one line>"}}]}}
 
 Rules:
 - Only pair entries that are the SAME vulnerability (same param flowing to the
   same dangerous sink location, even if named at different granularity or via
   different endpoints of one stored/reflected flow).
+- Prefer "merge" when param and sink location clearly correspond; use "attach"
+  when it is the same hole but the recorded locations/endpoints do not line up.
 - "high" ONLY when param and sink location clearly correspond; when unsure use
   "medium"/"low" or omit the pair entirely.
 - Different vulnerabilities must NOT be paired."""
 
 
 _PAIR_CONFIDENCES = frozenset({"high", "medium", "low"})
+_PAIR_MODES = frozenset({"merge", "attach"})
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def parse_pairing_response(raw: object, valid_gn_ids: set[str],
                            valid_llm_ids: set[str]) -> list[TrackPair]:
-    """解析 LLM 配对输出：容忍 markdown fence / 前后杂文；幻觉 ID 与非法置信度
-    整对丢弃；非法 JSON → []（调用方按无配对处理）。"""
+    """解析 LLM 配对输出：容忍 markdown fence / 前后杂文；幻觉 ID、非法置信度、
+    非法 mode 整对丢弃；非法 JSON → []（调用方按无配对处理）。
+
+    两种输入形态：新 ``{"merge": [{llm_id, gn_id, mode, confidence}]}``（§5.1
+    归并终审）与旧 ``{"pairs": [{gn_id, llm_id, confidence}]}``（mode 缺省 merge，
+    向后兼容）。"""
     if not isinstance(raw, str) or not raw.strip():
         return []
     import json
@@ -363,27 +398,50 @@ def parse_pairing_response(raw: object, valid_gn_ids: set[str],
         data = json.loads(m.group(0))
     except (json.JSONDecodeError, ValueError):
         return []
+    entries = list(data.get("merge") or []) + list(data.get("pairs") or [])
     pairs: list[TrackPair] = []
-    for p in data.get("pairs") or []:
+    for p in entries:
         if not isinstance(p, dict):
             continue
         gn_id, llm_id = str(p.get("gn_id") or ""), str(p.get("llm_id") or "")
         conf = str(p.get("confidence") or "").strip().lower()
+        mode = str(p.get("mode") or "merge").strip().lower()
         if gn_id not in valid_gn_ids or llm_id not in valid_llm_ids:
             continue
         if conf not in _PAIR_CONFIDENCES:
             continue
+        if mode not in _PAIR_MODES:
+            continue
         reason = p.get("reason")
         pairs.append(TrackPair(gn_id, llm_id, conf,
-                               str(reason) if isinstance(reason, str) else None))
+                               str(reason) if isinstance(reason, str) else None,
+                               mode))
     return pairs
+
+
+def _attach_merged_from(subject: Vulnerability, gn_id: str) -> Vulnerability:
+    """attach 挂靠：主体卡 ``merged_from`` 追加 GN 卡 ID（去重），其余字段不动。"""
+    data = subject.model_dump()
+    merged_from = list(data.get("merged_from") or [])
+    if gn_id not in merged_from:
+        merged_from.append(gn_id)
+    data["merged_from"] = merged_from
+    return type(subject).model_validate(data)
 
 
 def apply_pairing_merge(merged: list[Vulnerability],
                         pairs: list[TrackPair]) -> list[Vulnerability]:
-    """应用 high 置信配对：GN 卡并入对应 LLM 卡（复用 both 分支字段融合：
-    entries 并集 / severity 取高 / evidence_chain 兜底 / verdict OR），GN 独立卡
-    移除。中低置信与找不到卡的配对跳过。"""
+    """应用 high 置信配对，两种形态（spec 2026-08-26 §5.1）：
+
+    - ``mode="merge"``：GN 卡并入对应 LLM 卡成 both（复用 both 分支字段融合：
+      entries 并集 / severity 取高 / evidence_chain 兜底 / verdict OR），GN 独立卡
+      移除——现行为。
+    - ``mode="attach"``：LLM 卡为主体，GN 卡 ID 挂靠其 ``merged_from``，GN 独立卡
+      移除；主体卡 merge_source/confidence/verdict/severity 全不变（呈现层同洞
+      合并，不改双轨判定结果——spec §8）。
+
+    中低置信与找不到卡的配对跳过；同一 GN 卡只消费一次；同一 LLM 主体多对挂靠
+    时 merged_from 累积。"""
     by_id = {f.ID: f for f in merged}
     consumed_gn: set[str] = set()
     replacements: dict[str, Vulnerability] = {}
@@ -394,19 +452,23 @@ def apply_pairing_merge(merged: list[Vulnerability],
         gn = by_id.get(pair.gn_id)
         if llm is None or gn is None or pair.gn_id in consumed_gn:
             continue
-        replacements[pair.llm_id] = _clone_with_merge_fields(
-            llm,
-            merge_source="both",
-            confidence="high",
-            vulnerable=_is_vulnerable(llm) or _is_vulnerable(gn),
-            evidence_chain=getattr(llm, "evidence_chain", None)
-            or getattr(gn, "evidence_chain", None),
-            externally_exploitable_override=_authz_ee_or(llm, gn),
-            other_severity=effective_severity(gn),
-            other_entries=getattr(gn, "affected_entries", None),
-            other_params=getattr(gn, "affected_parameters", None),
-            other_endpoint=getattr(gn, "endpoint", None),
-        )
+        base = replacements.get(pair.llm_id, llm)
+        if pair.mode == "attach":
+            replacements[pair.llm_id] = _attach_merged_from(base, pair.gn_id)
+        else:
+            replacements[pair.llm_id] = _clone_with_merge_fields(
+                base,
+                merge_source="both",
+                confidence="high",
+                vulnerable=_is_vulnerable(base) or _is_vulnerable(gn),
+                evidence_chain=getattr(base, "evidence_chain", None)
+                or getattr(gn, "evidence_chain", None),
+                externally_exploitable_override=_authz_ee_or(base, gn),
+                other_severity=effective_severity(gn),
+                other_entries=getattr(gn, "affected_entries", None),
+                other_params=getattr(gn, "affected_parameters", None),
+                other_endpoint=getattr(gn, "endpoint", None),
+            )
         consumed_gn.add(pair.gn_id)
     if not consumed_gn:
         return merged

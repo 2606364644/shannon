@@ -61,6 +61,10 @@ _M = Messages({
     # 内部置信度标签（merger 单轨分支写 needs_review 等）→ 读者可读文案，
     # 不让流水线内部术语泄漏进报告正文（spec 2026-08-25 §9）。
     "conf_pending_review": {"zh": "待复核", "en": "Pending Review"},
+    # 判定通道失败（chain_verdict llm-pass-failed/unparseable-llm 降级）——与
+    # needs_review 待复核显式区分（spec 2026-08-26 §5.7）。
+    "conf_unadjudicated": {"zh": "未判定（判定通道失败）",
+                           "en": "Unadjudicated (verdict pass failed)"},
 })
 
 # 速查表分隔行（7 列，语言中性）
@@ -69,7 +73,8 @@ _PLACEHOLDER = "-"
 
 _VERIFICATION_KEYS = {"static_analysis": "verif_static",
                       "dynamically_verified": "verif_dynamic"}
-_CONFIDENCE_KEYS = {"high": "conf_high", "medium": "conf_medium", "low": "conf_low"}
+_CONFIDENCE_KEYS = {"high": "conf_high", "medium": "conf_medium", "low": "conf_low",
+                    "unadjudicated": "conf_unadjudicated"}
 
 
 def _type_title(vuln) -> str:
@@ -125,8 +130,9 @@ def _verification_cell(vuln) -> str:
 
 
 def _confidence_cell(vuln) -> str:
-    """置信度列：high/medium/low → 高/中/低；needs_review 及其它未知非空值 →
-    待复核（内部标签不进正文——泄漏源=dual_track_merger 单轨分支给条目写
+    """置信度列：high/medium/low → 高/中/低；unadjudicated → 未判定（判定通道
+    失败，spec 2026-08-26 §5.7——与 needs_review 区分）；needs_review 及其它未知
+    非空值 → 待复核（内部标签不进正文——泄漏源=dual_track_merger 单轨分支给条目写
     confidence="needs_review"）；空值显示 '-'。"""
     confidence = (getattr(vuln, "confidence", None) or "").strip().lower()
     key = _CONFIDENCE_KEYS.get(confidence)

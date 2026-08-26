@@ -1,6 +1,12 @@
 import type { ParsedVulnBlock, Severity } from "../api/types";
 import { inferSeverity, SEVERITY_RANK } from "./vuln-block";
 
+// 【T6 状态（spec 2026-08-26 §7.2）】报告页主路径已迁 ReportView（吃 report_data.json
+// 的确定性 stats，纯渲染）；本文件的推断/零计数补全（computeStats 第 146-164 行附近）
+// 只剩 md 降级分支（ReportTab 404 回退）与交付物页 md 预览在用（经 MarkdownView
+// -> ThreatOverview/TypeSummaryCards）。TODO(T6b)：md 降级分支下线时随 MarkdownView
+// 一起删除，届时零计数类型由 report_data.stats.by_type 数据自带。
+
 /** severity → 实心背景色（堆叠条段 / 类型卡色条 / 左色条复用）。
  *  暖色梯度：Critical=red / High=orange / Medium=yellow / Low=灰；
  *  cyan 仅作信息色，不进 severity 编码（避免与 primary 撞色）。 */

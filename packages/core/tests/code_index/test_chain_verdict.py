@@ -178,8 +178,11 @@ async def test_judge_chain_verdict_defaults_safe_on_llm_failure():
         raise RuntimeError("LLM chain-verdict pass not available")
 
     verdict = await judge_chain_verdict(chain, llm_client=failing_llm)
-    # graceful: never crash; mark needs_review (do not silently declare safe/vulnerable)
-    assert verdict.confidence == "low"
+    # graceful: never crash; verdict stays conservative-vulnerable (OR-friendly)
+    # spec 2026-08-26 §5.7：判定通道失败 → confidence="unadjudicated"（不再用 low
+    # 冒充已判定——low 是「LLM 判了且结论低置信」，通道失败是另一语义）
+    assert verdict.confidence == "unadjudicated"
+    assert verdict.verdict == "vulnerable"
     assert "needs_review" in (verdict.mismatch_reason or "") or verdict.verdict in ("safe", "vulnerable")
 
 
@@ -357,7 +360,8 @@ async def test_judge_unparseable_after_retries_is_conservative():
     assert calls["n"] == 3                          # 1 原始 + 2 重试（默认）
     assert verdict.verdict == "vulnerable"          # OR 友好，不静默清除
     assert verdict.witness_payload is None
-    assert verdict.confidence == "low"
+    # spec 2026-08-26 §5.7：unparseable 降级同属判定通道失败 → unadjudicated
+    assert verdict.confidence == "unadjudicated"
     assert "unparseable output after all attempts" in verdict.mismatch_reason
 
 
@@ -369,7 +373,41 @@ async def test_judge_empty_output_after_retries_distinguishes_reason():
 
     verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
     assert verdict.verdict == "vulnerable"
+    assert verdict.confidence == "unadjudicated"
     assert "empty output" in verdict.mismatch_reason
+
+
+# --------------------------------------------------------------------------- #
+# spec 2026-08-26-report-generation-agent-design §5.7：chain_verdict 失败显式化。
+# 「LLM 判了且结论 low confidence」≠「判定通道根本没成功」——后者 unadjudicated，
+# 前者仍是 LLM 的真实判定，confidence 原样透传。
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_judge_llm_low_confidence_verdict_is_not_unadjudicated():
+    """LLM 成功判定且自评 low → confidence 透传 "low"（不被改写 unadjudicated）。"""
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q -> db.execute(L1)","mismatch_reason":"weak signal",'
+                '"confidence":"low","title":"SQLi"}')
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    assert verdict.confidence == "low"
+    assert verdict.verdict == "vulnerable"
+
+
+@pytest.mark.asyncio
+async def test_judge_llm_failure_unadjudicated_keeps_conservative_fields():
+    """通道失败分支：verdict 保守 vulnerable + witness=None + 兜底 title（不丢报）。"""
+    async def failing_llm(prompt, **kw):
+        raise RuntimeError("provider down")
+
+    verdict = await judge_chain_verdict(_chain(), llm_client=failing_llm)
+    assert verdict.confidence == "unadjudicated"
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload is None
+    assert verdict.title is not None          # 确定性兜底标题仍在
+    assert "llm-pass-failed" in verdict.evidence_chain
 
 
 @pytest.mark.asyncio

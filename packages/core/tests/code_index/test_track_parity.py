@@ -164,3 +164,56 @@ async def test_no_cross_track_cards_skips_llm_entirely():
     client = _StubClient([])
     out = await enhance_track_parity(merged, "injection", client)
     assert client.calls == [] and len(out) == 1
+
+
+# --- spec 2026-08-26 §5.1 ①归并终审：attach 挂靠形态（merged_from）---
+
+@pytest.mark.asyncio
+async def test_attach_mode_attaches_gn_id_via_merged_from():
+    """新形态 mode=attach：LLM 卡为主体挂靠 GN ID（merged_from），GN 卡移除，
+    主体卡 merge_source/confidence 不变（呈现层归并，不冒充 both）。"""
+    pairing = json.dumps({"merge": [
+        {"llm_id": "INJ-VULN-01", "gn_id": "INJ-GN-01",
+         "mode": "attach", "confidence": "high",
+         "reason": "same eval hole, sink named at different granularity"}]})
+    client = _StubClient([pairing])
+    out = await enhance_track_parity(_merged(), "injection", client)
+    assert len(out) == 1
+    card = out[0]
+    assert card.ID == "INJ-VULN-01"
+    assert card.merged_from == ["INJ-GN-01"]
+    assert card.merge_source == "llm-only"
+    assert len(client.calls) == 1   # GN 卡已挂靠移除 → 无剩余 gn-only，不补全
+
+
+@pytest.mark.asyncio
+async def test_mixed_merge_and_attach_modes_via_enhance():
+    """一批配对同时含 merge 与 attach：merge 成 both、attach 挂靠 merged_from。"""
+    llm2 = _llm_card(ID="INJ-VULN-02", endpoint="GET /research",
+                     sink_function="eval elsewhere2")
+    gn2 = _gn_card(ID="INJ-GN-02")
+    merged = _merged() + merge_dual_track_queues([llm2], [], mode="verdict") \
+        + merge_dual_track_queues([], [gn2], mode="verdict")
+    pairing = json.dumps({"merge": [
+        {"llm_id": "INJ-VULN-01", "gn_id": "INJ-GN-01",
+         "mode": "merge", "confidence": "high"},
+        {"llm_id": "INJ-VULN-02", "gn_id": "INJ-GN-02",
+         "mode": "attach", "confidence": "high"}]})
+    client = _StubClient([pairing])
+    out = await enhance_track_parity(merged, "injection", client)
+    by_id = {f.ID: f for f in out}
+    assert by_id["INJ-VULN-01"].merge_source == "both"
+    assert by_id["INJ-VULN-02"].merge_source == "llm-only"
+    assert by_id["INJ-VULN-02"].merged_from == ["INJ-GN-02"]
+    assert set(by_id) == {"INJ-VULN-01", "INJ-VULN-02"}
+
+
+@pytest.mark.asyncio
+async def test_attach_mode_garbage_response_falls_back_deterministic():
+    """attach 时代 LLM 输出不可解析 → 回退确定性 key 配对结果（现行为不变）。"""
+    client = _StubClient(["garbage not json"])
+    merged = _merged()
+    out = await enhance_track_parity(merged, "injection", client,
+                                     complete=False)
+    assert [f.ID for f in out] == [f.ID for f in merged]
+    assert all(f.merged_from is None for f in out)

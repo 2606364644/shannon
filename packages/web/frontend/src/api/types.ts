@@ -296,6 +296,146 @@ export interface ParsedVulnBlock {
   raw: string;                      // 原始块 markdown（调试）
 }
 
+// === report_data.json（spec 2026-08-26-report-generation-agent-design §4，T6）===
+// 三轨（whitebox/blackbox/combined）统一报告 SSOT：GET .../report-data 返回，前端
+// ReportView 组件族纯渲染（不做解析/推断/归并）。字段名与 core pydantic schema
+// （models/report_data.py）严格一致，snake_case 直传不改名；agent 产物字段全部
+// 可选（组装时 LLM 步骤可能未跑/失败，报告永远完整产出）。
+
+/** 扫描元信息。 */
+export interface ReportScanMeta {
+  id: string;
+  track: "whitebox" | "blackbox" | "combined" | string;
+  repo?: string | null;
+  date?: string | null;
+  duration_ms?: number | null;
+  cost?: number | null;
+  currency?: string | null;
+  model?: string | null;
+}
+
+/** 接口一体表行：接口 + 参数 + 认证 + 三处行号（file:line）。 */
+export interface EndpointEntry {
+  method?: string | null;
+  path: string;
+  role?: string | null;            // write/trigger/read
+  auth?: string | null;            // isLoggedIn/public/isAdmin
+  params: string[];
+  route_registered_at?: string | null;
+  source_location?: string | null;
+  sink_location?: string | null;
+}
+
+/** 完整可复现 HTTP 请求（POC 增强 agent 产物；黑盒为实际发出的请求）。 */
+export interface PocRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string | null;
+}
+
+/** 预期响应特征（判定依据）。 */
+export interface PocExpectedResponse {
+  indicator: string;
+  success_criteria?: string | null;
+}
+
+/** POC 块：request + 前置条件 + 预期响应 + witness payload；curl/raw_http 由
+ *  request 确定性生成（复制/导出用）。 */
+export interface PocBlock {
+  witness_payload?: string | null;
+  request?: PocRequest | null;
+  preconditions?: string | null;
+  expected_response?: PocExpectedResponse | null;
+  curl?: string | null;
+  raw_http?: string | null;
+}
+
+/** 卡片叙事三段（cause=成因/impact=危害/remediation=修复建议，md 文本）。 */
+export interface VulnNarrative {
+  cause?: string | null;
+  impact?: string | null;
+  remediation?: string | null;
+}
+
+/** 验证证据：verification=dynamic 时 dynamic_evidence 为黑盒实测输出（突出显示）。 */
+export interface VulnEvidence {
+  verification: "static" | "dynamic";
+  dynamic_evidence?: string | null;
+  verdict?: string | null;
+  code_snippet?: string | null;
+  notes?: string | null;
+}
+
+/** 报告漏洞卡（queue SSOT 条目的报告视图超集；severity 由数据带出，前端不推断）。 */
+export interface ReportVulnerability {
+  id: string;
+  type: string;                    // injection/xss/ssrf/auth/authz
+  vulnerability_type?: string | null;
+  title?: string | null;
+  severity?: string | null;        // critical/high/medium/low
+  confidence?: string | null;      // high/needs_review/unadjudicated
+  cvss?: string | null;
+  cwe_id?: string | null;
+  owasp_category?: string | null;
+  externally_exploitable?: boolean | null;
+  authentication_required?: string | null;
+  merge_source?: string | null;    // both/llm-only/gitnexus-only
+  merged_from: string[];           // ①归并终审产物（跨轨同洞合并）
+  narrative?: VulnNarrative | null;
+  endpoints: EndpointEntry[];
+  affected_entries: Record<string, unknown>[];
+  dataflow_steps: Array<{ label?: string | null; file?: string | null; line?: number | null; protection?: string | null } & Record<string, unknown>>;
+  poc?: PocBlock | null;
+  evidence?: VulnEvidence | null;
+  attack_chain_refs: string[];
+}
+
+/** 执行摘要「最高风险发现」单条。 */
+export interface ReportTopRisk {
+  vuln_id: string;
+  reason?: string | null;
+  priority?: "P0" | "P1" | null;
+}
+
+/** ④执行摘要 agent 产物（组装期缺省；LLM 失败回退确定性摘要）。 */
+export interface ReportExecutiveSummary {
+  narrative?: string | null;
+  risk_level?: string | null;
+  top_risks: ReportTopRisk[];
+  remediation_order?: string | null;
+}
+
+/** 单类型聚合（确定性，组装器算——零计数类型也在数据里，前端不补全）。 */
+export interface ReportTypeStats {
+  count: number;
+  severity_range?: string | null;
+  key_findings?: string | null;
+}
+
+export interface ReportStatsData {
+  by_type: Record<string, ReportTypeStats>;
+  by_severity: Record<string, number>;
+}
+
+/** ⑤QA agent 产物：失败不阻塞（qa.passed=false 显式呈现）。 */
+export interface ReportQA {
+  passed: boolean;
+  checks: Array<{ check: string; failed_ids: string[] }>;
+  reworked_ids: string[];
+}
+
+/** 顶层 SSOT。attack_chains 步骤为自由 dict（组装器透传）。 */
+export interface ReportData {
+  schema_version: number;
+  scan: ReportScanMeta;
+  executive_summary?: ReportExecutiveSummary | null;
+  stats?: ReportStatsData | null;
+  vulnerabilities: ReportVulnerability[];
+  attack_chains: Array<{ id: string; steps?: Record<string, unknown>[]; narrative?: string | null }>;
+  qa?: ReportQA | null;
+}
+
 export interface DeliverablesFile {
   path: string;        // 相对 deliverables/{track}/ 的路径
   size: number;

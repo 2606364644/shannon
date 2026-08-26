@@ -1,7 +1,8 @@
 import json
 import pytest
 from pathlib import Path
-from supernova_core.services.report_assembler import ReportAssembler
+from supernova_core.services.report_assembler import ReportAssembler, _confidence_cell
+from supernova_core.models.queue_schemas import InjectionVulnerability
 
 
 @pytest.mark.asyncio
@@ -97,3 +98,26 @@ async def test_render_attack_chains_reads_intermediate(tmp_path):
     assert md != ""
     assert "CHAIN-01" in md
     assert "/api/users/1" in md
+
+
+# --- spec 2026-08-26 §5.7：unadjudicated（判定通道失败）速查表文案 ---
+
+def _vuln(confidence):
+    return InjectionVulnerability(
+        ID="INJ-GN-01", vulnerability_type="injection",
+        externally_exploitable=True, confidence=confidence, verdict="vulnerable")
+
+
+def test_confidence_cell_unadjudicated_zh(monkeypatch):
+    """zh：unadjudicated → 未判定（判定通道失败）——与待复核（needs_review）区分。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    assert _confidence_cell(_vuln("unadjudicated")) == "未判定（判定通道失败）"
+    # needs_review 仍走待复核（不受影响）
+    assert _confidence_cell(_vuln("needs_review")) == "待复核"
+
+
+def test_confidence_cell_unadjudicated_en(monkeypatch):
+    """en：unadjudicated → Unadjudicated (verdict pass failed)。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "en")
+    assert _confidence_cell(_vuln("unadjudicated")) == "Unadjudicated (verdict pass failed)"
+    assert _confidence_cell(_vuln("needs_review")) == "Pending Review"

@@ -4,9 +4,11 @@ GitNexus 轨侧的轻量 LLM 补全层（同 chain_verdict 轻量判定 / llm-di
 sink 模式——确定性兜底 + 可选 LLM 增强；不触碰「确定性产物不喂 LLM 轨 vuln
 agent prompt」铁律，输入是 GN 自己的产物）：
 
-1. **配对归并**（§6.1）：确定性 key 配不上的同洞卡（sink 粒度/称谓不同、跨
-   接口存储型链各见半条），每 class 一次 LLM 批量比对，仅 high 置信对应用
-   合并（复用 merger both 分支字段融合）。
+1. **配对归并**（§6.1 + §5.1 ①归并终审）：确定性 key 配不上的同洞卡（sink
+   粒度/称谓不同、跨接口存储型链各见半条），每 class 一次 LLM 批量比对，仅
+   high 置信对应用——两种形态：``mode=merge`` 并成 both（复用 merger both 分支
+   字段融合）或 ``mode=attach`` 挂靠（LLM 卡为主体，GN 卡 ID 写入主体卡
+   ``merged_from``、不再独立出现；不改主体判定字段）。
 2. **GN-only 卡补全**（§6.2）：配对后仍 gitnexus-only 的卡逐卡单次结构化输出，
    补 title/notes/impact/remediation/cvss/owasp_category/severity 校准——写
    BaseVulnerability 现成字段，零 schema 改动；不补 dataflow_steps（轻量单次
@@ -139,11 +141,12 @@ async def enhance_track_parity(
 ) -> list[Vulnerability]:
     """merge activity 内的编排入口（确定性 merge 之后、落盘之前）。
 
-    配对（每 class 一次）→ 补全（剩余 gn-only 逐卡一次；``complete=False`` 跳过
-    ——SUPERNOVA_GN_ENRICH_MODE=deep 时轻量补全让位给独立深度富化 step，避免
-    双重 LLM 花费）。任一 LLM 失败/不可解析都优雅退化（log + 保持现状），绝不
-    抛出——报告管线不因增强层阻塞（spec §6 退化口径）。单侧空时零调用
-    （成本守门）。"""
+    配对（每 class 一次；结果两种形态——merge 成 both 或 attach 挂靠
+    ``merged_from``，见 dual_track_merger.apply_pairing_merge）→ 补全（剩余
+    gn-only 逐卡一次；``complete=False`` 跳过——SUPERNOVA_GN_ENRICH_MODE=deep
+    时轻量补全让位给独立深度富化 step，避免双重 LLM 花费）。任一 LLM 失败/
+    不可解析都优雅退化（log + 保持现状 = 确定性 key 配对结果），绝不抛出——
+    报告管线不因增强层阻塞（spec §6/§5.6 退化口径）。单侧空时零调用（成本守门）。"""
     llm_only = [f for f in merged if f.merge_source == "llm-only"]
     gn_only = [f for f in merged if f.merge_source == "gitnexus-only"]
 

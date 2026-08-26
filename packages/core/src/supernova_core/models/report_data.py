@@ -114,6 +114,10 @@ class ReportVulnerability(BaseModel):
     poc: PocBlock | None = None
     evidence: VulnEvidence | None = None
     attack_chain_refs: list[str] = Field(default_factory=list)
+    # T8 融合版专属（spec §6.2）：白盒发现 × 黑盒实测三态 + 黑盒独有第四态；
+    # 白盒/黑盒单轨产物为 None。
+    cross_verification: Literal[
+        "verified", "untested", "failed-to-verify", "blackbox-only"] | None = None
     # 原始 queue entry（md 导出复用 render_vuln_card；JSON 消费方忽略）
     raw: dict[str, Any] | None = None
 
@@ -173,3 +177,5 @@ class ReportData(BaseModel):
     vulnerabilities: list[ReportVulnerability] = Field(default_factory=list)
     attack_chains: list[AttackChainEntry] = Field(default_factory=list)
     qa: ReportQA | None = None
+    # T8 融合版专属：白盒发现黑盒未覆盖清单 [{vuln_id, reason}]
+    verification_gaps: list[dict[str, Any]] = Field(default_factory=list)

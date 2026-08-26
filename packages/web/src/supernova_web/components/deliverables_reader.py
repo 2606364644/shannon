@@ -164,13 +164,12 @@ class DeliverablesReader:
             return rel[len(self._strip) + 1:]
         return rel
 
-    def read(self, filename: str, track: str | None = None,
-             preview_limit: int | None = None) -> dict | list | str:
-        """读单产物。preview_limit（spec 2026-08-18）：超限文件返回截断 str + 标注
-        （跳过 json.loads，几十 MB 的 code_index.json 不再整载入/整传输）。"""
-        # track=None(未指定,如 report_for)→ 像 summary/read_poc 那样按目录布局自动推断,
-        # 否则黑盒扫描报告落在 blackbox/ 却按默认 whitebox track 找不到 -> 500。
-        # 显式传 track(如 deliverables_file_for 从路由 query param)时尊重之。
+    def resolve_path(self, filename: str, track: str | None = None) -> Path:
+        """解析产物物理路径。track=None(未指定,如 report_for)→ 像 summary/read_poc
+        那样按目录布局自动推断, 否则黑盒扫描报告落在 blackbox/ 却按默认 whitebox
+        track 找不到 -> 500。显式传 track(如 deliverables_file_for 从路由 query
+        param)时尊重之。不存在抛 FileNotFoundError——read() 与下载端点
+        (FileResponse 附件,不读内容)共用。"""
         resolved = self._infer_track() if track is None else track
         p = resolve_track_deliverable(self._deliverables, resolved, filename)
         if not p.exists() and self._strip:
@@ -178,6 +177,13 @@ class DeliverablesReader:
             p = self._deliverables / filename
         if not p.exists():
             raise FileNotFoundError(filename)
+        return p
+
+    def read(self, filename: str, track: str | None = None,
+             preview_limit: int | None = None) -> dict | list | str:
+        """读单产物。preview_limit（spec 2026-08-18）：超限文件返回截断 str + 标注
+        （跳过 json.loads，几十 MB 的 code_index.json 不再整载入/整传输）。"""
+        p = self.resolve_path(filename, track)
         text = p.read_text("utf-8")
         if preview_limit is not None and len(text) > preview_limit:
             return (f"{text[:preview_limit]}\n\n…[truncated: showing {preview_limit} of "

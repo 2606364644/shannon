@@ -68,6 +68,23 @@ def test_gitnexus_only_marked_needs_review():
     assert out[0].confidence == "needs_review"
 
 
+# --- spec 2026-08-26 §5.7：chain_verdict 失败显式化（unadjudicated 不被吞）---
+
+def test_gitnexus_only_unadjudicated_confidence_survives_merge():
+    """GN-only 卡 confidence="unadjudicated"（chain_verdict 判定通道失败）→
+    merge 不得覆写成 needs_review（静默混入待复核）；普通 gn-only 仍 needs_review。"""
+    unadj = InjectionVulnerability(
+        ID="G1", vulnerability_type="injection", externally_exploitable=True,
+        confidence="unadjudicated", verdict="vulnerable",
+        source="q", sink_call="db.exec")
+    normal = _inj("G2", "vulnerable", source="q2", sink_call="db.exec2")
+    out = merge_dual_track_queues([], [unadj, normal], mode="verdict")
+    assert len(out) == 2
+    by_id = {f.ID: f for f in out}
+    assert by_id["G1"].confidence == "unadjudicated"
+    assert by_id["G2"].confidence == "needs_review"
+
+
 def test_dedup_key_collapses_same_finding_across_tracks():
     llm = [_inj("L1", "vulnerable", source="q", sink_call="db.exec")]
     gn = [_inj("G1", "safe", source="q", sink_call="db.exec")]
@@ -410,7 +427,8 @@ def test_build_pairing_prompt_contains_summaries():
     prompt = build_pairing_prompt([_llm_card()], [_gn_card()])
     assert "XSS-VULN-01" in prompt and "XSS-GN-13" in prompt
     assert "marked(doc.memo)" in prompt and "POST /memos" in prompt
-    assert "pairs" in prompt  # JSON 输出契约
+    # JSON 输出契约（§5.1 升级：{"merge":[...]}，含 mode=merge|attach 两种形态）
+    assert '"merge"' in prompt and '"mode"' in prompt
 
 
 def test_parse_pairing_response_valid():
@@ -469,3 +487,157 @@ def test_apply_pairing_missing_card_skipped():
     from supernova_core.code_index.dual_track_merger import TrackPair
     out = apply_pairing_merge(merged, [TrackPair("NOPE-GN", "XSS-VULN-01", "high")])
     assert len(out) == 1 and out[0].merge_source == "llm-only"
+
+
+# --- spec 2026-08-26 §5.1 ①归并终审：配对输出两种形态（merge 成 both / attach 挂靠）---
+
+def test_build_pairing_prompt_teaches_merge_and_attach_modes():
+    """prompt 明确教两种输出形态：mode=merge（both 字段融合）/ mode=attach
+    （LLM 卡为主体、GN 卡 ID 挂靠 merged_from、不再独立出现）。"""
+    prompt = build_pairing_prompt([_llm_card()], [_gn_card()])
+    assert '"merge"' in prompt or '"merge":' in prompt
+    assert "attach" in prompt
+    assert "merged_from" in prompt
+    assert "merge|attach" in prompt or '"merge"|"attach"' in prompt
+
+
+def test_parse_pairing_new_merge_form_with_modes():
+    """新输出形态 {"merge":[{llm_id,gn_id,mode,confidence}]}：mode 解析；
+    缺 mode → merge（向后兼容）；非法 mode / 幻觉 ID / 非法 confidence → 整对丢弃。"""
+    raw = _json.dumps({"merge": [
+        {"llm_id": "L1", "gn_id": "G1", "mode": "attach", "confidence": "high"},
+        {"llm_id": "L2", "gn_id": "G2", "mode": "merge", "confidence": "high"},
+        {"llm_id": "L3", "gn_id": "G3", "confidence": "high"},           # 缺 mode → merge
+        {"llm_id": "L4", "gn_id": "G4", "mode": "fuse", "confidence": "high"},   # 非法 mode
+        {"llm_id": "GHOST", "gn_id": "G5", "mode": "attach", "confidence": "high"},  # 幻觉 llm_id
+        {"llm_id": "L5", "gn_id": "G5", "mode": "attach"},               # 缺 confidence
+    ]})
+    pairs = parse_pairing_response(raw, {"G1", "G2", "G3", "G4", "G5"},
+                                   {"L1", "L2", "L3", "L4", "L5"})
+    assert [(p.llm_id, p.gn_id, p.mode, p.confidence) for p in pairs] == [
+        ("L1", "G1", "attach", "high"),
+        ("L2", "G2", "merge", "high"),
+        ("L3", "G3", "merge", "high"),
+    ]
+
+
+def test_parse_pairing_legacy_pairs_form_still_supported():
+    """旧 {"pairs":[...]} 形态继续可解析（mode 缺省 merge）——向后兼容。"""
+    raw = _json.dumps({"pairs": [
+        {"gn_id": "G1", "llm_id": "L1", "confidence": "high"}]})
+    pairs = parse_pairing_response(raw, {"G1"}, {"L1"})
+    assert len(pairs) == 1 and pairs[0].mode == "merge"
+
+
+def _stub_two_track_merged():
+    """LLM-only 卡 + GN-only 卡（确定性 key 配不上的同洞：sink 文件/行失配）。"""
+    llm = InjectionVulnerability(
+        ID="XSS-VULN-01", vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="medium", verdict="vulnerable",
+        title="Stored XSS: memo rendered without encoding",
+        endpoint="POST /memos", sink_function="res.render('memos', {memo})",
+        severity="high", affected_parameters=["memo"])
+    gn = InjectionVulnerability(
+        ID="XSS-GN-13", vulnerability_type="xss",
+        externally_exploitable=True, confidence="unadjudicated", verdict="vulnerable",
+        source="memo (app/routes/memos.js:MemosHandler:6)",
+        sink_call="app/routes/memos.js:MemosHandler:render:27:19",
+        affected_entries=[{"parameter": "memo",
+                           "sink_location": "app/routes/memos.js:27",
+                           "chain_id": "XSS-GN-13", "track": "gitnexus"}],
+        severity="medium", source_track="gitnexus")
+    return (merge_dual_track_queues([llm], [], mode="verdict")
+            + merge_dual_track_queues([], [gn], mode="verdict"))
+
+
+def test_apply_pairing_attach_records_merged_from_and_removes_gn():
+    """mode=attach：LLM 卡为主体，GN 卡 ID 写入 merged_from，GN 卡从列表移除。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(
+        _stub_two_track_merged(),
+        [TrackPair("XSS-GN-13", "XSS-VULN-01", "high", mode="attach")])
+    assert len(out) == 1
+    card = out[0]
+    assert card.ID == "XSS-VULN-01"
+    assert card.merged_from == ["XSS-GN-13"]
+    assert "XSS-GN-13" not in [f.ID for f in out]   # GN 卡不再独立出现
+
+
+def test_apply_pairing_attach_preserves_subject_card_fields():
+    """attach 是呈现层挂靠：主体卡 merge_source/confidence/verdict/severity/
+    affected_entries 全不变（不冒充 both/high，不改双轨判定结果——spec §8）。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(
+        _stub_two_track_merged(),
+        [TrackPair("XSS-GN-13", "XSS-VULN-01", "high", mode="attach")])
+    card = out[0]
+    assert card.merge_source == "llm-only"
+    assert card.confidence == "needs_review"     # 主体卡原置信度（非 both 的 high）
+    assert card.verdict == "vulnerable"
+    assert card.severity == "high"               # 不与 GN 取高（非字段融合）
+    assert not card.affected_entries             # GN entries 不并入（非 both 融合）
+
+
+def test_apply_pairing_attach_appends_to_existing_merged_from():
+    """主体卡已有 merged_from → 追加不覆盖、不重复。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    merged = _stub_two_track_merged()
+    merged[0].merged_from = ["XSS-GN-99"]
+    out = apply_pairing_merge(
+        merged, [TrackPair("XSS-GN-13", "XSS-VULN-01", "high", mode="attach"),
+                 TrackPair("XSS-GN-13", "XSS-VULN-01", "high", mode="attach")])
+    assert out[0].merged_from == ["XSS-GN-99", "XSS-GN-13"]
+
+
+def test_apply_pairing_mixed_modes_in_one_batch():
+    """一次配对同时含 merge 与 attach 两种形态：各自生效，GN 卡各只消费一次。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    llm1 = InjectionVulnerability(
+        ID="XSS-VULN-01", vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="medium", verdict="vulnerable",
+        endpoint="POST /memos", sink_function="res.render('memos')")
+    llm2 = InjectionVulnerability(
+        ID="XSS-VULN-02", vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="medium", verdict="vulnerable",
+        endpoint="POST /research", sink_function="res.render('research')")
+    gn1 = InjectionVulnerability(
+        ID="XSS-GN-13", vulnerability_type="xss", externally_exploitable=True,
+        confidence="low", verdict="vulnerable", source_track="gitnexus",
+        sink_call="app/routes/memos.js:MemosHandler:render:27:19")
+    gn2 = InjectionVulnerability(
+        ID="XSS-GN-14", vulnerability_type="xss", externally_exploitable=True,
+        confidence="low", verdict="vulnerable", source_track="gitnexus",
+        sink_call="app/routes/research.js:ResearchHandler:render:31:9")
+    merged = (merge_dual_track_queues([llm1, llm2], [], mode="verdict")
+              + merge_dual_track_queues([], [gn1, gn2], mode="verdict"))
+    out = apply_pairing_merge(merged, [
+        TrackPair("XSS-GN-13", "XSS-VULN-01", "high", mode="merge"),
+        TrackPair("XSS-GN-14", "XSS-VULN-02", "high", mode="attach"),
+    ])
+    assert len(out) == 2
+    by_id = {f.ID: f for f in out}
+    assert by_id["XSS-VULN-01"].merge_source == "both"          # merge 形态
+    assert by_id["XSS-VULN-01"].merged_from is None
+    assert by_id["XSS-VULN-02"].merge_source == "llm-only"      # attach 形态
+    assert by_id["XSS-VULN-02"].merged_from == ["XSS-GN-14"]
+
+
+def test_apply_pairing_attach_medium_confidence_not_applied():
+    """attach 同样受 high 置信门禁（误挂靠也吞 GN 卡，保守优先）。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(
+        _stub_two_track_merged(),
+        [TrackPair("XSS-GN-13", "XSS-VULN-01", "medium", mode="attach")])
+    assert len(out) == 2
+    assert out[0].merged_from is None and out[1].ID == "XSS-GN-13"
+
+
+def test_apply_pairing_attach_missing_cards_skipped():
+    """幻觉 ID（卡不在列表）→ 跳过，原列表不变。"""
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(
+        _stub_two_track_merged(),
+        [TrackPair("GHOST-GN", "XSS-VULN-01", "high", mode="attach"),
+         TrackPair("XSS-GN-13", "GHOST-VULN", "high", mode="attach")])
+    assert len(out) == 2
+    assert all(f.merged_from is None for f in out)

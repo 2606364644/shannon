@@ -272,6 +272,13 @@ describe("ReportTab 报告下载", () => {
     });
   }
 
+  // T6（spec 2026-08-26 §7.1）：报告页先探 report-data（结构化 SSOT）。本组用例为
+  // 旧 scan md 流--404 -> ReportTab 回退 md 渲染路径。
+  function reportData404() {
+    return http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report-data",
+      () => new HttpResponse("", { status: 404 }));
+  }
+
   it("组合默认融合 tab：点「下载 .md」→ c1-report-combined.md + 融合报告全文", async () => {
     server.use(
       http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(combinedScan)),
@@ -290,8 +297,11 @@ describe("ReportTab 报告下载", () => {
         bb_runs: [{ run_id: "run-2", status: "completed" }],
       })),
       trackReportHandler(),
+      http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report-data",
+        () => new HttpResponse(null, { status: 404 })),
       http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report",
         () => new HttpResponse("# 黑盒报告 run2", { headers: { "content-type": "text/plain" } })),
+      reportData404(),
     );
     renderDetailReport();
     // Radix TabsTrigger（1.1.17）激活在 onMouseDown（button=0 非 ctrl），无 onClick——
@@ -331,6 +341,9 @@ describe("ReportTab 失败 run 横幅", () => {
       })),
       // run 失败 → 无报告，黑盒/融合子 tab report 请求 404。
       http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report",
+        () => new HttpResponse("", { status: 404 })),
+      // T6：report-data 探测同样 404（旧 scan md 流语义）。
+      http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:run/report-data",
         () => new HttpResponse("", { status: 404 })),
     );
     renderDetailReport();
