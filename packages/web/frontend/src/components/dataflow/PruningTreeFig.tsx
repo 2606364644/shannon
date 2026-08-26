@@ -106,6 +106,29 @@ function hop(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
 }
 
+/** 缩放锚定（2026-08-26 UX 修复）：保持光标（或视口中心）下的内容不动，反推新 scroll。
+ *  内容坐标 cx = (curScroll + viewportOffset) / fromScale；新 scroll = cx × toScale − viewportOffset。
+ *  不补偿时光标下的点缩放后漂移（scale 改 svg width，视口锚死在左上角），用户要反复拖回。 */
+export function nextScrollForZoom(
+  curScroll: number,
+  viewportOffset: number,
+  fromScale: number,
+  toScale: number,
+): number {
+  const content = (curScroll + viewportOffset) / fromScale;
+  return Math.max(0, content * toScale - viewportOffset);
+}
+
+/** verdict → 链级短词（键盘 aria 用：打通/剪断/未判定）。 */
+function verdictShort(
+  verdict: DataflowBranch["verdict"],
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (verdict === "vulnerable") return t("workspaceDetail.dataflow.branchShortVuln");
+  if (verdict === "safe") return t("workspaceDetail.dataflow.branchShortSafe");
+  return t("workspaceDetail.dataflow.branchShortUnknown");
+}
+
 interface BranchLayout {
   branch: DataflowBranch;
   rowIdx: number;
@@ -247,6 +270,8 @@ function TreeCard({
   const [hoveredBranch, setHoveredBranch] = useState<string | null>(null);
   // 点枝条选中：当前选中的 branch_id（null=无；再点同一枝取消）。
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  // 折叠行展开态（2026-08-26 折叠枝联动修复）：点「+N 条枝被剪断」行展开全部剪断枝，再点收起。
+  const [foldExpanded, setFoldExpanded] = useState(false);
   const handleBranchHover = useCallback((id: string | null) => setHoveredBranch(id), []);
   const handleBranchSelect = useCallback(
     (id: string) => setSelectedBranch((cur) => (cur === id ? null : id)),
@@ -256,21 +281,26 @@ function TreeCard({
   const sinkX = xOf(sinkCol);
   const vulnCount = tree.branches.filter((b) => b.verdict === "vulnerable").length;
   const safeCount = tree.branches.filter((b) => b.verdict === "safe").length;
+  const unknownCount = tree.branches.filter((b) => b.verdict === "unknown").length;
   const hasVuln = vulnCount > 0 || tree.findings.length > 0;
 
-  // 枝条布局：打通/unknown 枝全部展开在前；剪断枝 >FOLD_THRESHOLD 折叠
-  const { layouts, foldedSafeCount } = useMemo(() => {
+  // 枝条布局：打通/unknown 枝全部展开在前；剪断枝 >FOLD_THRESHOLD 折叠（可点折叠行展开）
+  const { layouts, foldedIds, hasFold } = useMemo(() => {
     const vulnBranches = tree.branches.filter((b) => b.verdict === "vulnerable" || b.verdict === "unknown");
     const safeBranches = tree.branches.filter((b) => b.verdict === "safe");
-    const fold = safeBranches.length > FOLD_THRESHOLD;
+    const hasFold = safeBranches.length > FOLD_THRESHOLD;
+    const fold = hasFold && !foldExpanded;
     const shownSafe = fold ? safeBranches.slice(0, FOLD_THRESHOLD) : safeBranches;
-    const folded = fold ? safeBranches.length - FOLD_THRESHOLD : 0;
+    // 被折叠枝 id（hover 明细行时折叠行联动高亮，图上反馈「该枝在折叠批次里」）
+    const ids = fold
+      ? safeBranches.slice(FOLD_THRESHOLD).map((b) => b.branch_id).filter((x): x is string => !!x)
+      : [];
     const all = [...vulnBranches, ...shownSafe];
     const ls: BranchLayout[] = all.map((branch, i) => ({ branch, rowIdx: i }));
-    return { layouts: ls, foldedSafeCount: folded };
-  }, [tree.branches]);
+    return { layouts: ls, foldedIds: ids, hasFold };
+  }, [tree.branches, foldExpanded]);
 
-  const rows = layouts.length + (foldedSafeCount > 0 ? 1 : 0);
+  const rows = layouts.length + (hasFold ? 1 : 0);
   // sink 汇聚点 Y（所有行中线，让多枝向中汇聚；单枝时就在该枝中线）
   const sinkY = layouts.length > 1
     ? PAD_Y + (rows - 1) * ROW_H / 2 + ROW_H / 2
@@ -290,17 +320,30 @@ function TreeCard({
       data-testid="pruning-tree-card"
       data-tree-id={tree.tree_id}
     >
-      <TreeHeader tree={tree} t={t} vulnCount={vulnCount} safeCount={safeCount} hasVuln={hasVuln} />
+      <TreeHeader
+        tree={tree}
+        t={t}
+        vulnCount={vulnCount}
+        safeCount={safeCount}
+        unknownCount={unknownCount}
+        hasVuln={hasVuln}
+      />
       <ZoomViewport maxHeight={520}>
         <svg
           width={svgWidth + PAD_X}
           viewBox={`${-PAD_X} 0 ${svgWidth + PAD_X} ${svgHeight}`}
           role="img"
-          aria-label={t("workspaceDetail.dataflow.pruningTreeAria", {
-            sink: tree.sink.label ?? "sink",
-            vuln: vulnCount,
-            safe: safeCount,
-          })}
+          aria-label={t(
+            unknownCount > 0
+              ? "workspaceDetail.dataflow.pruningTreeAriaWithUnknown"
+              : "workspaceDetail.dataflow.pruningTreeAria",
+            {
+              sink: tree.sink.label ?? "sink",
+              vuln: vulnCount,
+              safe: safeCount,
+              unknown: unknownCount,
+            },
+          )}
         >
           {layouts.map((layout) => (
             <BranchPath
@@ -309,6 +352,7 @@ function TreeCard({
               sinkCol={sinkCol}
               sinkX={sinkX}
               sinkY={sinkY}
+              sinkLabel={tree.sink.label ?? "sink"}
               pubFuncStats={pubFuncStats}
               crossTreeSourceTip={crossTreeSourceTip}
               t={t}
@@ -319,8 +363,16 @@ function TreeCard({
               onSelect={handleBranchSelect}
             />
           ))}
-          {foldedSafeCount > 0 && (
-            <FoldedSafeRow rowIdx={layouts.length} count={foldedSafeCount} sinkCol={sinkCol} t={t} />
+          {hasFold && (
+            <FoldedSafeRow
+              rowIdx={layouts.length}
+              count={safeCount - FOLD_THRESHOLD}
+              expanded={foldExpanded}
+              highlighted={hoveredBranch != null && foldedIds.includes(hoveredBranch)}
+              onToggle={() => setFoldExpanded((cur) => !cur)}
+              sinkCol={sinkCol}
+              t={t}
+            />
           )}
           {sharedArcs.map((arc, i) => (
             <SameLineArcView key={i} arc={arc} />
@@ -351,23 +403,28 @@ function TreeCard({
   );
 }
 
-/** 树头徽章：sink 名 + file:line + rule_id/class + finding IDs + 红绿迷你比例条。 */
+/** 树头徽章：sink 名 + file:line + rule_id/class + finding IDs + 迷你比例条。
+ *  比例条三段式（2026-08-26 计数口径修复）：红=打通 / 绿=剪断 / 琥珀=未判定——
+ *  unknown 枝不再被画进绿色段（旧实现绿段宽 = 100−vulnPct，未判定被视觉等同「安全」）。 */
 function TreeHeader({
   tree,
   t,
   vulnCount,
   safeCount,
+  unknownCount,
   hasVuln,
 }: {
   tree: DataflowTree;
   t: ReturnType<typeof useTranslation>["t"];
   vulnCount: number;
   safeCount: number;
+  unknownCount: number;
   hasVuln: boolean;
 }) {
   const findingIds = tree.findings.map((f) => f.id).filter(Boolean).join(", ");
-  const total = Math.max(1, vulnCount + safeCount);
-  const vulnPct = (vulnCount / total) * 100;
+  const total = Math.max(1, vulnCount + safeCount + unknownCount);
+  const pct = (n: number) => `${(n / total) * 100}%`;
+  const hasUnknown = unknownCount > 0;
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
       <span
@@ -395,16 +452,34 @@ function TreeHeader({
         <span className="font-mono text-xs text-muted-foreground">{findingIds}</span>
       )}
       <span className="ml-auto flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">
-          {t("workspaceDetail.dataflow.minibar", { vuln: vulnCount, safe: safeCount })}
+        <span className="text-xs text-muted-foreground" data-minibar-text="">
+          {t(
+            hasUnknown
+              ? "workspaceDetail.dataflow.minibarWithUnknown"
+              : "workspaceDetail.dataflow.minibar",
+            { vuln: vulnCount, safe: safeCount, unknown: unknownCount },
+          )}
         </span>
         <span
           className="inline-flex h-2 w-16 overflow-hidden rounded-full border border-border"
           role="img"
-          aria-label={t("workspaceDetail.dataflow.minibarAria", { vuln: vulnCount, safe: safeCount })}
+          data-minibar=""
+          aria-label={t(
+            hasUnknown
+              ? "workspaceDetail.dataflow.minibarAriaWithUnknown"
+              : "workspaceDetail.dataflow.minibarAria",
+            { vuln: vulnCount, safe: safeCount, unknown: unknownCount },
+          )}
         >
-          <span className="bg-[hsl(var(--c-red))]" style={{ width: `${vulnPct}%` }} />
-          <span className="bg-[hsl(var(--c-green))]" style={{ width: `${100 - vulnPct}%` }} />
+          <span data-minibar-seg="vuln" className="bg-[hsl(var(--c-red))]" style={{ width: pct(vulnCount) }} />
+          <span data-minibar-seg="safe" className="bg-[hsl(var(--c-green))]" style={{ width: pct(safeCount) }} />
+          {hasUnknown && (
+            <span
+              data-minibar-seg="unknown"
+              className="bg-[hsl(var(--c-amber))] opacity-80"
+              style={{ width: pct(unknownCount) }}
+            />
+          )}
         </span>
       </span>
     </div>
@@ -419,6 +494,7 @@ function BranchPath({
   sinkCol: _sinkCol,
   sinkX,
   sinkY,
+  sinkLabel,
   pubFuncStats,
   crossTreeSourceTip,
   t,
@@ -432,6 +508,7 @@ function BranchPath({
   sinkCol: number;
   sinkX: number;
   sinkY: number;
+  sinkLabel: string;
   pubFuncStats: Map<string, PubFuncStat>;
   crossTreeSourceTip: (source: DataflowBranch["source"], currentTreeId: string) => string | null;
   t: ReturnType<typeof useTranslation>["t"];
@@ -502,6 +579,25 @@ function BranchPath({
       onMouseEnter={() => onHover(branch.branch_id ?? null)}
       onMouseLeave={() => onHover(null)}
       onClick={() => branch.branch_id && onSelect(branch.branch_id)}
+      /* 键盘可达（2026-08-26 UX 修复）：枝条可 Tab 聚焦，Enter/Space 与点击同 toggle 选中 */
+      tabIndex={branch.branch_id ? 0 : undefined}
+      role={branch.branch_id ? "button" : undefined}
+      aria-label={
+        branch.branch_id
+          ? t("workspaceDetail.dataflow.branchAria", {
+              source: branch.source.label ?? "source",
+              sink: sinkLabel,
+              verdict: verdictShort(verdict, t),
+            })
+          : undefined
+      }
+      onKeyDown={(e) => {
+        if (!branch.branch_id) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(branch.branch_id);
+        }
+      }}
     >
       <path d={d.trim()} className={cls + hl} data-branch={verdict} />
       {/* 剪断枝残端：从剪断点到 sink 方向渐隐虚线（不到 sink） */}
@@ -745,15 +841,23 @@ function NodeView({
   );
 }
 
-/** 折叠剪断枝行：「+N 条枝被剪断」。 */
+/** 折叠剪断枝行：「+N 条枝被剪断」⇄「收起 N 条剪断枝」（点击切换）。
+ *  联动（2026-08-26 折叠枝联动修复）：hover 被折叠枝的明细行 → 本行高亮
+ *  （图中反馈「该枝在折叠批次里」，不再无响应像坏了）；点击展开全部剪断枝。 */
 function FoldedSafeRow({
   rowIdx,
   count,
+  expanded,
+  highlighted,
+  onToggle,
   sinkCol,
   t,
 }: {
   rowIdx: number;
   count: number;
+  expanded: boolean;
+  highlighted: boolean;
+  onToggle: () => void;
   sinkCol: number;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
@@ -761,10 +865,27 @@ function FoldedSafeRow({
   const x1 = xOf(0);
   const x2 = xOf(sinkCol) - COL_W * 0.35;
   return (
-    <g data-collapsed-safe="">
+    <g
+      data-collapsed-safe=""
+      data-hovered={highlighted ? "" : undefined}
+      className="folded-safe-row"
+      role="button"
+      tabIndex={0}
+      aria-label={t("workspaceDetail.dataflow.foldedSafeExpandHint")}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <title>{t("workspaceDetail.dataflow.foldedSafeExpandHint")}</title>
       <path d={hop(x1, y, x2, y)} className="folded-safe" />
       <text x={(x1 + x2) / 2} y={y - 6} className="fill-[hsl(var(--c-green))]" fontSize={11} textAnchor="middle">
-        {t("workspaceDetail.dataflow.foldedSafe", { count })}
+        {expanded
+          ? t("workspaceDetail.dataflow.foldedSafeCollapse", { count })
+          : t("workspaceDetail.dataflow.foldedSafe", { count })}
       </text>
     </g>
   );
@@ -829,16 +950,21 @@ function SinkTarget({
   );
 }
 
-/** 缩放平移容器（2026-08-21 交互重做）：
+/** 缩放平移容器（2026-08-21 交互重做；2026-08-26 UX 第二批修复）：
  *  - 滚轮：无修饰键放行（页面自然滚动，不再劫持）；Ctrl/⌘+wheel 缩放（接管浏览器页缩放）。
  *    原生 addEventListener({passive:false}) 注册——React 合成 onWheel 在 root 上是 passive，
  *    preventDefault 无效。
  *  - 缩放：直接放大 svg 的 width 属性（viewBox 不变）——SVG 语义放大，布局尺寸随之
  *    变化 → overflow:auto 滚动条自动正确。替代旧 CSS transform:scale（不改布局尺寸，
  *    scale>1 时溢出被裁、滚动条到不了右侧内容）。
+ *  - 缩放锚定（2026-08-26）：以光标为锚补偿 scrollLeft/scrollTop（按钮缩放锚视口中心）——
+ *    不补偿时光标下的点漂移，用户要反复拖回。
  *  - 拖拽平移：驱动 scrollLeft/scrollTop（程序化滚动，滚动条同步）——替代旧 translate
- *    双轨（translate 把内容移出滚动条可达范围 = 图「错乱/丢失」）。
- *  - 控件：− / 百分比(reset) / + 三个按钮。 */
+ *    双轨（translate 把内容移出滚动条可达范围 = 图「错乱/丢失」）。mousedown
+ *    preventDefault + 容器 userSelect:none（2026-08-26）：拖图不再把 SVG 文字选蓝。
+ *  - 控件：− / 百分比(reset) / + 三个按钮，挂滚动容器外的 relative wrapper 上
+ *    （2026-08-26）：absolute 在 overflow:auto 容器内会随内容滚出视口——深树横向滚动
+ *    后按钮消失，想缩放得先滚回左上角。 */
 function ZoomViewport({
   children,
   maxHeight,
@@ -846,25 +972,72 @@ function ZoomViewport({
   children: React.ReactElement<{ width?: number | string }>;
   maxHeight: number;
 }) {
+  const { t } = useTranslation();
   const [scale, setScale] = useState(1);
   const ref = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
+  // 缩放锚点：zoom 发起时记录（光标/视口中心相对容器偏移 + 当时 scroll），scale 生效后补偿
+  const anchorRef = useRef<{ ox: number; oy: number; sl: number; st: number; from: number } | null>(null);
+
+  const zoomAt = useCallback((factor: number, ox: number, oy: number) => {
+    const el = ref.current;
+    if (!el) return;
+    setScale((s) => {
+      const next = Math.min(3, Math.max(0.3, s * factor));
+      if (next !== s) anchorRef.current = { ox, oy, sl: el.scrollLeft, st: el.scrollTop, from: s };
+      return next;
+    });
+  }, []);
+
+  // 按钮缩放锚视口中心（无光标语义）
+  const zoomFromCenter = useCallback(
+    (factor: number) => {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      zoomAt(factor, r.width / 2, r.height / 2);
+    },
+    [zoomAt],
+  );
+
+  const resetZoom = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setScale((s) => {
+      if (s !== 1) anchorRef.current = { ox: r.width / 2, oy: r.height / 2, sl: el.scrollLeft, st: el.scrollTop, from: s };
+      return 1;
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    const a = anchorRef.current;
+    if (!el || !a) return;
+    anchorRef.current = null;
+    // svg width 已按新 scale 渲染后再补滚动（同帧布局完成，scrollLeft 不被 clamp 回）
+    el.scrollLeft = nextScrollForZoom(a.sl, a.ox, a.from, scale);
+    el.scrollTop = nextScrollForZoom(a.st, a.oy, a.from, scale);
+  }, [scale]);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return; // 纯滚轮 → 页面/容器自然滚动
-      e.preventDefault(); // Ctrl+wheel 浏览器默认是页缩放 → 接管为图缩放
-      setScale((s) => Math.min(3, Math.max(0.3, s * (e.deltaY > 0 ? 0.9 : 1.1))));
+      e.preventDefault(); // Ctrl+wheel 浏览器默认是页缩放 → 接管为图缩放（光标锚定）
+      const r = el.getBoundingClientRect();
+      zoomAt(e.deltaY > 0 ? 0.9 : 1.1, e.clientX - r.left, e.clientY - r.top);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [zoomAt]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     const el = ref.current;
     if (!el) return;
+    // 阻止拖拽进入文本选择（SVG text 默认可选，拖图会把满屏文字选蓝）
+    e.preventDefault();
     dragRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
   }, []);
 
@@ -887,42 +1060,44 @@ function ZoomViewport({
     "rounded border border-border bg-card px-1.5 text-xs text-muted-foreground hover:text-primary";
 
   return (
-    <div
-      ref={ref}
-      data-viewport=""
-      data-max-height={String(maxHeight)}
-      style={{ maxHeight, overflow: "auto", position: "relative", cursor: "grab" }}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={endDrag}
-      onMouseLeave={endDrag}
-    >
-      {scaled}
+    <div className="relative" data-zoom-wrap="">
+      <div
+        ref={ref}
+        data-viewport=""
+        data-max-height={String(maxHeight)}
+        style={{ maxHeight, overflow: "auto", cursor: "grab", userSelect: "none" }}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={endDrag}
+        onMouseLeave={endDrag}
+      >
+        {scaled}
+      </div>
       <span className="absolute right-2 top-2 z-10 flex items-center gap-1">
         <button
           type="button"
           data-zoom-out=""
-          onClick={() => setScale((s) => Math.max(0.3, s * 0.9))}
+          onClick={() => zoomFromCenter(0.9)}
           className={btnCls}
-          aria-label="zoom out"
+          aria-label={t("workspaceDetail.dataflow.zoomOut")}
         >
           −
         </button>
         <button
           type="button"
-          onClick={() => setScale(1)}
+          onClick={resetZoom}
           data-zoom-reset=""
           className={btnCls}
-          title="reset"
+          title={t("workspaceDetail.dataflow.zoomReset")}
         >
           {Math.round(scale * 100)}%
         </button>
         <button
           type="button"
           data-zoom-in=""
-          onClick={() => setScale((s) => Math.min(3, s * 1.1))}
+          onClick={() => zoomFromCenter(1.1)}
           className={btnCls}
-          aria-label="zoom in"
+          aria-label={t("workspaceDetail.dataflow.zoomIn")}
         >
           +
         </button>

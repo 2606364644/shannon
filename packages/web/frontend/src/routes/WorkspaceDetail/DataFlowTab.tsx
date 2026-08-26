@@ -178,6 +178,12 @@ function SummaryBar({
     (n, tr) => n + tr.branches.filter((b) => b.verdict === "safe").length,
     0,
   );
+  // unknown 枝（LLM 轨「无法确认」）独立计数（2026-08-26 口径修复）：总数含 unknown 而
+  // 打通/剪断都不含 → 数字加不平（真实数据每份 1-2 条），「N 条未判定」补齐可加和口径
+  const unjudged = trees.reduce(
+    (n, tr) => n + tr.branches.filter((b) => b.verdict === "unknown").length,
+    0,
+  );
   // toggle 两态按钮共用样式：激活态 accent 底、非激活 muted 悬停提亮
   const segCls = (on: boolean) =>
     `rounded-md border border-border px-2 py-1 ${
@@ -198,6 +204,11 @@ function SummaryBar({
       <span className="text-muted-foreground">
         {t("workspaceDetail.dataflow.cutFlows", { count: cut })}
       </span>
+      {unjudged > 0 && (
+        <span className="text-[hsl(var(--c-amber))]">
+          {t("workspaceDetail.dataflow.unknownFlows", { count: unjudged })}
+        </span>
+      )}
       <span className="text-muted-foreground">
         {t("workspaceDetail.dataflow.controls", { count: controls.length })}
       </span>

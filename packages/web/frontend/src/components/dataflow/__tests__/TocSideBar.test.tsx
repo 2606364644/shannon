@@ -114,6 +114,25 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
     expect(safeEntry?.textContent ?? "").toContain("0打通/1剪断");
   });
 
+  it("unknown 枝计数：次行「N打通/M剪断/K未判定」三段（unknown>0 时），无 unknown 保持两段", () => {
+    const unkTree: DataflowTree = {
+      ...vulnTree,
+      tree_id: "T-UNK-TOC",
+      branches: [
+        vulnTree.branches[0],
+        { ...vulnTree.branches[0], branch_id: "F-U", verdict: "unknown" },
+      ],
+    };
+    const { container } = render(
+      <TocSideBar trees={[unkTree]} controls={[]} safeVectors={[]} />,
+    );
+    const entry = container.querySelector('[data-toc-id="T-UNK-TOC"]');
+    expect(entry?.textContent).toContain("1打通/0剪断/1未判定");
+
+    const plain = render(<TocSideBar trees={[vulnTree]} controls={[]} safeVectors={[]} />);
+    expect(plain.container.querySelector("[data-toc-id]")?.textContent).not.toContain("未判定");
+  });
+
   it("认证·授权条目：▲黄图标 + endpoint", () => {
     const { container } = render(
       <TocSideBar trees={[]} controls={[control]} safeVectors={[]} />,

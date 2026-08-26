@@ -110,8 +110,13 @@ export function TocSideBar({ trees, controls, safeVectors }: TocSideBarProps) {
             const status = treeStatus(tree);
             const vulnN = tree.branches.filter((b) => b.verdict === "vulnerable").length;
             const safeN = tree.branches.filter((b) => b.verdict === "safe").length;
+            // unknown 枝三段计数（2026-08-26 口径修复，与汇总条/迷你条同口径）
+            const unknownN = tree.branches.filter((b) => b.verdict === "unknown").length;
             const ids = tree.findings.map((f) => f.id).filter(Boolean).join(", ");
-            const counts = t("workspaceDetail.dataflow.tocCounts", { vuln: vulnN, safe: safeN });
+            const counts =
+              unknownN > 0
+                ? t("workspaceDetail.dataflow.tocCountsWithUnknown", { vuln: vulnN, safe: safeN, unknown: unknownN })
+                : t("workspaceDetail.dataflow.tocCounts", { vuln: vulnN, safe: safeN });
             return (
               <button
                 key={tree.tree_id}

@@ -867,6 +867,26 @@
   stroke: hsl(var(--c-green) / 0.5);
   stroke-dasharray: 3 3;
 }
+/* 折叠行可点 + 联动高亮（2026-08-26 折叠枝联动修复）：点击展开全部被折叠的剪断枝；
+   hover 被折叠枝的明细行 → 本行同 hovered 语义提亮（图中反馈「该枝在折叠批次里」） */
+.folded-safe-row {
+  cursor: pointer;
+}
+.folded-safe-row:hover .folded-safe,
+.folded-safe-row[data-hovered] .folded-safe {
+  stroke: hsl(var(--c-green));
+  stroke-width: 2.5;
+}
+.folded-safe-row:hover text,
+.folded-safe-row[data-hovered] text {
+  font-weight: 700;
+}
+/* SVG 枝条键盘聚焦轮廓（2026-08-26 键盘可达）：g[data-branch] tabIndex 聚焦后
+   Tab 导览可见落点（青色虚线圈，与 hover/selected 的 drop-shadow 语义区分） */
+g[data-branch][tabindex]:focus {
+  outline: 1.5px dashed hsl(var(--c-cyan));
+  outline-offset: 3px;
+}
 /* 公共函数节点下标（spec §5「公共函数 ⟳ N 枝经过」）：青色小标，hover 说明剪断哪几条枝 */
 .pubfunc-sub {
   fill: hsl(var(--c-cyan));

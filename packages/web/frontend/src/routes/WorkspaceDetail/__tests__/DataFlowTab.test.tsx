@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -228,5 +228,40 @@ describe("DataFlowTab", () => {
     expect(follows(title, intro)).toBe(true);
     expect(follows(intro, legend)).toBe(true);
     expect(follows(legend, firstTree)).toBe(true);
+  });
+
+  it("汇总条 unknown 枝计数：总数含未判定 + 独立「N 条未判定」项（无 unknown 时不显示该噪音）", async () => {
+    // 无 unknown：不出现「未判定」段
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/dataflow", () => HttpResponse.json(mockView)),
+    );
+    renderAt("/p/w1/scans/s1/dataflow");
+    await waitFor(() => expect(screen.getByTestId("dataflow-summary-bar")).toBeInTheDocument());
+    expect(screen.queryByText(/未判定/)).toBeNull();
+
+    // 加一棵 unknown 树：4 条数据流 = 1 打通 + 2 剪断 + 1 未判定（数字加得平）
+    const unknownTree = {
+      ...mockView.trees[0],
+      tree_id: "T-SSRF-UNK",
+      findings: [],
+      branches: [
+        {
+          ...mockView.trees[0].branches[0],
+          branch_id: "F-UNK",
+          verdict: "unknown" as const,
+          verdict_reason: "No URL scheme allowlist validation",
+        },
+      ],
+    };
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/dataflow", () =>
+        HttpResponse.json({ ...mockView, trees: [...mockView.trees, unknownTree] })),
+    );
+    cleanup(); // 同 it 两轮挂载：清第一轮 DOM，避免 getByText 命中两份
+    renderAt("/p/w2/scans/s2/dataflow");
+    await waitFor(() => expect(screen.getByText(/4 条数据流/)).toBeInTheDocument());
+    expect(screen.getByText(/1 条打通到危险点/)).toBeInTheDocument();
+    expect(screen.getByText(/2 条被防护剪断/)).toBeInTheDocument();
+    expect(screen.getByText(/1 条未判定/)).toBeInTheDocument();
   });
 });

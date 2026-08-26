@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, createEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import i18n from "@/i18n";
-import { COL_W, NODE_LABEL_Y1, PILL_HALF_H_MAX, ROW_H, PruningTreeFig } from "../PruningTreeFig";
+import { COL_W, NODE_LABEL_Y1, PILL_HALF_H_MAX, ROW_H, PruningTreeFig, nextScrollForZoom } from "../PruningTreeFig";
 import { BranchRow } from "../BranchRow";
 import type { DataflowTree, DataflowBranch } from "@/api/types";
 
@@ -809,5 +809,115 @@ describe("PruningTreeFig — 真实数据重叠修复（pill 副行/标签带/to
     // 无 translate transform（旧实现 translate(tx,ty) 与滚动条双轨 → 图被移出可达范围）
     const inner = viewport.firstElementChild as HTMLElement;
     expect(inner.style.transform).toBe("");
+  });
+});
+
+describe("PruningTreeFig — 数据流图 UX 修复（2026-08-26 第二批）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+  afterEach(() => i18n.changeLanguage("zh"));
+
+  it("缩放控件在滚动容器外（absolute 挂在 overflow:auto 容器内会随内容滚出视口——深树横向滚动后按钮消失）", () => {
+    const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
+    const viewport = container.querySelector("[data-viewport]")!;
+    const btn = container.querySelector("[data-zoom-out]")!;
+    expect(viewport.contains(btn)).toBe(false); // 不在滚动容器内
+    // 与滚动容器同 wrapper（悬停在视口右上角，不随内容滚动）
+    expect(viewport.parentElement!.contains(btn)).toBe(true);
+  });
+
+  it("拖拽不选字：滚动容器 userSelect:none + mousedown preventDefault（拖图不再把 SVG 文字选蓝）", () => {
+    const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
+    const viewport = container.querySelector("[data-viewport]") as HTMLElement;
+    expect(viewport.style.userSelect).toBe("none");
+    const evt = createEvent.mouseDown(viewport);
+    fireEvent(viewport, evt);
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it("nextScrollForZoom：缩放以光标为锚补偿滚动（光标下内容不漂移，放大/缩小往返对称）", () => {
+    // 放大：scroll=100、光标距视口左缘 50、1x→2x → 内容坐标 (100+50)/1=150 → 新 scroll=150×2−50=250
+    expect(nextScrollForZoom(100, 50, 1, 2)).toBe(250);
+    // 缩小往返（对称：同锚点回原位）
+    expect(nextScrollForZoom(250, 50, 2, 1)).toBe(100);
+    // 不产生负 scroll（内容左缘之上）
+    expect(nextScrollForZoom(10, 60, 1, 0.5)).toBe(0);
+  });
+
+  it("缩放控件 aria/title 走 i18n（不再硬编码英文 zoom out / zoom in / reset）", () => {
+    const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
+    expect(container.querySelector("[data-zoom-out]")?.getAttribute("aria-label")).toBe("缩小");
+    expect(container.querySelector("[data-zoom-in]")?.getAttribute("aria-label")).toBe("放大");
+    expect(container.querySelector("[data-zoom-reset]")?.getAttribute("title")).toBe("重置缩放");
+  });
+
+  it("树头迷你条三段式：unknown 枝不再画成绿色（红=打通 / 绿=剪断 / 琥珀=未判定），无 unknown 保持两段", () => {
+    const mixedTree: DataflowTree = {
+      ...vulnerableTree,
+      tree_id: "T-MIX",
+      branches: [
+        vulnerableTree.branches[0],
+        { ...safeTree.branches[0], branch_id: "F-MIX-S" },
+        { ...vulnerableTree.branches[0], verdict: "unknown", branch_id: "F-MIX-U" },
+      ],
+    };
+    const mixed = render(<PruningTreeFig trees={[mixedTree]} />);
+    const segs = mixed.container.querySelectorAll("[data-minibar-seg]");
+    expect(segs.length).toBe(3);
+    const w = (k: string) =>
+      parseFloat((mixed.container.querySelector(`[data-minibar-seg="${k}"]`) as HTMLElement).style.width);
+    expect(w("vuln")).toBeCloseTo(33.33, 1);
+    expect(w("safe")).toBeCloseTo(33.33, 1);
+    expect(w("unknown")).toBeCloseTo(33.33, 1);
+    // minibar 文案含「未判定」
+    expect(mixed.container.querySelector("[data-minibar-text]")?.textContent).toContain("未判定");
+    mixed.unmount();
+    // 无 unknown：两段（红/绿），文案不出现「未判定」噪音
+    const plain = render(<PruningTreeFig trees={[vulnerableTree]} />);
+    expect(plain.container.querySelectorAll("[data-minibar-seg]").length).toBe(2);
+    expect(plain.container.querySelector("[data-minibar-text]")?.textContent).not.toContain("未判定");
+  });
+
+  it("折叠枝联动：hover 被折叠枝明细行 → 折叠行高亮；点折叠行展开全部、再点收起", () => {
+    const tree: DataflowTree = {
+      ...safeTree,
+      tree_id: "T-FOLD2",
+      branches: Array.from({ length: 6 }, (_, i) => ({
+        ...safeTree.branches[0],
+        branch_id: `F-SAFE-${i}`,
+      })),
+    };
+    const { container } = render(<PruningTreeFig trees={[tree]} />);
+    const collapsedRow = container.querySelector("[data-collapsed-safe]")!;
+    expect(collapsedRow).toBeTruthy();
+    const shownCount = () => container.querySelectorAll("path[data-branch='safe']").length;
+    const before = shownCount(); // 4 条显示（每枝主 path + 残端）
+    // hover 被折叠的第 6 条枝明细行 → 折叠行 data-hovered（图中反馈「该枝在折叠批次里」）
+    const foldedRow = container.querySelector('[data-branch-row][data-branch-id="F-SAFE-5"]')!;
+    fireEvent.mouseEnter(foldedRow);
+    expect(collapsedRow.hasAttribute("data-hovered")).toBe(true);
+    fireEvent.mouseLeave(foldedRow);
+    expect(collapsedRow.hasAttribute("data-hovered")).toBe(false);
+    // 点击折叠行 → 展开全部剪断枝
+    fireEvent.click(collapsedRow);
+    expect(shownCount()).toBeGreaterThan(before);
+    expect(container.querySelector("[data-collapsed-safe]")?.textContent).toContain("收起");
+    // 再点 → 收起回到折叠态
+    fireEvent.click(container.querySelector("[data-collapsed-safe]")!);
+    expect(shownCount()).toBe(before);
+    expect(container.querySelector("[data-collapsed-safe]")?.textContent).toContain("+");
+  });
+
+  it("键盘可达：枝条 g 可聚焦（tabIndex+role+aria-label），Enter/Space 选中明细行（再按取消）", () => {
+    const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
+    const g = container.querySelector('[data-branch="vulnerable"]') as unknown as HTMLElement;
+    expect(g.tabIndex).toBe(0);
+    expect(g.getAttribute("role")).toBe("button");
+    expect(g.getAttribute("aria-label") ?? "").toContain("req.query.name");
+    expect(g.getAttribute("aria-label") ?? "").toContain("cursor.execute");
+    fireEvent.keyDown(g, { key: "Enter" });
+    expect(container.querySelector("[data-branch-row][data-selected]")).toBeTruthy();
+    // Space 再按 → 取消选中（与点击同 toggle 语义）
+    fireEvent.keyDown(g, { key: " " });
+    expect(container.querySelector("[data-branch-row][data-selected]")).toBeNull();
   });
 });
