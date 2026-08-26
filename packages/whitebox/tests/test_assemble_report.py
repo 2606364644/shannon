@@ -207,3 +207,61 @@ async def test_inject_model_info_en_anchor(tmp_path, monkeypatch):
                        encoding="utf-8")
     await ReportAssembler.inject_model_info(report, session)
     assert "- **Model:** glm-5.2" in report.read_text(encoding="utf-8")
+
+
+async def test_assemble_report_writes_report_data(tmp_path, monkeypatch):
+    """T1（spec 2026-08-26-report-generation-agent §3）：assemble 之后产
+    report_data.json（SSOT）——与 comprehensive md 同目录；non-fatal。"""
+    import json
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    (deliverables / "intermediate").mkdir()
+    (deliverables / "intermediate" / "xss_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{
+            "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+            "externally_exploitable": True, "confidence": "high",
+            "severity": "high", "title": "t",
+        }]}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))
+
+    rec = _RecordingSession()
+    set_audit_session(rec)
+    try:
+        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
+    finally:
+        clear_audit_session()
+
+    report_data = deliverables / "report_data.json"
+    assert report_data.exists()
+    data = json.loads(report_data.read_text(encoding="utf-8"))
+    assert data["schema_version"] == 1
+    assert data["vulnerabilities"][0]["id"] == "XSS-VULN-01"
+    assert data["stats"]["by_type"]["xss"]["count"] == 1
+    # md 主链路不受影响
+    assert (deliverables / "comprehensive_security_assessment_report.md").exists()
+
+
+async def test_assemble_report_report_data_nonfatal(tmp_path, monkeypatch):
+    """report_data 组装失败不阻塞 md 主链路（每步独立降级铁律）。"""
+    import supernova_core.services.report_data_builder as builder
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    (deliverables / "auth_analysis_deliverable.md").write_text(
+        "# 认证分析报告\nAUTH-VULN-01", encoding="utf-8")
+    monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))
+
+    async def _boom(*a, **kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(builder, "build_report_data", _boom)
+
+    rec = _RecordingSession()
+    set_audit_session(rec)
+    try:
+        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
+    finally:
+        clear_audit_session()
+
+    assert (deliverables / "comprehensive_security_assessment_report.md").exists()
+    assert not (deliverables / "report_data.json").exists()

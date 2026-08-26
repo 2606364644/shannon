@@ -42,6 +42,16 @@ class BaseVulnerability(BaseModel):
     # 产出的这两个字段（同 2026-08-20 authentication_required 静默丢弃教训）。
     impact: str | None = None          # 危害一句话（LLM 轨 collector 输出，报告卡片"危害"段权威来源）
     remediation: str | None = None     # 修复建议一句话（LLM 轨 collector 输出）
+    # ---- 报告生成 agent 化（spec 2026-08-26-report-generation-agent-design §3/§5）----
+    # agent 富化产物写回 SSOT queue 的 append-only 结构化字段（旧 queue 兼容全 None）：
+    # ①归并终审（T2）：跨轨同洞合并——本卡为主体时挂靠的 GN 卡 ID 列表
+    merged_from: list[str] | None = None
+    # ②卡片富化（T3）：接口一体表行（models/report_data.EndpointEntry 形态 dict，
+    # 含 route_registered_at/source_location/sink_location 行号链）
+    report_endpoints: list[dict] | None = None
+    # ③POC 增强（T4）：结构化 POC（models/report_data.PocBlock 形态 dict：
+    # request/preconditions/expected_response/witness_payload）
+    report_poc: dict | None = None
 
 class InjectionVulnerability(BaseVulnerability):
     # injection 输出契约 = TS 原版 injectionFields（sink_call 族，vuln-injection.txt
@@ -154,6 +164,17 @@ _CLASS_ADAPTERS: dict[str, TypeAdapter] = {
     "ssrf": TypeAdapter(SsrfVulnerability),
     "authz": TypeAdapter(AuthzVulnerability),
 }
+
+
+def parse_vuln_entry(entry: dict, vuln_class: str | None = None):
+    """单条 queue entry → 对应子类实例（report_data.raw 重建用，公共入口）。
+
+    与 parse_lenient 同一套 adapter 语义：已知 vuln_class 强制子类解析，
+    未知/None 走 Union 猜测。畸形 entry 直接抛（调用方自行决定兜底）。
+    """
+    adapter = _CLASS_ADAPTERS.get(vuln_class, _VulnerabilityAdapter) \
+        if vuln_class else _VulnerabilityAdapter
+    return adapter.validate_python(entry)
 
 
 @dataclass

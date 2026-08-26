@@ -33,6 +33,18 @@ def vuln_phase_steps(vuln_classes: list[str]) -> tuple[str, ...]:
     return tuple(f"{vt}-vuln" for vt in vuln_classes)
 
 
+def _activity_not_registered_hint(exc: Exception) -> str:
+    """§5.7（spec 2026-08-26-report-generation-agent）：activity 未注册 = 部署
+    不一致（代码已提交、worker 进程未重启——NodeGoat-20260826-041323 实证：
+    GN 富化 activity 曾 3 次 NotFoundError 静默降级）。显式提示重启，不再
+    无痕跳过。"""
+    msg = str(exc).lower().replace(" ", "")
+    if "notregistered" in msg or "notfounderror" in msg:
+        return (" — ACTIVITY NOT REGISTERED: worker 部署不一致（新代码未随 worker"
+                " 重启加载），重启 worker 后新扫描生效")
+    return ""
+
+
 def _decide_gitnexus_failfast(statuses: dict, llm_track_enabled: bool) -> list[str]:
     """Task 4 fail-fast 决策(纯函数, 单测可达, 无 Temporal 依赖).
 
@@ -500,7 +512,28 @@ class WhiteboxScanWorkflow:
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"gn finding enrichment failed (non-fatal): {exc}",
+                       "info_message": f"gn finding enrichment failed (non-fatal)"
+                                       f"{_activity_not_registered_hint(exc)}: {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
+            # === 全卡接口表富化（GN 富化后；non-fatal，spec 2026-08-26-report-
+            # generation-agent §5.2）——两轨全部卡产接口一体表（method/path/params/
+            # auth + 路由注册/源/汇行号链），写回 queue 的 report_endpoints；
+            # SUPERNOVA_ENDPOINT_ENRICH_ENABLED 关闭时 activity 内部跳过。 ===
+            try:
+                await workflow.execute_activity(
+                    activities.run_endpoint_enrichment, act_input,
+                    start_to_close_timeout=timedelta(minutes=30),
+                    retry_policy=retry_for("gitnexus-verdict"),
+                )
+            except Exception as exc:
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"endpoint enrichment failed (non-fatal)"
+                                       f"{_activity_not_registered_hint(exc)}: {exc}",
                        "info_level": "warning"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
@@ -659,6 +692,29 @@ class WhiteboxScanWorkflow:
                 )
             except Exception:  # noqa: BLE001 — PoC 任何失败(含 ActivityError)只降级
                 pass
+            finally:
+                self._state.current_agent = None
+            # === T5：report_data 终版组装（§5.4/§5.5 摘要+QA；non-fatal） ===
+            # 全部富化（merge/接口表/POC）已写回 queue 后重建 report_data.json，
+            # LLM 摘要 + QA 校验（缺 endpoints 回炉一次）。任何失败不阻塞扫描
+            # 收尾（rd.json 已有 assemble 时的初版兜底）。
+            self._state.current_agent = "report-polish"
+            try:
+                await workflow.execute_activity(
+                    activities.run_report_polish, act_input,
+                    start_to_close_timeout=timedelta(minutes=20),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:  # noqa: BLE001 — rd 初版兜底已落盘
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"report polish failed (non-fatal)"
+                                       f"{_activity_not_registered_hint(exc)}: {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
             finally:
                 self._state.current_agent = None
             await workflow.execute_activity(

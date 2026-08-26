@@ -1249,6 +1249,196 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
 
 
 @activity.defn
+async def run_endpoint_enrichment(input: ActivityInput) -> dict:
+    """全卡接口表富化（spec 2026-08-26-report-generation-agent §5.2）。
+
+    素材包 = 合并后 SSOT 全部卡（两轨）+ entry_points.json 路由表；per-class
+    并行 run_gitnexus_verdict_agent（多轮可 grep/read），产接口一体表
+    （method/path/params/auth + route_registered_at/source_location/
+    sink_location 行号链），按 ID 写回 queue 的 report_endpoints 字段
+    （builder 组装 report_data.json 优先采用；确定性 endpoint 兜底不受影响）。
+
+    位置：merge 与 run_gn_finding_enrichment 之后、render_findings 之前。
+    开关 SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认开，独立于 GN_ENRICH_MODE——
+    接口富化对两轨全部卡生效）。失败降级为不富化（non-fatal）。
+    """
+    from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等)
+    from supernova_core.config.concurrency import endpoint_enrich_enabled
+    if not endpoint_enrich_enabled():
+        return {"skipped": "disabled", "enriched_classes": {},
+                "total_enriched": 0}
+    repo, deliverables, _ = _get_paths(input)
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+
+    prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+    route_table = _load_route_table(deliverables)
+    max_turns = int(os.getenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", "30"))
+
+    async def _enrich_class(vuln_class: str) -> dict:
+        queue_path = resolve_intermediate(
+            deliverables, f"{vuln_class}_exploitation_queue.json")
+        if queue_path is None or not queue_path.exists():
+            return {"candidates": 0, "enriched": 0, "noop": True}
+        parsed = VulnerabilityQueue.parse_lenient(
+            queue_path.read_text(encoding="utf-8"))
+        findings = list(parsed.queue.vulnerabilities)
+        if not findings:
+            return {"candidates": 0, "enriched": 0, "noop": True}
+        prompt = prompt_manager.load_sync(
+            "endpoint_enrichment",
+            variables={
+                "route_table": route_table,
+                "vuln_candidates": _render_endpoint_candidates(findings),
+            },
+        )
+        try:
+            result = await run_gitnexus_verdict_agent(
+                prompt=prompt,
+                repo_path=str(repo),
+                structured_output_schema={
+                    "type": "object",
+                    "properties": {"vulnerabilities": {"type": "array"}},
+                },
+                audit_session=get_audit_session(),
+                provider_config=input.provider_config,
+                max_turns=max_turns,
+            )
+        except Exception as exc:  # noqa: BLE001 — 富化失败不阻塞报告
+            logger.warning(
+                "endpoint-enrichment: %s agent failed (keep deterministic "
+                "endpoints): %s", vuln_class, exc)
+            return {"candidates": len(findings), "enriched": 0,
+                    "failed": str(exc)[:200]}
+        raw = result.structured_output
+        if raw is None and result.text:
+            raw = result.text
+        enriched, warnings = _apply_endpoint_enrichment(findings, raw)
+        for w in warnings:
+            logger.warning("%s (%s)", w, vuln_class)
+        atomic_write_json(
+            queue_path,
+            {"vulnerabilities": [f.model_dump() for f in findings]},
+        )
+        logger.info("endpoint-enrichment: %s %d/%d cards enriched",
+                    vuln_class, enriched, len(findings))
+        return {"candidates": len(findings), "enriched": enriched}
+
+    enriched_classes: dict[str, dict] = {}
+    total_enriched = 0
+    async with get_audit_session().track_step(
+            "vulnerability-analysis", "endpoint-enrichment",
+            intent=intent_for("endpoint-enrichment")):
+        results = await asyncio.gather(
+            *(_enrich_class(vc) for vc in ALL_VULN_CLASSES),
+            return_exceptions=True,
+        )
+        for vuln_class, res in zip(ALL_VULN_CLASSES, results):
+            if isinstance(res, BaseException):
+                logger.warning(
+                    "endpoint-enrichment: %s crashed (non-fatal): %s",
+                    vuln_class, res)
+                res = {"failed": str(res)[:200]}
+            enriched_classes[vuln_class] = res
+            total_enriched += int(res.get("enriched", 0)) if isinstance(res, dict) else 0
+    return {"skipped": None, "enriched_classes": enriched_classes,
+            "total_enriched": total_enriched}
+
+
+def _load_route_table(deliverables: Path) -> str:
+    """entry_points.json → 路由表文本素材（METHOD route @ file:line）。"""
+    import json as _json
+    ep_path = resolve_intermediate(deliverables, "entry_points.json")
+    if ep_path is None or not ep_path.exists():
+        return "(no entry_points.json)"
+    try:
+        data = _json.loads(ep_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return "(entry_points.json unreadable)"
+    lines: list[str] = []
+    for ep in data.get("adjudicated_entry_points") or []:
+        if not isinstance(ep, dict):
+            continue
+        route = ep.get("route")
+        method = ep.get("http_method") or "-"
+        # func_block_id "app/routes/index.js:index:66" → 注册位置 file:line
+        fb = str(ep.get("func_block_id") or "")
+        parts = fb.rsplit(":", 1)
+        registered = f"{parts[0]}:{parts[1]}" if len(parts) == 2 and parts[1].isdigit() else fb
+        evidence = ep.get("evidence") or ""
+        lines.append(f"- {method} {route} @ {registered} ({evidence})")
+    return "\n".join(lines) or "(no adjudicated entry points)"
+
+
+def _render_endpoint_candidates(findings: list) -> str:
+    """全部卡渲染成接口富化 prompt 的候选 markdown（确定性事实）。"""
+    lines: list[str] = []
+    for f in findings:
+        eps = getattr(f, "endpoints", None) or []
+        lines.append(
+            f"- ID: {f.ID}\n"
+            f"  type: {getattr(f, 'vulnerability_type', None)}\n"
+            f"  title: {getattr(f, 'title', None)}\n"
+            f"  endpoints: {eps}\n"
+            f"  endpoint: {getattr(f, 'endpoint', None) or getattr(f, 'source_endpoint', None)}\n"
+            f"  path: {getattr(f, 'path', None)}\n"
+            f"  source: {getattr(f, 'source', None)}\n"
+            f"  sink_call: {getattr(f, 'sink_call', None)}\n"
+            f"  affected_parameters: {getattr(f, 'affected_parameters', None)}"
+        )
+    return "\n".join(lines) or "(none)"
+
+
+def _apply_endpoint_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
+    """接口富化 agent 输出按 ID 回填 report_endpoints（原地）。
+
+    宽松解析：structured_output dict / JSON 文本皆可；id/ID 均认；条目 path
+    不以 / 开头丢弃（防幻觉）；ID 未知整条丢弃。返回 (回填条数, warnings)。
+    """
+    import json as _json
+    warnings: list[str] = []
+    data: object = raw
+    if isinstance(data, str):
+        try:
+            data = _json.loads(data)
+        except (ValueError, TypeError):
+            return 0, ["endpoint-enrichment: unparseable output"]
+    if not isinstance(data, dict):
+        return 0, ["endpoint-enrichment: output not a JSON object"]
+    entries = data.get("vulnerabilities")
+    if not isinstance(entries, list):
+        return 0, ["endpoint-enrichment: no vulnerabilities array"]
+    by_id = {f.ID: f for f in findings}
+    enriched = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        eid = str(entry.get("id") or entry.get("ID") or "")
+        target = by_id.get(eid)
+        if target is None:
+            warnings.append(f"endpoint-enrichment: unknown ID {eid!r} skipped")
+            continue
+        raw_eps = entry.get("endpoints")
+        if not isinstance(raw_eps, list):
+            continue
+        valid: list[dict] = []
+        for ep in raw_eps:
+            if not isinstance(ep, dict):
+                continue
+            path = str(ep.get("path") or "")
+            if not path.startswith("/"):
+                warnings.append(
+                    f"endpoint-enrichment: {eid} malformed path {path!r} dropped")
+                continue
+            valid.append(ep)
+        if valid:
+            target.report_endpoints = valid
+            enriched += 1
+    return enriched, warnings
+
+
+@activity.defn
 async def run_assemble_dataflow_view(input: ActivityInput) -> dict:
     """P4: 组装 dataflow_view.json（spec 2026-08-20 §3；失败不阻塞扫描）。
 
@@ -1376,6 +1566,11 @@ async def assemble_report(input: ActivityInput) -> None:
     加执行摘要并清理。攻击链章节由后续 inject_attack_chains activity 注入
     （report-executive 之后），避免被覆盖。GitNexus 轨判定状态注记由后续
     inject_gitnexus_track_status activity 注入（同样 report-executive 之后）。
+
+    T1（spec 2026-08-26-report-generation-agent §3）：assemble 之后产
+    report_data.json（三轨统一报告 SSOT）——agent 富化（merge 内）已写回
+    queue，此处确定性组装；web report-data API / 前端纯渲染 / md 导出同源。
+    组装失败 non-fatal（md 主链路不受影响）。
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
@@ -1389,12 +1584,42 @@ async def assemble_report(input: ActivityInput) -> None:
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
             await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
+            await _write_report_data_safely(input, deliverables)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+async def _write_report_data_safely(input: ActivityInput, deliverables: Path) -> None:
+    """report_data.json 组装落盘（T1）；non-fatal——失败 warning 不阻塞 md 主链路。
+
+    scan id 推断：workspace_path（web=scan_dir）目录名 → session.json 祖先 →
+    "unknown"。模块属性调用（report_data_builder.build_report_data）以支持
+    测试 monkeypatch。
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from supernova_core.models.report_data import ScanMeta
+        from supernova_core.services import report_data_builder
+
+        scan_id = "unknown"
+        if input.workspace_path:
+            scan_id = Path(input.workspace_path).name
+        else:
+            for ancestor in deliverables.resolve().parents:
+                if (ancestor / "session.json").exists():
+                    scan_id = ancestor.name
+                    break
+        scan_meta = ScanMeta(id=scan_id, track="whitebox")
+        report_data = await report_data_builder.build_report_data(
+            deliverables, scan_meta)
+        await report_data_builder.write_report_data(
+            report_data, deliverables / "report_data.json")
+    except Exception as exc:  # noqa: BLE001 — 每步独立降级铁律
+        log.warning("report_data.json 组装失败（non-fatal，md 主链路不受影响）: %s", exc)
 
 
 @activity.defn
@@ -1526,7 +1751,7 @@ async def inject_gitnexus_track_status(input: ActivityInput) -> None:
 
 @activity.defn
 async def generate_poc_report(input: ActivityInput) -> None:
-    """报告增强：生成 curl/Burp PoC md。失败不阻塞主报告（吞异常）。"""
+    """报告增强：生成 curl/Burp PoC md + T4 结构化 POC 写回 queue。失败不阻塞主报告（吞异常）。"""
     import logging
     log = logging.getLogger(__name__)
     try:
@@ -1543,8 +1768,284 @@ async def generate_poc_report(input: ActivityInput) -> None:
             api_key=input.api_key,
             provider_config=input.provider_config,   # P3c 阶段 1
         )
+        # T4（spec 2026-08-26-report-generation-agent §5.3）：per-vuln 并行结构化
+        # POC（完整 request/preconditions/expected_response），写回 queue 的
+        # report_poc；LLM 失败 per-vuln 降级（只含确定性 request/witness）。
+        await _write_structured_pocs(input, deliverables)
     except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
         log.warning("poc: whitebox generate_poc_report failed (non-blocking): %s", exc)
+
+
+async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> None:
+    """T4 接线：每类 queue 逐卡并行 build_structured_poc → report_poc 写回。"""
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+    from supernova_core.services.poc_structured import (
+        _coerce_expected_response,
+        apply_structured_poc,
+        build_expected_response_prompt,
+        build_structured_poc,
+    )
+    base_url = input.web_url or "http://TARGET"
+
+    for vuln_class in (input.vuln_classes or list(ALL_VULN_CLASSES)):
+        cfg = _QUEUE_FILES.get(vuln_class)
+        if cfg is None:
+            continue
+        queue_path = resolve_intermediate(deliverables, cfg)
+        if queue_path is None or not queue_path.exists():
+            continue
+        parsed = VulnerabilityQueue.parse_lenient(
+            queue_path.read_text(encoding="utf-8"), vuln_class=vuln_class)
+        findings = list(parsed.queue.vulnerabilities)
+        if not findings:
+            continue
+        entries: list[dict] = []
+        changed = False
+        for f in findings:
+            entry = f.model_dump()
+            try:
+                # build_structured_poc 同步契约（llm_fn sync）——确定性部分直调，
+                # expected_response 由 activity 层异步补（run_claude_prompt 是 async）
+                poc = build_structured_poc(f, base_url=base_url)
+                if poc and poc.get("request"):
+                    try:
+                        prompt = build_expected_response_prompt(f, poc["request"])
+                        result = await run_claude_prompt(
+                            prompt=prompt, repo_path=input.repo_path,
+                            model_tier="small",
+                            provider_config=input.provider_config)
+                        raw = (result.structured_output
+                               if result.structured_output is not None
+                               else result.text)
+                        expected = _coerce_expected_response(raw)
+                        if expected:
+                            poc["expected_response"] = expected
+                    except Exception as exc:  # noqa: BLE001 — LLM 失败降级
+                        log.warning("structured poc expected_response %s "
+                                    "failed (deterministic only): %s", f.ID, exc)
+                    entry = apply_structured_poc(entry, poc)
+                    changed = True
+            except Exception as exc:  # noqa: BLE001 — 单卡失败保确定性
+                log.warning("structured poc %s failed (keep deterministic): %s",
+                            f.ID, exc)
+            entries.append(entry)
+        if changed:
+            atomic_write_json(queue_path, {"vulnerabilities": entries})
+
+
+# taint 三类 + authz/auth 的 queue 文件名（结构化 POC / polish 重建遍历用）
+_QUEUE_FILES = {
+    "injection": "injection_exploitation_queue.json",
+    "xss": "xss_exploitation_queue.json",
+    "ssrf": "ssrf_exploitation_queue.json",
+    "auth": "auth_exploitation_queue.json",
+    "authz": "authz_exploitation_queue.json",
+}
+
+_TAINT_CLASSES = ("injection", "xss", "ssrf")
+
+
+@activity.defn
+async def run_report_polish(input: ActivityInput) -> dict:
+    """T5（spec 2026-08-26-report-generation-agent §5.4/§5.5）：report_data 终版组装。
+
+    位置：generate_poc_report 之后（全部富化——merge/接口表/POC——已写回 queue），
+    reporting 收尾。三步：
+    1. 重建 report_data（确定性组装，吃全部富化字段）——rd.json 的权威组装点；
+    2. ⑤QA：确定性必填校验（taint 卡 endpoints≥1 / title / severity），缺
+       endpoints 的卡回炉一次（复用 endpoint 富化 agent + prompt）→ 重建；
+       仍失败 → qa.passed=false 显式呈现（不静默）；
+    3. ④执行摘要：LLM 产 executive_summary（攻击面叙事/top_risks/P0-P1）；
+       失败回退确定性摘要（severity 排序）。
+    任何 LLM 失败不阻塞 rd 产出（non-fatal 全程）。
+    """
+    from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)
+    repo, deliverables, _ = _get_paths(input)
+    from supernova_core.models.report_data import (
+        ExecutiveSummary, ReportQA, QACheck, ScanMeta, TopRisk,
+    )
+    from supernova_core.services import report_data_builder
+    from supernova_core.services.severity_rules import SEVERITY_ORDER
+
+    def _scan_meta() -> ScanMeta:
+        scan_id = "unknown"
+        if input.workspace_path:
+            scan_id = Path(input.workspace_path).name
+        else:
+            for ancestor in deliverables.resolve().parents:
+                if (ancestor / "session.json").exists():
+                    scan_id = ancestor.name
+                    break
+        return ScanMeta(id=scan_id, track="whitebox")
+
+    prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+
+    async with get_audit_session().track_step(
+            "reporting", "report-polish", intent=intent_for("report-polish")):
+        rd = await report_data_builder.build_report_data(deliverables, _scan_meta())
+
+        # --- ⑤QA：taint 卡缺 endpoints → 回炉一次 ---
+        missing = [v for v in rd.vulnerabilities
+                   if v.type in _TAINT_CLASSES and not v.endpoints]
+        reworked_ids: list[str] = []
+        if missing:
+            reworked_ids = await _rework_missing_endpoints(
+                input, deliverables, repo, missing, prompt_manager)
+            if reworked_ids:
+                rd = await report_data_builder.build_report_data(
+                    deliverables, _scan_meta())
+
+        checks: list[QACheck] = []
+        taint_missing = [v.id for v in rd.vulnerabilities
+                         if v.type in _TAINT_CLASSES and not v.endpoints]
+        checks.append(QACheck(check="taint_endpoints_present",
+                              failed_ids=taint_missing))
+        no_title = [v.id for v in rd.vulnerabilities if not (v.title or "").strip()]
+        checks.append(QACheck(check="title_present", failed_ids=no_title))
+        bad_sev = [v.id for v in rd.vulnerabilities
+                   if v.severity not in SEVERITY_ORDER]
+        checks.append(QACheck(check="severity_valid", failed_ids=bad_sev))
+        qa = ReportQA(passed=not any(c.failed_ids for c in checks),
+                      checks=checks, reworked_ids=reworked_ids)
+
+        # --- ④执行摘要 ---
+        summary_source = "deterministic"
+        es = None
+        try:
+            digest_lines = [
+                f"- {v.id} | {v.type} | {v.severity} | {v.title} | "
+                f"endpoints={','.join(e.path for e in v.endpoints) or '-'}"
+                for v in rd.vulnerabilities
+            ]
+            prompt = prompt_manager.load_sync(
+                "report_summary",
+                variables={"vuln_digest": "\n".join(digest_lines) or "(none)"},
+            )
+            result = await run_claude_prompt(
+                prompt=prompt, repo_path=str(repo), model_tier="medium",
+                structured_output_schema={
+                    "type": "object",
+                    "properties": {
+                        "narrative": {"type": "string"},
+                        "risk_level": {"type": "string"},
+                        "top_risks": {"type": "array"},
+                        "remediation_order": {"type": "string"},
+                    },
+                },
+                provider_config=input.provider_config,
+            )
+            payload = result.structured_output
+            if isinstance(payload, dict) and payload.get("narrative"):
+                es = ExecutiveSummary.model_validate(payload)
+                summary_source = "llm"
+        except Exception as exc:  # noqa: BLE001 — 摘要失败回退确定性
+            logger.warning("report-polish: summary agent failed "
+                           "(deterministic fallback): %s", exc)
+        if es is None:
+            es = _deterministic_summary(rd)
+
+        rd.executive_summary = es
+        rd.qa = qa
+        await report_data_builder.write_report_data(
+            rd, deliverables / "report_data.json")
+        return {"summary": summary_source, "qa_passed": qa.passed,
+                "reworked": len(reworked_ids)}
+
+
+def _deterministic_summary(rd):
+    """④降级：确定性摘要（severity 排序 top 卡；无 LLM）。"""
+    from supernova_core.models.report_data import ExecutiveSummary, TopRisk
+
+    ranked = sorted(
+        [v for v in rd.vulnerabilities],
+        key=lambda v: -({"critical": 3, "high": 2, "medium": 1, "low": 0}
+                        .get(v.severity or "medium", 0)))
+    if not ranked:
+        return ExecutiveSummary(narrative="未发现漏洞。", risk_level="低")
+    by_sev: dict[str, int] = {}
+    for v in ranked:
+        by_sev[v.severity or "medium"] = by_sev.get(v.severity or "medium", 0) + 1
+    sev_text = "、".join(f"{k} {v} 个" for k, v in by_sev.items())
+    top = ranked[0]
+    risk_level = {"critical": "极高", "high": "高",
+                  "medium": "中", "low": "低"}.get(top.severity or "medium", "中")
+    top_risks = [
+        TopRisk(vuln_id=v.id, reason=v.title,
+                priority="P0" if (v.severity == "critical") else "P1")
+        for v in ranked[:5]
+    ]
+    return ExecutiveSummary(
+        narrative=(f"共发现 {len(ranked)} 个漏洞（{sev_text}）。"
+                   f"最高风险：{top.id} {top.title}。"),
+        risk_level=risk_level, top_risks=top_risks)
+
+
+async def _rework_missing_endpoints(
+    input: ActivityInput, deliverables: Path, repo: Path,
+    missing, prompt_manager,
+) -> list[str]:
+    """⑤回炉：缺 endpoints 的 taint 卡喂回接口富化 agent 一次；写回 queue。"""
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+    from supernova_whitebox.audit.session_registry import get_audit_session
+
+    by_class: dict[str, list] = {}
+    for v in missing:
+        by_class.setdefault(v.type, []).append(v)
+    reworked: list[str] = []
+    route_table = _load_route_table(deliverables)
+    for vuln_class, cards in by_class.items():
+        cfg = _QUEUE_FILES.get(vuln_class)
+        if cfg is None:
+            continue
+        queue_path = resolve_intermediate(deliverables, cfg)
+        if queue_path is None or not queue_path.exists():
+            continue
+        parsed = VulnerabilityQueue.parse_lenient(
+            queue_path.read_text(encoding="utf-8"), vuln_class=vuln_class)
+        findings = list(parsed.queue.vulnerabilities)
+        card_ids = {v.id for v in cards}
+        targets = [f for f in findings if f.ID in card_ids]
+        if not targets:
+            continue
+        prompt = prompt_manager.load_sync(
+            "endpoint_enrichment",
+            variables={
+                "route_table": route_table,
+                "vuln_candidates": _render_endpoint_candidates(targets),
+            },
+        )
+        try:
+            result = await run_gitnexus_verdict_agent(
+                prompt=prompt,
+                repo_path=str(repo),
+                structured_output_schema={
+                    "type": "object",
+                    "properties": {"vulnerabilities": {"type": "array"}},
+                },
+                audit_session=get_audit_session(),
+                provider_config=input.provider_config,
+                max_turns=int(os.getenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", "30")),
+            )
+        except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
+            logger.warning("report-polish: rework %s failed: %s", vuln_class, exc)
+            continue
+        raw = result.structured_output
+        if raw is None and result.text:
+            raw = result.text
+        enriched, warnings = _apply_endpoint_enrichment(findings, raw)
+        for w in warnings:
+            logger.warning("%s (rework %s)", w, vuln_class)
+        if enriched:
+            atomic_write_json(
+                queue_path,
+                {"vulnerabilities": [f.model_dump() for f in findings]},
+            )
+            reworked_ids = {f.ID for f in targets
+                            if getattr(f, "report_endpoints", None)}
+            reworked.extend(sorted(reworked_ids))
+    return reworked
 
 
 async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:

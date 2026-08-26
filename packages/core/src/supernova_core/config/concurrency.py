@@ -86,6 +86,19 @@ def gn_enrich_mode() -> str:
     return "deep"
 
 
+def endpoint_enrich_enabled() -> bool:
+    """SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认 "1"，经 ws_getenv 支持 per-workspace）：
+
+    全卡接口表富化（spec 2026-08-26-report-generation-agent §5.2）——独立于
+    SUPERNOVA_GN_ENRICH_MODE（GN-only 叙事富化档位）：接口富化对两轨全部卡
+    生效（LLM 卡补行号链、GN 卡补接口），关闭时 builder 走确定性 endpoint
+    兜底（无行号）。"""
+    raw = ws_getenv("SUPERNOVA_ENDPOINT_ENRICH_ENABLED")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def get_chunk_max_calls() -> int:
     """Read SUPERNOVA_CHUNK_MAX_CALLS (chunk 内 suspicious/source call 数上限, spec 2026-07-10).
 

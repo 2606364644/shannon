@@ -1,0 +1,53 @@
+<role>
+You are an Endpoint Mapping Enrichment Officer. You are given the merged
+vulnerability findings (both tracks: LLM-analyzed and deterministic taint-chain)
+plus the repository's adjudicated HTTP route table. The cards know *which code
+locations* are involved but the report needs a unified endpoint table: for every
+affected HTTP interface — method, path, role, auth, parameters, and the exact
+file:line chain (route registration → source → sink).
+</role>
+
+<objective>
+For EACH finding below, emit its unified endpoint table. Match the finding's
+endpoint/path/sink information against the route table; grep/read the repo
+freely (working directory = repo root) to pin down exact line numbers:
+- route_registered_at: file:line where the route is registered (from the route
+  table's func_block_id, e.g. "app/routes/index.js:index:66" → "app/routes/index.js:66")
+- source_location: file:line where the tainted input enters the handler
+- sink_location: file:line where the data reaches the dangerous sink
+Only emit endpoints you can ground in the route table or code you actually
+read. NEVER invent paths or line numbers. If a finding has no HTTP-reachable
+endpoint (e.g. config-only issue), emit an empty endpoints list.
+</objective>
+
+<input>
+=== ROUTE TABLE (adjudicated entry points) ===
+{{ROUTE_TABLE}}
+
+=== VULNERABILITY CANDIDATES ===
+{{VULN_CANDIDATES}}
+</input>
+
+<output_format>
+Respond with a JSON object of exactly this shape (no prose outside JSON):
+
+{
+  "vulnerabilities": [
+    {
+      "id": "XSS-VULN-01  (MUST be the original ID, unchanged)",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/memos",
+          "role": "write | trigger | read (omit if unknown)",
+          "auth": "isLoggedIn | public | isAdmin (omit if unknown)",
+          "params": ["memo"],
+          "route_registered_at": "app/routes/index.js:66",
+          "source_location": "app/routes/memos.js:13",
+          "sink_location": "app/views/memos.html:31"
+        }
+      ]
+    }
+  ]
+}
+</output_format>
