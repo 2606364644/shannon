@@ -50,3 +50,42 @@ def export_report_markdown(report_data: ReportData) -> str:
     if card_sections:
         sections.append("\n\n---\n\n".join(card_sections))
     return "\n\n---\n\n".join(sections)
+
+
+def export_poc_collection(report_data: ReportData) -> str:
+    """poc_collection.md 导出（spec 2026-08-26-report-single-source-rendering §4）。
+
+    PoC 单源：从 report_data.poc 导出（raw_http 优先，request 确定性拼
+    兜底），每卡 curl（```bash）+ raw_http（```http，Burp 原始报文）双
+    fenced + 前置条件/预期响应/Witness 行；无 POC 卡整卡省略。
+    """
+    sections: list[str] = []
+    for rv in report_data.vulnerabilities:
+        poc = rv.poc
+        if poc is None:
+            continue
+        lines: list[str] = [f"### {rv.id}", ""]
+        title = rv.title or rv.vulnerability_type or rv.type
+        if title:
+            lines.extend((f"**{title}**", ""))
+        if poc.preconditions:
+            lines.extend((f"- 前置条件：{poc.preconditions}", ""))
+        if poc.expected_response:
+            indicator = poc.expected_response.indicator
+            if indicator:
+                lines.extend((f"- 预期响应：{indicator}", ""))
+        if poc.witness_payload:
+            lines.extend((f"- Witness：{poc.witness_payload}", ""))
+        curl = poc.curl
+        raw_http = poc.raw_http
+        if not raw_http and poc.request is not None:
+            req = poc.request
+            head = f"{req.method} {req.url} HTTP/1.1"
+            headers = "".join(f"{k}: {v}\r\n" for k, v in req.headers.items())
+            raw_http = head + "\r\n" + headers + ("\r\n" + (req.body or ""))
+        if curl:
+            lines.extend(("```bash", curl, "```", ""))
+        if raw_http:
+            lines.extend(("```http", raw_http, "```"))
+        sections.append("\n".join(lines))
+    return "\n\n---\n\n".join(sections)

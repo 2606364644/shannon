@@ -180,6 +180,21 @@ class AttackChainEntry(BaseModel):
     narrative: str | None = None
 
 
+class QuickReferenceRow(BaseModel):
+    """漏洞速查表行（spec 2026-08-26-report-single-source-rendering §5）：
+    builder 从 vulnerabilities + affected_parameters 确定性产；前端与 md
+    都只渲染不派生（守「渲染层纯渲染」——md 现速查表从 queue 现算的口径
+    收编进 schema）。"""
+
+    id: str
+    title: str | None = None
+    params: list[str] = Field(default_factory=list)
+    endpoints: list[str] = Field(default_factory=list)
+    severity: str | None = None
+    verification: str | None = None
+    confidence: str | None = None
+
+
 class ReportData(BaseModel):
     schema_version: int = 1
     scan: ScanMeta
@@ -187,6 +202,7 @@ class ReportData(BaseModel):
     stats: ReportStats | None = None
     vulnerabilities: list[ReportVulnerability] = Field(default_factory=list)
     attack_chains: list[AttackChainEntry] = Field(default_factory=list)
+    quick_reference: list[QuickReferenceRow] = Field(default_factory=list)
     qa: ReportQA | None = None
     # T8 融合版专属：白盒发现黑盒未覆盖清单 [{vuln_id, reason}]
     verification_gaps: list[dict[str, Any]] = Field(default_factory=list)

@@ -46,6 +46,24 @@ def test_report_data_top_level_shape():
     assert rd.executive_summary is None  # ④ agent 产物，组装时可缺省
     assert rd.qa is None  # ⑤ agent 产物
     assert rd.vulnerabilities == []
+    assert rd.quick_reference == []  # 速查表行（spec 单源化 §5）缺省空
+
+
+def test_quick_reference_row_model():
+    """QuickReferenceRow（spec 2026-08-26-report-single-source-rendering §5）：
+    速查表 schema——builder 确定性产，前端与 md 只渲染不派生。"""
+    from supernova_core.models.report_data import QuickReferenceRow
+    row = QuickReferenceRow(
+        id="XSS-VULN-01", title="存储型 XSS：POST /memos",
+        params=["memo (body)"],
+        endpoints=["POST /memos (write, isLoggedIn)"],
+        severity="high", verification="静态分析", confidence="待复核")
+    assert row.id == "XSS-VULN-01"
+    assert row.params == ["memo (body)"]
+    # 最小行：仅 id 必填（title 等缺省容忍——渲染层跳空段）
+    minimal = QuickReferenceRow(id="AUTH-VULN-01")
+    assert minimal.title is None
+    assert minimal.params == []
 
 
 # ---------- T1 组装器（report_data_builder）----------
@@ -212,53 +230,5 @@ async def test_write_report_data_json(tmp_path):
 
 
 # ---------- T1 md 导出（report_markdown_exporter）----------
-
-async def test_export_report_markdown_summary_and_cards(tmp_path):
-    from supernova_core.services.report_data_builder import build_report_data
-    from supernova_core.services.report_markdown_exporter import (
-        export_report_markdown,
-    )
-    from supernova_core.models.report_data import ScanMeta
-
-    d = tmp_path / "deliverables"
-    await _write_queue(d, "xss_exploitation_queue.json", [{
-        "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
-        "externally_exploitable": True, "confidence": "high",
-        "merge_source": "llm-only",
-        "title": "存储型 XSS：POST /memos",
-        "severity": "high",
-        "notes": "路由为 isLoggedIn", "impact": "窃取会话", "remediation": "DOMPurify",
-    }])
-    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
-    md = export_report_markdown(rd)
-
-    # 速查表 + 结构化漏洞卡节数与 JSON 一致（verify 口径）
-    from supernova_core.services.report_assembler import count_vuln_headings
-    assert "## 漏洞速查表" in md
-    assert count_vuln_headings(md) == len(rd.vulnerabilities) == 1
-    assert "### XSS-VULN-01" in md
-    # 卡片正文复用 render_vuln_card（raw 重建）——零视觉回归
-    assert "**漏洞成因（研判依据）**" in md
-    assert "存储型 XSS：POST /memos" in md
-
-
-async def test_export_report_markdown_multiple_classes(tmp_path):
-    from supernova_core.services.report_data_builder import build_report_data
-    from supernova_core.services.report_markdown_exporter import (
-        export_report_markdown,
-    )
-    from supernova_core.models.report_data import ScanMeta
-    from supernova_core.services.report_assembler import count_vuln_headings
-
-    d = tmp_path / "deliverables"
-    await _write_queue(d, "xss_exploitation_queue.json", [
-        {"ID": f"XSS-VULN-{i:02d}", "vulnerability_type": "Stored",
-         "externally_exploitable": True, "confidence": "high", "severity": "high"}
-        for i in (1, 2)])
-    await _write_queue(d, "ssrf_exploitation_queue.json", [
-        {"ID": "SSRF-VULN-01", "vulnerability_type": "SSRF",
-         "externally_exploitable": True, "confidence": "high", "severity": "critical"}])
-    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
-    md = export_report_markdown(rd)
-    assert count_vuln_headings(md) == 3
-    assert "### SSRF-VULN-01" in md
+# 已迁出至 test_report_markdown_exporter.py（spec 2026-08-26 单源化，
+# builder 与 exporter 测试文件分离）。
