@@ -722,6 +722,53 @@ describe("PruningTreeFig — 真实数据重叠修复（pill 副行/标签带/to
     expect(ROW_H).toBeGreaterThanOrEqual(NODE_LABEL_Y1 + 11 + 11 + PILL_HALF_H_MAX + 4);
   });
 
+  it("线穿字修复：source pill 底有不透明底 rect（主 path 起点是 pill 中心，16% 半透明面盖不住线 → 红虚线横穿 pill 文字）", () => {
+    const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
+    const sourceG = container.querySelector("[data-source]");
+    const bgRect = sourceG?.querySelector('rect[data-pill-bg]');
+    const faceRect = sourceG?.querySelector("rect.source-pill");
+    expect(bgRect).toBeTruthy();
+    expect(faceRect).toBeTruthy();
+    // 底 rect 与面 rect 同尺寸同位置（底盖满整个 pill）
+    for (const attr of ["x", "y", "width", "height"]) {
+      expect(bgRect!.getAttribute(attr)).toBe(faceRect!.getAttribute(attr));
+    }
+    // 底 rect 先画（SVG 后画在上：底在下、半透明面在上，两层都在枝条 path 之上 → 线被盖住）
+    expect(bgRect!.compareDocumentPosition(faceRect!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("pill 宽度按主/副两行最宽者撑起（副行 meta 比主行 label 长时不再溢出 rect 右缘被穿出的 path 压字）", () => {
+    // 短 label + 长 entry：主行 56 兜底宽，副行截到 COL_W-20 预算远宽于主行
+    const tree: DataflowTree = {
+      ...vulnerableTree,
+      tree_id: "T-META-WIDE",
+      branches: [
+        {
+          ...vulnerableTree.branches[0],
+          branch_id: "F-META-WIDE",
+          source: {
+            label: "req.body",
+            type: "body",
+            entry: "POST /api/contributions/add [auth: session, no CSRF]",
+            file: "app/routes.ts",
+            line: 10,
+          },
+        },
+      ],
+    };
+    const { container } = render(<PruningTreeFig trees={[tree]} />);
+    const rect = container.querySelector('[data-source] rect.source-pill');
+    const meta = container.querySelector("[data-source] [data-source-meta]");
+    expect(rect).toBeTruthy();
+    expect(meta).toBeTruthy();
+    const metaText = meta?.textContent ?? "";
+    // 组件同口径估算（fontSize 8.5：全角 8.5 / 半角 4.76）
+    const metaW = [...metaText].reduce((w, c) => w + (c.charCodeAt(0) > 0xff ? 8.5 : 8.5 * 0.56), 0);
+    const w = parseFloat(rect!.getAttribute("width") ?? "0");
+    // rect 右缘（x=-6+w）须盖过副行文本右缘（x=2+metaW）至少 2px
+    expect(w).toBeGreaterThanOrEqual(metaW + 10);
+  });
+
   it("SVG 内 tooltip 全部用原生 <title>（data-tooltip 的 CSS 浮层在 SVG 内无 containing block，定位不可靠）", () => {
     const { container } = render(<PruningTreeFig trees={[hugeTree]} />);
     expect(container.querySelectorAll("svg [data-tooltip]").length).toBe(0);

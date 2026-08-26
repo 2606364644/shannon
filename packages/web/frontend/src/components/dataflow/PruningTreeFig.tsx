@@ -593,8 +593,13 @@ function SourcePill({
   const shownMeta = fitLabel(metaText, COL_W - 20);
   const labelCut = shownLabel !== label;
   const metaCut = shownMeta !== metaText;
-  // pill 宽度按截断后文本实宽（不再用 length×6 粗估——中文/全角宽度低估同样溢出）
-  const w = Math.min(COL_W - 8, Math.max(56, textWidthPx(shownLabel) + 16));
+  // pill 宽度按主/副两行最宽者撑起（2026-08-26 线穿字修复副因：宽只按主行算时，
+  // 长 entry 副行溢出 rect 右缘，主 path 从 pill 中心穿出后正好压在露出的 meta 尾巴上）
+  const subW = isStorage ? 80 : textWidthPx(shownMeta);
+  const w = Math.min(
+    COL_W - 8,
+    Math.max(56, textWidthPx(shownLabel) + 16, hasSub ? subW + 16 : 0),
+  );
   const h = hasSub ? PILL_HALF_H_MAX * 2 : 22;
   const topY = -h / 2;
   // 主行基线：有副行时上移，无副行居中
@@ -614,6 +619,12 @@ function SourcePill({
   return (
     <g data-source="" data-node="0" x={x} transform={`translate(${x} ${y})`} className="source-pill">
       <title>{tooltip}</title>
+      {/* 不透明底（2026-08-26 线穿字修复）：主 path 起点是 pill 正中心 (0,0)，首段横穿
+          pill 文字带；16% 半透明面盖不住线 → 红虚线直接压在 source 文字上，每枝一条、
+          满屏线字互压（NodeGoat 15 树真实数据「乱糟糟」根因）。底 rect 用卡面实色
+          （--card，与树卡底同色视觉无缝），先画在半透明面之下、二者都在枝条 path 之上 →
+          穿 pill 的线段被盖住，线视觉上从 pill 右缘接出。 */}
+      <rect x={-6} y={topY} width={w} height={h} rx={12} className="source-pill-bg" data-pill-bg="" />
       <rect x={-6} y={topY} width={w} height={h} rx={12} className="source-pill" />
       <text x={2} y={mainY} className="source-pill-txt" textAnchor="start" data-source-label="">
         {shownLabel}

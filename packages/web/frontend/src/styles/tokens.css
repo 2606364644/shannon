@@ -801,6 +801,12 @@
   stroke-dasharray: 1 4;
   opacity: 0.7;
 }
+/* source pill 不透明底：盖住主 path 起点（pill 中心）穿出的枝条线（2026-08-26 线穿字修复）；
+   卡面实色与树卡底同色，视觉无缝——半透明 cyan 面叠在其上保持原材质 */
+.source-pill-bg {
+  fill: hsl(var(--card));
+  stroke: none;
+}
 .source-pill {
   fill: hsl(var(--c-cyan) / 0.16);
   stroke: hsl(var(--c-cyan));
