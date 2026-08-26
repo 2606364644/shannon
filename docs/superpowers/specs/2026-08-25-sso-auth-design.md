@@ -1,7 +1,7 @@
 # SSO 认证接入（富途 OA passport）设计
 
 - 日期：2026-08-25
-- 状态：📐 设计完成待实现
+- 状态：✅ 已实现（2026-08-26 修订：配置模型 env 驱动 → DB 运行时配置 + env 首次种子，白名单面板迁设置页，见 `2026-08-26-sso-runtime-config-design.md`；§5.2/§7/§8/§11/§12 已同步修订）
 - 范围：`packages/web`（后端 auth 子系统 + 前端登录/用户展示）
 - 关联：无前序 spec（现有账号密码认证为 P0 已落地能力，见 `packages/web/src/supernova_web/auth/`）
 
@@ -76,7 +76,7 @@
 - **`auth/routes.py` 扩展**：SSO 端点 + 白名单管理端点（沿用该文件的 `_cookie_secure`/`_cookie_kwargs` cookie 工具）。
 - **`auth/store.py` 扩展**：新表/新列的 CRUD。
 - **`auth/session.py` 扩展**：`create(user_id, ttl_hours=None)` 可选参数，None 落默认 `self.ttl`。
-- **`config.py` 扩展**：SSO env 配置（§7）。
+- **`config.py` 扩展**：SSO env 配置（§7；2026-08-26 修订：env 降级为首次种子来源，运行时配置存 auth.db `sso_config` 单行表）。
 
 ### 5.2 端点与校验链
 
@@ -90,6 +90,8 @@
 | `POST /api/auth/sso/whitelist` | admin | body `{nick}` 增白名单（重复幂等 200） |
 | `DELETE /api/auth/sso/whitelist/{nick}` | admin | 删除 |
 | `POST /api/auth/sso/whitelist/enabled` | admin | 运行时切换白名单管控（body `{enabled}`；关闭=所有 OA 认证用户可登录，JIT 建户照常；nick_conflict 护栏不随开关变化） |
+| `GET /api/auth/sso/admin/config` | admin | SSO 5 项运行时配置现值 + `updated_at/by`（2026-08-26 修订新增，见 `2026-08-26-sso-runtime-config-design.md` §7.1） |
+| `PUT /api/auth/sso/admin/config` | admin | 全量更新 SSO 5 项配置（校验：passport https、enabled=1 时 domain 必填、ttl 1–168），即时生效 |
 
 **callback 校验链（顺序，失败即 302 `/login?sso_error=<code>`）：**
 
@@ -134,9 +136,11 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
 
 `store.py` 新增：`get/add/remove/list_sso_whitelist`、`is_nick_whitelisted`、`mark_ticket_used`/`is_ticket_used`/`purge_used_tickets`、`update_avatar`、补列迁移。`User` model 加 `avatar_url: str | None`、`auth_provider: str = "password"`。
 
-## 7. 配置（config.py，env 驱动）
+## 7. 配置（2026-08-26 修订：DB 运行时配置 + env 首次种子）
 
-| env | 默认 | 说明 |
+SSO 5 项配置存 auth.db `sso_config` 单行表（admin 经设置页 `GET/PUT /api/auth/sso/admin/config` 配置，**即时生效无需重启**）。下表 env 仅在**首次启动表空时**作为种子种入 DB，此后 env 不再生效（坏 env 种子降级不崩溃）：
+
+| env（种子用） | 默认 | 说明 |
 |---|---|---|
 | `SUPERNOVA_WEB_SSO_ENABLED` | `0` | 总开关；关闭时 SSO 端点 404、前端不显示按钮 |
 | `SUPERNOVA_WEB_SSO_AUTH_DOMAIN` | 空 | **裸域名**（如 `codescan.futu5.com`）；传 validateTicket 的 `authDomain`。需在 OA 侧登记 |
@@ -144,14 +148,14 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
 | `SUPERNOVA_WEB_SSO_PASSPORT_BASE` | `https://passport.futuoa.com` | passport 基址 |
 | `SUPERNOVA_WEB_SSO_SESSION_TTL_HOURS` | `24` | SSO 会话时长（sn-sid max_age 同步） |
 
-**fail-fast**：`sso_enabled=1` 且 `sso_auth_domain` 为空 → 启动报错（对齐 env-loader 风格）。
+**fail-fast（2026-08-26 修订：已移除）**：原「`sso_enabled=1` 且 `sso_auth_domain` 为空 → 启动报错」改为种子降级（种 enabled=0 + warning）+ PUT 写入时校验（enabled=1 时 domain 必填、passport 必须 https）。详见 `2026-08-26-sso-runtime-config-design.md`。
 
 ## 8. 前端设计（基于现有登录页改造，复用 shadcn 组件）
 
 - **LoginPage**：账密表单下方加分隔线 + 「使用 OA 账号登录」按钮（仅 `sso/config.enabled` 时渲染）→ `window.location.assign('/api/auth/sso/login?next=' + encodeURIComponent(next))`。解析 `?sso_error=` 显示 i18n 错误文案（`not_whitelisted` → 「账号未授权，请联系管理员开通」；其余 → 通用 SSO 失败文案）。
 - **AuthContext**：`AuthUser` 加 `avatar_url?: string | null`；`logout()` 若响应含 `sso_logout_url` → `window.location.assign`（OA 登出后回 `/login`），否则维持现状。
 - **UserMenu**：有 `avatar_url` → 圆形 `<img src referrerPolicy="no-referrer">`（浏览器直连 CDN，服务端零参与）；无 → 现状首字母回退。用户名即 nick，无需改。
-- **UsersPage**：新增「SSO 白名单」管理块：nick 输入 + 添加 + 列表删除；SSO 关闭时显示「未启用」提示块；头部含管控开关（admin 运行时切换，存 auth.db `sso_whitelist_state` 单行表，默认开）。
+- **UsersPage**：~~新增「SSO 白名单」管理块~~（2026-08-26 修订：白名单面板迁至 SettingsPage「SSO / OA 登录」section，与 SSO 配置卡集中管理；UsersPage 回归纯用户管理）。
 - **i18n**：zh/en 新增键（注意 kebab→camel 转换陷阱，对齐现有 locales 结构）。
 
 ## 9. 安全设计汇总
@@ -185,7 +189,7 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
 - whitelist CRUD：admin 增删查、非 admin 403、重复添加幂等。
 - logout：SSO 会话返回 `sso_logout_url`（URL 编码正确）；账密会话无该字段。
 - `next` open redirect 用例：`//evil.com`、`/\evil.com`、`https://evil.com`、空。
-- 配置：enabled 但缺 auth_domain → 启动 fail-fast。
+- 配置：~~enabled 但缺 auth_domain → 启动 fail-fast~~（2026-08-26 修订：改为种子降级 + PUT 校验链测试，见 `2026-08-26-sso-runtime-config-design.md` §11）。
 
 **前端 vitest：**
 
@@ -198,7 +202,7 @@ CREATE TABLE IF NOT EXISTS sso_used_tickets (
 
 ## 12. 验收标准
 
-1. `SUPERNOVA_WEB_SSO_ENABLED=0`：全系统行为与现状逐字节一致（SSO 端点 404、前端无按钮）。
+1. SSO 未启用（DB `sso_config.enabled=0`，2026-08-26 修订：来源由 env 改 DB）：SSO 端点 404、前端无按钮，其余行为与现状一致。
 2. 开启后：登录页两方式并存；SSO 全流程（跳 OA → 回调 → 白名单内建户 → 顶栏 nick+头像 → 登出跳 OA 登出回 /login）走通。
 3. 白名单外 nick 被拒且不建户；ticket 重放被拒。
 4. 账密登录/登出/改密/CSRF/BruteGuard 零回归。
