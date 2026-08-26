@@ -25,6 +25,15 @@ const rows: QuickReferenceRow[] = [
     verification: "动态实测",
     confidence: "高",
   },
+  {
+    id: "INJ-VULN-03",
+    title: "多参数注入（截断档）",
+    params: ["a (body)", "b (body)", "c (body)", "d (body)", "e (body)"],
+    endpoints: ["POST /multi"],
+    severity: "medium",
+    verification: "静态分析",
+    confidence: "中",
+  },
 ];
 
 beforeEach(() => i18n.changeLanguage("zh"));
@@ -36,7 +45,7 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
     expect(screen.getByTestId("quick-reference")).toBeInTheDocument();
     expect(screen.getByText("漏洞速查表")).toBeInTheDocument();
     const trs = screen.getAllByTestId("quick-ref-row");
-    expect(trs.length).toBe(2);
+    expect(trs.length).toBe(3);
     for (const h of ["标题", "参数", "接口", "严重程度", "验证", "置信度"]) {
       expect(screen.getByText(h)).toBeInTheDocument();
     }
@@ -66,5 +75,51 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
   it("rows 空 → 整节不渲染（渲染层跳空，不出空壳表）", () => {
     render(<QuickReferenceTable rows={[]} onLocate={() => {}} />);
     expect(screen.queryByTestId("quick-reference")).not.toBeInTheDocument();
+  });
+
+  // ── 2026-08-27 速查表 triage 优化（左缘色规/截断/语义色/a11y）──
+
+  it("行左缘 severity 色规：与 VulnerabilityCard SEV_EDGE 同语言（critical 红 / high 橙 / medium 黄 / low 中性）", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const trs = screen.getAllByTestId("quick-ref-row");
+    expect(trs[1].className).toContain("border-l-red"); // critical（INJ-VULN-02）
+    expect(trs[0].className).toContain("border-l-orange"); // high（XSS-VULN-01）
+    expect(trs[2].className).toContain("border-l-yellow"); // medium（INJ-VULN-03）
+  });
+
+  it("params >3 截断（对齐 md _params_cell 口径）：显示前 3 + 等 N 个，title 悬停可见全量", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const cell = screen.getByTestId("quick-ref-params-INJ-VULN-03");
+    expect(cell.textContent).toContain("a (body), b (body), c (body)");
+    expect(cell.textContent).toContain("等 5 个"); // n=总数（对齐 md _params_cell 口径）
+    expect(cell.textContent).not.toContain("d (body)");
+    expect(cell).toHaveAttribute("title", "a (body), b (body), c (body), d (body), e (body)");
+    // ≤3 不截断：INJ-VULN-02 两参数全量
+    const cell2 = screen.getByTestId("quick-ref-params-INJ-VULN-02");
+    expect(cell2.textContent).toContain("userId (query)");
+    expect(cell2).not.toHaveAttribute("title");
+  });
+
+  it("验证列语义色：动态验证 → 绿（实锤信号提亮）；静态 → muted（对齐卡内 evidence 徽章语言）", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const dynamic = screen.getByTestId("quick-ref-verification-INJ-VULN-02");
+    expect(dynamic.className).toContain("text-green");
+    const staticCell = screen.getByTestId("quick-ref-verification-XSS-VULN-01");
+    expect(staticCell.className).toContain("text-muted-foreground");
+  });
+
+  it("置信度列：待复核/未判定 → amber（QA 风险信号）；高中低 → 常规文本", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const review = screen.getByTestId("quick-ref-confidence-XSS-VULN-01");
+    expect(review.className).toContain("text-amber");
+    const normal = screen.getByTestId("quick-ref-confidence-INJ-VULN-02");
+    expect(normal.className).not.toContain("text-amber");
+  });
+
+  it("a11y：列头 scope=col（屏幕阅读器列关联）", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    for (const th of screen.getAllByRole("columnheader")) {
+      expect(th).toHaveAttribute("scope", "col");
+    }
   });
 });

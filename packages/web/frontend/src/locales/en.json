@@ -1081,6 +1081,7 @@
     "quickRefSeverity": "Severity",
     "quickRefVerification": "Verification",
     "quickRefConfidence": "Confidence",
+    "paramsMoreSuffix": " +{{n}} more",
     "collapseAll": "Collapse all",
     "expandAll": "Expand all",
     "toggleVulnCard": "Toggle vulnerability card {{id}}",

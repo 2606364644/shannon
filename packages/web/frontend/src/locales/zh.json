@@ -1081,6 +1081,7 @@
     "quickRefSeverity": "严重程度",
     "quickRefVerification": "验证",
     "quickRefConfidence": "置信度",
+    "paramsMoreSuffix": " 等 {{n}} 个",
     "collapseAll": "全部收起",
     "expandAll": "全部展开",
     "toggleVulnCard": "展开/收起漏洞卡 {{id}}",
