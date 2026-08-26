@@ -171,6 +171,14 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(kamiBlock).not.toContain("--backdrop-");
   });
 
+  it("kami 块：羊皮纸颗粒画布材质（2026-08-26 亮色材质升级）", () => {
+    const m = tokens.match(/\.light\.theme-kami\s*\{([\s\S]*?)\n\}/);
+    expect(m).not.toBeNull();
+    const kamiBlock = m![1];
+    // 粗频噪点（baseFrequency 0.55、3 octaves）——比 warm-paper 细纤维更明显的颗粒
+    expect(kamiBlock).toMatch(/--canvas-material:\s*url\("data:image\/svg\+xml,[^"]*baseFrequency='0\.55'[^"]*"\)/);
+  });
+
   it("mac 块：SF Pro 字体栈 + 胶囊 CTA + 玻璃减法（卡片实色、浮层留玻璃）+ coral 主色", () => {
     const m = tokens.match(/\.light\.theme-mac\s*\{([\s\S]*?)\n\}/);
     expect(m).not.toBeNull();
@@ -187,17 +195,123 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     expect(macBlock).not.toContain("--backdrop-card");
     expect(macBlock).toMatch(/--popover:\s*0 0% 100% \/ 0\.72;/);
     expect(macBlock).toMatch(/--backdrop-float:/);
-    // primary 维持 coral（身份色归业务纪律不动）
-    expect(macBlock).toMatch(/--primary:\s*14 76% 52%;/);
+    // primary（2026-08-27 果味修订）：coral → apple.com CTA 蓝 #0071E3（系统对齐层
+    // 用参考系统本色的分层纪律回归；品牌 coral 仍在 charcoal/warm-paper 基准主题）
+    expect(macBlock).toMatch(/--primary:\s*211 100% 45%;/);
+    // 2026-08-27 果味修订：中性阶梯蓝饱和回真值——#F2F2F7 精确换算是 240 24% 96%
+    // （旧值 240 6% 96% 把蓝味降没了，全屏读作纯灰——「发灰」根因）
+    expect(macBlock).toMatch(/--background:\s*240 24% 96%;/);
+    // 天光渐变画布材质：极淡冷蓝自上而下渐隐，磨砂玻璃透出 macOS 桌面天光
+    // （单方向单色温 ≤6% alpha，与 Arc 三团彩色光斑不同语言）；attachment fixed 钉视口
+    expect(macBlock).toMatch(/--canvas-material:\s*linear-gradient\(180deg, hsl\(211[^)]*\) 0%,/);
+    expect(macBlock).toMatch(/--canvas-material-attachment:\s*fixed;/);
+    // CTA 光晕同步蓝（旧 coral 光晕在蓝按钮上是脏橙边）
+    expect(macBlock).toMatch(/--shadow-cta:[^;]*hsl\(211 100% 45% \/ 0\.30\)/);
     // 2026-08-26 材质补课（macOS 系统设置语言）：卡片 whisper 影（无外描边环——
     // 白卡浮灰画布靠色调对比，ring 是 web 通用解法非 Apple 解法）
     expect(macBlock).toMatch(/--shadow-card:\s*0 1px 2px hsl\(240 6% 20% \/ 0\.03\), 0 8px 24px -12px hsl\(240 6% 20% \/ 0\.07\);/);
     // 平面卡：卡片面（div/section/article 上的 bg-card+border）隐去描边；
     // 卡内分隔线/输入框/TopBar hairline 走 --border 原值不受影响
     expect(tokens).toMatch(/\.light\.theme-mac :is\(div, section, article\)\.bg-card\.border\s*\{/);
-    // 分段控件导航：激活项 = 灰胶囊段（macOS segmented control，替代 web 下划线范式）
-    expect(tokens).toMatch(/\.light\.theme-mac \.topbar-nav-item\[data-active="true"\]\s*\{/);
-    // 环境色光斑已删（Arc 的语言非 Apple 的——macOS 桌面不透彩，画布干净 #F2F2F7）
+    // 分段控件导航（2026-08-27 果味修订）：激活项 = 白片浮起在灰槽（macOS segmented
+    // control 原生语言；旧灰胶囊是灰上灰），带小落影
+    const seg = tokens.match(/\.light\.theme-mac \.topbar-nav-item\[data-active="true"\]\s*\{([\s\S]*?)\n\}/);
+    expect(seg).not.toBeNull();
+    expect(seg![1]).toMatch(/background:\s*hsl\(0 0% 100%\);/);
+    expect(seg![1]).toMatch(/box-shadow:/);
+    // 天光走 --canvas-material var 机制（html body 通用消费点 + attachment var），
+    // 不写 .light.theme-mac body 规则
     expect(tokens).not.toMatch(/\.light\.theme-mac body\s*\{/);
+  });
+
+  it("openai 块：纯白画布 + 深青黑墨色 + OpenAI 青主色（DESIGN.md 真值）+ Söhne/Inter 字体覆盖", () => {
+    const m = tokens.match(/\.light\.theme-openai\s*\{([\s\S]*?)\n\}/);
+    expect(m).not.toBeNull();
+    const oaiBlock = m![1];
+    // 层 A 真值：--bg #ffffff / --fg #0d0d0d / --border #e5e5e5 / 主按钮墨黑（DESIGN.md
+    // 「主要按钮 #0d0d0d」真值档——teal 非主 CTA，仅焦点/链接/成功，反「绿太多」失真）
+    expect(oaiBlock).toMatch(/--background:\s*0 0% 100%;/);
+    expect(oaiBlock).toMatch(/--foreground:\s*0 0% 5%;/);
+    expect(oaiBlock).toMatch(/--border:\s*0 0% 90%;/);
+    expect(oaiBlock).toMatch(/--primary:\s*0 0% 5%;/);
+    // teal 的真岗位：focus ring（--focus-ring 真值）——primary 黑 / ring 青分离
+    expect(oaiBlock).toMatch(/--ring:\s*165 82% 35%;/);
+    // 次级面：薄雾 #fafafa（secondary/muted）+ 珍珠 #f5f5f5（accent）
+    expect(oaiBlock).toMatch(/--secondary:\s*0 0% 98%;/);
+    expect(oaiBlock).toMatch(/--accent:\s*0 0% 96%;/);
+    // 层 C：12px 软圆角 + Söhne/Inter 栈（真值置首、Inter webfont 兜底）+ Söhne Mono
+    expect(oaiBlock).toMatch(/--radius:\s*12px;/);
+    expect(oaiBlock).toMatch(/--font-sans:\s*"Söhne", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;/);
+    expect(oaiBlock).toMatch(/--font-mono:\s*"Söhne Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;/);
+    // 不覆盖衬线（DESIGN.md 约束：Signifier 仅限编辑展示层，产品控件无衬线）；
+    // 不定义胶囊 CTA（OpenAI 行动按钮是 12px 矩形圆角，非 mac 全胶囊语言）
+    expect(oaiBlock).not.toContain("--font-serif:");
+    expect(oaiBlock).not.toContain("--radius-cta:");
+    // 层 B：c-green 用深青 #0a7a5e（--accent-hover 真值档，白底 5.3:1 AA；
+    // 品牌青 35% 档仅 3.2:1 只配按钮底/链接）。severity hue 锁定 5/24/38
+    expect(oaiBlock).toMatch(/--c-green:\s*165 85% 26%;/);
+    expect(oaiBlock).toMatch(/--c-red:\s*5\s/);
+    expect(oaiBlock).toMatch(/--c-orange:\s*24\s/);
+    expect(oaiBlock).toMatch(/--c-yellow:\s*38\s/);
+    // GitNexus cyan 与 teal 主色拉开（190° vs 165°）
+    expect(oaiBlock).toMatch(/--c-cyan:\s*190 65% 30%;/);
+    // 层 E：全库最轻——真值 hover 影 rgba(13,13,13,0.06) 压一档当静态 whisper，
+    // 单层无 ring（卡 border 已画线，github「线不叠影」纪律）
+    expect(oaiBlock).toMatch(/--shadow-card:\s*0 4px 16px hsl\(0 0% 5% \/ 0\.05\);/);
+    // 黑 CTA 无光晕（DESIGN.md 主按钮近无影；teal 光晕在黑按钮上是脏边——同 mac
+    // 果味修订「coral 光晕在蓝按钮上是脏橙边」教训）：cta 影为纯中性黑落影
+    expect(oaiBlock).toMatch(/--shadow-cta:\s*0 1px 2px hsl\(0 0% 5% \/ 0\.18\);/);
+    expect(oaiBlock).not.toMatch(/--shadow-cta:[^;]*hsl\(165/);
+    // 禁玻璃 / 无画布材质 / 无 topbar 覆盖（留白即真值；顶栏回落 popover 白+hairline）
+    expect(oaiBlock).not.toContain("--backdrop-");
+    expect(oaiBlock).not.toContain("--canvas-material");
+    expect(oaiBlock).not.toContain("--topbar-bg");
+  });
+});
+
+describe("亮色材质升级（2026-08-26 纸纹×2 + 蓝图网格，spec 同名）", () => {
+  it("通用画布材质消费点：html body 读 --canvas-material（(0,0,2) 压 events.css body shorthand）", () => {
+    const m = tokens.match(/html body\s*\{([\s\S]*?)\n\}/);
+    expect(m, "html body 规则应存在").not.toBeNull();
+    expect(m![1]).toMatch(/background-image:\s*var\(--canvas-material, none\);/);
+    expect(m![1]).toMatch(/background-size:\s*var\(--canvas-material-size, auto\);/);
+    // 2026-08-27 mac 果味修订：attachment 第三 var（纸纹/网格默认 scroll 随内容，
+    // mac 天光 fixed 钉视口顶部）
+    expect(m![1]).toMatch(/background-attachment:\s*var\(--canvas-material-attachment, scroll\);/);
+  });
+
+  it("warm-paper 块：材质专用块（色 token 仍在 .light 基础块不重复）+ 细纸纹 feTurbulence", () => {
+    const m = tokens.match(/\.light\.theme-warm-paper\s*\{([\s\S]*?)\n\}/);
+    expect(m, ".light.theme-warm-paper 块应存在").not.toBeNull();
+    const wpBlock = m![1];
+    // 细纤维：高频 0.9、低透明度 0.04——比 kami 更淡的纸面
+    expect(wpBlock).toMatch(/--canvas-material:\s*url\("data:image\/svg\+xml,[^"]*baseFrequency='0\.9'[^"]*"\)/);
+    expect(wpBlock).toMatch(/opacity='0\.04'/);
+    // 材质专用块：不重复定义颜色 token（.light 基础块仍是唯一色源）
+    expect(wpBlock).not.toMatch(/--background:/);
+    expect(wpBlock).not.toMatch(/--primary:/);
+  });
+
+  it("blueprint 块：冷白绘图纸 + 墨蓝主色 + 4px 圆角 + 实色 hairline + 网格画布", () => {
+    const m = tokens.match(/\.light\.theme-blueprint\s*\{([\s\S]*?)\n\}/);
+    expect(m).not.toBeNull();
+    const bpBlock = m![1];
+    expect(bpBlock).toMatch(/--background:\s*214 40% 97%;/);
+    // 制图墨蓝（224°，与 GitNexus cyan 192° 拉开 32°）
+    expect(bpBlock).toMatch(/--primary:\s*224 58% 34%;/);
+    // 实色 crisp hairline（蓝图线是画出来的，非 alpha 透出）
+    expect(bpBlock).toMatch(/--border:\s*215 25% 84%;/);
+    expect(bpBlock).toMatch(/--radius:\s*4px;/);
+    // TopBar 冷灰带（与 github 灰带同机制、冷调）
+    expect(bpBlock).toMatch(/--topbar-bg:\s*214 35% 96%;/);
+    // severity hue 锁定
+    expect(bpBlock).toMatch(/--c-red:\s*5\s/);
+    expect(bpBlock).toMatch(/--c-orange:\s*24\s/);
+    expect(bpBlock).toMatch(/--c-yellow:\s*38\s/);
+    // 网格画布：24px 小格 + 120px 大格双层 linear-gradient（图案材质非噪点）
+    expect(bpBlock).toMatch(/--canvas-material:\s*\n?\s*linear-gradient\(hsl\(221[^)]*\) 1px, transparent 1px\),/);
+    expect(bpBlock).toMatch(/--canvas-material-size:\s*24px 24px, 24px 24px, 120px 120px, 120px 120px;/);
+    // 禁玻璃：blueprint 不定义 --backdrop-*（图纸是实底材质）
+    expect(bpBlock).not.toContain("--backdrop-");
   });
 });

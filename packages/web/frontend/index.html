@@ -15,7 +15,8 @@
         try {
           // 与 theme.ts applyTheme 同语义（防 FOAC 首帧闪基础主题）：
           // 主题 → mode class + palette class；旧值 dark/light/frost 读时归一；
-          // system/无/非法 → 按 prefers 落默认主题对（浅=mac / 深=charcoal）。
+          // system/无/非法 → 按 prefers 落默认主题对（浅=warm-paper / 深=charcoal；
+          // 2026-08-27 默认浅色回切品牌基准，与 theme.ts defaultThemeFor 同源）。
           var DEF = {
             charcoal: ["dark"],
             midnight: ["dark", "theme-midnight"],
@@ -27,13 +28,15 @@
             github: ["light", "theme-github"],
             notion: ["light", "theme-notion"],
             kami: ["light", "theme-kami"],
-            "warm-paper": ["light"],
+            blueprint: ["light", "theme-blueprint"],
+            // 2026-08-26 亮色材质升级：warm-paper 获材质专用 palette class（画布纸纹）
+            "warm-paper": ["light", "theme-warm-paper"],
           };
           var legacy = { dark: "charcoal", light: "warm-paper", frost: "mac" };
           var t = localStorage.getItem("supernova-theme");
           if (legacy[t]) t = legacy[t];
           if (!DEF[t]) {
-            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "mac" : "charcoal";
+            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "warm-paper" : "charcoal";
           }
           var cl = document.documentElement.classList;
           DEF[t].forEach(function (c) {

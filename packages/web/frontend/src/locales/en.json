@@ -628,7 +628,9 @@
       "mission": "Mission Control",
       "github": "GitHub",
       "notion": "Notion Warm",
-      "kami": "kami Paper"
+      "kami": "kami Paper",
+      "blueprint": "Blueprint",
+      "openai": "OpenAI"
     },
     "accountSecurityTitle": "Account security",
     "accountSecurityHint": "Change your sign-in password",

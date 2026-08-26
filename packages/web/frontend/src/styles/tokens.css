@@ -12,11 +12,20 @@
    - radius 10px（从 8 提到 10，更 Claude 圆润但克制）；暖棕/暖黑柔阴影浮起卡片。
    2026-08-24（二）：基础双主题精确对齐 claude.ai 真值（深 #262624/#30302E/#E8E6E3、
    浅 #FAF9F5/纯白卡/#2C2B29，coral 灵魂色不动），显示名改「Claude 深色/浅色」；
-   默认主题对改为 浅=Mac / 深=Claude 深色（theme.ts defaultThemeFor）。
+   默认主题对改为 浅=Mac / 深=Claude 深色（theme.ts defaultThemeFor）；
+   2026-08-27 默认浅色回切 warm-paper（mac 果味修订后 brand 基准回位，
+   coral 留守默认主题——用户决策）。
    扩展主题块见下方（mac=Apple HIG / midnight=Linear / graphite=Geist /
    sentry=Sentry / arc=Arc Browser / mission=Mission Control /
    github=GitHub Primer / notion=Notion / kami=kami 纸质，2026-08-25 后六者
-   移植自 OpenDesign DESIGN.md）。 */
+   移植自 OpenDesign DESIGN.md；2026-08-27 增 openai=OpenAI 近单色研究室）。
+   2026-08-26 亮色材质升级：亮色组从「颜色差异」进到「材质差异」——warm-paper/kami
+   落纸纹（feTurbulence 画布噪点，细纤维/粗颗粒两档）、新增 blueprint（白盒蓝图：
+   冷白绘图纸 + 墨蓝 24/120px 网格画布 + 实色 hairline + 4px 技术圆角）；notion /
+   github / mac 的纯影/线框/玻璃三极不动（克制即身份；2026-08-27 mac 果味修订
+   例外——蓝饱和回真值 + Apple 蓝主色 + 天光画布 + 分段白片，反「太灰」反馈）。
+   画布材质统一走 --canvas-material / --canvas-material-size /
+   --canvas-material-attachment token + html body 消费点（.light 块后）。 */
 
 :root {
   /* 层 A · shadcn token（深 · Claude 深色；2026-08-24 精确对齐 claude.ai 暗色真值：
@@ -142,15 +151,39 @@
   --shadow-toolbar-hover: inset 0 1px 0 hsl(40 30% 100% / 0.55), 0 2px 4px hsl(40 12% 20% / 0.10), 0 10px 24px -8px hsl(40 12% 20% / 0.20);
 }
 
-/* —— 扩展主题（2026-08-24 新增并材质升级，只增不删：charcoal/warm-paper 基础主题即上方 :root/.light 原样保留）——
+/* —— 画布材质层（2026-08-26 亮色材质升级）——
+   warm-paper 材质专用块：色 token 仍是上方 .light 基础块（零重复——本块不定义任何
+   颜色），只挂画布材质。暖纸纤维 = feTurbulence fractalNoise 高频细噪（0.9）+
+   饱和度归零灰噪 + rect opacity 0.04（噪点 alpha 平均再减半 → 实效 ~2%：纸感而非
+   脏感；tile 180px stitchTiles 无缝平铺）。「暖纸」从奶油色漆变成真的纸。 */
+.light.theme-warm-paper {
+  --canvas-material: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+/* 画布材质通用消费点：主题块定义 --canvas-material（SVG 纸纹 / 蓝图网格），
+   html body 统一消费。html body (0,0,2) 为压过 events.css 的
+   body { background: var(--void) } shorthand（(0,0,1)——tokens.css 先于
+   events.css import，同级会输给源顺序）；background-color 仍由 events.css 供
+   （--void = hsl(var(--background))）。未定义主题回落 none 零影响；arc 环境光层
+   （.dark.theme-arc body，(0,2,1)）特异性更高不受影响。 */
+html body {
+  background-image: var(--canvas-material, none);
+  background-size: var(--canvas-material-size, auto);
+  background-attachment: var(--canvas-material-attachment, scroll);
+}
+
+/* —— 扩展主题（2026-08-24 新增并材质升级，只增不删：charcoal/warm-paper 基础主题即上方 :root/.light 原样保留；
+   2026-08-26 起 warm-paper 另有材质专用块 .light.theme-warm-paper——只挂画布纸纹，色 token 仍单源于 .light）——
    双类选择器 .dark.theme-* / .light.theme-*（特异性 (0,2,0)）严格高于 :root/.light，覆盖不依赖源顺序。
    设计纪律（2026-08-25 修订为分层制）：主色分层——品牌层（charcoal/warm-paper/midnight/graphite）coral
    保留；系统对齐层（mac/github/sentry/mission/notion/kami）用参考系统本色 primary；arc 以玻璃透质感为
-   身份、primary 保持 coral（Arc 品牌珊瑚与 coral 同族不构成第二主色）。severity red/orange/yellow
+   身份、primary 保持 coral（Arc 品牌珊瑚与 coral 同族不构成第二主色）；blueprint（2026-08-26 新增，
+   概念主题非品牌移植）用制图墨蓝 224°——图纸身份即主色。severity red/orange/yellow
    hue 锁定 5°/24°/38°只调 lightness/sat 保 AA；cyan=GitNexus 轨 / magenta=LLM 轨双轨语义色逐主题单独校对比。
    材质语言各主题独立：边框用 alpha 或实色随真值、阴影语言逐主题、圆角随主题气质覆盖（mac 12 / midnight 12 /
-   graphite 8 / sentry 8 / arc 16 / mission 4 / github 6 / notion 6 / kami 6）；字体默认共享，
-   仅 kami（衬线主导）与 mac（2026-08-25 SF Pro 栈，Apple 质感信号）覆盖 --font-sans。 */
+   graphite 8 / sentry 8 / arc 16 / mission 4 / github 6 / notion 6 / kami 6 / blueprint 4 / openai 12）、
+   画布材质（--canvas-material：warm-paper 细纸纹 / kami 羊皮纸颗粒 / blueprint 绘图网格）；
+   字体默认共享，仅 kami（衬线主导）与 mac（2026-08-25 SF Pro 栈，Apple 质感信号）覆盖 --font-sans。 */
 
 /* 午夜 Midnight（深 · 靛蓝 SOC，2026-08-24 材质升级对标 Linear 深色）：
    近黑靛底 + 浮层顶部 hairline 发光（Linear 深色浮层的质感灵魂）+ 高饱和语义色。
@@ -461,8 +494,9 @@
    OpenDesign Don't「核心 UI 不过度使用阴影/发光/渐变」，Apple 靠色调对比与表面
    阶梯分层，不靠全卡玻璃）；severity 用 Apple 系统色浅底文本变体
    （red=#D70015 / orange=#C93400 / green=#248A3D 系）；文本 Apple 近黑 #1D1D1F +
-   次级 #6E6E73；主操作 coral 系 accent 红橙档（身份色归业务，材质/severity 仍
-   Apple 真值）。
+   次级 #6E6E73；主操作 apple.com CTA 蓝 #0071E3（2026-08-27 前为 coral 系红橙档
+   ——身份色归业务旧决策，果味修订后系统对齐层本色纪律回归，coral 留在品牌基准
+   主题 charcoal/warm-paper；材质/severity 仍 Apple 真值）。
    Apple 质感信号（2026-08-25 增补 / 2026-08-26 补课收敛）：
    ① 字体：--font-sans 覆盖 SF 栈——Apple 设备 -apple-system 解析 SF Pro/苹方，
      其他平台回落 Inter（OpenDesign 官方免费替代）；--font-mono 同步 SF Mono 栈；
@@ -475,29 +509,39 @@
    ⑤ 分段控件导航（2026-08-26）：激活 nav 项 = 灰胶囊段（macOS segmented
      control），替代 web 下划线范式（见块后 CSS）；
    ⑥ 环境色光斑已删（2026-08-26）：三团 radial 是 Arc 的语言非 Apple 的——
-     macOS 桌面不透彩，画布干净 #F2F2F7；TopBar 磨砂透滚动内容即可成立。
+     macOS 桌面不透彩团，画布干净 #F2F2F7；TopBar 磨砂透滚动内容即可成立。
+   ⑦ 果味修订（2026-08-27，反「太灰」反馈）：中性阶梯蓝饱和回 #F2F2F7 真值
+     （240 24%——旧值 240 6% 丢了 4 倍蓝味，全屏读作纯灰，发灰根因）；primary
+     换 apple.com CTA 蓝 #0071E3 + 链接 #0066CC；天光渐变回归但非 ⑥ 删的彩团——
+     单方向单色温 ≤6% alpha 冷蓝天光（macOS 亮色桌面本色，光从上来），磨砂静止
+     时透天光而非纯灰；分段控件激活段白片化（白片浮灰槽，旧灰胶囊是灰上灰）。
    12px 桌面窗口圆角保持。 */
 .light.theme-mac {
-  /* 层 A · shadcn token（卡片实色；仅浮层 popover 带 alpha = 玻璃「透」） */
-  --background: 240 6% 96%;
+  /* 层 A · shadcn token（卡片实色；仅浮层 popover 带 alpha = 玻璃「透」）。
+     2026-08-27 果味修订——中性阶梯蓝饱和回真值 + primary 换 Apple 蓝：
+     - #F2F2F7 精确换算是 240 24% 96%（旧值 240 6% 96% 把蓝味降没了——全屏
+       中性面读作纯灰，「太灰」的根因）；secondary/muted/accent 同步回蓝。
+     - primary 换 apple.com CTA 蓝 #0071E3（211 100% 45%）——系统对齐层用参考
+       系统本色的分层纪律回归（品牌 coral 仍在 charcoal/warm-paper 基准主题）。 */
+  --background: 240 24% 96%;
   --foreground: 240 5% 12%;
   --card: 0 0% 100%;
   --card-foreground: 240 5% 12%;
   --popover: 0 0% 100% / 0.72;
   --popover-foreground: 240 5% 12%;
-  --primary: 14 76% 52%;
+  --primary: 211 100% 45%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 5% 96%;
+  --secondary: 240 20% 95%;
   --secondary-foreground: 240 5% 12%;
-  --muted: 240 5% 96%;
-  --muted-foreground: 240 4% 40%;
-  --accent: 240 5% 94%;
+  --muted: 240 20% 95%;
+  --muted-foreground: 240 8% 40%;
+  --accent: 240 18% 93%;
   --accent-foreground: 240 5% 12%;
   --destructive: 2 100% 42%;
   --destructive-foreground: 0 0% 100%;
   --border: 240 6% 10% / 0.14;
   --input: 240 6% 10% / 0.14;
-  --ring: 14 76% 52%;
+  --ring: 211 100% 45%;
 
   /* 层 B · 语义色（Apple 系统色浅底文本变体，白底全部 ≥AA 4.5） */
   --c-cyan: 192 95% 28%;
@@ -517,10 +561,10 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", Inter, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
 
-  /* 层 D · prose（Apple label 近黑 + coral 链接） */
+  /* 层 D · prose（Apple label 近黑 + 链接蓝 #0066CC 深档保 AA） */
   --prose-body: 240 5% 14%;
   --prose-headings: 240 6% 9%;
-  --prose-links: 14 76% 40%;
+  --prose-links: 211 100% 40%;
   --prose-bold: 240 6% 9%;
   --prose-code: 192 95% 26%;
   --prose-code-bg: 240 5% 93%;
@@ -529,10 +573,11 @@
   --prose-hr: 240 5% 10% / 0.12;
 
   /* 层 E · elevation（2026-08-26 平面化：无外描边环——白卡浮灰画布靠色调对比，
-     卡影压到 whisper（systemGrouped 语言：Apple 的卡不靠 ring/投影分层）） */
+     卡影压到 whisper（systemGrouped 语言：Apple 的卡不靠 ring/投影分层）。
+     cta 光晕 2026-08-27 同步蓝（旧 coral 光晕在蓝按钮上是脏橙边）） */
   --shadow-card: 0 1px 2px hsl(240 6% 20% / 0.03), 0 8px 24px -12px hsl(240 6% 20% / 0.07);
-  --shadow-cta: 0 1px 2px hsl(14 76% 25% / 0.18), 0 6px 16px -6px hsl(14 76% 52% / 0.28);
-  --shadow-cta-hover: 0 2px 4px hsl(14 76% 25% / 0.22), 0 10px 22px -6px hsl(14 76% 52% / 0.36);
+  --shadow-cta: 0 1px 2px hsl(211 100% 25% / 0.18), 0 6px 16px -6px hsl(211 100% 45% / 0.30);
+  --shadow-cta-hover: 0 2px 4px hsl(211 100% 25% / 0.22), 0 10px 22px -6px hsl(211 100% 52% / 0.38);
   --shadow-toolbar: 0 1px 2px hsl(240 6% 20% / 0.06);
   --shadow-toolbar-hover: 0 2px 4px hsl(240 6% 20% / 0.08), 0 10px 24px -8px hsl(240 6% 20% / 0.14);
 
@@ -541,6 +586,13 @@
      磨砂 token 不再定义 → card/磁贴自动回落 none 实色。其他主题不定义 → none 零影响。
      2026-08-26 光斑删除后磨砂透的是滚动内容本身——macOS 工具栏 vibrancy 正是如此） */
   --backdrop-float: saturate(180%) blur(32px);
+
+  /* 层 F' · 画布材质（2026-08-27 果味修订）：天光渐变——极淡冷蓝自上而下渐隐
+     （≤6% alpha，前 1/3 屏可感），磨砂玻璃静止时透出的不再是纯灰而是 macOS 亮色
+     桌面的蓝天。与 2026-08-26 删除的 Arc 式三团彩色光斑是两种语言：单方向、单色温、
+     物理直觉（光从上来）；attachment fixed 钉视口顶部（html body 通用消费点）。 */
+  --canvas-material: linear-gradient(180deg, hsl(211 80% 62% / 0.06) 0%, hsl(211 80% 62% / 0.02) 30%, hsl(211 80% 62% / 0) 55%);
+  --canvas-material-attachment: fixed;
 }
 
 /* mac 平面卡（2026-08-26 材质补课 ④）：卡片面（div/section/article 上的 bg-card +
@@ -550,17 +602,22 @@
   border-color: transparent;
 }
 
-/* mac 分段控件导航（2026-08-26 材质补课 ⑤）：激活 nav 项 = 灰胶囊段（macOS
-   segmented control 语言；TopBar 的 topbar-nav-item[data-active] 挂钩，其他主题
-   无此规则、维持下划线范式）。特异性 (0,4,0) 压过 tailwind 单类 border/text 工具类。 */
+/* mac 分段控件导航（2026-08-26 材质补课 ⑤；2026-08-27 果味修订白片化）：
+   激活 nav 项 = 白片浮起在灰槽（macOS segmented control 原生语言——旧灰胶囊是
+   灰上灰，正是「太灰」观感的病灶之一）；TopBar 的 topbar-nav-item[data-active]
+   挂钩，其他主题无此规则、维持下划线范式。特异性 (0,4,0) 压过 tailwind 单类
+   border/text 工具类。 */
 .light.theme-mac .topbar-nav-item[data-active="true"] {
-  border-color: transparent;
-  background: hsl(240 5% 88%);
+  border-color: hsl(240 8% 10% / 0.10);
+  background: hsl(0 0% 100%);
   color: hsl(240 5% 12%);
   border-radius: 999px;
+  box-shadow: 0 1px 2px hsl(240 8% 10% / 0.10), 0 2px 8px hsl(240 8% 10% / 0.06);
 }
 .light.theme-mac .topbar-nav-item[data-active="true"]:hover {
-  background: hsl(240 5% 85%);
+  /* 白片是抬起的实体段，hover 不回灰（真 macOS 白片 hover 只加深落影） */
+  background: hsl(0 0% 100%);
+  box-shadow: 0 1px 2px hsl(240 8% 10% / 0.12), 0 3px 10px hsl(240 8% 10% / 0.08);
 }
 
 /* mac SF 标题紧排：不做——PageHeader/CardTitle 全局已 tracking-tight（-0.025em），
@@ -756,6 +813,156 @@
   --shadow-cta-hover: 0 0 0 1px hsl(10 52% 40%), 0 6px 28px hsl(0 0% 0% / 0.07);
   --shadow-toolbar: 0 0 0 1px hsl(50 22% 86%);
   --shadow-toolbar-hover: 0 0 0 1px hsl(50 20% 80%), 0 4px 24px hsl(0 0% 0% / 0.06);
+
+  /* 层 F' · 画布材质（2026-08-26 亮色材质升级）：羊皮纸颗粒——粗频
+     （0.55 / 3 octaves / tile 220px）比 warm-paper 细纤维更明显（rect opacity
+     0.07）；象牙卡 = 压在纹理纸面上的光滑纸片。印刷品的纸张肌理 + 衬线 + 朱砂
+     三件套齐（DESIGN.md 反模式禁的是硬阴影/玻璃/渐变——纸纹即纸的本体）。 */
+  --canvas-material: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.07'/%3E%3C/svg%3E");
+}
+
+/* 蓝图 Blueprint（浅 · 白盒制图桌，2026-08-26 亮色材质升级新增）：
+   whitebox 的本义就是「读图纸」——冷白绘图纸画布 + 墨蓝细网格（24px 小格 /
+   120px 大格，全主题库唯一图案材质）+ 实色 crisp hairline（蓝图线是画出来的，
+   非 alpha 透出）+ 制图墨蓝主色（224°，与 GitNexus cyan 192° 拉开 32°）+
+   4px 技术圆角 + 冷调紧凑投影。卡 = 图纸上的模板仪器；TopBar 冷灰带；无玻璃。 */
+.light.theme-blueprint {
+  /* 层 A · shadcn token */
+  --background: 214 40% 97%;
+  --foreground: 220 30% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 30% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 30% 12%;
+  --primary: 224 58% 34%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 30% 95%;
+  --secondary-foreground: 220 30% 12%;
+  --muted: 214 30% 95%;
+  --muted-foreground: 215 12% 38%;
+  --accent: 214 30% 92%;
+  --accent-foreground: 220 30% 12%;
+  --destructive: 5 62% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 215 25% 84%;
+  --input: 215 25% 84%;
+  --ring: 224 58% 34%;
+  --topbar-bg: 214 35% 96%;
+
+  /* 层 B · 语义色（cyan=GitNexus 青压深拉开与墨蓝的距离；severity hue 锁定 5/24/38） */
+  --c-cyan: 192 85% 28%;
+  --c-magenta: 278 55% 45%;
+  --c-green: 137 55% 30%;
+  --c-red: 5 62% 44%;
+  --c-orange: 24 75% 37%;
+  --c-yellow: 38 70% 29%;
+  --c-amber: 36 73% 34%;
+
+  /* 层 C · 圆角（技术制图利落，与 mission 4px 同档） */
+  --radius: 4px;
+
+  /* 层 D · prose（冷墨文字 + 墨蓝链接 + 青代码色 + 冷灰代码底） */
+  --prose-body: 220 25% 15%;
+  --prose-headings: 220 30% 10%;
+  --prose-links: 224 58% 36%;
+  --prose-bold: 220 30% 10%;
+  --prose-code: 192 85% 28%;
+  --prose-code-bg: 214 30% 94%;
+  --prose-quotes: 215 12% 40%;
+  --prose-bullets: 215 12% 40%;
+  --prose-hr: 220 30% 12% / 0.10;
+
+  /* 层 E · elevation（冷调紧凑：近距落影 + 远距淡影；组件 border 已画线，影不加 ring） */
+  --shadow-card: 0 1px 2px hsl(220 40% 20% / 0.07), 0 6px 16px -8px hsl(220 40% 20% / 0.10);
+  --shadow-cta: 0 1px 2px hsl(224 58% 20% / 0.2), 0 4px 12px -4px hsl(224 58% 34% / 0.3);
+  --shadow-cta-hover: 0 2px 4px hsl(224 58% 20% / 0.22), 0 8px 20px -6px hsl(224 58% 40% / 0.38);
+  --shadow-toolbar: 0 1px 2px hsl(220 40% 20% / 0.07);
+  --shadow-toolbar-hover: 0 0 0 1px hsl(215 25% 84%), 0 2px 4px hsl(220 40% 20% / 0.10), 0 8px 20px -8px hsl(220 40% 20% / 0.16);
+
+  /* 层 F' · 画布材质（本主题的灵魂）：绘图纸网格——24px 小格（5% 墨蓝）+
+     120px 大格（9%）双频 linear-gradient；图纸的「图」就在纸上，
+     经上方 html body 通用消费点生效。 */
+  --canvas-material:
+    linear-gradient(hsl(221 45% 40% / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(221 45% 40% / 0.05) 1px, transparent 1px),
+    linear-gradient(hsl(221 45% 40% / 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(221 45% 40% / 0.09) 1px, transparent 1px);
+  --canvas-material-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+}
+
+/* OpenAI（浅 · 近单色研究室，2026-08-27 移植自 OpenDesign design-system-openai）：
+   「面向公众开放的研究室」——纯白画布 + 深青黑墨色（#0d0d0d 微冷近黑，非咄咄逼人
+   的深暗）+ 主 CTA 墨黑（DESIGN.md「主要按钮 #0d0d0d」档——真身 openai.com/
+   chatgpt.com 的 CTA 就是黑底白字）+ OpenAI 青 #10a37f 退守稀少强调岗（focus
+   ring / 链接 / 成功——中性系统中唯一彩色；青做 primary 会「绿太多读作绿色主题」，
+   反模式「仅靠绿色不成 OpenAI 风」的对称面）+ Söhne/Inter
+   克制字重 + #e5e5e5 细线（「颜色的缺席而非存在」）+ 默认无影 + 留白为主要分隔。
+   DESIGN.md 反模式条款继承：Signifier 衬线仅限编辑展示层（无消费点，不覆盖
+   --font-serif——衬线身份已归 kami）；无玻璃 / 无画布材质 / 无 topbar 覆盖——
+   纯白即真值。c-green 用深青 #0a7a5e（--accent-hover 真值档）：品牌青 35% 档
+   白底仅 3.2:1 配大色块（UI 组件 3:1 档），徽章文本压到 26% 档 5.3:1 AA。 */
+.light.theme-openai {
+  /* 层 A · shadcn token（白卡轮廓靠细线非色调差——同 github 线框派；次级面：
+     薄雾 #fafafa / hover·胶囊面 珍珠 #f5f5f5。primary=墨黑主按钮档，ring=
+     teal 焦点光晕（--focus-ring 真值）——真身 CTA 黑 / 焦点青的角色分置） */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 5%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 5%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 5%;
+  --primary: 0 0% 5%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 98%;
+  --secondary-foreground: 0 0% 5%;
+  --muted: 0 0% 98%;
+  --muted-foreground: 0 0% 43%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 5 84% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 165 82% 35%;
+
+  /* 层 B · 语义色（green=深青 --accent-hover 档 AA；danger #ef4146 358°→锁 5°；
+     warn #f5a623 37°→锁 24°；cyan 190° 与 c-green teal 165° 拉 25° 防双绿混淆） */
+  --c-cyan: 190 65% 30%;
+  --c-magenta: 278 55% 45%;
+  --c-green: 165 85% 26%;
+  --c-red: 5 84% 48%;
+  --c-orange: 24 85% 38%;
+  --c-yellow: 38 85% 30%;
+  --c-amber: 36 78% 33%;
+
+  /* 层 C · 字体/圆角（第三处字体覆盖：Söhne 真值置首（Klim 商用本地多无）+
+     Inter webfont 兜底即实际渲染字体；行动按钮 12px 矩形圆角——不定义
+     --radius-cta 胶囊（芯片才用 9999px，非 mac 全胶囊语言）） */
+  --radius: 12px;
+  --font-sans: "Söhne", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Söhne Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* 层 D · prose（正文石墨 #3c3c3c（DESIGN.md 正文阅读色）/ 标题柔黑 #1a1a1a /
+     链接深青（同 c-green 源）/ hr 细线实色） */
+  --prose-body: 0 0% 24%;
+  --prose-headings: 0 0% 10%;
+  --prose-links: 165 85% 26%;
+  --prose-bold: 0 0% 10%;
+  --prose-code: 190 65% 28%;
+  --prose-code-bg: 0 0% 96%;
+  --prose-quotes: 0 0% 43%;
+  --prose-bullets: 0 0% 43%;
+  --prose-hr: 0 0% 90%;
+
+  /* 层 E · elevation（全库最轻：真值 hover 影 rgba(13,13,13,0.06) 压一档当静态
+     whisper，单层无 ring——卡 border 已画线，github「线不叠影」纪律同源。
+     黑 CTA 近无影（DESIGN.md 主按钮无光晕）——纯中性微落影，teal 光晕在黑按钮
+     上是脏边，不加（同 mac「coral 光晕在蓝按钮上是脏橙边」教训）） */
+  --shadow-card: 0 4px 16px hsl(0 0% 5% / 0.05);
+  --shadow-cta: 0 1px 2px hsl(0 0% 5% / 0.18);
+  --shadow-cta-hover: 0 2px 6px hsl(0 0% 5% / 0.24);
+  --shadow-toolbar: 0 1px 2px hsl(0 0% 5% / 0.05);
+  --shadow-toolbar-hover: 0 2px 4px hsl(0 0% 5% / 0.08), 0 8px 20px -8px hsl(0 0% 5% / 0.12);
 }
 
 /* —— 剪枝树（PruningTreeFig）专用动画与 class（spec 2026-08-20 §5 视觉语言）——

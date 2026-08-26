@@ -55,6 +55,8 @@ describe("theme lib", () => {
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(localStorage.getItem(THEME_KEY)).toBe("warm-paper");
+    // 2026-08-26 亮色材质升级：warm-paper 获材质专用 palette class（色 token 仍在 .light 基础块）
+    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
   });
 
   it("applyTheme: 切换时清旧 class（含 palette class）", () => {
@@ -81,10 +83,10 @@ describe("theme lib", () => {
     expect(cl.contains("light")).toBe(false);
   });
 
-  it("THEMES 覆盖 11 主题；palette id 与 paletteClass 一一对应；浅色组默认 Mac 在前", () => {
+  it("THEMES 覆盖 13 主题；palette id 与 paletteClass 一一对应；浅色组默认 warm-paper 在前", () => {
     expect(THEMES.map((t) => t.id)).toEqual([
       "charcoal", "midnight", "graphite", "sentry", "arc", "mission",
-      "mac", "warm-paper", "github", "notion", "kami",
+      "warm-paper", "mac", "github", "notion", "kami", "blueprint", "openai",
     ]);
     expect(getThemeDef("charcoal")?.paletteClass).toBeNull();
     expect(getThemeDef("mac")?.paletteClass).toBe("theme-mac");
@@ -94,11 +96,17 @@ describe("theme lib", () => {
     expect(getThemeDef("github")?.paletteClass).toBe("theme-github");
     expect(getThemeDef("notion")?.paletteClass).toBe("theme-notion");
     expect(getThemeDef("kami")?.paletteClass).toBe("theme-kami");
+    // 2026-08-26 亮色材质升级：warm-paper 材质专用块 + 新增 blueprint
+    expect(getThemeDef("warm-paper")?.paletteClass).toBe("theme-warm-paper");
+    expect(getThemeDef("blueprint")?.paletteClass).toBe("theme-blueprint");
+    // 2026-08-27 OpenAI 主题（OpenDesign design-system-openai 移植）
+    expect(getThemeDef("openai")?.paletteClass).toBe("theme-openai");
     expect(getThemeDef("system")).toBeNull();
   });
 
-  it("oppositeBaseTheme: dark→mac / light→charcoal（翻到对侧默认主题）", () => {
-    expect(oppositeBaseTheme("dark")).toBe("mac");
+  it("oppositeBaseTheme: dark→warm-paper / light→charcoal（翻到对侧默认主题）", () => {
+    // 2026-08-27 默认主题对回切：mac 果味修订（Apple 蓝主色）后默认浅色回品牌基准
+    expect(oppositeBaseTheme("dark")).toBe("warm-paper");
     expect(oppositeBaseTheme("light")).toBe("charcoal");
   });
 
@@ -111,8 +119,8 @@ describe("theme lib", () => {
     }
   });
 
-  it("applyTheme(github/notion/kami): light + 各自 palette class", () => {
-    for (const id of ["github", "notion", "kami"] as const) {
+  it("applyTheme(github/notion/kami/blueprint/openai): light + 各自 palette class", () => {
+    for (const id of ["github", "notion", "kami", "blueprint", "openai"] as const) {
       applyTheme(id);
       const cl = document.documentElement.classList;
       expect(cl.contains("light")).toBe(true);
@@ -125,6 +133,10 @@ describe("theme lib", () => {
     expect(getInitialTheme()).toBe("kami");
     localStorage.setItem(THEME_KEY, "mission");
     expect(getInitialTheme()).toBe("mission");
+    localStorage.setItem(THEME_KEY, "blueprint");
+    expect(getInitialTheme()).toBe("blueprint");
+    localStorage.setItem(THEME_KEY, "openai");
+    expect(getInitialTheme()).toBe("openai");
   });
 
   it("resolveEffectiveTheme: 新主题查 def.mode 正确", () => {
@@ -134,6 +146,8 @@ describe("theme lib", () => {
     expect(resolveEffectiveTheme("github")).toBe("light");
     expect(resolveEffectiveTheme("notion")).toBe("light");
     expect(resolveEffectiveTheme("kami")).toBe("light");
+    expect(resolveEffectiveTheme("blueprint")).toBe("light");
+    expect(resolveEffectiveTheme("openai")).toBe("light");
   });
 });
 
@@ -193,16 +207,16 @@ describe("theme system 态", () => {
     expect(document.documentElement.className).not.toContain("theme-");
   });
 
-  it("applyTheme(system): 系统浅色 → light + theme-mac（默认亮色=Mac）", () => {
+  it("applyTheme(system): 系统浅色 → light + theme-warm-paper（默认亮色=品牌基准）", () => {
     mockMatchMedia(true);
     applyTheme("system");
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
   });
 
-  it("getInitialTheme: 无 stored + 系统浅色 → mac（默认亮色主题）", () => {
+  it("getInitialTheme: 无 stored + 系统浅色 → warm-paper（默认亮色主题）", () => {
     mockMatchMedia(true);
-    expect(getInitialTheme()).toBe("mac");
+    expect(getInitialTheme()).toBe("warm-paper");
   });
 
   it("applyTheme(system): 注册 matchMedia change 监听", () => {
@@ -211,16 +225,16 @@ describe("theme system 态", () => {
     expect(mm.listenerCount()).toBe(1);
   });
 
-  it("system 下系统偏好变化 → 实时重挂 class + 切默认主题 palette（dark 无 / light=theme-mac）", () => {
+  it("system 下系统偏好变化 → 实时重挂 class + 切默认主题 palette（dark 无 / light=theme-warm-paper）", () => {
     const mm = mockMatchMedia(false);
     applyTheme("system");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    mm.change(true); // 系统切浅色 → 默认亮色 Mac
+    mm.change(true); // 系统切浅色 → 默认亮色 warm-paper（品牌基准）
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
     mm.change(false); // 切回深色 → palette 清回 charcoal 基础态
-    expect(document.documentElement.classList.contains("theme-mac")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(false);
   });
 
   it("切回显式态 → 清理 system 监听（无泄漏）", () => {

@@ -92,7 +92,7 @@ describe("LoginPage", () => {
     });
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(localStorage.getItem(THEME_KEY)).toBe("mac"); // 对侧默认主题=Mac
+    expect(localStorage.getItem(THEME_KEY)).toBe("warm-paper"); // 对侧默认主题=warm-paper（2026-08-27 默认浅色回切品牌基准）
   });
 
   it("跟随全局主题（<html> 设 dark 时不强制 light）", async () => {

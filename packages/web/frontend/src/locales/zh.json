@@ -628,7 +628,9 @@
       "mission": "指挥中心",
       "github": "GitHub",
       "notion": "Notion 暖灰",
-      "kami": "kami 纸质"
+      "kami": "kami 纸质",
+      "blueprint": "蓝图",
+      "openai": "OpenAI"
     },
     "accountSecurityTitle": "账户安全",
     "accountSecurityHint": "修改登录密码",

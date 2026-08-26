@@ -68,6 +68,7 @@ beforeEach(async () => {
   document.documentElement.classList.remove(
     "dark", "light", "theme-mac", "theme-midnight", "theme-graphite",
     "theme-sentry", "theme-arc", "theme-mission", "theme-github", "theme-notion", "theme-kami",
+    "theme-warm-paper", "theme-blueprint", "theme-openai",
   );
 });
 afterEach(() => { server.resetHandlers(); cleanup(); });
@@ -118,6 +119,26 @@ describe("SettingsPage", () => {
     // 旧名不再出现（改名闭环）
     expect(screen.queryByRole("button", { name: /^炭黑$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^暖纸$/ })).not.toBeInTheDocument();
+  });
+
+  it("主题选择器：材质升级主题渲染——蓝图（2026-08-26 新增）点击 → light + theme-blueprint", async () => {
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    expect(screen.getByRole("button", { name: /蓝图/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /蓝图/ }));
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-blueprint")).toBe(true);
+    expect(localStorage.getItem("supernova-theme")).toBe("blueprint");
+  });
+
+  it("主题选择器：OpenAI 主题（2026-08-27 新增）渲染并点击 → light + theme-openai", async () => {
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    expect(screen.getByRole("button", { name: /OpenAI/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-openai")).toBe(true);
+    expect(localStorage.getItem("supernova-theme")).toBe("openai");
   });
 
   it("主题选择器：点午夜 → <html>.dark + theme-midnight + localStorage=midnight", async () => {

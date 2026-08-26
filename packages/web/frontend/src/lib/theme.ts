@@ -7,11 +7,20 @@
    "frost"（霜白，2026-08-24 改名 Mac）读时映射为 "mac"（只读时归一，不回写）。
    默认主题对（2026-08-24）：浅色=Mac、深色=Claude 深色（charcoal）——首次访问按
    OS 偏好落这一对，system 态与快捷翻转（oppositeBaseTheme）同源。
+   2026-08-27 默认浅色回切 warm-paper：mac 果味修订（Apple 蓝主色）后，默认主题
+   保留品牌 coral（用户决策）——mac 成为纯可选的果味主题，brand 基准回到
+   warm-paper/charcoal 一对（spec 2026-08-27-mac-theme-apple-flavor）。
    2026-08-25 扩展至 11 主题：+sentry/arc/mission（深）+ github/notion/kami（浅），
-   移植自 OpenDesign DESIGN.md（spec 2026-08-25-theme-expansion）。 */
+   移植自 OpenDesign DESIGN.md（spec 2026-08-25-theme-expansion）。
+   2026-08-26 亮色材质升级至 12 主题：warm-paper 获得 paletteClass（材质专用块
+   .light.theme-warm-paper 挂画布纸纹，色 token 仍单源于 .light 基础块）+
+   新增 blueprint（浅 · 白盒蓝图——绘图网格画布，spec 2026-08-26-light-theme-material）。
+   2026-08-27 增至 13 主题：+openai（浅 · OpenAI 近单色研究室——纯白画布 +
+   深青黑墨色 + 墨黑主 CTA（teal 仅焦点/链接/成功），移植自 OpenDesign
+   design-system-openai，spec 2026-08-27-openai-theme）。 */
 
 export type ThemeMode = "dark" | "light";
-export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite" | "sentry" | "arc" | "mission" | "github" | "notion" | "kami";
+export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite" | "sentry" | "arc" | "mission" | "github" | "notion" | "kami" | "blueprint" | "openai";
 /** @deprecated 语义由 ThemeMode 取代；保留别名避免存量导入破坏。 */
 export type EffectiveTheme = ThemeMode;
 export type Theme = ThemeId;
@@ -30,7 +39,8 @@ export interface ThemeDef {
 }
 
 /** 全部主题：深色组在前、浅色组在后（SettingsPicker 按组分块渲染；
-    浅色组默认主题 mac 排最前）。charcoal/warm-paper = Claude 风深/浅基础主题
+    浅色组默认主题 warm-paper 排最前——2026-08-27 默认浅色回切品牌基准）。
+    charcoal/warm-paper = Claude 风深/浅基础主题
     （tokens.css :root/.light 精确对齐 claude.ai 真值色）。 */
 export const THEMES: readonly ThemeDef[] = [
   {
@@ -70,16 +80,20 @@ export const THEMES: readonly ThemeDef[] = [
     preview: { bg: "hsl(223 49% 8%)", card: "hsl(221 39% 11%)", primary: "hsl(43 100% 50%)", border: "hsl(214 52% 25%)" },
   },
   {
+    id: "warm-paper",
+    mode: "light",
+    // 2026-08-26 亮色材质升级：材质专用 palette class（只挂 --canvas-material 纸纹；
+    // 色 token 仍单源于 tokens.css .light 基础块，本项 preview 与其同步维护）。
+    // 2026-08-27 起为默认浅色主题（mac 果味修订后 brand 基准回位）
+    paletteClass: "theme-warm-paper",
+    preview: { bg: "hsl(48 33% 97%)", card: "hsl(0 0% 100%)", primary: "hsl(15 58% 50%)", border: "hsl(40 8% 17% / 0.10)" },
+  },
+  {
     id: "mac",
     mode: "light",
     paletteClass: "theme-mac",
-    preview: { bg: "hsl(240 6% 96%)", card: "hsl(0 0% 100%)", primary: "hsl(14 76% 52%)", border: "hsl(240 6% 10% / 0.14)" },
-  },
-  {
-    id: "warm-paper",
-    mode: "light",
-    paletteClass: null,
-    preview: { bg: "hsl(48 33% 97%)", card: "hsl(0 0% 100%)", primary: "hsl(15 58% 50%)", border: "hsl(40 8% 17% / 0.10)" },
+    // 2026-08-27 果味修订：画布蓝饱和回 #F2F2F7 真值、primary 换 apple.com CTA 蓝（与 tokens.css mac 块同步）
+    preview: { bg: "hsl(240 24% 96%)", card: "hsl(0 0% 100%)", primary: "hsl(211 100% 45%)", border: "hsl(240 6% 10% / 0.14)" },
   },
   {
     id: "github",
@@ -100,6 +114,21 @@ export const THEMES: readonly ThemeDef[] = [
     // 2026-08-26 材质补课：画布 95→93 / sand ring 89→86（与 tokens.css kami 块同步）
     preview: { bg: "hsl(52 30% 93%)", card: "hsl(48 33% 97%)", primary: "hsl(10 52% 40%)", border: "hsl(50 22% 86%)" },
   },
+  {
+    id: "blueprint",
+    mode: "light",
+    paletteClass: "theme-blueprint",
+    preview: { bg: "hsl(214 40% 97%)", card: "hsl(0 0% 100%)", primary: "hsl(224 58% 34%)", border: "hsl(215 25% 84%)" },
+  },
+  {
+    id: "openai",
+    mode: "light",
+    paletteClass: "theme-openai",
+    // 2026-08-27 OpenDesign design-system-openai 移植：纯白画布 / 珍珠次级面 /
+    // 主 CTA 墨黑 #0d0d0d（DESIGN.md 主要按钮档，teal 仅焦点/链接/成功）/ 细线
+    // #e5e5e5（与 tokens.css openai 块同步维护）
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(0 0% 96%)", primary: "hsl(0 0% 5%)", border: "hsl(0 0% 90%)" },
+  },
 ];
 
 const PALETTE_CLASSES = THEMES.map((t) => t.paletteClass).filter((c): c is string => c !== null);
@@ -109,14 +138,15 @@ export function getThemeDef(id: ThemeId): ThemeDef | null {
   return THEMES.find((t) => t.id === id) ?? null;
 }
 
-/** 各 mode 的默认主题（2026-08-24 起）：浅色=Mac、深色=Claude 深色（charcoal）。
+/** 各 mode 的默认主题（2026-08-24 起浅色=Mac；2026-08-27 回切浅色=warm-paper——
+    mac 果味修订（Apple 蓝主色）后默认主题保留品牌 coral，深色=Claude 深色 charcoal）。
     首次访问无 stored、system 态解析、快捷翻转三处共用这一对。 */
-export function defaultThemeFor(mode: ThemeMode): "mac" | "charcoal" {
-  return mode === "light" ? "mac" : "charcoal";
+export function defaultThemeFor(mode: ThemeMode): "warm-paper" | "charcoal" {
+  return mode === "light" ? "warm-paper" : "charcoal";
 }
 
-/** 快捷翻转的目标：对侧 mode 的默认主题（dark→mac / light→charcoal）。
-    palette 主题（midnight/graphite/warm-paper）无对侧变体，一律翻到对侧默认。 */
+/** 快捷翻转的目标：对侧 mode 的默认主题（dark→warm-paper / light→charcoal）。
+    palette 主题（midnight/mac 等）无对侧变体，一律翻到对侧默认。 */
 export function oppositeBaseTheme(mode: ThemeMode): Exclude<ThemeId, "system"> {
   return defaultThemeFor(mode === "dark" ? "light" : "dark");
 }
@@ -143,6 +173,8 @@ function normalizeStored(v: string | null): ThemeId | null {
     case "github":
     case "notion":
     case "kami":
+    case "blueprint":
+    case "openai":
       return v;
     default:
       return null;
