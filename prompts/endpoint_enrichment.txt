@@ -18,6 +18,18 @@ freely (working directory = repo root) to pin down exact line numbers:
 Only emit endpoints you can ground in the route table or code you actually
 read. NEVER invent paths or line numbers. If a finding has no HTTP-reachable
 endpoint (e.g. config-only issue), emit an empty endpoints list.
+
+ALSO emit problem points for each finding — the specific code spots that make
+this finding dangerous (usually the source line and the sink line, plus any
+missing-sanitization spot in between):
+- location: file:line of the dangerous spot (same grounding rule as above —
+  only file:line you actually read in the repo)
+- description: one sentence on WHY this spot is dangerous
+- snippet: ≤15 lines of the REAL source code you actually read at that
+  location (verbatim, copy from the file — NEVER fabricate, paraphrase, or
+  reconstruct from memory; same anti-hallucination rule as line numbers)
+If you are not confident you can quote the real code for a spot, omit that
+problem point (or omit the whole problem_points field for the finding).
 </objective>
 
 <input>
@@ -45,6 +57,13 @@ Respond with a JSON object of exactly this shape (no prose outside JSON):
           "route_registered_at": "app/routes/index.js:66",
           "source_location": "app/routes/memos.js:13",
           "sink_location": "app/views/memos.html:31"
+        }
+      ],
+      "problem_points": [
+        {
+          "location": "app/routes/memos.js:13",
+          "description": "一句话：此处为何危险（如：用户输入未净化直接进入模板渲染）",
+          "snippet": "≤15 行 repo 里真实读到的源码原文（禁止杜撰/改写；无把握则整个省略 problem_points 字段）"
         }
       ]
     }

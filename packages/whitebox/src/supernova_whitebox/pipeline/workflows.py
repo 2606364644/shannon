@@ -643,6 +643,38 @@ class WhiteboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
             self._state.current_phase = "reporting"
+            # === §4.2（spec 2026-08-26-vuln-card-seven-sections）POC 写回时序前移 ===
+            # 结构化 POC 写回 queue 必须在 render_findings 之前——md 卡要原生渲染
+            # POC 节（curl + Burp 双格式），render 时 report_poc 已在 queue 里。
+            # 写回失败 non-fatal（md 卡 POC 节缺省），workflow 层兜底对齐
+            # generate_poc_report：activity 内 try/except 抓不到 Temporal
+            # start_to_close_timeout(runtime cancel 非 Python 异常)，须在此包裹。
+            self._state.current_agent = "write-structured-poc"
+            try:
+                await workflow.execute_activity(
+                    activities.write_structured_poc, act_input,
+                    start_to_close_timeout=timedelta(minutes=20),
+                    retry_policy=retry_for("poc"),
+                )
+            except Exception as exc:  # noqa: BLE001 — POC 写回任何失败只降级
+                if _activity_not_registered_hint(exc):
+                    # 部署不一致（worker 未注册新 activity）非可降级富化失败，
+                    # fail-fast 显式暴露（b51eb9a4 教训：静默不跑=md 卡全丢 POC 节）。
+                    raise ApplicationFailure(
+                        f"Write structured poc activity is not registered: {exc}",
+                        type="ActivityNotRegistered",
+                        non_retryable=True,
+                    ) from exc
+                await workflow.execute_activity(
+                    activities.log_info_activity,
+                    ActivityInput(**{**act_input.__dict__,
+                       "info_message": f"write structured poc failed (non-fatal): {exc}",
+                       "info_level": "warning"}),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=retry_for("log"),
+                )
+            finally:
+                self._state.current_agent = None
             self._state.current_agent = "render-findings"
             await workflow.execute_activity(
                 activities.render_findings, act_input,

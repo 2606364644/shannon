@@ -42,11 +42,19 @@ _INTERNAL_LABEL_RE = re.compile(
 )
 _FILE_LINE_RE = re.compile(r"[\w./-]+\.[A-Za-z]{1,5}:\d+")
 
+# 接口块描述符串解析（对齐 report_data_builder.parse_endpoint_string 契约；
+# 不直接 import——builder 反向依赖本模块，会循环导入）。串形态：
+# "POST /memos (write, isLoggedIn)" / "GET /memos (trigger)" / "/allocations/:id"。
+_EP_STRING_RE = re.compile(
+    r"^\s*(?:(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+)?([^\s(]+)\s*(?:\((.*?)\))?\s*$",
+    re.IGNORECASE,
+)
+_EP_KNOWN_ROLES = {"write", "trigger", "read", "update", "delete"}
+
 # 漏洞卡 / 报告文案双语（zh/en 可配，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
 _M = Messages({
     # 通用 entry 标签（技术细节折叠区沿用 _label 行式）
     "verdict": {"zh": "判定", "en": "Verdict"},
-    "witness_payload": {"zh": "PoC", "en": "PoC"},
     "concat_occurrences": {"zh": "拼接出现", "en": "Concat Occurrences"},
     "sanitization_observed": {"zh": "防护情况", "en": "Protection Observed"},
     "encoding_observed": {"zh": "编码情况", "en": "Encoding Observed"},
@@ -101,18 +109,27 @@ _M = Messages({
         "zh": "静态链路发现，建议人工确认。",
         "en": "Static-chain finding; confirm manually.",
     },
-    "meta_affected_entries": {"zh": "**受影响入口**", "en": "**Affected Entries**"},
-    "entry_endpoints_label": {"zh": "接口", "en": "Endpoints"},
     "entry_sep": {"zh": "、", "en": ", "},
-    "tbl_param": {"zh": "参数", "en": "Parameter"},
-    "tbl_sink_loc": {"zh": "Sink 位置", "en": "Sink Location"},
-    "tbl_chain_id": {"zh": "链 ID", "en": "Chain ID"},
     "suspected_indirect": {"zh": "（疑似间接）", "en": " (suspected indirect)"},
+    # 相关接口紧凑块小字行标签（spec 2026-08-26-vuln-card-seven-sections §3
+    # 节 4，弃表后原表列并入；冒号含在文案内）
+    "ep_params": {"zh": "参数：", "en": "Params: "},
+    "ep_auth": {"zh": "认证：", "en": "Auth: "},
+    "ep_route": {"zh": "路由注册：", "en": "Route: "},
+    "ep_sink": {"zh": "Sink：", "en": "Sink: "},
+    "ep_chain": {"zh": "链：", "en": "Chain: "},
     "sec_description": {"zh": "**漏洞成因（研判依据）**", "en": "**Root Cause (Basis)**"},
-    "sec_impact": {"zh": "**危害**", "en": "**Impact**"},
-    "sec_code": {"zh": "**问题点**", "en": "**Vulnerable Code**"},
+    "sec_impact": {"zh": "**漏洞危害**", "en": "**Impact**"},
+    "sec_code": {"zh": "**问题点**", "en": "**Problem Points**"},
+    "sec_endpoints": {"zh": "**相关接口**", "en": "**Related Endpoints**"},
+    "sec_poc": {"zh": "**POC**", "en": "**POC**"},
     "sec_remediation": {"zh": "**修复建议**", "en": "**Remediation**"},
     "sec_tech_detail": {"zh": "#### 漏洞细节", "en": "#### Vulnerability Details"},
+    # POC 独立节（§3 节 5，从漏洞细节区拆出）
+    "poc_preconditions": {"zh": "前置条件", "en": "Preconditions"},
+    "poc_expected": {"zh": "预期响应", "en": "Expected Response"},
+    "poc_expected_full": {"zh": "{indicator}（{criteria}）", "en": "{indicator} ({criteria})"},
+    "poc_witness": {"zh": "Witness", "en": "Witness"},
     "det_into": {"zh": "传入", "en": "flows into"},
     "det_unfiltered_into": {
         "zh": "{param} 未经过滤传入 {sink}",
@@ -310,30 +327,72 @@ def _description_lines(vuln, gn_only: bool, cls_name: str, colon: str,
     return [_gn_description(cls_name, colon, param, sink, loc_part)]
 
 
-def _card_endpoints(vuln) -> list[str]:
-    """接口列表（spec 2026-08-26 §4.3）：endpoints 新字段优先（多接口，写入+触发
-    分开）；缺省兜底 path 提取 → endpoint → source_endpoint（单接口）。"""
-    eps = [str(e).strip() for e in (getattr(vuln, "endpoints", None) or [])
-           if str(e).strip()]
-    if eps:
-        return eps
-    ep = (extract_endpoint(getattr(vuln, "path", None))
-          or getattr(vuln, "endpoint", None)
-          or getattr(vuln, "source_endpoint", None))
-    return [str(ep)] if ep else []
+def _parse_endpoint_string(raw: str) -> dict | None:
+    """接口串 → 块描述符（method/path/role/auth；对齐 builder 的解析语义：
+    无方法前缀且不以 / 开头的串不是端点）。"""
+    m = _EP_STRING_RE.match(raw.strip())
+    if not m:
+        return None
+    method, path, paren = m.group(1), m.group(2), m.group(3)
+    if method is None and not path.startswith("/"):
+        return None
+    d = {"method": method.upper() if method else None, "path": path,
+         "role": None, "auth": None, "route": None, "params": [], "sink": None}
+    if paren:
+        for part in [p.strip() for p in paren.split(",") if p.strip()]:
+            if part.lower() in _EP_KNOWN_ROLES and d["role"] is None:
+                d["role"] = part.lower()
+            elif d["auth"] is None:
+                d["auth"] = part
+    return d
 
 
-def _entry_section_lines(vuln, loc: str | None) -> list[str]:
-    """受影响入口节（承担「涉及接口 × 涉及参数」呈现，spec 2026-08-26 §4.3）：
-    接口列表行（**不被标题掩盖**——title 是叙事，接口行是结构化数据）+ 参数×
-    sink 位置×链 ID 表。affected_entries 优先；LLM-only 无 entries 时由
-    affected_parameters / vulnerable_parameter × loc 合成（链 ID 留空）。参数、接口
-    全无 → 返回空（整节省略）。"""
-    lines: list[str] = []
-    endpoints = _card_endpoints(vuln)
-    if endpoints:
-        lines.append(f"- **{_M.get('entry_endpoints_label')}:** "
-                     f"{_M.get('entry_sep').join(endpoints)}")
+def _endpoint_descriptors(vuln) -> tuple[list[dict], bool]:
+    """接口块描述符（§3 节 4）：report_endpoints（富化写回，EndpointEntry
+    形态）优先 → endpoints 串解析（多接口，写入+触发分开）→ endpoint /
+    path 提取 / source_endpoint 单接口兜底。返回 (descriptors, structured)：
+    structured=True 表示富化块自带 params/sink/auth/route（不并入卡级 rows）。"""
+    descriptors: list[dict] = []
+    for item in (getattr(vuln, "report_endpoints", None) or []):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        method = str(item.get("method") or "").strip().upper() or None
+        descriptors.append({
+            "method": method, "path": path,
+            "role": str(item.get("role") or "").strip() or None,
+            "auth": str(item.get("auth") or "").strip() or None,
+            "route": str(item.get("route_registered_at") or "").strip() or None,
+            "params": [str(p) for p in (item.get("params") or [])
+                       if str(p).strip()],
+            "sink": str(item.get("sink_location") or "").strip() or None,
+        })
+    if descriptors:
+        return descriptors, True
+    for raw in (getattr(vuln, "endpoints", None) or []):
+        d = _parse_endpoint_string(str(raw))
+        if d is not None:
+            descriptors.append(d)
+    if descriptors:
+        return descriptors, False
+    # 单接口兜底（对齐原 _card_endpoints 回退链：path 提取 → endpoint →
+    # source_endpoint）
+    fallback = (extract_endpoint(getattr(vuln, "path", None))
+                or getattr(vuln, "endpoint", None)
+                or getattr(vuln, "source_endpoint", None))
+    if fallback:
+        d = _parse_endpoint_string(str(fallback))
+        if d is not None:
+            return [d], False
+    return [], False
+
+
+def _entry_rows(vuln, loc: str | None) -> list[tuple[str, str, str]]:
+    """(参数, sink 位置, 链 ID) 行：affected_entries 优先；LLM-only 无 entries
+    时由 affected_parameters / vulnerable_parameter × loc 合成（链 ID 留空）。
+    三列全空不渲染（F8）。"""
     entries = getattr(vuln, "affected_entries", None) or []
     rows: list[tuple[str, str, str]] = []
     if entries:
@@ -354,23 +413,123 @@ def _entry_section_lines(vuln, loc: str | None) -> list[str]:
         if vp and vp not in params:
             params.append(str(vp))
         rows = [(p, loc or "", "") for p in params]
-    if not rows and not lines:
+    return rows
+
+
+def _join_unique(items: list[str]) -> str:
+    """按序去重拼接（空值跳过）——多值并入小字行单段的展示形态。"""
+    out: list[str] = []
+    for it in items:
+        it = str(it).strip()
+        if it and it not in out:
+            out.append(it)
+    return _M.get("entry_sep").join(out)
+
+
+def _ep_small_line(params: list[str], auth: str | None, route: str | None,
+                   sinks: list[str], chains: list[str]) -> str | None:
+    """接口块缩进小字行：`参数 ｜ 认证 ｜ 路由注册 ｜ Sink ｜ 链`（空段省，
+    全空返回 None 不渲染空行）。"""
+    segments: list[str] = []
+    joined = _join_unique(params)
+    if joined:
+        segments.append(f"{_M.get('ep_params')}{joined}")
+    if auth:
+        segments.append(f"{_M.get('ep_auth')}{auth}")
+    if route:
+        segments.append(f"{_M.get('ep_route')}{route}")
+    joined = _join_unique(sinks)
+    if joined:
+        segments.append(f"{_M.get('ep_sink')}{joined}")
+    joined = _join_unique(chains)
+    if joined:
+        segments.append(f"{_M.get('ep_chain')}{joined}")
+    if not segments:
+        return None
+    return f"  - {_M.get('meta_sep').join(segments)}"
+
+
+def _entry_section_lines(vuln, loc: str | None) -> list[str]:
+    """相关接口节（spec 2026-08-26-vuln-card-seven-sections §3 节 4）：每接口
+    一块（`- METHOD /path（role）` + 缩进小字行「参数 ｜ 认证 ｜ 路由注册 ｜
+    Sink ｜ 链」），弃 markdown 表——原表列（参数/Sink 位置/链 ID）信息无损
+    并入小字行（多值按序去重拼接）。
+
+    数据源分层：report_endpoints（富化写回）优先且块自带 params/sink/auth/
+    route（链 ID 不在 EndpointEntry 契约内，仍并入卡级 affected_entries 聚合）；
+    派生块（endpoints 串解析 / 单接口兜底）把卡级 rows 聚合并入每块——多接口
+    卡无 per-endpoint 归属数据，各块同聚合（信息无损、不虚构归属）。接口与
+    参数全无 → 返回空（整节省略）。"""
+    descriptors, structured = _endpoint_descriptors(vuln)
+    rows = _entry_rows(vuln, loc)
+    if not descriptors and not rows:
         return []
-    if rows:
-        lines.append(_M.get("meta_affected_entries"))
-        lines.append(
-            f"| {_M.get('tbl_param')} | {_M.get('tbl_sink_loc')} | "
-            f"{_M.get('tbl_chain_id')} |")
-        lines.append("|---|---|---|")
-        lines.extend(f"| {p} | {sl} | {cid} |" for p, sl, cid in rows)
+    row_params = [p for p, _, _ in rows]
+    row_sinks = [s for _, s, _ in rows]
+    row_chains = [c for _, _, c in rows]
+    card_auth = getattr(vuln, "authentication_required", None)
+    card_auth = card_auth.strip() if isinstance(card_auth, str) and card_auth.strip() else None
+    zh = current_lang() == "zh"
+    lines: list[str] = [_M.get("sec_endpoints")]
+    if descriptors:
+        for d in descriptors:
+            head = "- " + (f"{d['method']} " if d["method"] else "") + d["path"]
+            if d["role"]:
+                head += f"（{d['role']}）" if zh else f" ({d['role']})"
+            lines.append(head)
+            params = list(d["params"])
+            sinks = [d["sink"]] if d["sink"] else []
+            if not structured:
+                # 派生块并入卡级 rows 聚合（富化块自带，不重复并入）
+                params += row_params
+                sinks += row_sinks
+            small = _ep_small_line(params, d["auth"] or card_auth, d["route"],
+                                   sinks, row_chains)
+            if small:
+                lines.append(small)
+    else:
+        # 无接口锚点但卡级 rows 有料（如纯位置条目）：小字行独立成行
+        small = _ep_small_line(row_params, card_auth, None, row_sinks, row_chains)
+        if small is None:
+            return []
+        lines.append(small)
     return lines
+
+
+def _problem_points(vuln) -> list[tuple[str, str | None, str | None]]:
+    """report_problem_points（富化写回）→ (location, description, snippet) 列表。
+    宽松校验同 report_data_builder._problem_points：非 dict / 缺 location 丢弃。"""
+    points: list[tuple[str, str | None, str | None]] = []
+    for item in (getattr(vuln, "report_problem_points", None) or []):
+        if not isinstance(item, dict):
+            continue
+        location = str(item.get("location") or "").strip()
+        if not location:
+            continue
+        points.append((location, item.get("description"), item.get("snippet")))
+    return points
 
 
 def _issue_section_lines(vuln, vuln_class: str, param, sink_name,
                          loc: str | None, snippet: str | None) -> list[str]:
-    """问题点三要素（spec 2026-08-26 §4.2）：位置（file:line，回退链见 _card_loc）、
-    说明（{param} 未经校验进入 {sink}；XSS 附渲染上下文）、snippet fence（提取失败
-    缺省 fence，位置+说明照常——不再整节省略）。位置与说明全无 → 返回空。"""
+    """问题点三要素（spec 2026-08-26-vuln-card-seven-sections §3 节 3）：
+    report_problem_points（富化写回，逐条 位置/说明/snippet fence——语言标签按
+    文件后缀）优先；无则回落合成路径——位置（file:line，回退链见 _card_loc）、
+    说明（{param} 未经校验进入 {sink}；XSS 附渲染上下文）、传入 snippet fence
+    （提取失败缺省 fence，位置+说明照常——不再整节省略）。位置与说明全无 →
+    返回空。"""
+    points = _problem_points(vuln)
+    if points:
+        out = [_M.get("sec_code")]
+        for location, desc, pt_snippet in points:
+            out.append(f"- **{_M.get('issue_location')}:** {location}")
+            if desc:
+                out.append(f"- **{_M.get('issue_desc_label')}:** {desc}")
+            if pt_snippet:
+                out.append(f"```{_snippet_lang_tag(location)}")
+                out.append(str(pt_snippet))
+                out.append("```")
+        return out
     desc = None
     if sink_name:
         p_disp = param or _M.get("code_input_generic")
@@ -419,24 +578,58 @@ def _dataflow_item_lines(vuln) -> list[str]:
     return [_label("dataflow")] + [f"  {i}. {t}" for i, t in enumerate(items, 1)]
 
 
+def _poc_section_lines(vuln) -> list[str]:
+    """POC 独立节（§3 节 5，从漏洞细节区拆出）：读 report_poc（写回时序前移
+    后渲染时已可用）——前置条件/预期响应/Witness 行 + curl（```bash）与
+    raw_http（```http，Burp 原始报文）双 fenced block，缺则对应 block 省。
+    无 report_poc 或无可渲染内容 → 整节省略。"""
+    poc = getattr(vuln, "report_poc", None)
+    if not isinstance(poc, dict):
+        return []
+    lines: list[str] = []
+    preconditions = str(poc.get("preconditions") or "").strip()
+    if preconditions:
+        lines.append(f"{_label('poc_preconditions')} {preconditions}")
+    expected = poc.get("expected_response")
+    if isinstance(expected, dict):
+        indicator = str(expected.get("indicator") or "").strip()
+        criteria = str(expected.get("success_criteria") or "").strip()
+        if indicator and criteria:
+            text = _M.get("poc_expected_full", indicator=indicator, criteria=criteria)
+        else:
+            text = indicator or criteria
+        if text:
+            lines.append(f"{_label('poc_expected')} {text}")
+    witness = str(poc.get("witness_payload") or "").strip()
+    if witness:
+        lines.append(f"{_label('poc_witness')} {witness}")
+    curl = str(poc.get("curl") or "").strip()
+    if curl:
+        lines.extend(("```bash", curl, "```"))
+    raw_http = str(poc.get("raw_http") or "").strip()
+    if raw_http:
+        lines.extend(("```http", raw_http, "```"))
+    if not lines:
+        return []
+    return [_M.get("sec_poc"), *lines]
+
+
 def _tech_detail_lines(vuln) -> list[str]:
-    """漏洞细节折叠区（用户口径 2026-08-25 + 2026-08-26 §4.1 收敛）：PoC →
-    数据流（分点）→ 防护情况置顶，判定/CVSS/OWASP 随后，其余判定字段全量收纳，
+    """漏洞细节折叠区（用户口径 2026-08-25 + 2026-08-26 §4.1 收敛）：数据流
+    （分点）→ 防护情况置顶，判定/CVSS/OWASP 随后，其余判定字段全量收纳，
     沿用 _label 行式。信息归并（§4.1）：脆弱位置/来源详情并入数据流分点，
     Sink 函数/渲染上下文/脆弱代码位置并入问题点三要素，端点/来源端点并入
-    受影响入口接口列表行——均不再在本区独立成行。"""
+    相关接口紧凑块——均不再在本区独立成行；witness 升 POC 独立节
+    （vuln-card-seven-sections §4.3），本区不再渲染 PoC 行。"""
     lines: list[str] = []
 
     def add(key: str, value) -> None:
         if value:
             lines.append(f"{_label(key)} {value}")
 
-    # 1. PoC（用户口径小节名；原「验证 payload」；.md 保留，web 前端有并入
-    #    详细 PoC 时过滤——spec 2026-08-26 §8）
-    add("witness_payload", getattr(vuln, "witness_payload", None))
-    # 2. 数据流（分点编号，不混排）
+    # 1. 数据流（分点编号，不混排）
     lines.extend(_dataflow_item_lines(vuln))
-    # 3. 防护情况：taint 净化（encoding/sanitization）+ authz 防护证据 +
+    # 2. 防护情况：taint 净化（encoding/sanitization）+ authz 防护证据 +
     #    auth/ssrf 缺失防护（同属防护语义，收拢置顶）
     if getattr(vuln, "encoding_observed", None):
         add("encoding_observed", vuln.encoding_observed)
@@ -444,11 +637,11 @@ def _tech_detail_lines(vuln) -> list[str]:
         add("sanitization_observed", getattr(vuln, "sanitization_observed", None))
     add("guard_evidence", getattr(vuln, "guard_evidence", None))
     add("missing_defense", getattr(vuln, "missing_defense", None))
-    # 4. 判定三件套
+    # 3. 判定三件套
     add("verdict", getattr(vuln, "verdict", None))
     add("cvss", getattr(vuln, "cvss", None))
     add("owasp_category", getattr(vuln, "owasp_category", None))
-    # 5. 其余判定字段照旧全量（归并行不再渲染，见 docstring）
+    # 4. 其余判定字段照旧全量（归并行不再渲染，见 docstring）
     add("concat_occurrences", getattr(vuln, "concat_occurrences", None))
     add("vulnerable_parameter", getattr(vuln, "vulnerable_parameter", None))
     add("exploitation_hypothesis", getattr(vuln, "exploitation_hypothesis", None))
@@ -461,12 +654,14 @@ def _tech_detail_lines(vuln) -> list[str]:
 
 
 def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
-    """统一漏洞卡（用户口径 2026-08-25：正文叙事 + 漏洞细节折叠）。
+    """统一漏洞卡（spec 2026-08-26-vuln-card-seven-sections §3 七节基准）。
 
     结构：`### {ID} {类名}：{title}` → 元信息行（严重程度/CWE/验证/置信度，
-    双轨确认、GN-only 追加待复核）→ **漏洞成因（研判依据）** → **危害** →
-    **问题点**（snippet fence）→ **受影响入口**（涉及参数×涉及接口，表）→
-    **修复建议** → #### 漏洞细节（PoC/数据流分点/防护情况置顶 + 判定字段全量收纳）。
+    双轨确认、GN-only 追加待复核）→ **漏洞成因（研判依据）** → **漏洞危害** →
+    **问题点**（report_problem_points 优先，回落位置+说明+snippet fence）→
+    **相关接口**（紧凑块，弃表）→ **POC**（report_poc；前置条件/预期响应/
+    Witness + curl/raw_http 双 fenced，无则整节省略）→ #### 漏洞细节（数据流
+    分点/防护情况 + 判定字段全量收纳）→ **修复建议**（收尾）。
     内部标签（llm-pass-failed/needs_review/unparseable-llm）零泄漏。
     """
     zh = current_lang() == "zh"
@@ -518,8 +713,8 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.extend(_description_lines(vuln, gn_only, cls_name, colon, param, sink_name, loc_part))
     lines.append("")
 
-    # 危害：impact（并行任务加的字段，此刻可能不存在）→ notes → 类级兜底；
-    # GN-only 统一明示「静态链路发现，建议人工确认后修复」
+    # 危害（§3 节 2）：impact（并行任务加的字段，此刻可能不存在）→ notes →
+    # 类级兜底；GN-only 统一明示「静态链路发现，建议人工确认后修复」
     impact = getattr(vuln, "impact", None)
     if gn_only:
         impact = impact or vuln.notes or _M.get("gn_static_hint")
@@ -529,30 +724,38 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.append(impact)
     lines.append("")
 
-    # 问题点三要素（§4.2）：位置 + 说明（XSS 附渲染上下文）+ snippet fence；
-    # snippet 提取失败仅缺 fence，位置+说明照常（不再整节省略）
+    # 问题点三要素（§3 节 3）：report_problem_points 优先 → 位置 + 说明
+    # （XSS 附渲染上下文）+ snippet fence 回落；snippet 提取失败仅缺 fence，
+    # 位置+说明照常（不再整节省略）
     issue_lines = _issue_section_lines(vuln, vuln_class, param, sink_name, loc, snippet)
     if issue_lines:
         lines.extend(issue_lines)
         lines.append("")
 
-    # 受影响入口（涉及参数×涉及接口）：接口行 + 表（entries 或合成）
+    # 相关接口（§3 节 4）：每接口一块（紧凑小字行，弃表）
     entry_lines = _entry_section_lines(vuln, loc)
     if entry_lines:
         lines.extend(entry_lines)
         lines.append("")
 
-    # 修复建议：remediation（并行任务加的字段）→ GN-only 人工确认提示 → 类级兜底
+    # POC（§3 节 5，独立节）：report_poc 缺则整节省略
+    poc_lines = _poc_section_lines(vuln)
+    if poc_lines:
+        lines.extend(poc_lines)
+        lines.append("")
+
+    # 漏洞细节（§3 节 6，折叠附录区；PoC 行已升独立节）
+    lines.append(_M.get("sec_tech_detail"))
+    lines.extend(_tech_detail_lines(vuln))
+    lines.append("")
+
+    # 修复建议（§3 节 7，收尾）：remediation（并行任务加的字段）→ GN-only
+    # 人工确认提示 → 类级兜底
     remediation = getattr(vuln, "remediation", None)
     if not remediation:
         remediation = _M.get("gn_rem_hint" if gn_only else _REM_FALLBACK[vuln_class])
     lines.append(_M.get("sec_remediation"))
     lines.append(remediation)
-    lines.append("")
-
-    # 漏洞细节（折叠附录区）
-    lines.append(_M.get("sec_tech_detail"))
-    lines.extend(_tech_detail_lines(vuln))
 
     # 行级 rstrip：吃掉内部标签剥离留下的行尾空白
     return "\n".join(

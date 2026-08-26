@@ -358,6 +358,14 @@ export interface VulnNarrative {
   remediation?: string | null;
 }
 
+/** 问题点三要素（spec 2026-08-26-vuln-card-seven-sections §3 节 3）：位置 + 说明 +
+ *  代码片段。endpoint 富化 agent 读源码产出，builder 纯透传（不合成不推断）。 */
+export interface ProblemPoint {
+  location: string;
+  description?: string | null;
+  snippet?: string | null;
+}
+
 /** 验证证据：verification=dynamic 时 dynamic_evidence 为黑盒实测输出（突出显示）。 */
 export interface VulnEvidence {
   verification: "static" | "dynamic";
@@ -383,6 +391,7 @@ export interface ReportVulnerability {
   merge_source?: string | null;    // both/llm-only/gitnexus-only
   merged_from: string[];           // ①归并终审产物（跨轨同洞合并）
   narrative?: VulnNarrative | null;
+  problem_points?: ProblemPoint[];   // 旧 report_data 无此字段 → 渲染兜底链（endpoints 行号 + evidence.code_snippet）
   endpoints: EndpointEntry[];
   affected_entries: Record<string, unknown>[];
   dataflow_steps: Array<{ label?: string | null; file?: string | null; line?: number | null; protection?: string | null } & Record<string, unknown>>;

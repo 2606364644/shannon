@@ -3,7 +3,9 @@
 
 覆盖：agent 产物写回 report_endpoints（含行号链）/ 幻觉 ID 丢弃 / 畸形
 endpoint 条目丢弃 / agent 失败 non-fatal（queue 不变）/ 素材包含
-entry_points 路由表 / 开关门控（SUPERNOVA_ENDPOINT_ENRICH_ENABLED）。
+entry_points 路由表 / 开关门控（SUPERNOVA_ENDPOINT_ENRICH_ENABLED）；
+§4.1（2026-08-26-vuln-card-seven-sections）problem_points 富化（有效回填 /
+畸形条目丢弃 / 幻觉 ID 跳过 / 无输出不动原值 / enriched 去重计数）。
 """
 import json
 from contextlib import asynccontextmanager
@@ -153,6 +155,149 @@ async def test_endpoint_enrichment_agent_failure_nonfatal(tmp_path, monkeypatch)
                        .read_text(encoding="utf-8"))
     assert "report_endpoints" not in queue["vulnerabilities"][0]
     assert result["enriched_classes"]["xss"]["failed"]
+
+
+# ---------- §4.1（spec 2026-08-26-vuln-card-seven-sections）problem_points 富化 ----------
+
+_PP = [{"location": "app/routes/memos.js:13", "description": "未净化用户输入直拼模板",
+        "snippet": "const memo = req.body.memo;\nres.render('memos', {memo});"}]
+
+
+async def test_endpoint_enrichment_writes_report_problem_points(tmp_path, monkeypatch):
+    """§4.1：problem_points 有效条目按 ID 写回；同卡 endpoints+problem_points
+    enriched 只算 1（去重）；prompt 契约含 problem_points 字段。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [{
+        "id": "XSS-VULN-01",
+        "endpoints": [{"method": "POST", "path": "/memos"}],
+        "problem_points": _PP,
+    }]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)) as mock_agent, \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        result = await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    # 同卡写回 endpoints + problem_points 两字段，enriched 去重只算 1
+    assert result["total_enriched"] == 1
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    entry = queue["vulnerabilities"][0]
+    assert entry["report_problem_points"] == _PP
+    # prompt 产出契约已扩 problem_points（防杜撰措辞与行号约束同款）
+    prompt = mock_agent.call_args.kwargs["prompt"]
+    assert "problem_points" in prompt
+
+
+async def test_endpoint_enrichment_problem_points_only_counts(tmp_path, monkeypatch):
+    """§4.1：只写回 problem_points（无 endpoints 输出）该卡也算 enriched=1。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [{
+        "id": "XSS-VULN-01", "problem_points": _PP,
+    }]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)), \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        result = await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    assert result["total_enriched"] == 1
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    entry = queue["vulnerabilities"][0]
+    assert entry["report_problem_points"] == _PP
+    # 两字段独立判断：未输出 endpoints 则 report_endpoints 保持 None
+    # （写回走 model_dump，未设置字段序列化为 None）
+    assert entry["report_endpoints"] is None
+
+
+async def test_endpoint_enrichment_drops_invalid_problem_points(tmp_path, monkeypatch, caplog):
+    """§4.1：非 dict / location 空 / snippet 空的条目丢弃 + warning；合法条目照常写。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [{
+        "id": "XSS-VULN-01",
+        "problem_points": [
+            "not-a-dict",                                        # 非 dict
+            {"location": "   ", "description": "d", "snippet": "s"},   # location 空白
+            {"location": "app/a.js:1", "description": "d", "snippet": ""},  # snippet 空
+            _PP[0],                                              # 合法
+        ],
+    }]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)), \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        with caplog.at_level("WARNING"):
+            result = await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    assert queue["vulnerabilities"][0]["report_problem_points"] == _PP
+    assert result["total_enriched"] == 1
+    # 丢弃有 warning 可观测（非静默）
+    assert sum(1 for r in caplog.records
+               if "problem_points" in r.getMessage()
+               and r.levelname == "WARNING") >= 3
+
+
+async def test_endpoint_enrichment_problem_points_unknown_id_skipped(tmp_path, monkeypatch):
+    """§4.1：幻觉 ID 的 problem_points 整条跳过，queue 不动该字段。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [
+        {"id": "XSS-GHOST-99", "problem_points": _PP},
+    ]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)), \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        result = await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    assert result["total_enriched"] == 0
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    # 幻觉 ID 跳过：该卡 report_problem_points 保持 None（model_dump 序列化）
+    assert queue["vulnerabilities"][0]["report_problem_points"] is None
+
+
+async def test_endpoint_enrichment_keeps_existing_problem_points(tmp_path, monkeypatch):
+    """§4.1：agent 无 problem_points 输出 → 原 report_problem_points 不动。"""
+    d = _wb(tmp_path)
+    preset = [_PP[0]]
+    _write_queue(d, [{**_XSS_VULN, "report_problem_points": preset}])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [{
+        "id": "XSS-VULN-01",
+        "endpoints": [{"method": "POST", "path": "/memos"}],
+    }]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)), \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    entry = queue["vulnerabilities"][0]
+    assert entry["report_problem_points"] == preset   # 原值保留
+    assert entry["report_endpoints"][0]["path"] == "/memos"  # endpoints 照常写
 
 
 async def test_endpoint_enrichment_disabled_by_env(tmp_path, monkeypatch):

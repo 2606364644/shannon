@@ -149,7 +149,6 @@ def _problem_points(vuln) -> list[ProblemPoint]:
             snippet=item.get("snippet"),
         ))
     return points
-    return None
 
 
 def _evidence(vuln) -> VulnEvidence:

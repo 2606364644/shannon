@@ -1257,6 +1257,9 @@ async def run_endpoint_enrichment(input: ActivityInput) -> dict:
     （method/path/params/auth + route_registered_at/source_location/
     sink_location 行号链），按 ID 写回 queue 的 report_endpoints 字段
     （builder 组装 report_data.json 优先采用；确定性 endpoint 兜底不受影响）。
+    §4.1（spec 2026-08-26-vuln-card-seven-sections）：同 agent 扩产 per 卡
+    problem_points（location/description/snippet——snippet 必须是真实读到的
+    源码原文），独立校验后写回 report_problem_points。
 
     位置：merge 与 run_gn_finding_enrichment 之后、render_findings 之前。
     开关 SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认开，独立于 GN_ENRICH_MODE——
@@ -1391,10 +1394,14 @@ def _render_endpoint_candidates(findings: list) -> str:
 
 
 def _apply_endpoint_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
-    """接口富化 agent 输出按 ID 回填 report_endpoints（原地）。
+    """接口富化 agent 输出按 ID 回填 report_endpoints / report_problem_points（原地）。
 
     宽松解析：structured_output dict / JSON 文本皆可；id/ID 均认；条目 path
-    不以 / 开头丢弃（防幻觉）；ID 未知整条丢弃。返回 (回填条数, warnings)。
+    不以 / 开头丢弃（防幻觉）；ID 未知整条丢弃。§4.1（spec
+    2026-08-26-vuln-card-seven-sections）：problem_points 逐项校验（非 dict /
+    location 空白 / snippet 空白丢弃），与 report_endpoints 独立判断、独立
+    写回；enriched 计数按卡去重（任一字段写回即算 1）。
+    返回 (回填条数, warnings)。
     """
     import json as _json
     warnings: list[str] = []
@@ -1419,21 +1426,48 @@ def _apply_endpoint_enrichment(findings: list, raw: object) -> tuple[int, list[s
         if target is None:
             warnings.append(f"endpoint-enrichment: unknown ID {eid!r} skipped")
             continue
+        card_touched = False
         raw_eps = entry.get("endpoints")
-        if not isinstance(raw_eps, list):
-            continue
-        valid: list[dict] = []
-        for ep in raw_eps:
-            if not isinstance(ep, dict):
-                continue
-            path = str(ep.get("path") or "")
-            if not path.startswith("/"):
-                warnings.append(
-                    f"endpoint-enrichment: {eid} malformed path {path!r} dropped")
-                continue
-            valid.append(ep)
-        if valid:
-            target.report_endpoints = valid
+        if isinstance(raw_eps, list):
+            valid: list[dict] = []
+            for ep in raw_eps:
+                if not isinstance(ep, dict):
+                    continue
+                path = str(ep.get("path") or "")
+                if not path.startswith("/"):
+                    warnings.append(
+                        f"endpoint-enrichment: {eid} malformed path {path!r} dropped")
+                    continue
+                valid.append(ep)
+            if valid:
+                target.report_endpoints = valid
+                card_touched = True
+        # §4.1 problem_points：防幻觉立场同 path/行号——location/snippet 均非空
+        # 才收（snippet 必须是 agent 真实读到的原文）；空条目丢弃 + warning。
+        raw_pps = entry.get("problem_points")
+        if isinstance(raw_pps, list):
+            valid_pps: list[dict] = []
+            for idx, pp in enumerate(raw_pps):
+                if not isinstance(pp, dict):
+                    warnings.append(
+                        f"endpoint-enrichment: {eid} problem_points[{idx}] "
+                        f"not a dict, dropped")
+                    continue
+                if not str(pp.get("location") or "").strip():
+                    warnings.append(
+                        f"endpoint-enrichment: {eid} problem_points[{idx}] "
+                        f"missing location, dropped")
+                    continue
+                if not str(pp.get("snippet") or "").strip():
+                    warnings.append(
+                        f"endpoint-enrichment: {eid} problem_points[{idx}] "
+                        f"missing snippet, dropped")
+                    continue
+                valid_pps.append(pp)
+            if valid_pps:
+                target.report_problem_points = valid_pps
+                card_touched = True
+        if card_touched:
             enriched += 1
     return enriched, warnings
 
@@ -1751,7 +1785,12 @@ async def inject_gitnexus_track_status(input: ActivityInput) -> None:
 
 @activity.defn
 async def generate_poc_report(input: ActivityInput) -> None:
-    """报告增强：生成 curl/Burp PoC md + T4 结构化 POC 写回 queue。失败不阻塞主报告（吞异常）。"""
+    """报告增强：生成 curl/Burp PoC md 文档。失败不阻塞主报告（吞异常）。
+
+    §4.2（spec 2026-08-26-vuln-card-seven-sections）：结构化 POC 写回已拆到
+    独立 activity write_structured_poc（render_findings 之前执行），本 activity
+    只保留 PoC md 生成（继续消费写回后的 report_poc）。
+    """
     import logging
     log = logging.getLogger(__name__)
     try:
@@ -1768,12 +1807,26 @@ async def generate_poc_report(input: ActivityInput) -> None:
             api_key=input.api_key,
             provider_config=input.provider_config,   # P3c 阶段 1
         )
-        # T4（spec 2026-08-26-report-generation-agent §5.3）：per-vuln 并行结构化
-        # POC（完整 request/preconditions/expected_response），写回 queue 的
-        # report_poc；LLM 失败 per-vuln 降级（只含确定性 request/witness）。
-        await _write_structured_pocs(input, deliverables)
     except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
         log.warning("poc: whitebox generate_poc_report failed (non-blocking): %s", exc)
+
+
+@activity.defn
+async def write_structured_poc(input: ActivityInput) -> None:
+    """T4 结构化 POC 写回 queue（§4.2 时序前移：render_findings 之前）。
+
+    T4（spec 2026-08-26-report-generation-agent §5.3）：per-vuln 结构化 POC
+    （完整 request/preconditions/expected_response），写回 queue 的 report_poc；
+    LLM 失败 per-vuln 降级（只含确定性 request/witness）。写回失败 non-fatal
+    （md 卡 POC 节缺省），语义与拆出前（generate_poc_report 内）一致。
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        _, deliverables, _ = _get_paths(input)
+        await _write_structured_pocs(input, deliverables)
+    except Exception as exc:  # noqa: BLE001 — 写回失败绝不阻塞主流程
+        log.warning("poc: whitebox write_structured_poc failed (non-blocking): %s", exc)
 
 
 async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> None:

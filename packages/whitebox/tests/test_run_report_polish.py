@@ -2,8 +2,10 @@
 """T5（spec 2026-08-26-report-generation-agent §5.4/§5.5）+ T4 接线。
 
 覆盖：polish 重建 report_data（吃全部富化字段）/ ④摘要 LLM 产物与确定性
-兜底 / ⑤QA 必填校验（taint 卡 endpoints≥1）与回炉一次 / T4 结构化 POC
-写回 queue（generate_poc_report 内）。
+兜底 / ⑤QA 必填校验（taint 卡 endpoints≥1）与回炉一次 / §4.2（spec
+2026-08-26-vuln-card-seven-sections）POC 写回时序前移——generate_poc_report
+不再触发写回、write_structured_poc 独立 activity 写回 report_poc、
+两处 worker 注册表含新 activity。
 """
 import json
 from contextlib import asynccontextmanager
@@ -172,27 +174,48 @@ async def test_polish_qa_flags_when_rework_also_fails(tmp_path, monkeypatch):
     assert "SSRF-GN-01" in check["failed_ids"]
 
 
-# ---------- T4 接线：generate_poc_report 写回 report_poc ----------
+# ---------- §4.2（spec 2026-08-26-vuln-card-seven-sections）POC 写回时序前移 ----------
 
-async def test_generate_poc_report_writes_report_poc(tmp_path, monkeypatch):
+_POC_QUEUE_VULN = {
+    "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+    "externally_exploitable": True, "confidence": "high",
+    "merge_source": "llm-only", "title": "t", "severity": "high",
+    "endpoint": "POST /memos",
+    "witness_payload": "<img src=x onerror=alert(1)>",
+    "authentication_required": "true",
+}
+
+
+async def test_generate_poc_report_no_longer_writes_report_poc(tmp_path, monkeypatch):
+    """§4.2：generate_poc_report 只保留 PoC md 生成，不再触发结构化写回
+    （写回拆到 write_structured_poc，前移到 render_findings 之前）。"""
     d = _wb(tmp_path)
-    _write_queue(d, [{
-        "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
-        "externally_exploitable": True, "confidence": "high",
-        "merge_source": "llm-only", "title": "t", "severity": "high",
-        "endpoint": "POST /memos",
-        "witness_payload": "<img src=x onerror=alert(1)>",
-        "authentication_required": "true",
-    }])
+    _write_queue(d, [_POC_QUEUE_VULN])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    with patch("supernova_core.services.poc_generator.PoCGenerator.generate",
+               return_value=None) as mock_gen, \
+         patch.object(activities, "run_claude_prompt") as mock_llm:
+        await activities.generate_poc_report(_FakeInput(tmp_path))
+
+    mock_gen.assert_called_once()   # md 文档生成保留
+    mock_llm.assert_not_called()    # 不再吃结构化 POC 的 expected_response LLM
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    assert "report_poc" not in queue["vulnerabilities"][0]
+
+
+async def test_write_structured_poc_activity_writes_report_poc(tmp_path, monkeypatch):
+    """§4.2：write_structured_poc 独立 activity 可跑，写回 report_poc。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_POC_QUEUE_VULN])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
     expected = {"indicator": "响应含未转义 payload", "success_criteria": "alert 触发"}
-    with patch("supernova_core.services.poc_generator.PoCGenerator.generate",
-               return_value=None), \
-         patch.object(activities, "run_claude_prompt",
+    with patch.object(activities, "run_claude_prompt",
                       return_value=SimpleNamespace(
                           structured_output=expected, text=None)):
-        await activities.generate_poc_report(_FakeInput(tmp_path))
+        await activities.write_structured_poc(_FakeInput(tmp_path))
 
     queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
                        .read_text(encoding="utf-8"))
@@ -201,3 +224,18 @@ async def test_generate_poc_report_writes_report_poc(tmp_path, monkeypatch):
     assert poc["request"]["url"].endswith("/memos")
     assert poc["expected_response"]["indicator"] == "响应含未转义 payload"
     assert "curl" in poc and poc["curl"]
+
+
+def test_write_structured_poc_registered_on_workers():
+    """b51eb9a4 教训：新 activity 两处 worker 注册表（CLI worker.py + web
+    runner.py）都必须 import + 列入 activities，漏注册会 fail-fast/静默不跑。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    for rel in ("packages/whitebox/src/supernova_whitebox/worker.py",
+                "packages/worker/src/supernova_worker/runner.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        count = src.count("write_structured_poc")
+        assert count >= 2, (
+            f"write_structured_poc 在 {rel} 仅出现 {count} 次，"
+            f"预期 >= 2（import + activities 列表）"
+        )

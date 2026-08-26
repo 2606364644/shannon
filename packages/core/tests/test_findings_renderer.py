@@ -51,7 +51,8 @@ def test_render_injection_card_full():
     assert "**Concat Occurrences:** query + user_input" in result
     assert "**Protection Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
-    assert "**PoC:** ' OR 1=1 --" in result
+    # witness 行已升 POC 独立节（七节 spec §4.3）——无 report_poc 不再渲染，
+    # 双 fenced 断言见 test_poc_section_double_fenced_blocks
     # notes 现作为「危害」叙述（impact 字段缺省时的 fallback）
     assert "**Impact**" in result
     assert "Critical finding" in result
@@ -93,7 +94,7 @@ def test_render_injection_card_llm_output_fields():
     assert "### INJ-VULN-01" in result
     assert "cursor.execute" in result  # sink_function rendered
     assert "vulnerable" in result
-    assert "' UNION SELECT version()--" in result
+    # witness 行已升 POC 独立节（无 report_poc 不渲染，见 POC 节专项测试）
 
 
 def test_render_xss_card_full():
@@ -119,7 +120,6 @@ def test_render_xss_card_full():
     assert "HTML context" in result  # render_context 并入说明句
     assert "**Encoding Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
-    assert "**PoC:** <script>alert(1)</script>" in result
 
 
 def test_render_auth_card_full():
@@ -138,7 +138,8 @@ def test_render_auth_card_full():
     assert "### AUTH-VULN-001" in result
     assert "**Source Endpoint:**" not in result
     assert "**Vulnerable Code Location:**" not in result
-    assert "- **Endpoints:** /api/login" in result  # 归入受影响入口节
+    assert "**Related Endpoints**" in result
+    assert "- /api/login" in result  # 归入相关接口节（紧凑块）
     assert "- **Location:** auth/handlers.py:42" in result  # 归入问题点节
     assert "**Missing Defense:** No rate limiting" in result
     assert "**Exploitation Hypothesis:** Brute force possible" in result
@@ -162,7 +163,7 @@ def test_render_authz_card_full():
     result = render_vuln_card(vuln, "authz")
     assert "### AUTHZ-VULN-001" in result
     assert "**Endpoint:**" not in result
-    assert "- **Endpoints:** /api/users/{id}" in result
+    assert "- /api/users/{id}" in result
     assert "**Role Context:** Authenticated user" in result
     assert "**Guard Evidence:** No ownership check" in result
     assert "**Side Effect:** Access other users' data" in result
@@ -186,7 +187,7 @@ def test_render_ssrf_card_full():
     result = render_vuln_card(vuln, "ssrf")
     assert "### SSRF-VULN-001" in result
     assert "**Source Endpoint:**" not in result
-    assert "- **Endpoints:** /api/fetch" in result
+    assert "- /api/fetch" in result
     assert "**Vulnerable Parameter:** url" in result
     assert "**Missing Defense:** No URL allowlist" in result
 
@@ -262,26 +263,28 @@ def test_card_four_elements_and_meta_line(monkeypatch):
     assert card.startswith("### INJ-VULN-01 注入漏洞：命令注入")
     assert "严重程度：严重" in card and "CWE-95" in card
     assert "验证：静态分析" in card and "双轨确认" in card
-    for section in ("**漏洞成因（研判依据）**", "**危害**", "**问题点**",
-                    "**受影响入口**", "**修复建议**", "#### 漏洞细节"):
+    for section in ("**漏洞成因（研判依据）**", "**漏洞危害**", "**问题点**",
+                    "**相关接口**", "**修复建议**", "#### 漏洞细节"):
         assert section in card, section
-    assert "| preTax | app/routes/contributions.js:32 |" in card
+    assert "  - 参数：preTax、afterTax" in card  # 相关接口小字行并入参数
     assert SNIPPET in card  # 问题点 fence 内
 
 
 def test_card_section_order(monkeypatch):
-    """节顺序（用户口径 2026-08-25）：成因 → 危害 → 问题点 → 受影响入口（参数×
-    接口）→ 修复建议 → 漏洞细节（PoC/数据流/防护收纳折叠区）。"""
+    """节顺序（spec 2026-08-26-vuln-card-seven-sections §3）：成因 → 漏洞危害 →
+    问题点 → 相关接口 → [POC] → 漏洞细节 → 修复建议（修复建议收尾；无
+    report_poc 时 POC 节缺省——七节全序见 test_card_seven_section_order_with_poc）。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     card = render_vuln_card(_vuln(), "injection", SNIPPET)
-    order = ["**漏洞成因（研判依据）**", "**危害**", "**问题点**",
-             "**受影响入口**", "**修复建议**", "#### 漏洞细节"]
+    order = ["**漏洞成因（研判依据）**", "**漏洞危害**", "**问题点**",
+             "**相关接口**", "#### 漏洞细节", "**修复建议**"]
     pos = [card.index(s) for s in order]
     assert pos == sorted(pos), f"节顺序错乱: {order}"
 
 
-def test_card_details_section_order_poc_dataflow_protection(monkeypatch):
-    """漏洞细节区置顶顺序：PoC → 数据流 → 防护情况 → 判定（其余判定字段随后）。"""
+def test_card_details_section_order_dataflow_protection(monkeypatch):
+    """漏洞细节区置顶顺序：数据流 → 防护情况 → 判定（其余判定字段随后）；
+    PoC 行已升独立节（§4.3），本区不再渲染。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     v = _vuln(
         witness_payload="preTax=require('child_process').execSync('id')",
@@ -294,9 +297,10 @@ def test_card_details_section_order_poc_dataflow_protection(monkeypatch):
         ])
     card = render_vuln_card(v, "injection", None)
     details = card.split("#### 漏洞细节", 1)[1]
-    order = ["**PoC:**", "**数据流:**", "**防护情况:**", "**判定:**"]
+    order = ["**数据流:**", "**防护情况:**", "**判定:**"]
     pos = [details.index(s) for s in order]
     assert pos == sorted(pos), f"漏洞细节区字段顺序错乱: {order}"
+    assert "**PoC:**" not in details  # witness 升 POC 独立节
 
 
 def test_dataflow_steps_rendered_as_numbered_list(monkeypatch):
@@ -325,19 +329,19 @@ def test_evidence_chain_split_into_numbered_list(monkeypatch):
     assert "  2. app/routes/contributions.js:eval:32" in card
 
 
-def test_llm_card_synthesizes_entry_table(monkeypatch):
-    """无 affected_entries 的 LLM 卡：affected_parameters + endpoint → 合成入口表
-    （涉及参数 × 涉及接口 呈现一致）；接口不在标题时补「受影响接口：」行。"""
+def test_llm_card_synthesizes_endpoint_block(monkeypatch):
+    """无 affected_entries 的 LLM 卡：affected_parameters + endpoint → 合成接口块
+    小字行（涉及参数 × Sink 位置 呈现一致，sink_call 解析 loc）。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     v = _vuln(
-        title="命令注入：贡献值请求体直接 eval()（RCE）",  # title 不含接口 → 补接口行
+        title="命令注入：贡献值请求体直接 eval()（RCE）",
         affected_entries=None,
         endpoint="POST /contributions",
         sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23")
     card = render_vuln_card(v, "injection", None)
-    assert "- **接口:** POST /contributions" in card
-    assert "| preTax | app/routes/contributions.js:32 |  |" in card
-    assert "| afterTax | app/routes/contributions.js:32 |  |" in card
+    assert "- POST /contributions" in card
+    assert ("  - 参数：preTax、afterTax、roth"
+            " ｜ Sink：app/routes/contributions.js:32") in card
 
 
 def test_description_section_no_inline_chain_dump(monkeypatch):
@@ -346,7 +350,7 @@ def test_description_section_no_inline_chain_dump(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     v = _vuln(notes="服务端无沙箱，eval 直接求值请求体。")
     card = render_vuln_card(v, "injection", None)
-    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
+    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**漏洞危害**", 1)[0]
     assert "preTax & req.body" not in desc
     assert "服务端无沙箱" in desc
     assert "**脆弱位置:**" not in card  # §4.1 删行（链归数据流分点）
@@ -580,7 +584,7 @@ async def test_render_recovers_bare_list_queue(tmp_path):
 
     findings = (deliverables / "auth_findings.md").read_text()
     assert "### AUTH-1" in findings
-    assert "- **Endpoints:** POST /login" in findings
+    assert "- POST /login" in findings
     assert "auto-recovered" in findings.lower() or "bare-list" in findings.lower()
 
 
@@ -742,7 +746,7 @@ def test_render_injection_card_zh_labels(monkeypatch):
     result = render_vuln_card(vuln, "injection")
     assert "未经校验即进入 sqlite3.execute" in result
     assert "严重程度：" in result
-    assert ("**漏洞成因（研判依据）**" in result and "**危害**" in result
+    assert ("**漏洞成因（研判依据）**" in result and "**漏洞危害**" in result
             and "#### 漏洞细节" in result)
     assert "测试备注" in result  # notes 作为危害叙述
     assert "Summary" not in result
@@ -836,19 +840,21 @@ async def test_render_findings_with_repo_root_injects_snippet(tmp_path):
     await FindingsRenderer.render_findings_from_queues(deliverables, repo_root=repo)
 
     findings = (deliverables / "injection_findings.md").read_text()
-    assert "**Vulnerable Code**" in findings
+    assert "**Problem Points**" in findings
     assert "```js" in findings          # fence + 按扩展名语言标注
     assert "eval(req.body.preTax)" in findings
-    # direct 回填：preTax 在 snippet 中（无标注）；nothere 不在（疑似间接）
-    assert "| preTax | app/routes.js:2 | C1 |" in findings
-    assert "| nothere (suspected indirect) | app/routes.js:4 | C2 |" in findings
+    # direct 回填：preTax 在 snippet 中（无标注）；nothere 不在（疑似间接）——
+    # 并入小字行（弃表后无行级配对，参数带注记）
+    assert ("  - Params: preTax, nothere (suspected indirect)"
+            " | Sink: app/routes.js:2, app/routes.js:4"
+            " | Chain: C1, C2") in findings
 
 
 # --- F8 / F9a（spec 2026-08-25 终审）---
 
-def test_authz_horizontal_gn_entry_table_no_empty_rows():
+def test_authz_horizontal_gn_entry_block_no_empty_section():
     """F8：Horizontal GN 条目无参数无 sink_location → sink 位置回退
-    vulnerable_code_location；三列全空的 entry 不渲染表行（不成 `|  |  |  |`）。"""
+    vulnerable_code_location（并入小字行）；三列全空的 entry 不渲染（整节省略）。"""
     vuln = AuthzVulnerability(
         ID="HZN-GN-01", vulnerability_type="Horizontal",
         externally_exploitable=True, confidence="low",
@@ -857,10 +863,10 @@ def test_authz_horizontal_gn_entry_table_no_empty_rows():
                            "chain_id": "HZN-GN-01", "track": "gitnexus"}],
     )
     card = render_vuln_card(vuln, "authz")
-    assert "|  | middleware/auth.js:45 | HZN-GN-01 |" in card
+    assert "  - Sink: middleware/auth.js:45 | Chain: HZN-GN-01" in card
 
     # 三列全 None（且无 vulnerable_code_location 可回退、无接口）→ 整节省略：
-    # 无参无位置无接口不出空表头
+    # 无参无位置无接口不出空节
     empty = AuthzVulnerability(
         ID="HZN-GN-02", vulnerability_type="Horizontal",
         externally_exploitable=True, confidence="low",
@@ -869,6 +875,7 @@ def test_authz_horizontal_gn_entry_table_no_empty_rows():
     )
     card2 = render_vuln_card(empty, "authz")
     assert not [l for l in card2.splitlines() if l.startswith("|")]
+    assert "**Related Endpoints**" not in card2
 
 
 def test_card_title_not_repeated_in_description_section(monkeypatch):
@@ -878,7 +885,7 @@ def test_card_title_not_repeated_in_description_section(monkeypatch):
     card = render_vuln_card(v, "injection", None)
     assert card.count(v.title) == 1          # 仅标题行出现一次
     # source→path 链 dump 不再混排成因段（移居漏洞细节区 vulnerable_location）
-    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
+    desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**漏洞危害**", 1)[0]
     assert " → " not in desc
     assert "**脆弱位置:**" not in card  # §4.1 删行（链归数据流分点）
 
@@ -927,8 +934,8 @@ def test_details_section_drops_consolidated_kv_lines():
                  "**Vulnerable Code Location:**", "**Endpoint:**",
                  "**Source Endpoint:**"):
         assert line not in details, line
-    # 保留项照旧
-    assert "**PoC:**" in details
+    # 保留项照旧；PoC 行已升独立节（§4.3），细节区不再渲染
+    assert "**PoC:**" not in details
     assert "**Dataflow:**" in details
     assert "**Verdict:**" in details or "**Protection Observed:**" in details
 
@@ -943,7 +950,7 @@ def test_issue_section_three_elements_without_snippet():
         sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23",
     )
     result = render_vuln_card(vuln, "injection", snippet=None)
-    assert "**Vulnerable Code**" in result
+    assert "**Problem Points**" in result
     assert "- **Location:** app/routes/contributions.js:32" in result
     assert "eval" in result.split("- **Issue:**", 1)[1].splitlines()[0]
 
@@ -979,8 +986,8 @@ def test_xss_render_context_folded_into_issue_desc():
     assert "**Render Context:**" not in result
 
 
-def test_entry_section_endpoints_list_line():
-    """§4.3 受影响入口：endpoints 新字段渲染接口列表行（多接口，写入+触发分开）。"""
+def test_entry_section_multi_endpoint_blocks():
+    """§3 节 4 相关接口：endpoints 多接口逐块（写入+触发分开），role 注记。"""
     vuln = XssVulnerability(
         ID="XSS-VULN-01", vulnerability_type="Stored XSS",
         externally_exploitable=True, confidence="high",
@@ -989,10 +996,12 @@ def test_entry_section_endpoints_list_line():
         affected_parameters=["memo (body)"],
     )
     result = render_vuln_card(vuln, "xss", snippet=None)
-    assert "- **Endpoints:** POST /memos (write), GET /memos (trigger)" in result
+    assert "**Related Endpoints**" in result
+    assert "- POST /memos (write)" in result
+    assert "- GET /memos (trigger)" in result
 
 
-def test_entry_section_endpoint_line_not_masked_by_title():
+def test_entry_section_endpoint_block_not_masked_by_title():
     """§4.3 删除「endpoint 在标题里就不渲染接口行」：结构化数据不被叙事掩盖。"""
     vuln = InjectionVulnerability(
         ID="INJ-VULN-01", vulnerability_type="SQLi",
@@ -1002,8 +1011,9 @@ def test_entry_section_endpoint_line_not_masked_by_title():
         affected_parameters=["preTax"],
     )
     result = render_vuln_card(vuln, "injection", snippet=None)
-    # 接口行必须在受影响入口节内（标签行），不是细节区 kv 行
-    assert "- **Endpoints:** POST /contributions" in result
+    # 接口块必须在相关接口节内，不是细节区 kv 行
+    assert "**Related Endpoints**" in result
+    assert "- POST /contributions" in result.splitlines()
 
 
 def test_gn_only_meta_line_no_duplicate_pending_review(monkeypatch):
@@ -1020,3 +1030,218 @@ def test_gn_only_meta_line_no_duplicate_pending_review(monkeypatch):
     result = render_vuln_card(vuln, "xss", snippet=None)
     meta = next(l for l in result.splitlines() if "严重程度" in l)
     assert meta.count("待复核") == 1
+
+
+# --- 七节基准结构（spec 2026-08-26-vuln-card-seven-sections §4.3）---
+# 节序：成因 → 漏洞危害 → 问题点 → 相关接口 → POC → 漏洞细节 → 修复建议；
+# 前移假设：渲染时 report_poc / report_problem_points 已写回（时序前移由
+# write_structured_poc activity 保证，见 whitebox workflow 测试）。
+
+REPORT_POC = {
+    "request": {
+        "method": "POST",
+        "url": "http://TARGET:3000/contributions",
+        "headers": {"Content-Type": "application/json"},
+        "body": '{"preTax": "1;require(\'child_process\')"}',
+    },
+    "preconditions": "已登录普通用户（会话 Cookie 有效）",
+    "expected_response": {
+        "indicator": "响应体包含命令执行输出",
+        "success_criteria": "HTTP 200 且 body 含 uid=",
+    },
+    "witness_payload": "1;require('child_process')",
+    "curl": ("curl -X POST 'http://TARGET:3000/contributions' "
+             "-H 'Content-Type: application/json' "
+             "--data '{\"preTax\": \"1;require(\'child_process\')\"}'"),
+    "raw_http": ("POST /contributions HTTP/1.1\nHost: TARGET:3000\n"
+                 "Content-Type: application/json\n"
+                 'Content-Length: 34\n\n'
+                 '{"preTax": "1;require(\'child_process\')"}'),
+}
+
+PROBLEM_POINTS = [
+    {"location": "app/routes/contributions.js:32",
+     "description": "请求体 preTax 未校验直接进入 eval()，可执行任意 JS。",
+     "snippet": "const preTax = eval(req.body.preTax);"},
+    {"location": "app/routes/contributions.js:33",
+     "description": "afterTax 同样未校验进入 eval()。",
+     "snippet": "const afterTax = eval(req.body.afterTax);"},
+]
+
+
+def test_card_seven_section_order_with_poc(monkeypatch):
+    """§3 七节全序（含 POC）：成因 → 漏洞危害 → 问题点 → 相关接口 → POC →
+    漏洞细节 → 修复建议（修复建议收尾）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(report_poc=REPORT_POC)
+    card = render_vuln_card(v, "injection", None)
+    order = ["**漏洞成因（研判依据）**", "**漏洞危害**", "**问题点**",
+             "**相关接口**", "**POC**", "#### 漏洞细节", "**修复建议**"]
+    pos = [card.index(s) for s in order]
+    assert pos == sorted(pos), f"七节顺序错乱: {order}"
+
+
+def test_card_without_report_poc_omits_poc_section(monkeypatch):
+    """无 report_poc → POC 整节省略；细节区 PoC 行已删（witness 升 POC 节随
+    report_poc 渲染）；修复建议仍收尾。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(witness_payload="1;require('child_process')")
+    card = render_vuln_card(v, "injection", None)
+    assert "**POC**" not in card
+    assert "**PoC:**" not in card
+    assert card.rindex("**修复建议**") > card.rindex("#### 漏洞细节")
+
+
+def test_impact_and_endpoints_section_renamed_zh(monkeypatch):
+    """§4.3 更名：危害 → 漏洞危害；受影响入口 → 相关接口（旧标签不再出现）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(_vuln(), "injection", None)
+    assert "**漏洞危害**" in card
+    assert "**相关接口**" in card
+    assert "**危害**" not in card
+    assert "**受影响入口**" not in card
+
+
+def test_new_section_labels_en():
+    """en（autouse 默认）：更名/新增节标签双语齐——Problem Points / Related
+    Endpoints / POC；旧英文标签不再出现。"""
+    card = render_vuln_card(_vuln(report_poc=REPORT_POC), "injection", None)
+    for s in ("**Root Cause (Basis)**", "**Impact**", "**Problem Points**",
+              "**Related Endpoints**", "**POC**", "#### Vulnerability Details",
+              "**Remediation**"):
+        assert s in card, s
+    assert "**Vulnerable Code**" not in card
+    assert "**Affected Entries**" not in card
+
+
+def test_entry_section_compact_blocks_no_table(monkeypatch):
+    """§3 节 4 弃 markdown 表：无 `|---` 表头/表行；每接口一块 + 缩进小字行，
+    原表列（参数/Sink 位置/链 ID）信息无损并入。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(_vuln(), "injection", None)
+    entry = card.split("**相关接口**", 1)[1].split("\n\n", 1)[0]
+    assert "|---" not in card
+    assert not [l for l in card.splitlines() if l.startswith("|")]
+    assert "- POST /contributions" in entry
+    assert ("  - 参数：preTax、afterTax"
+            " ｜ Sink：app/routes/contributions.js:32、app/routes/contributions.js:33"
+            " ｜ 链：INJ-GN-01、INJ-GN-04") in entry
+
+
+def test_entry_section_role_annotated_only_when_present(monkeypatch):
+    """§3 节 4：role（write/trigger）有则注记；认证并入小字行；无 role 不注空括号。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(
+        endpoints=["POST /memos (write)", "GET /memos (trigger)"],
+        affected_entries=None,
+        affected_parameters=["memo (body)"],
+        authentication_required="isLoggedIn",
+    )
+    card = render_vuln_card(v, "injection", None)
+    entry = card.split("**相关接口**", 1)[1]
+    assert "- POST /memos（write）" in entry
+    assert "- GET /memos（trigger）" in entry
+    assert "认证：isLoggedIn" in entry
+    v2 = _vuln(endpoint="POST /contributions", affected_entries=None,
+               affected_parameters=["preTax"])
+    card2 = render_vuln_card(v2, "injection", None)
+    assert "- POST /contributions" in card2.splitlines()
+
+
+def test_entry_section_structured_report_endpoints_preferred(monkeypatch):
+    """report_endpoints（富化写回）优先：块自带 参数/认证/路由注册/Sink；
+    链 ID 仍并入卡级 affected_entries 聚合（EndpointEntry 契约无链字段）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(report_endpoints=[{
+        "method": "POST", "path": "/contributions", "role": "write",
+        "auth": "isLoggedIn", "params": ["preTax"],
+        "route_registered_at": "app/routes/contributions.js:12",
+        "source_location": "app/routes/contributions.js:13",
+        "sink_location": "app/routes/contributions.js:32",
+    }])
+    card = render_vuln_card(v, "injection", None)
+    assert "- POST /contributions（write）" in card
+    assert ("  - 参数：preTax ｜ 认证：isLoggedIn"
+            " ｜ 路由注册：app/routes/contributions.js:12"
+            " ｜ Sink：app/routes/contributions.js:32"
+            " ｜ 链：INJ-GN-01、INJ-GN-04") in card
+
+
+def test_poc_section_double_fenced_blocks(monkeypatch):
+    """§3 节 5 POC 独立节：前置条件/预期响应/Witness 行 + curl（```bash）与
+    raw_http（```http）双 fenced block；witness 不再进漏洞细节区。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(report_poc=REPORT_POC, witness_payload="旧细节区 witness 不再渲染")
+    card = render_vuln_card(v, "injection", None)
+    assert "**POC**" in card
+    poc = card.split("**POC**", 1)[1].split("#### 漏洞细节", 1)[0]
+    assert "- **前置条件:** 已登录普通用户（会话 Cookie 有效）" in poc
+    assert "- **预期响应:** 响应体包含命令执行输出（HTTP 200 且 body 含 uid=）" in poc
+    assert "- **Witness:** 1;require('child_process')" in poc
+    assert "```bash" in poc
+    assert REPORT_POC["curl"] in poc
+    assert "```http" in poc
+    assert "POST /contributions HTTP/1.1" in poc
+    assert "旧细节区 witness 不再渲染" not in card
+    assert "**PoC:**" not in card
+
+
+def test_poc_section_omits_missing_fenced_blocks(monkeypatch):
+    """curl/raw_http 缺则对应 fenced block 省（不造空 block）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    poc = {k: REPORT_POC[k] for k in
+           ("preconditions", "expected_response", "witness_payload", "curl")}
+    card = render_vuln_card(_vuln(report_poc=poc), "injection", None)
+    assert "```bash" in card
+    assert "```http" not in card
+
+
+def test_poc_section_minimal_report_poc(monkeypatch):
+    """report_poc 仅前置条件：POC 节照常（不因缺 curl/raw_http 整节省略）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(
+        _vuln(report_poc={"preconditions": "已登录普通用户"}), "injection", None)
+    assert "**POC**" in card
+    assert "- **前置条件:** 已登录普通用户" in card
+
+
+def test_problem_points_enriched_preferred(monkeypatch):
+    """§3 节 3：report_problem_points（富化写回）优先——逐条 位置/说明/snippet
+    fence（语言标签按后缀）；回落 snippet 不再混入。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(report_problem_points=PROBLEM_POINTS)
+    card = render_vuln_card(v, "injection", SNIPPET)
+    issue = card.split("**问题点**", 1)[1].split("**相关接口**", 1)[0]
+    assert "- **位置:** app/routes/contributions.js:32" in issue
+    assert "- **说明:** 请求体 preTax 未校验直接进入 eval()，可执行任意 JS。" in issue
+    assert "```js" in issue
+    assert "const preTax = eval(req.body.preTax);" in issue
+    assert "- **位置:** app/routes/contributions.js:33" in issue
+    assert "const afterTax = eval(req.body.afterTax);" in issue
+    assert SNIPPET not in card  # 回落路径的传入 snippet 不稀释富化产物
+
+
+def test_problem_points_fallback_unchanged_without_enrichment(monkeypatch):
+    """无 report_problem_points → 回落现状：_card_loc 位置 + 合成说明 + 传入
+    snippet fence（回落路径行为保持不变）。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    card = render_vuln_card(_vuln(), "injection", SNIPPET)
+    issue = card.split("**问题点**", 1)[1].split("**相关接口**", 1)[0]
+    assert "- **位置:** app/routes/contributions.js:32" in issue
+    assert "- **说明:**" in issue
+    assert SNIPPET in issue
+
+
+def test_problem_points_malformed_entries_dropped(monkeypatch):
+    """畸形条目（缺 location / 空位置）丢弃；有效条目照常渲染。（非 dict 条目
+    在 pydantic list[dict] 校验层已拒，无需渲染层兜底。）"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    v = _vuln(report_problem_points=[
+        {"description": "无位置"}, {"location": "   ", "description": "空位置"},
+        {"location": "app/routes/contributions.js:32", "description": "有效条目"},
+    ])
+    card = render_vuln_card(v, "injection", None)
+    assert "- **位置:** app/routes/contributions.js:32" in card
+    assert "- **说明:** 有效条目" in card
+    assert "无位置" not in card
+    assert "空位置" not in card

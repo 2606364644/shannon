@@ -28,6 +28,7 @@ def test_step_names_matches_phase_steps_order():
     assert step_names("risk-scoring") == ("risk-scoring", "dataflow-hints")
     assert step_names("attack-chain") == ("attack-chain-assembly",)
     assert step_names("reporting") == (
+        "write-structured-poc",
         "render-findings", "assemble-report", "run-report-agent",
         "verify-report-vuln-blocks",
         "inject-attack-chains", "inject-gitnexus-track-status",

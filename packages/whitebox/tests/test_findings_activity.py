@@ -37,4 +37,38 @@ async def test_render_findings_activity_generates_findings(tmp_path):
     assert findings.exists()
     content = findings.read_text()
     assert "### INJECTION-001" in content
-    assert "**Sink Call:** db.execute" in content
+    # Sink 行已并入问题点说明句（vuln-card-consolidation §4.1 + 七节卡 §4.3）
+    assert "db.execute" in content.split("- **Issue:**", 1)[1].splitlines()[0]
+
+
+# ---------- §4.2（spec 2026-08-26-vuln-card-seven-sections）POC 写回时序前移 ----------
+# md 卡要原生渲染 POC 节（curl + Burp 双格式），结构化 POC 写回必须在
+# render_findings 之前完成——镜像 test_reporting_workflow.py 的源码锚定模式
+# （reporting 真实执行依赖 temporal worker + LLM，静态断言防时序回归）。
+
+
+def _workflow_src() -> str:
+    return (Path(__file__).resolve().parents[1]
+            / "src/supernova_whitebox/pipeline/workflows.py"
+            ).read_text(encoding="utf-8")
+
+
+def test_write_structured_poc_runs_before_render_findings_in_workflow():
+    """源码级硬约束：workflows.py 里 write_structured_poc 在 render_findings 之前。"""
+    src = _workflow_src()
+    i_write = src.find("activities.write_structured_poc")
+    assert i_write != -1, "找不到 write_structured_poc 的 execute_activity 调用"
+    i_render = src.find("activities.render_findings")
+    assert i_render != -1, "找不到 render_findings 的 execute_activity 调用"
+    assert i_write < i_render, (
+        "write_structured_poc 必须在 render_findings 之前执行"
+        "（md 卡原生 POC 节依赖写回后的 report_poc）"
+    )
+
+
+def test_write_structured_poc_step_registered_before_render_findings():
+    """step_intents 注册表顺序：write-structured-poc 在 render-findings 之前（dashboard 一致）。"""
+    from supernova_whitebox.pipeline.step_intents import step_names
+    steps = step_names("reporting")
+    assert "write-structured-poc" in steps
+    assert steps.index("write-structured-poc") < steps.index("render-findings")

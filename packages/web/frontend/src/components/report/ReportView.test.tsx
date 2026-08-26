@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { ReportView } from "./ReportView";
 import { ExecutiveSummary } from "./ExecutiveSummary";
 import { StatsRow } from "./StatsRow";
-import { VulnerabilityCard } from "./VulnerabilityCard";
+import { VulnerabilityCard, buildRawHttp } from "./VulnerabilityCard";
 import type { ReportData, ReportVulnerability } from "@/api/types";
 
 // ── fixture：对齐 core pydantic schema（models/report_data.py）snake_case 直传 ──
@@ -17,6 +17,8 @@ const vuln: ReportVulnerability = {
   severity: "high",
   confidence: "high",
   cwe_id: "CWE-79",
+  cvss: "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L 8.6",
+  owasp_category: "A03:2021-Injection",
   externally_exploitable: true,
   merge_source: "both",
   merged_from: ["XSS-GN-13"],
@@ -25,6 +27,18 @@ const vuln: ReportVulnerability = {
     impact: "会话窃取",
     remediation: "启用转义",
   },
+  problem_points: [
+    {
+      location: "app/routes/memos.js:13",
+      description: "memo 参数未校验直接落库",
+      snippet: "const memo = req.body.memo;",
+    },
+    {
+      location: "app/views/memos.html:31",
+      description: "渲染时未转义输出",
+      snippet: "<%= memo %>",
+    },
+  ],
   endpoints: [
     {
       method: "POST",
@@ -192,45 +206,198 @@ describe("VulnerabilityCard", () => {
     expect(screen.getByText(/高危/)).toBeInTheDocument(); // vuln.severity.High zh
   });
 
-  it("narrative 三段（成因/危害/修复建议）全部渲染", () => {
+  it("narrative 节独立纵排（弃 3 列 grid）：成因/危害/修复建议各成节，节头标签按七节基准", () => {
     render(<VulnerabilityCard v={vuln} />);
-    expect(screen.getByText(/渲染 memo 时未转义/)).toBeInTheDocument();
-    expect(screen.getByText(/会话窃取/)).toBeInTheDocument();
-    expect(screen.getByText(/启用转义/)).toBeInTheDocument();
+    expect(screen.getByTestId("sec-cause").textContent).toContain("渲染 memo 时未转义");
+    expect(screen.getByTestId("sec-impact").textContent).toContain("会话窃取");
+    expect(screen.getByTestId("sec-remediation").textContent).toContain("启用转义");
+    expect(screen.getByText("漏洞成因（研判依据）")).toBeInTheDocument();
+    expect(screen.getByText("漏洞危害")).toBeInTheDocument();
+    expect(screen.getByText("修复建议")).toBeInTheDocument();
+    // 弃 grid md:grid-cols-3：全卡纵向排布
+    const card = screen.getByTestId("report-vuln-card");
+    expect(card.className).not.toContain("md:grid-cols-3");
+    expect(screen.queryByTestId("vuln-narrative")).not.toBeInTheDocument();
   });
 
-  it("endpoints 一体表：Method/Path/参数/认证/路由注册/Source/Sink 七列全带行号", () => {
-    render(<VulnerabilityCard v={vuln} />);
-    const table = screen.getByTestId("vuln-endpoints");
-    const head = within(table).getAllByRole("columnheader").map((h) => h.textContent);
-    expect(head).toEqual(["Method", "Path", "参数", "认证", "路由注册", "Source", "Sink"]);
-    const row = within(table).getAllByRole("row")[1];
-    const cells = within(row).getAllByRole("cell").map((c) => c.textContent);
-    expect(cells[0]).toContain("POST");
-    expect(cells[1]).toContain("/memos");
-    expect(cells[2]).toContain("memo");
-    expect(cells[3]).toContain("isLoggedIn");
-    expect(cells[4]).toContain("app/routes/index.js:66");
-    expect(cells[5]).toContain("app/routes/memos.js:13");
-    expect(cells[6]).toContain("app/views/memos.html:31");
+  it("cause 空 → 成因节整体省略（GN-only 卡自然降级，不出空壳节）", () => {
+    render(
+      <VulnerabilityCard
+        v={{ ...vuln, narrative: { cause: null, impact: "会话窃取", remediation: "启用转义" } }}
+      />,
+    );
+    expect(screen.queryByTestId("sec-cause")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sec-impact")).toBeInTheDocument();
   });
 
-  it("POC 块：完整请求（方法/URL/头/体）+ 前置条件 + 预期响应 + witness + 复制 curl", () => {
+  it("七节纵向顺序（spec §3 基准）：成因 → 危害 → 问题点 → 相关接口 → POC → 证据 → 漏洞细节 → 修复建议", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const card = screen.getByTestId("report-vuln-card");
+    const ids = [
+      "sec-cause",
+      "sec-impact",
+      "sec-problem-points",
+      "sec-endpoints",
+      "vuln-poc",
+      "vuln-evidence",
+      "sec-details",
+      "sec-remediation",
+    ];
+    const els = ids.map((id) => card.querySelector(`[data-testid="${id}"]`));
+    els.forEach((el, i) => expect(el, `section ${ids[i]} should render`).toBeTruthy());
+    for (let i = 1; i < els.length; i++) {
+      // els[i] 在 DOM 中跟随 els[i-1] 之后（纵向节序）
+      expect(
+        els[i - 1]!.compareDocumentPosition(els[i]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("问题点节：problem_points 逐条渲染（位置 mono + 说明 + 代码片段 pre）", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const sec = screen.getByTestId("sec-problem-points");
+    const items = within(sec).getAllByTestId("problem-point");
+    expect(items.length).toBe(2);
+    expect(items[0].textContent).toContain("app/routes/memos.js:13");
+    expect(items[0].textContent).toContain("memo 参数未校验直接落库");
+    const snippets = within(sec).getAllByTestId("problem-point-snippet");
+    expect(snippets[0].textContent).toContain("const memo = req.body.memo;");
+    expect(snippets[1].textContent).toContain("<%= memo %>");
+  });
+
+  it("problem_points 空时兜底链：位置 ← endpoints source→sink 逐行、片段 ← evidence.code_snippet", () => {
+    render(<VulnerabilityCard v={{ ...vuln, problem_points: [] }} />);
+    const sec = screen.getByTestId("sec-problem-points");
+    const rows = within(sec).getAllByTestId("problem-point-location");
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain("app/routes/memos.js:13");
+    expect(rows[0].textContent).toContain("app/views/memos.html:31");
+    expect(within(sec).getAllByTestId("problem-point-snippet").length).toBe(1);
+    expect(within(sec).getByTestId("problem-point-snippet").textContent).toContain(
+      "res.render('memos', { memo })",
+    );
+  });
+
+  it("问题点全空（无 problem_points、endpoints 无行号、无 code_snippet）→ 整节省略", () => {
+    render(
+      <VulnerabilityCard
+        v={{
+          ...vuln,
+          problem_points: [],
+          endpoints: [{ ...vuln.endpoints[0], source_location: null, sink_location: null }],
+          evidence: { ...vuln.evidence!, code_snippet: null },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("sec-problem-points")).not.toBeInTheDocument();
+  });
+
+  it("相关接口：紧凑块（METHOD /path mono 加粗 + role 徽章 + 参数/认证/路由注册小字行），无表格", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const sec = screen.getByTestId("sec-endpoints");
+    expect(sec.querySelector("table")).toBeNull();
+    const blocks = within(sec).getAllByTestId("endpoint-block");
+    expect(blocks.length).toBe(1);
+    expect(within(blocks[0]).getByText("POST /memos")).toBeInTheDocument();
+    expect(within(blocks[0]).getByTestId("endpoint-role").textContent).toBe("write");
+    const meta = within(blocks[0]).getByTestId("endpoint-meta").textContent ?? "";
+    expect(meta).toContain("memo");
+    expect(meta).toContain("isLoggedIn");
+    expect(meta).toContain("app/routes/index.js:66");
+  });
+
+  it("多接口逐块渲染（紧凑块非表格，块数 = endpoints 数）", () => {
+    render(
+      <VulnerabilityCard
+        v={{
+          ...vuln,
+          endpoints: [
+            ...vuln.endpoints,
+            { method: "GET", path: "/memos/:id", role: "trigger", auth: null, params: ["id"], route_registered_at: null, source_location: null, sink_location: null },
+          ],
+        }}
+      />,
+    );
+    const sec = screen.getByTestId("sec-endpoints");
+    const blocks = within(sec).getAllByTestId("endpoint-block");
+    expect(blocks.length).toBe(2);
+    expect(within(blocks[1]).getByText("GET /memos/:id")).toBeInTheDocument();
+    const meta = within(blocks[1]).getByTestId("endpoint-meta").textContent ?? "";
+    expect(meta).toContain("id");
+    expect(meta).not.toContain("isLoggedIn");
+  });
+
+  it("POC 节：curl ↔ Burp 双 tab，默认 curl；冗长 method/url/headers 逐行列表已删", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render(<VulnerabilityCard v={vuln} />);
     const poc = screen.getByTestId("vuln-poc");
-    expect(within(poc).getByText(/POST\s+http:\/\/t\/memos/)).toBeInTheDocument();
-    expect(within(poc).getByText(/connect\.sid=abc/)).toBeInTheDocument();
-    expect(within(poc).getByTestId("poc-body").textContent).toContain("memo=<img src=x onerror=alert(1)>");
+    // 默认 curl tab：curl 串原样展示（poc.curl 优先）+ 复制按钮
+    expect(within(poc).getByTestId("poc-curl").textContent).toContain(
+      "curl -X POST 'http://t/memos' -d 'memo=<img src=x onerror=alert(1)>'",
+    );
+    expect(within(poc).queryByTestId("poc-burp")).not.toBeInTheDocument();
+    // 冗长的 poc-request 逐行列表已删除（双格式块是其超集）
+    expect(within(poc).queryByTestId("poc-request")).not.toBeInTheDocument();
+    expect(within(poc).queryByTestId("poc-body")).not.toBeInTheDocument();
+    fireEvent.click(within(poc).getByTestId("copy-curl"));
+    expect(writeText).toHaveBeenCalledWith("curl -X POST 'http://t/memos' -d 'memo=<img src=x onerror=alert(1)>'");
+    // 前置条件 / 预期响应 / witness 保留
     expect(within(poc).getByTestId("poc-witness").textContent).toContain("<img src=x onerror=alert(1)>");
     expect(within(poc).getByText(/需登录/)).toBeInTheDocument();
     expect(within(poc).getByText(/响应含未转义 payload/)).toBeInTheDocument();
     expect(within(poc).getByText(/onerror 触发/)).toBeInTheDocument();
-    // curl 完整展示 + 复制按钮
-    expect(within(poc).getByText(/curl -X POST 'http:\/\/t\/memos'/)).toBeInTheDocument();
-    fireEvent.click(within(poc).getByTestId("copy-curl"));
-    expect(writeText).toHaveBeenCalledWith("curl -X POST 'http://t/memos' -d 'memo=<img src=x onerror=alert(1)>'");
+  });
+
+  it("POC Burp tab：raw_http 缺 → 由 request 确定性拼 raw HTTP（方法行 + Host + headers + body）", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<VulnerabilityCard v={vuln} />);
+    const poc = screen.getByTestId("vuln-poc");
+    fireEvent.click(within(poc).getByTestId("poc-tab-burp"));
+    const burp = within(poc).getByTestId("poc-burp");
+    expect(burp.textContent).toContain("POST /memos HTTP/1.1");
+    expect(burp.textContent).toContain("Host: t");
+    expect(burp.textContent).toContain("Cookie: connect.sid=abc");
+    expect(burp.textContent).toContain("memo=<img src=x onerror=alert(1)>");
+    // 切走后 curl 块隐藏；Burp 块自带复制按钮
+    expect(within(poc).queryByTestId("poc-curl")).not.toBeInTheDocument();
+    fireEvent.click(within(poc).getByTestId("copy-burp"));
+    const copied = writeText.mock.calls[0][0] as string;
+    expect(copied).toContain("POST /memos HTTP/1.1");
+    expect(copied).toContain("Host: t");
+    // 切回 curl
+    fireEvent.click(within(poc).getByTestId("poc-tab-curl"));
+    expect(within(poc).getByTestId("poc-curl")).toBeInTheDocument();
+    expect(within(poc).queryByTestId("poc-burp")).not.toBeInTheDocument();
+  });
+
+  it("POC Burp tab：raw_http 有值时原样展示（不走 request 拼装）", () => {
+    render(
+      <VulnerabilityCard
+        v={{ ...vuln, poc: { ...vuln.poc!, raw_http: "POST /memos HTTP/1.1\nHost: t\nX-Burp: 1\n\nmemo=x" } }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("poc-tab-burp"));
+    const burp = screen.getByTestId("poc-burp");
+    expect(burp.textContent).toContain("X-Burp: 1");
+    expect(burp.textContent).not.toContain("connect.sid");
+  });
+
+  it("漏洞细节节 meta：CVSS 尾分数提亮（font-semibold）+ 向量串 mono + OWASP badge", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const score = screen.getByTestId("cvss-score");
+    expect(score.textContent).toBe("8.6");
+    expect(score.className).toContain("font-semibold");
+    expect(screen.getByTestId("cvss-vector").textContent).toContain("AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L");
+    const owasp = screen.getByTestId("owasp-badge");
+    expect(owasp.textContent).toContain("A03:2021-Injection");
+  });
+
+  it("CVSS 无尾分数结构 → 不切分，原样 mono（无 score 提亮元素）", () => {
+    render(<VulnerabilityCard v={{ ...vuln, cvss: "AV:N/AC:L/PR:L" }} />);
+    expect(screen.queryByTestId("cvss-score")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cvss-vector").textContent).toContain("AV:N/AC:L/PR:L");
   });
 
   it("dataflow_steps 折叠区：默认收起，点击展开显示步 + file:line", () => {
@@ -262,6 +429,26 @@ describe("VulnerabilityCard", () => {
     const copied = writeText.mock.calls[0][0] as string;
     expect(copied).toContain("curl");
     expect(copied).toContain("http://t/memos");
+    expect(copied).toContain("-H 'Cookie: connect.sid=abc'");
     expect(copied).toContain("memo=<img src=x onerror=alert(1)>");
+  });
+});
+
+describe("buildRawHttp（Burp 格式确定性拼装，导出纯函数）", () => {
+  it("方法行（path+query）+ Host（从 url 取）+ headers + 空行 + body", () => {
+    expect(
+      buildRawHttp({
+        method: "POST",
+        url: "http://t/memos?q=1",
+        headers: { Cookie: "sid=1" },
+        body: "memo=x",
+      }),
+    ).toBe("POST /memos?q=1 HTTP/1.1\nHost: t\nCookie: sid=1\n\nmemo=x");
+  });
+
+  it("headers 已含 Host 时不重复；无 body 不追加空行", () => {
+    expect(
+      buildRawHttp({ method: "GET", url: "http://t/x", headers: { Host: "t2.example" } }),
+    ).toBe("GET /x HTTP/1.1\nHost: t2.example");
   });
 });

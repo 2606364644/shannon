@@ -11,8 +11,6 @@ sink 笛卡尔积）先按单位收敛（gn_collapse），再与 LLM 轨同单�
 的 _llm_inj / _gn_inj，勿跨测试模块 import）。
 """
 
-import re
-
 import pytest
 
 from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
@@ -73,18 +71,23 @@ async def test_e2e_nine_gn_one_llm_become_one_card(monkeypatch):
     assert set(m.affected_parameters) == {"preTax", "afterTax", "roth"}
 
     card = render_vuln_card(m, "injection", SNIPPET)
-    # 正文四节齐 + 受影响入口 + 卡标题带 LLM title
+    # 正文节齐（七节基准，无 report_poc 时 POC 缺省）+ 卡标题带 LLM title
     assert card.startswith("### INJ-VULN-01 注入漏洞：命令注入")
-    for s in ("**漏洞成因（研判依据）**", "**危害**", "**问题点**",
-              "**修复建议**", "**受影响入口**", "#### 漏洞细节"):
+    for s in ("**漏洞成因（研判依据）**", "**漏洞危害**", "**问题点**",
+              "**相关接口**", "#### 漏洞细节", "**修复建议**"):
         assert s in card, f"卡片缺正文小节: {s}"
+    assert card.rindex("**修复建议**") > card.rindex("#### 漏洞细节")  # 修复建议收尾
     assert "双轨确认" in card                    # merge_source=both 的元信息
     assert SNIPPET in card                       # 问题点 fence
-    # 受影响入口表按归并单位渲染：9 行数据（GN 笛卡尔积不平铺成 9 张卡）
-    entry_rows = re.findall(
-        r"^\| (?:preTax|afterTax|roth) \| app/routes/contributions\.js:\d+ \|",
-        card, re.M)
-    assert len(entry_rows) == 9
+    # 相关接口紧凑块（spec 2026-08-26-vuln-card-seven-sections §3 节 4，弃表）：
+    # 9 条去重 entry（3 参数 × 3 行 sink）的参数/Sink 全并入小字行（信息无损）
+    assert "|---" not in card
+    assert "- POST /contributions" in card
+    small = [l for l in card.splitlines() if l.startswith("  - 参数：")]
+    assert len(small) == 1
+    for p in ("preTax", "afterTax", "roth"):
+        assert p in small[0]
+    assert small[0].count("app/routes/contributions.js:") == 3
     # 内部标签零出现（spec §9）
     for banned in ("llm-pass-failed", "needs_review", "unparseable-llm"):
         assert banned not in card, banned
