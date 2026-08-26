@@ -22,6 +22,14 @@ import type { BlackboxRunSummary, ReportData } from "@/api/types";
 
 type Track = "whitebox" | "blackbox" | "combined";
 
+/** 报告页版心（布局不变量）：报告是长文档型页面，卡片边框/表格/散文/POC 须共享同
+ *  一居中列宽，布局节奏才稳定——2026-08-26 满宽实验（b1cf3fb3 删版心 + 护栏下沉
+ *  RichText 768px）反例：散文 768px vs 卡片满宽 → 左重右空、表格列距拉稀，已回滚。
+ *  档位 1536px：endpoints 表 7 列 mono（Path/Source/Sink 等 file:line）自然需求
+ *  ~1300px+，1280(7xl) 下挤、1536 舒展——整页单一版心提档，不做表格单独满宽（单一
+ *  宽度 > 局部护栏）。控制台型页（live/logs/产物）满宽是另一立场，勿混同。 */
+const REPORT_COL_CLS = "mx-auto w-full max-w-[1536px]";
+
 /** 报告卡右上「下载 .md」：直接落已在内存的 md 全文（/report 无截断），不重发请求。 */
 function ReportDownloadButton({ filename, md }: { filename: string; md: string }) {
   const { t } = useTranslation();
@@ -143,14 +151,22 @@ function SingleReport({ ws, scanId, scanType }: { ws: string; scanId: string; sc
   const mdPath = scanReportPath(ws, scanId);
   const filename = reportDownloadFilename(scanId);
 
-  if (rd.loading) return <ReportSkeleton />;
-  // 满宽控制台立场（2026-08-26 放宽）：与 live/logs/产物页一致铺满 AppShell 内容区
-  // （超宽屏由 AppShell max-w-[2400px] 兜底）；可读行宽护栏下沉到叙述文本容器
-  // （RichText max-w-3xl）——宽度给表格/curl/POC 等结构化数据，不给散文。
-  if (rd.data)
-    return <StructuredReportShell data={rd.data} mdPath={mdPath} filename={filename} />;
-  if (rd.notFound) return <LegacyMdReport path={mdPath} filename={filename} />;
-  return <ErrorState message={t("workspaceDetail.report.loadError", { error: rd.error })} />;
+  let body;
+  if (rd.loading) {
+    body = <ReportSkeleton />;
+  } else if (rd.data) {
+    body = <StructuredReportShell data={rd.data} mdPath={mdPath} filename={filename} />;
+  } else if (rd.notFound) {
+    body = <LegacyMdReport path={mdPath} filename={filename} />;
+  } else {
+    body = <ErrorState message={t("workspaceDetail.report.loadError", { error: rd.error })} />;
+  }
+  // 版心列（REPORT_COL_CLS）：所有分支共享——拉宽提档（7xl）但布局结构不变，见常量注释。
+  return (
+    <div data-testid="report-page-column" className={REPORT_COL_CLS}>
+      {body}
+    </div>
+  );
 }
 
 /** 组合：三子 tab，各拉对应 track。黑盒/融合子 tab 按 selectedRun（版本化 run，spec
@@ -196,8 +212,8 @@ function CombinedReport({ ws, scanId, scanType }: { ws: string; scanId: string; 
   }
 
   return (
-    // 同 SingleReport：满宽控制台立场（护栏下沉到 RichText，见 SingleReport 注释）。
-    <div className="space-y-3">
+    // 同 SingleReport：版心列（REPORT_COL_CLS）包 tab 条 + 正文，布局结构不变。
+    <div data-testid="report-page-column" className={`${REPORT_COL_CLS} space-y-3`}>
       <Tabs value={track} onValueChange={(v) => setTrack(v as Track)}>
         <TabsList>
           <TabsTrigger value="whitebox">{t("workspaceDetail.report.combined.tabWhitebox")}</TabsTrigger>

@@ -20,9 +20,7 @@ export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary 
       data-testid="exec-summary"
       className="space-y-3 rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4 shadow-[var(--shadow-card)]"
     >
-      {/* 满宽报告页（2026-08-26 放宽）：justify-start 让风险等级徽章紧跟标题，
-          避免 justify-between 在宽屏把徽章推到远端显得松散。 */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-base font-semibold tracking-tight">{t("report.execSummary")}</span>
         {summary.risk_level && (
           <span
@@ -39,7 +37,7 @@ export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary 
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
             {t("report.topRisks")}
           </div>
-          <ol className="list-decimal max-w-3xl space-y-1 pl-6 text-sm">
+          <ol className="list-decimal space-y-1 pl-6 text-sm">
             {summary.top_risks.map((r, i) => (
               <li key={i} className="min-w-0 break-words">
                 <a

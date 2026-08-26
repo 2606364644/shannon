@@ -228,6 +228,59 @@ describe("ReportTab（report-data 结构化优先路径）", () => {
   });
 });
 
+describe("ReportTab 版心不变量（拉宽≠满宽）", () => {
+  /** 报告是长文档型页面：所有分支（结构化/md 降级/组合）的正文都须包在居中版心列内
+   *  ——版心是这页布局的骨架（卡片边框/表格/散文/POC 共享同一宽度），删掉版心会让
+   *  各元素宽度各自为政（散文护栏 768px vs 卡片满宽 → 左重右空）。版心档位 1536px：
+   *  endpoints 表 7 列 mono（Path/Source/Sink 等 file:line）自然需求 ~1300px+，1280
+   *  下挤、1536 舒展（2026-08-26 定档）。 */
+  const expectInColumn = () => {
+    const col = document.querySelector('[data-testid="report-page-column"]');
+    expect(col).not.toBeNull();
+    expect(col!.className).toContain("mx-auto");
+    expect(col!.className).toContain("max-w-[1536px]");
+    return col!;
+  };
+
+  it("结构化路径：正文包在 mx-auto max-w-[1536px] 版心列内", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/report-data", () =>
+        HttpResponse.json(REPORT_DATA)),
+    );
+    renderAt("/p/ws/scans/scan1/report");
+    await waitFor(() => expect(screen.getByTestId("structured-report")).toBeInTheDocument());
+    const col = expectInColumn();
+    expect(col.contains(screen.getByTestId("structured-report"))).toBe(true);
+  });
+
+  it("md 降级路径：正文同样包在版心列内（MarkdownView 内部 max-w-none，靠版心守行宽）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/report", () =>
+        new HttpResponse(MD, { headers: { "content-type": "text/plain" } })),
+    );
+    renderAt("/p/ws/scans/scan1/report");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1, name: /综合安全评估报告/ })).toBeInTheDocument(),
+    );
+    const col = expectInColumn();
+    expect(col.contains(screen.getByRole("heading", { level: 1 }))).toBe(true);
+  });
+
+  it("组合视图：三子 tab 条 + 正文都在版心列内", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ combined: true, scan_type: "whitebox", status: "completed" })),
+      http.get("/api/workspaces/:ws/scans/:scanId/blackbox-runs/:runId/report-data", () =>
+        HttpResponse.json({ ...REPORT_DATA, scan: { ...REPORT_DATA.scan, track: "combined" } })),
+    );
+    renderCombinedAt("/p/ws/scans/scan1/report", { selectedRun: "run-1", runSummary: null });
+    await waitFor(() => expect(screen.getByTestId("structured-report")).toBeInTheDocument());
+    const col = expectInColumn();
+    expect(col.contains(screen.getByRole("tab", { name: /融合报告/ }))).toBe(true);
+    expect(col.contains(screen.getByTestId("structured-report"))).toBe(true);
+  });
+});
+
 describe("ReportTab i18n", () => {
   afterEach(() => i18n.changeLanguage("zh"));
 
