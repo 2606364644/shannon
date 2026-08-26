@@ -116,6 +116,31 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
     expect(normal.className).not.toContain("text-amber");
   });
 
+  it("ID 列不折行：truncate 锁单行（ID 是原子标识符 token，连字符是 CSS 断行点，auto layout 挤压会在 - 处意外断成两行），title 悬停兜底超长 ID", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const btn = screen.getByTestId("quick-ref-jump-XSS-VULN-01");
+    expect(btn.className).toContain("truncate"); // 含 whitespace-nowrap：真实 ID 9–13 字符恒单行
+    expect(btn).toHaveAttribute("title", "XSS-VULN-01"); // agent 自由提交不受控，超长 ID 截断时悬停全文（对齐 params 列语言）
+  });
+
+  it("端点列 break-words 替代 break-all：优先空格// 优雅断行，仅超长无空格 token（如 GitNexus 路径证据 app/routes/x.js:Fn:21:19 ≈421px）才硬断——break-all 会把常规端点断成 POST /contri+butions 碎片", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const row1 = screen.getAllByTestId("quick-ref-row")[0];
+    const tds = row1.querySelectorAll("td");
+    expect(tds[3].className).toContain("break-words");
+    expect(tds[3].className).not.toContain("break-all");
+    // 参数列同语言兜底：超长无空格 token 硬断而非撑表
+    expect(tds[2].className).toContain("break-words");
+  });
+
+  it("验证/置信度列 nowrap：值域是 builder 枚举短语（已动态验证/待复核，4–6 字），折行即挤压信号——中文会逐字断成三行", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const tr = screen.getAllByTestId("quick-ref-row")[1];
+    const tds = tr.querySelectorAll("td");
+    expect(tds[5].className).toContain("whitespace-nowrap"); // 验证
+    expect(tds[6].className).toContain("whitespace-nowrap"); // 置信度
+  });
+
   it("a11y：列头 scope=col（屏幕阅读器列关联）", () => {
     render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
     for (const th of screen.getAllByRole("columnheader")) {

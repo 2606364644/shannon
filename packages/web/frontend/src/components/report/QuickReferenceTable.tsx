@@ -103,7 +103,8 @@ export function QuickReferenceTable({
                         e.stopPropagation();
                         locate(r.id);
                       }}
-                      className="font-mono text-[11.5px] text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                      title={r.id}
+                      className="block max-w-[9rem] truncate font-mono text-[11.5px] text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                     >
                       {r.id}
                     </button>
@@ -114,11 +115,11 @@ export function QuickReferenceTable({
                   <td
                     data-testid={`quick-ref-params-${r.id}`}
                     title={r.params.length > PARAMS_MAX ? paramsAll : undefined}
-                    className={`${cellCls} text-muted-foreground`}
+                    className={`${cellCls} break-words text-muted-foreground`}
                   >
                     {r.params.length > 0 ? paramsShown : "—"}
                   </td>
-                  <td className={`${cellCls} break-all font-mono text-[11px] text-muted-foreground`}>
+                  <td className={`${cellCls} break-words font-mono text-[11px] text-muted-foreground`}>
                     {r.endpoints.length > 0 ? r.endpoints.join(", ") : "—"}
                   </td>
                   <td className={cellCls}>
@@ -134,13 +135,13 @@ export function QuickReferenceTable({
                   </td>
                   <td
                     data-testid={`quick-ref-verification-${r.id}`}
-                    className={`${cellCls} ${isDynamicVerification(r.verification) ? "text-green" : "text-muted-foreground"}`}
+                    className={`${cellCls} whitespace-nowrap ${isDynamicVerification(r.verification) ? "text-green" : "text-muted-foreground"}`}
                   >
                     {r.verification ?? "—"}
                   </td>
                   <td
                     data-testid={`quick-ref-confidence-${r.id}`}
-                    className={`${cellCls} ${isReviewFlagged(r.confidence) ? "text-amber" : "text-foreground/85"}`}
+                    className={`${cellCls} whitespace-nowrap ${isReviewFlagged(r.confidence) ? "text-amber" : "text-foreground/85"}`}
                   >
                     {r.confidence ?? "—"}
                   </td>
