@@ -341,6 +341,7 @@ export default function ScanDetail() {
           bg-background 遮住从块底滚过的内容。live/logs 走 flex 链、无页面滚动，sticky 不触发，
           shrink-0 保持自然高。 */}
       <div
+        data-testid="scan-sticky-header"
         className={`sticky top-12 z-30 space-y-4 bg-background pb-2 print:static${isFlexLayout ? " shrink-0" : ""}`}
       >
         {!loading && meta && (

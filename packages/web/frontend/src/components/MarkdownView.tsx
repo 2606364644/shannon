@@ -25,6 +25,7 @@ import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
 import { splitByVulnBlocks, inferSeverity, type Segment } from "@/lib/vuln-block";
+import { focusAnchor } from "@/utils/focusAnchor";
 import { splitAttackChainSection, splitPocSection, parsePocEntries, stripCardPocLines } from "@/lib/report-sections";
 import {
   computeStats,
@@ -405,6 +406,15 @@ const SEV_DOT: Record<string, string> = {
   Medium: "bg-yellow",
   Low: "bg-muted-foreground",
 };
+/** severity → 卡左缘色规（2026-08-26 标题升主标题配套，与结构化路径
+ *  VulnerabilityCard.SEV_EDGE 同源）：ExecutiveSummary 红左规语言的梯度推广，
+ *  长列表滚动扫视时左缘色带即 triage（色带编码危险度而非装饰）。 */
+const SEV_EDGE: Record<string, string> = {
+  Critical: "border-l-2 border-l-red/70",
+  High: "border-l-2 border-l-orange/70",
+  Medium: "border-l-2 border-l-yellow/70",
+  Low: "border-l-2 border-l-muted-foreground/40",
+};
 
 /** 从漏洞块派生一行可扫的「是什么」小标题：优先 Sink/Location 的 basename:行号，其次 vulnType。
  *  GitNexus 轨漏洞标题只有 ID（无描述），靠这个给出有意义的扫描线索。 */
@@ -519,11 +529,13 @@ export function MarkdownView({ markdown }: { markdown: string }) {
     [pocEntries, matchedPocIds],
   );
 
-  // 锚点跳转：只平滑滚动，不 focus 目标（避免浏览器原生锚点的 outline / 焦点跳动）。
-  // 保留 href 供无障碍 / 键盘 / 右键复制（spec 2026-07-24 §3.2）。
+  // 锚点跳转（2026-08-26 精准化）：委托 focusAnchor——运行时量 ScanDetail 双层 sticky
+  // 遮蔽带（TopBar 48px + 进度概览/tabs sticky 块，合计远超旧 scroll-mt-20 的 80px
+  // 预留），落点让目标卡头完整露出 + coral 描边闪烁确认；不 focus 目标（避免原生
+  // 锚点 outline / 焦点跳动）。保留 href 供无障碍 / 键盘 / 右键复制（spec 2026-07-24 §3.2）。
   const scrollToId = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
     e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    focusAnchor(id);
   };
 
   // 漏洞卡片「全部收起/展开」按钮：图标态（与「收起目录」并排于 TOC 顶部行，风格统一；
@@ -695,7 +707,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
 
       <div className={twoCol ? "grid grid-cols-[200px_1fr] gap-8" : "grid grid-cols-1"}>
         {twoCol && (
-          <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-20 self-start">
+          <nav data-testid="toc" aria-label={t("markdown.tocAria")} className="sticky top-44 self-start">
             {/* 顶部工具行：「目录」label + 两个折叠图标按钮并排。
                 ★ 两按钮都在 <ul> 目录树之上（ul 自身 max-h + overflow-y-auto），
                 展开任意章节、目录条目增多时按钮恒在顶部可见，不被滚走。
@@ -725,7 +737,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 {collapseAllCardsBtn}
               </div>
             </div>
-            <ul className="max-h-[calc(100vh-3rem)] space-y-0.5 overflow-y-auto pr-1">
+            <ul className="max-h-[calc(100vh-12rem)] space-y-0.5 overflow-y-auto pr-1">
               {tocTree.map((node) => {
                 const hasKids = node.children.length > 0;
                 const collapsed = collapsedSections.has(node.item.id);
@@ -849,33 +861,43 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                       id={block.id}
                       data-testid="vuln-card"
                       data-severity={sev}
-                      className="vuln-entry scroll-mt-20 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+                      className={`vuln-entry scroll-mt-20 rounded-md border border-border bg-card p-4 shadow-[var(--shadow-card)] ${SEV_EDGE[sev] ?? ""}`}
                     >
-                      {/* 常驻 header：整行可点折叠（accordion）。ID + severity 药丸（暖色 --c-*）+ 一行「是什么」+ chevron。
-                          min-w-0 让 subtitle truncate 生效；flex-wrap 窄屏优雅换行；折叠态也能扫。 */}
+                      {/* 常驻 header：整块可点折叠（accordion），两级卡头（2026-08-26 标题
+                          升主标题，与结构化路径 VulnerabilityCard 同构）——eyebrow 元信息行
+                          （ID + severity 药丸 + chevron，扫视层）+ 标题行（14.5px semibold
+                          前景全亮，line-clamp-2 替代旧单行 truncate）。flex-col 让两级各占
+                          一行；折叠态也能扫。 */}
                       <button
                         type="button"
                         data-testid="vuln-toggle"
                         onClick={() => toggleCard(block.id)}
                         aria-expanded={!collapsedIds.has(block.id)}
                         aria-controls={`${block.id}-body`}
-                        className="flex w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 text-left"
+                        className="flex w-full min-w-0 flex-col gap-1 text-left"
                       >
-                        <span className="shrink-0 font-mono text-[13px] font-semibold text-foreground">{block.id}</span>
-                        <span
-                          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[sev]}`}
-                          data-testid="vuln-sev"
-                        >
-                          <span className={`size-1.5 rounded-full ${SEV_DOT[sev]}`} aria-hidden="true" data-testid="vuln-dot" />
-                          {t(`vuln.severity.${sev}`, { defaultValue: sev })}
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                          <span className="shrink-0 font-mono text-[13px] font-semibold text-foreground">{block.id}</span>
+                          <span
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[sev]}`}
+                            data-testid="vuln-sev"
+                          >
+                            <span className={`size-1.5 rounded-full ${SEV_DOT[sev]}`} aria-hidden="true" data-testid="vuln-dot" />
+                            {t(`vuln.severity.${sev}`, { defaultValue: sev })}
+                          </span>
+                          <ChevronDown
+                            className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${collapsedIds.has(block.id) ? "-rotate-90" : ""}`}
+                            aria-hidden="true"
+                          />
                         </span>
                         {subtitle && (
-                          <span className="min-w-0 truncate text-[13px] font-medium text-foreground/70">{subtitle}</span>
+                          <span
+                            data-testid="vuln-subtitle"
+                            className="line-clamp-2 break-words text-[14.5px] font-semibold leading-snug tracking-tight text-foreground"
+                          >
+                            {subtitle}
+                          </span>
                         )}
-                        <ChevronDown
-                          className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-150 ${collapsedIds.has(block.id) ? "-rotate-90" : ""}`}
-                          aria-hidden="true"
-                        />
                       </button>
                       {/* body：完整原始内容（命中时并入对应 PoC），默认展开（不丢信息）；
                           本卡折叠时隐藏（扫描视图）。break-words 让长路径自动折行，不溢出卡片。 */}

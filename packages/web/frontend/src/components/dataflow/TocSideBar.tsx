@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ControlFinding, DataflowTree, SafeVector } from "@/api/types";
+import { focusAnchor } from "@/utils/focusAnchor";
 import { controlAnchorId } from "./GuardChain";
 
 export interface TocSideBarProps {
@@ -19,46 +20,22 @@ export interface TocSideBarProps {
 /** 排查过的入口分组锚点 id（对应 SafeEntries 区的 data-safe-section）。 */
 export const SAFE_SECTION_ID = "safe-entries";
 
-/** 描边闪烁自动清理延时（≈ tokens.css .dataflow-flash 动画时长 1.8s + 余量）。 */
-const FLASH_CLEANUP_MS = 2000;
-/** 闪烁清理定时器（单例：新定位自动接管，旧定时器不再对新目标生效）。 */
-let flashTimer: number | undefined;
-
 function cssEscape(s: string): string {
   return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
 }
 
 /** 定位锚点：平滑滚动到目标卡（树卡 / 关卡卡 / 排查过的入口区）+ coral 描边闪烁。
  *  目录点击与 DataFlowTab ?tree= 深链（VulnCard「查看数据流」跳转落点）共用。
- *  找不到目标（深链失效 / 数据未含该树）返回 false，静默不报错。
- *  单一 active-target 语义（Fix round 1 F①）：触发新定位前清掉所有旧目标的描边
- *  （连点多目标不残留累积），闪烁结束后自动摘除（描边是瞬时定位提示，非持久状态）。 */
+ *  定位核心（精准落点量 sticky 遮蔽带 + 闪烁 + 单一 active-target 语义）2026-08-26
+ *  起委托共享 focusAnchor——与报告页目录/摘要锚点同一「落点露出目标 + coral 闪烁」
+ *  语言；这里只保留 dataflow 的属性查找器（data-tree-id / data-control-id）。
+ *  找不到目标（深链失效 / 数据未含该树）返回 false，静默不报错。 */
 export function focusDataflowAnchor(id: string): boolean {
   const selector =
     id === SAFE_SECTION_ID
       ? "[data-safe-section]"
       : `[data-tree-id="${cssEscape(id)}"], [data-control-id="${cssEscape(id)}"]`;
-  const el = document.querySelector(selector);
-  if (!el) return false;
-  // 清旧：摘掉所有仍带描边的目标 + 作废旧清理定时器
-  for (const prev of Array.from(document.querySelectorAll(".dataflow-flash"))) {
-    prev.classList.remove("dataflow-flash");
-  }
-  if (flashTimer !== undefined) {
-    window.clearTimeout(flashTimer);
-    flashTimer = undefined;
-  }
-  el.scrollIntoView({ behavior: "smooth", block: "start" });
-  // 重启动画：先摘 class 再强制 reflow 再加回（连续定位同一目标也能重新闪烁）
-  el.classList.remove("dataflow-flash");
-  void (el as HTMLElement).offsetWidth;
-  el.classList.add("dataflow-flash");
-  // 动画结束自清理（jsdom 无动画事件，用与动画时长对齐的 timer 兜底）
-  flashTimer = window.setTimeout(() => {
-    el.classList.remove("dataflow-flash");
-    flashTimer = undefined;
-  }, FLASH_CLEANUP_MS);
-  return true;
+  return focusAnchor(id, () => document.querySelector(selector));
 }
 
 /** 树是否有漏洞（打通口径，与 PruningTreeFig 靶心一致）：任一枝 verdict=vulnerable 或挂 findings。

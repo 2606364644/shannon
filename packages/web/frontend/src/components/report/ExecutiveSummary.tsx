@@ -1,6 +1,7 @@
-import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ReportExecutiveSummary } from "@/api/types";
+import { focusAnchor } from "@/utils/focusAnchor";
+import { REPORT_EXEC_SUMMARY_ID } from "./ReportToc";
 import { RichText } from "./RichText";
 
 /**
@@ -8,15 +9,14 @@ import { RichText } from "./RichText";
  * 纯渲染——叙事 / 风险等级 / top_risks 锚点（链接到同页 VulnerabilityCard，卡 id=vuln_id）
  * / 修复优先级。对齐 md 路径 exec-summary-hero 的视觉（红左规 + 卡面），但数据来自
  * 结构化字段，不再从编号列表 prose 里猜 ID（extractVulnIds 已删职责）。
+ * top_risks 锚点经 focusAnchor 精准定位（2026-08-26：量 sticky 遮蔽带落点 + coral
+ * 描边闪烁，目录跳转同一语言）；section 挂 REPORT_EXEC_SUMMARY_ID 供报告目录定位。
  */
 export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary }) {
   const { t } = useTranslation();
-  const scrollTo = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
-    e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
   return (
     <section
+      id={REPORT_EXEC_SUMMARY_ID}
       data-testid="exec-summary"
       className="space-y-3 rounded-md border border-border border-l-2 border-l-red/60 bg-card p-4 shadow-[var(--shadow-card)]"
     >
@@ -42,7 +42,10 @@ export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary 
               <li key={i} className="min-w-0 break-words">
                 <a
                   href={`#${r.vuln_id}`}
-                  onClick={(e) => scrollTo(e, r.vuln_id)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    focusAnchor(r.vuln_id);
+                  }}
                   className="kv-vuln-id font-mono text-[13px] text-primary"
                   data-testid="top-risk-link"
                 >

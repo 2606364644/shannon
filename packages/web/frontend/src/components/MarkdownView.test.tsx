@@ -681,13 +681,13 @@ describe("MarkdownView sticky top 对齐全局栈（集成约束）", () => {
     );
   });
 
-  it("TOC sticky top-20（旧 top-4 已改），不再贴视口顶被 chrome 盖", () => {
+  it("TOC sticky top-44（2026-08-26 遮蔽带修复：TopBar+进度 tabs sticky 块 ≈150px > 旧 top-20），目录不被 sticky 头盖住", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
     const toc = container.querySelector('[data-testid="toc"]');
     expect(toc).not.toBeNull();
     expect(toc?.className).toContain("sticky");
-    expect(toc?.className).toContain("top-20");
-    expect(toc?.className).not.toContain("top-4"); // 旧值已改
+    expect(toc?.className).toContain("top-44");
+    expect(toc?.className).not.toContain("top-20"); // 旧值已改
   });
 });
 
@@ -765,15 +765,16 @@ describe("MarkdownView PoC 并入漏洞卡片（spec 2026-07-24）", () => {
     expect(container.querySelector('[data-testid="poc-orphan"]')).toBeNull();
   });
 
-  it("TOC 锚点点击走 JS scrollIntoView（不依赖原生锚点 focus）", () => {
-    const scrollIntoView = vi.fn();
-    proto.scrollIntoView = scrollIntoView;
+  it("TOC 锚点点击走 JS scrollTo（focusAnchor 量遮蔽带，不依赖原生锚点 focus）", () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
     const { container } = render(<MarkdownView markdown={MD} />);
     const toc = container.querySelector('[data-testid="toc"]');
     const link = toc!.querySelector("a[href^='#']") as HTMLAnchorElement;
     expect(link).toBeTruthy();
     fireEvent.click(link);
-    // onClick preventDefault + 手动 scrollIntoView：证明走 JS 路径而非浏览器原生锚点 focus
-    expect(scrollIntoView).toHaveBeenCalled();
+    // onClick preventDefault + focusAnchor 的 window.scrollTo：证明走 JS 精准定位路径
+    // 而非浏览器原生锚点 focus（2026-08-26 起定位核心委托 utils/focusAnchor）
+    expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "smooth" });
   });
 });

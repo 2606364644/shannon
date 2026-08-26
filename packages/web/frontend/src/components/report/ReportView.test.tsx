@@ -122,6 +122,19 @@ describe("ReportView（JSON 纯渲染集成）", () => {
     expect(screen.getByTestId("report-qa-banner")).toBeInTheDocument();
     expect(screen.getByText(/QA 校验未通过/)).toBeInTheDocument();
   });
+
+  it("目录（ReportToc）：条目镜像区块，点击精准定位（scrollTo smooth）+ 目标卡描边闪烁", () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={data} />);
+    const toc = screen.getByTestId("report-toc");
+    expect(within(toc).getByText("漏洞 (2)")).toBeInTheDocument();
+    expect(toc.querySelector('[data-toc-id="XSS-VULN-01"]')).toBeTruthy();
+    expect(toc.querySelector('[data-toc-id="INJ-VULN-02"]')).toBeTruthy();
+    fireEvent.click(toc.querySelector('[data-toc-id="XSS-VULN-01"]')!);
+    expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "smooth" });
+    expect(document.getElementById("XSS-VULN-01")!.classList.contains("dataflow-flash")).toBe(true);
+  });
 });
 
 describe("ExecutiveSummary", () => {
@@ -166,8 +179,13 @@ describe("VulnerabilityCard", () => {
   it("头部：ID + 标题 + 严重度徽章 + 双轨徽章 + merged_from 徽章", () => {
     render(<VulnerabilityCard v={vuln} />);
     expect(screen.getByText("XSS-VULN-01")).toBeInTheDocument();
-    expect(screen.getByText(/备忘录存储型 XSS/)).toBeInTheDocument();
+    // 标题升主标题（2026-08-26）：独立标题行（vuln-title），不再 truncate / 70% 透明
+    const title = screen.getByTestId("vuln-title");
+    expect(title.textContent).toBe("备忘录存储型 XSS");
+    expect(title.className).not.toContain("truncate");
     const card = screen.getByTestId("report-vuln-card");
+    // severity 左缘色规（high → orange 梯度，ExecutiveSummary 红左规语言推广）
+    expect(card.className).toContain("border-l-orange");
     expect(card.getAttribute("data-severity")).toBe("high");
     expect(screen.getByText(/双轨确认/)).toBeInTheDocument();
     expect(screen.getByText(/XSS-GN-13/)).toBeInTheDocument();

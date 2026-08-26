@@ -80,7 +80,9 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
     i18n.changeLanguage("zh");
     MockIO.instances = [];
     vi.stubGlobal("IntersectionObserver", MockIO);
-    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    // 2026-08-26 focusAnchor 委托后定位走 window.scrollTo（量 sticky 遮蔽带算落点），
+    // 不再用 scrollIntoView。
+    window.scrollTo = vi.fn();
   });
   afterEach(() => {
     i18n.changeLanguage("zh");
@@ -149,9 +151,9 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
     expect(inactive?.getAttribute("aria-current")).toBeNull();
   });
 
-  it("点击条目 → 平滑滚动到目标卡 + coral 描边闪烁（dataflow-flash）", () => {
-    const scrollIntoView = vi.fn();
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+  it("点击条目 → 精准滚动到目标卡（window.scrollTo，量遮蔽带算落点）+ coral 描边闪烁", () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo;
     const { container } = render(
       <div>
         <div data-tree-id="T-VULN-01">tree1</div>
@@ -160,16 +162,16 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
     );
     const entry = container.querySelector('[data-toc-id="T-VULN-01"]') as HTMLElement;
     fireEvent.click(entry);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    expect(scrollIntoView.mock.calls[0][0]).toEqual({ behavior: "smooth", block: "start" });
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo.mock.calls[0][0]).toEqual({ top: expect.any(Number), behavior: "smooth" });
     // 目标卡加上描边闪烁 class
     const target = container.querySelector('[data-tree-id="T-VULN-01"]')!;
     expect(target.classList.contains("dataflow-flash")).toBe(true);
   });
 
   it("点击排查过的入口分组头 → 滚动到 safe 区锚点", () => {
-    const scrollIntoView = vi.fn();
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo;
     const { container } = render(
       <div>
         <div data-safe-section="">safe</div>
@@ -179,7 +181,7 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
     const groupHead = container.querySelector('[data-toc-id="safe-entries"]') as HTMLElement;
     expect(groupHead).toBeTruthy();
     fireEvent.click(groupHead);
-    expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalled();
     expect(container.querySelector('[data-safe-section]')!.classList.contains("dataflow-flash")).toBe(true);
   });
 
@@ -234,7 +236,7 @@ describe("TocSideBar — 目录侧栏（spec §5）", () => {
 
 describe("focusDataflowAnchor — ?tree= 定位（DataFlowTab / VulnCard 跳转共用）", () => {
   beforeEach(() => {
-    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.scrollTo = vi.fn();
   });
   it("按 tree_id 定位：滚动 + 闪烁，找不到返回 false", () => {
     const el = document.createElement("section");
