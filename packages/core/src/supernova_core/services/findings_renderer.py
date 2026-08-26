@@ -41,22 +41,14 @@ _FILE_LINE_RE = re.compile(r"[\w./-]+\.[A-Za-z]{1,5}:\d+")
 # 漏洞卡 / 报告文案双语（zh/en 可配，跟随 SUPERNOVA_AGENT_NARRATION_LANG）。
 _M = Messages({
     # 通用 entry 标签（技术细节折叠区沿用 _label 行式）
-    "vulnerable_location": {"zh": "脆弱位置", "en": "Vulnerable Location"},
-    "source_detail": {"zh": "来源详情", "en": "Source Detail"},
     "verdict": {"zh": "判定", "en": "Verdict"},
     "witness_payload": {"zh": "PoC", "en": "PoC"},
-    "sink_call": {"zh": "Sink 调用", "en": "Sink Call"},
     "concat_occurrences": {"zh": "拼接出现", "en": "Concat Occurrences"},
     "sanitization_observed": {"zh": "防护情况", "en": "Protection Observed"},
-    "sink_function": {"zh": "Sink 函数", "en": "Sink Function"},
-    "render_context": {"zh": "渲染上下文", "en": "Render Context"},
     "encoding_observed": {"zh": "编码情况", "en": "Encoding Observed"},
-    "source_endpoint": {"zh": "来源端点", "en": "Source Endpoint"},
-    "vulnerable_code_location": {"zh": "脆弱代码位置", "en": "Vulnerable Code Location"},
     "missing_defense": {"zh": "缺失防护", "en": "Missing Defense"},
     "exploitation_hypothesis": {"zh": "利用假设", "en": "Exploitation Hypothesis"},
     "suggested_exploit_technique": {"zh": "建议利用技术", "en": "Suggested Exploit Technique"},
-    "endpoint": {"zh": "端点", "en": "Endpoint"},
     "role_context": {"zh": "角色上下文", "en": "Role Context"},
     "guard_evidence": {"zh": "防护证据", "en": "Guard Evidence"},
     "side_effect": {"zh": "副作用", "en": "Side Effect"},
@@ -67,6 +59,10 @@ _M = Messages({
     "owasp_category": {"zh": "OWASP 分类", "en": "OWASP Category"},
     "dataflow": {"zh": "数据流", "en": "Dataflow"},
     "evidence_chain": {"zh": "证据链", "en": "Evidence Chain"},
+    # 问题点三要素（spec 2026-08-26 §4.2）
+    "issue_location": {"zh": "位置", "en": "Location"},
+    "issue_desc_label": {"zh": "说明", "en": "Issue"},
+    "issue_render_ctx": {"zh": "（{ctx} 上下文）", "en": " ({ctx} context)"},
     # CLASS_CONFIG heading（value = message key）
     "heading_injection": {"zh": "注入漏洞", "en": "Injection Vulnerabilities"},
     "heading_xss": {"zh": "跨站脚本 (XSS)", "en": "Cross-Site Scripting (XSS)"},
@@ -102,6 +98,8 @@ _M = Messages({
         "en": "Static-chain finding; confirm manually.",
     },
     "meta_affected_entries": {"zh": "**受影响入口**", "en": "**Affected Entries**"},
+    "entry_endpoints_label": {"zh": "接口", "en": "Endpoints"},
+    "entry_sep": {"zh": "、", "en": ", "},
     "tbl_param": {"zh": "参数", "en": "Parameter"},
     "tbl_sink_loc": {"zh": "Sink 位置", "en": "Sink Location"},
     "tbl_chain_id": {"zh": "链 ID", "en": "Chain ID"},
@@ -111,7 +109,6 @@ _M = Messages({
     "sec_code": {"zh": "**问题点**", "en": "**Vulnerable Code**"},
     "sec_remediation": {"zh": "**修复建议**", "en": "**Remediation**"},
     "sec_tech_detail": {"zh": "#### 漏洞细节", "en": "#### Vulnerability Details"},
-    "desc_endpoint": {"zh": "受影响接口：", "en": "Affected endpoint: "},
     "det_into": {"zh": "传入", "en": "flows into"},
     "det_unfiltered_into": {
         "zh": "{param} 未经过滤传入 {sink}",
@@ -253,7 +250,9 @@ def _card_sink(vuln) -> tuple[str | None, str | None]:
 
 
 def _card_loc(vuln, sink_loc: str | None) -> str | None:
-    """file:line 位置：GN sink_call 解析 → affected_entries[0] → 代码位置字段 → 正则。"""
+    """file:line 位置：GN sink_call 解析 → affected_entries[0] → 代码位置字段 → 正则
+    （含 sink_function 文本——XSS 是 sink_function 族，LLM 自然语言 sink 常内嵌
+    "at file:line"，NodeGoat XSS-VULN-02~08 问题点节消失正因缺此回退）。"""
     if sink_loc:
         return sink_loc
     entries = getattr(vuln, "affected_entries", None) or []
@@ -264,7 +263,7 @@ def _card_loc(vuln, sink_loc: str | None) -> str | None:
     vcl = getattr(vuln, "vulnerable_code_location", None)
     if isinstance(vcl, str) and vcl:
         return vcl
-    for attr in ("path", "sink_call"):
+    for attr in ("path", "sink_call", "sink_function"):
         val = getattr(vuln, attr, None)
         if isinstance(val, str):
             m = _FILE_LINE_RE.search(val)
@@ -307,18 +306,30 @@ def _description_lines(vuln, gn_only: bool, cls_name: str, colon: str,
     return [_gn_description(cls_name, colon, param, sink, loc_part)]
 
 
+def _card_endpoints(vuln) -> list[str]:
+    """接口列表（spec 2026-08-26 §4.3）：endpoints 新字段优先（多接口，写入+触发
+    分开）；缺省兜底 path 提取 → endpoint → source_endpoint（单接口）。"""
+    eps = [str(e).strip() for e in (getattr(vuln, "endpoints", None) or [])
+           if str(e).strip()]
+    if eps:
+        return eps
+    ep = (extract_endpoint(getattr(vuln, "path", None))
+          or getattr(vuln, "endpoint", None)
+          or getattr(vuln, "source_endpoint", None))
+    return [str(ep)] if ep else []
+
+
 def _entry_section_lines(vuln, loc: str | None) -> list[str]:
-    """受影响入口节（承担「涉及参数 × 涉及接口」呈现）：接口行（endpoint 不在
-    标题时补一行）+ 参数×sink 表。affected_entries 优先；LLM-only 无 entries 时由
+    """受影响入口节（承担「涉及接口 × 涉及参数」呈现，spec 2026-08-26 §4.3）：
+    接口列表行（**不被标题掩盖**——title 是叙事，接口行是结构化数据）+ 参数×
+    sink 位置×链 ID 表。affected_entries 优先；LLM-only 无 entries 时由
     affected_parameters / vulnerable_parameter × loc 合成（链 ID 留空）。参数、接口
     全无 → 返回空（整节省略）。"""
     lines: list[str] = []
-    title = getattr(vuln, "title", None) or ""
-    endpoint = (getattr(vuln, "endpoint", None)
-                or extract_endpoint(getattr(vuln, "path", None))
-                or getattr(vuln, "source_endpoint", None))
-    if endpoint and endpoint not in title:
-        lines.append(f"{_M.get('desc_endpoint')}{endpoint}")
+    endpoints = _card_endpoints(vuln)
+    if endpoints:
+        lines.append(f"- **{_M.get('entry_endpoints_label')}:** "
+                     f"{_M.get('entry_sep').join(endpoints)}")
     entries = getattr(vuln, "affected_entries", None) or []
     rows: list[tuple[str, str, str]] = []
     if entries:
@@ -351,6 +362,34 @@ def _entry_section_lines(vuln, loc: str | None) -> list[str]:
     return lines
 
 
+def _issue_section_lines(vuln, vuln_class: str, param, sink_name,
+                         loc: str | None, snippet: str | None) -> list[str]:
+    """问题点三要素（spec 2026-08-26 §4.2）：位置（file:line，回退链见 _card_loc）、
+    说明（{param} 未经校验进入 {sink}；XSS 附渲染上下文）、snippet fence（提取失败
+    缺省 fence，位置+说明照常——不再整节省略）。位置与说明全无 → 返回空。"""
+    desc = None
+    if sink_name:
+        p_disp = param or _M.get("code_input_generic")
+        desc = _M.get("code_issue_line", param=p_disp, sink=sink_name)
+        rc = getattr(vuln, "render_context", None)
+        if rc and vuln_class == "xss":
+            desc = (desc.rstrip("。.")
+                    + _M.get("issue_render_ctx", ctx=rc)
+                    + ("。" if current_lang() == "zh" else "."))
+    if not loc and not desc:
+        return []
+    out = [_M.get("sec_code")]
+    if loc:
+        out.append(f"- **{_M.get('issue_location')}:** {loc}")
+    if desc:
+        out.append(f"- **{_M.get('issue_desc_label')}:** {desc}")
+    if snippet:
+        out.append(f"```{_snippet_lang_tag(loc or '')}")
+        out.append(snippet)
+        out.append("```")
+    return out
+
+
 def _dataflow_item_lines(vuln) -> list[str]:
     """数据流分点（用户口径 2026-08-25：不要混成一团）：dataflow_steps 优先
     （结构化，每步 label + file:line）；无 steps 按 evidence_chain 的 →/-> 拆。
@@ -377,16 +416,19 @@ def _dataflow_item_lines(vuln) -> list[str]:
 
 
 def _tech_detail_lines(vuln) -> list[str]:
-    """漏洞细节折叠区（用户口径 2026-08-25）：PoC → 数据流（分点）→ 防护情况
-    置顶，判定/CVSS/OWASP 随后，其余判定字段全量收纳，沿用 _label 行式。
-    evidence_chain 不再单行 dump——数据流分点已覆盖（steps 优先，链拆分兜底）。"""
+    """漏洞细节折叠区（用户口径 2026-08-25 + 2026-08-26 §4.1 收敛）：PoC →
+    数据流（分点）→ 防护情况置顶，判定/CVSS/OWASP 随后，其余判定字段全量收纳，
+    沿用 _label 行式。信息归并（§4.1）：脆弱位置/来源详情并入数据流分点，
+    Sink 函数/渲染上下文/脆弱代码位置并入问题点三要素，端点/来源端点并入
+    受影响入口接口列表行——均不再在本区独立成行。"""
     lines: list[str] = []
 
     def add(key: str, value) -> None:
         if value:
             lines.append(f"{_label(key)} {value}")
 
-    # 1. PoC（用户口径小节名；原「验证 payload」）
+    # 1. PoC（用户口径小节名；原「验证 payload」；.md 保留，web 前端有并入
+    #    详细 PoC 时过滤——spec 2026-08-26 §8）
     add("witness_payload", getattr(vuln, "witness_payload", None))
     # 2. 数据流（分点编号，不混排）
     lines.extend(_dataflow_item_lines(vuln))
@@ -402,23 +444,9 @@ def _tech_detail_lines(vuln) -> list[str]:
     add("verdict", getattr(vuln, "verdict", None))
     add("cvss", getattr(vuln, "cvss", None))
     add("owasp_category", getattr(vuln, "owasp_category", None))
-    # 5. 其余判定字段照旧全量
-    if getattr(vuln, "source", None) or getattr(vuln, "path", None):
-        add("vulnerable_location",
-            f"{getattr(vuln, 'source', None) or 'N/A'} → "
-            f"{getattr(vuln, 'path', None) or 'N/A'}")
-    add("source_detail", getattr(vuln, "source_detail", None))
-    # sink：优先 LLM 实际输出的 sink_function，回退旧 sink_call（语义相同）
-    if getattr(vuln, "sink_function", None):
-        add("sink_function", vuln.sink_function)
-    else:
-        add("sink_call", getattr(vuln, "sink_call", None))
-    add("render_context", getattr(vuln, "render_context", None))
+    # 5. 其余判定字段照旧全量（归并行不再渲染，见 docstring）
     add("concat_occurrences", getattr(vuln, "concat_occurrences", None))
-    add("source_endpoint", getattr(vuln, "source_endpoint", None))
-    add("endpoint", getattr(vuln, "endpoint", None))
     add("vulnerable_parameter", getattr(vuln, "vulnerable_parameter", None))
-    add("vulnerable_code_location", getattr(vuln, "vulnerable_code_location", None))
     add("exploitation_hypothesis", getattr(vuln, "exploitation_hypothesis", None))
     add("suggested_exploit_technique", getattr(vuln, "suggested_exploit_technique", None))
     add("role_context", getattr(vuln, "role_context", None))
@@ -473,7 +501,10 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
         conf_line += _M.get("meta_dual_track")
     meta_parts.append(conf_line)
     if gn_only:
-        meta_parts.append(_M.get("gn_pending_review"))
+        pending = _M.get("gn_pending_review")
+        # §4.4：confidence 已显示「待复核」（needs_review 内部标签替换）时不再追加
+        if pending not in conf_line:
+            meta_parts.append(pending)
     lines.append(_M.get("meta_sep").join(meta_parts))
     lines.append("")
 
@@ -493,15 +524,11 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     lines.append(impact)
     lines.append("")
 
-    # 问题点（SINK 代码片段）：snippet 非空时 fence（按扩展名语言标注）+ 一句指出问题
-    if snippet:
-        lines.append(_M.get("sec_code"))
-        lines.append(f"```{_snippet_lang_tag(loc or '')}")
-        lines.append(snippet)
-        lines.append("```")
-        if sink_name:
-            p_disp = param or _M.get("code_input_generic")
-            lines.append(_M.get("code_issue_line", param=p_disp, sink=sink_name))
+    # 问题点三要素（§4.2）：位置 + 说明（XSS 附渲染上下文）+ snippet fence；
+    # snippet 提取失败仅缺 fence，位置+说明照常（不再整节省略）
+    issue_lines = _issue_section_lines(vuln, vuln_class, param, sink_name, loc, snippet)
+    if issue_lines:
+        lines.extend(issue_lines)
         lines.append("")
 
     # 受影响入口（涉及参数×涉及接口）：接口行 + 表（entries 或合成）
@@ -593,23 +620,6 @@ def _passes_filter(vuln: Vulnerability, config: ReportConfig) -> bool:
 
 def filter_vulnerabilities(queue: VulnerabilityQueue, config: ReportConfig) -> list[Vulnerability]:
     return [v for v in queue.vulnerabilities if _passes_filter(v, config)]
-
-
-def _first_sink_location(vuln) -> str | None:
-    """渲染循环取 snippet 用的首个 sink 位置：affected_entries[0] 优先，
-    LLM-only 回退 path/sink_call/代码位置字段正则提首个 `file.ext:line`。"""
-    entries = getattr(vuln, "affected_entries", None) or []
-    if entries and isinstance(entries[0], dict):
-        sl = entries[0].get("sink_location")
-        if isinstance(sl, str) and sl:
-            return sl
-    for attr in ("path", "sink_call", "vulnerable_code_location"):
-        val = getattr(vuln, attr, None)
-        if isinstance(val, str):
-            m = _FILE_LINE_RE.search(val)
-            if m:
-                return m.group(0)
-    return None
 
 
 class FindingsRenderer:
@@ -713,7 +723,8 @@ class FindingsRenderer:
                     try:
                         snippet: str | None = None
                         if repo_root is not None:
-                            loc = _first_sink_location(vuln)
+                            # 位置 SSOT = _card_loc（§4.4 与问题点节同一回退链）
+                            loc = _card_loc(vuln, _card_sink(vuln)[1])
                             if loc:
                                 snippet = await extract_snippet(repo_root, loc)
                             annotate_direct(

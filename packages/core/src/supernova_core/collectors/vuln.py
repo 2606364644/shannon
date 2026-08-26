@@ -426,6 +426,22 @@ _INJECTION_FINDING_PROPS: dict = {
     "mismatch_reason": _str_field("Why the defense fails / mismatches (1–2 lines)."),
     "witness_payload": _str_field(
         "Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    # spec 2026-08-26 §5：受影响入口节结构化数据源（接口列表 + 外部参数）。
+    "endpoints": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "该漏洞涉及的全部接口（METHOD /path）；写入与触发分开列（如存储型 XSS "
+            "的写入口与渲染触发口），可带角色注记，如 'POST /memos (write)'、"
+            "'GET /memos (trigger)'。"),
+    },
+    "affected_parameters": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
+            "'memo (body)'、'q (query)'。"),
+    },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
@@ -446,6 +462,22 @@ _XSS_FINDING_PROPS: dict = {
     "verdict": _str_field('"vulnerable" | "safe" — only vulnerable findings are submitted.'),
     "mismatch_reason": _str_field("Why the defense fails / mismatches."),
     "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    # spec 2026-08-26 §5：受影响入口节结构化数据源（接口列表 + 外部参数）。
+    "endpoints": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "该漏洞涉及的全部接口（METHOD /path）；写入与触发分开列（如存储型 XSS "
+            "的写入口与渲染触发口），可带角色注记，如 'POST /memos (write)'、"
+            "'GET /memos (trigger)'。"),
+    },
+    "affected_parameters": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
+            "'memo (body)'、'q (query)'。"),
+    },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
@@ -461,6 +493,22 @@ _SSRF_FINDING_PROPS: dict = {
     **_AUTH_FINDING_PROPS,
     "vulnerable_parameter": _str_field("The outbound-request parameter carrying attacker-controlled input."),
     "witness_payload": _str_field("Minimal concrete payload value proving the flaw (payload 值本身，无前缀无说明)."),
+    # spec 2026-08-26 §5：受影响入口节结构化数据源（接口列表 + 外部参数）。
+    "endpoints": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "该漏洞涉及的全部接口（METHOD /path）；写入与触发分开列（如存储型 XSS "
+            "的写入口与渲染触发口），可带角色注记，如 'POST /memos (write)'、"
+            "'GET /memos (trigger)'。"),
+    },
+    "affected_parameters": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
+            "'memo (body)'、'q (query)'。"),
+    },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 

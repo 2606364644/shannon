@@ -303,3 +303,47 @@ describe("parsePocEntries", () => {
     expect(entries[0].md.trim()).not.toMatch(/---$/);
   });
 });
+
+// spec 2026-08-26 §8：PoC 单一呈现——web 报告页有并入详细 PoC 的卡，
+// 卡内 PoC/最小见证行过滤（.md 原文不受影响，各文档自洽）。
+import { stripCardPocLines } from "./report-sections";
+
+describe("stripCardPocLines", () => {
+  const body = [
+    "**危害**",
+    "x",
+    "",
+    "#### 漏洞细节",
+    "- **PoC:** BODY-PAYLOAD",
+    "- **最小见证:** BODY-WITNESS",
+    "- **判定:** vulnerable",
+  ].join("\n");
+
+  it("过滤 PoC/最小见证行（zh/en 双标签），其余行原样", () => {
+    const out = stripCardPocLines(body);
+    expect(out).not.toContain("BODY-PAYLOAD");
+    expect(out).not.toContain("BODY-WITNESS");
+    expect(out).toContain("- **判定:** vulnerable");
+    expect(out).toContain("**危害**");
+  });
+
+  it("英文标签 Minimal Witness 同滤；fence 内的同形文本不动（仅行首 kv 形态）", () => {
+    const md = [
+      "- **PoC:** p",
+      "- **Minimal Witness:** w",
+      "```bash",
+      "- **PoC:** inside-fence-untouched",
+      "```",
+    ].join("\n");
+    const out = stripCardPocLines(md);
+    // fence 外两个 kv 行被滤、fence 内同形文本保留
+    const outsideFence = out.split("```bash")[0];
+    expect(outsideFence).not.toContain("**PoC:**");
+    expect(outsideFence).not.toContain("**Minimal Witness:**");
+    expect(out).toContain("inside-fence-untouched");
+  });
+
+  it("无匹配行 → 原样返回", () => {
+    expect(stripCardPocLines("plain\nmd")).toBe("plain\nmd");
+  });
+});

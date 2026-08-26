@@ -140,3 +140,29 @@ def test_schema_fields_land_in_pydantic_models():
             f"{vuln_class} submit_finding schema 字段未进落盘模型 "
             f"{model.__name__}（pydantic 会静默丢弃）: {sorted(dropped)}"
         )
+
+
+# spec 2026-08-26 §5：taint 三类（inj/xss/ssrf）补接口/参数列表字段——受影响入口
+# 节的结构化数据源（接口列表行 + 外部参数）。双侧锁定同 _REPORT_CARD_FIELDS 口径。
+_TAINT_ENDPOINT_FIELDS = ["endpoints", "affected_parameters"]
+_TAINT_CLASSES = ["injection", "xss", "ssrf"]
+
+
+@pytest.mark.parametrize("vuln_class", _TAINT_CLASSES)
+def test_taint_endpoint_fields_in_prompt_and_schema(vuln_class):
+    """endpoints/affected_parameters 必须同时出现在 taint 类 prompt 字段表与
+    submit_finding schema——只进 schema 不进 prompt ⇒ 模型不知道要交（字段
+    永远空，LLM taint 卡受影响入口节全缺的老问题）；只进 prompt 不进 schema
+    ⇒ 方向一测试红（collector 静默丢弃）。"""
+    for f in _TAINT_ENDPOINT_FIELDS:
+        assert f in _prompt_finding_fields(vuln_class), (
+            f"vuln-{vuln_class}.txt 字段表缺 {f}（模型不会被教到）")
+        assert f in _schema_finding_fields(vuln_class), (
+            f"submit_finding schema 缺 {f}（collector 会静默丢弃）")
+
+
+def test_taint_endpoint_fields_land_in_base_model():
+    """endpoints/affected_parameters 声明在 BaseVulnerability（渲染层 getattr
+    读取），全 class 落盘统一。"""
+    for f in _TAINT_ENDPOINT_FIELDS:
+        assert f in BaseVulnerability.model_fields

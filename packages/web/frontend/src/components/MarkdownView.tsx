@@ -25,7 +25,7 @@ import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
 import { TypeSummaryCards } from "./report/TypeSummaryCards";
 import { splitByVulnBlocks, inferSeverity, type Segment } from "@/lib/vuln-block";
-import { splitAttackChainSection, splitPocSection, parsePocEntries } from "@/lib/report-sections";
+import { splitAttackChainSection, splitPocSection, parsePocEntries, stripCardPocLines } from "@/lib/report-sections";
 import {
   computeStats,
   type ParsedTypeSummary,
@@ -819,8 +819,17 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                 {g.blocks.map((block) => {
                   const sev = inferSeverity(block, topRiskIds);
                   // body = 原始 markdown 去掉首行标题（ID 在 header 里显示），完整保留所有字段/代码/散文——不裁剪丢信息。
-                  const bodyMd = block.raw.split(/\r?\n/).slice(1).join("\n").trim();
+                  // PoC 单一呈现（spec 2026-08-26 §8）：有并入的详细 PoC（curl/Burp，
+                  // payload 超集）时过滤卡内 PoC/最小见证行；无并入的卡保留 payload 行。
                   const pocMd = pocById.get(block.id);
+                  const bodyMd = (pocMd
+                    ? stripCardPocLines(block.raw)
+                    : block.raw
+                  )
+                    .split(/\r?\n/)
+                    .slice(1)
+                    .join("\n")
+                    .trim();
                   const subtitle = block.title || vulnPreview(block);
                   return (
                     <section

@@ -925,7 +925,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
         from supernova_core.code_index.gitnexus_track_status import read_track_status
         from supernova_core.models.queue_schemas import VulnerabilityQueue
 
-        _, deliverables, _ = _get_paths(input)
+        repo, deliverables, _ = _get_paths(input)
         # GitNexus 轨 per-class 状态(Task 4 写,文件缺/损坏返 {} 容错)。
         # 仅供 merger 标记 gitnexus_status + 报告标红;合并逻辑不读它(failed 类
         # 自然 gitnexus_findings=[] -> llm-only 或 continue 跳过)。
@@ -978,6 +978,28 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                     gitnexus_findings,
                     mode="verdict",
                 )
+                # 双轨呈现一致性（spec 2026-08-26 §6）：确定性 key 配不上的同洞卡
+                # 由轻量 LLM 配对归并（仅 high 应用），剩余 GN-only 卡补全叙事/评级
+                # 字段——两轨卡片字段同构。LLM 不可用优雅退化（enhance 内部捕获，
+                # 维持确定性 merge 结果），报告管线不因增强层阻塞。
+                both_before = sum(
+                    1 for f in merged if f.merge_source == "both")
+                try:
+                    from supernova_core.services.track_parity import (
+                        enhance_track_parity,
+                    )
+                    _parity_client = _make_verdict_llm_client(
+                        str(repo) if repo else "",
+                        provider_config=getattr(input, "provider_config", None),
+                    )
+                    merged = await enhance_track_parity(
+                        merged, vuln_class, _parity_client)
+                except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
+                    logger.warning(
+                        "track-parity skipped for %s (client setup failed): %s",
+                        vuln_class, exc)
+                parity_paired = sum(
+                    1 for f in merged if f.merge_source == "both") - both_before
                 # 合并版写回 intermediate/（SSOT；下游 resolve_intermediate 优先读到合并版）
                 atomic_write_json(
                     intermediate_path(deliverables, f"{vuln_class}_exploitation_queue.json"),

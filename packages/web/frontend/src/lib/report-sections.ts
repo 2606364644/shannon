@@ -162,6 +162,26 @@ function findDetailPoCOffset(pocMd: string): number {
   return m ? m.index : -1;
 }
 
+/** 卡内 PoC/最小见证 kv 行形态（zh/en 双标签；行首 `- **key:**` 才命中，fence 内不动）。 */
+const CARD_POC_LINE_RE = /^\s*-\s+\*\*(?:PoC|最小见证|Minimal Witness)[:：]\*\*/;
+
+/**
+ * PoC 单一呈现（spec 2026-08-26 §8）：该卡有并入的详细 PoC（curl/Burp，payload
+ * 超集）时，卡 body 内的 `- **PoC:**` / `- **最小见证:**` 行过滤，一张卡只留一处
+ * PoC。无并入的卡（内部漏洞 / poc 未覆盖）调用方不调本函数，payload 行保留。
+ * 仅行首 kv 形态命中——fence 代码块里的同形文本原样保留。
+ */
+export function stripCardPocLines(md: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  for (const l of md.split(/\r?\n/)) {
+    if (/^\s*```/.test(l)) inFence = !inFence;
+    if (!inFence && CARD_POC_LINE_RE.test(l)) continue;
+    out.push(l);
+  }
+  return out.join("\n");
+}
+
 /**
  * 解析 PoC md 的「## 详细 PoC」章节，按 `### ` 切条目，每条提 vuln ID。
  * - 无「## 详细 PoC」标题（格式异常 / 仅概览表）→ 返回 []（保守，不误并概览表内容进卡片）。

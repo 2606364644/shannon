@@ -137,8 +137,8 @@ Structure: Each `submit_finding` argument MUST follow this exact format:
 		"cvss": "可选：CVSS 向量串与估分，如 'AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H 9.8'。按向量估分；不确定时省略，不要编造。",
 		"owasp_category": "可选：OWASP Top 10 分类，如 'A03:2021-Injection'；不确定时省略。",
 		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors.",
-		"dataflow_steps": [
-			{"label": "UserController.list", "file": "app/controllers/userController.js", "line": 25, "protection": null},
+		"endpoints": ["POST /memos (write)", "GET /memos (trigger)"],
+		"affected_parameters": ["memo (body)", "q (query)"],
 			{"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
 		]
 	}

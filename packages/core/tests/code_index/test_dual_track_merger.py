@@ -1,5 +1,12 @@
-from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
-from supernova_core.models.queue_schemas import AuthzVulnerability, InjectionVulnerability
+from supernova_core.code_index.dual_track_merger import (
+    merge_dual_track_queues,
+)
+from supernova_core.models.queue_schemas import (
+    AuthVulnerability,
+    AuthzVulnerability,
+    InjectionVulnerability,
+    XssVulnerability,
+)
 
 
 def _inj(ID, verdict, source="q", sink_call="db.exec", **kw):
@@ -364,3 +371,101 @@ def test_sink_name_case_variants_still_merge():
         out = merge_dual_track_queues(llm, gn, mode="verdict")
         assert len(out) == 1, (llm_sink, gn_sink_call)
         assert out[0].merge_source == "both", (llm_sink, gn_sink_call)
+
+
+# --- LLM 辅助跨轨配对归并（spec 2026-08-26 §6.1）---
+
+import json as _json
+
+from supernova_core.code_index.dual_track_merger import (
+    apply_pairing_merge,
+    build_pairing_prompt,
+    parse_pairing_response,
+)
+
+
+def _llm_card(ID="XSS-VULN-01", **kw):
+    return InjectionVulnerability(
+        ID=ID, vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="medium",
+        verdict="vulnerable", title="Stored XSS: memo rendered without encoding",
+        endpoint="POST /memos", sink_function="marked(doc.memo)",
+        severity="high", affected_parameters=["memo"],
+        **kw)
+
+
+def _gn_card(ID="XSS-GN-13", **kw):
+    return InjectionVulnerability(
+        ID=ID, vulnerability_type="xss",
+        externally_exploitable=True, confidence="low",
+        verdict="vulnerable", source="memo (app/routes/memos.js:MemosHandler:6)",
+        sink_call="app/routes/memos.js:MemosHandler:render:27:19",
+        affected_entries=[{"parameter": "memo",
+                            "sink_location": "app/routes/memos.js:27",
+                            "chain_id": ID, "track": "gitnexus"}],
+        severity="medium", **kw)
+
+
+def test_build_pairing_prompt_contains_summaries():
+    prompt = build_pairing_prompt([_llm_card()], [_gn_card()])
+    assert "XSS-VULN-01" in prompt and "XSS-GN-13" in prompt
+    assert "marked(doc.memo)" in prompt and "POST /memos" in prompt
+    assert "pairs" in prompt  # JSON 输出契约
+
+
+def test_parse_pairing_response_valid():
+    raw = _json.dumps({"pairs": [
+        {"gn_id": "G1", "llm_id": "L1", "confidence": "high", "reason": "same sink"},
+        {"gn_id": "G2", "llm_id": "L2", "confidence": "medium"},
+    ]})
+    pairs = parse_pairing_response(raw, {"G1", "G2"}, {"L1", "L2"})
+    assert [(p.gn_id, p.llm_id, p.confidence) for p in pairs] == [
+        ("G1", "L1", "high"), ("G2", "L2", "medium")]
+
+
+def test_parse_pairing_drops_unknown_ids_and_bad_confidence():
+    raw = _json.dumps({"pairs": [
+        {"gn_id": "GHOST", "llm_id": "L1", "confidence": "high"},   # 幻觉 gn_id
+        {"gn_id": "G1", "llm_id": "GHOST2", "confidence": "high"},  # 幻觉 llm_id
+        {"gn_id": "G1", "llm_id": "L1", "confidence": "certain"},   # 非法置信度
+        {"gn_id": "G2", "llm_id": "L2"},                             # 缺 confidence
+    ]})
+    assert parse_pairing_response(raw, {"G1", "G2"}, {"L1", "L2"}) == []
+
+
+def test_parse_pairing_unparseable_returns_empty():
+    assert parse_pairing_response("not json at all", {"G1"}, {"L1"}) == []
+    assert parse_pairing_response("", {"G1"}, {"L1"}) == []
+
+
+def test_apply_pairing_high_confidence_merges():
+    llm = _llm_card()
+    gn = _gn_card()
+    merged = merge_dual_track_queues([llm], [], mode="verdict") \
+        + merge_dual_track_queues([], [gn], mode="verdict")
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(merged, [TrackPair("XSS-GN-13", "XSS-VULN-01", "high")])
+    assert len(out) == 1
+    card = out[0]
+    assert card.ID == "XSS-VULN-01"
+    assert card.merge_source == "both"
+    assert card.confidence == "high"
+    # GN entries 并入 + severity 取高
+    assert any(e.get("chain_id") == "XSS-GN-13" for e in card.affected_entries)
+    assert card.severity == "high"
+
+
+def test_apply_pairing_medium_keeps_separate():
+    llm, gn = _llm_card(), _gn_card()
+    merged = merge_dual_track_queues([llm], [], mode="verdict") \
+        + merge_dual_track_queues([], [gn], mode="verdict")
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(merged, [TrackPair("XSS-GN-13", "XSS-VULN-01", "medium")])
+    assert len(out) == 2  # 中低置信不合并（误合并比漏合并更伤可信度）
+
+
+def test_apply_pairing_missing_card_skipped():
+    merged = merge_dual_track_queues([_llm_card()], [], mode="verdict")
+    from supernova_core.code_index.dual_track_merger import TrackPair
+    out = apply_pairing_merge(merged, [TrackPair("NOPE-GN", "XSS-VULN-01", "high")])
+    assert len(out) == 1 and out[0].merge_source == "llm-only"

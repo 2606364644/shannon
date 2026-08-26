@@ -42,9 +42,12 @@ def test_render_injection_card_full():
     )
     result = render_vuln_card(vuln, "injection")
     assert "### INJECTION-VULN-001" in result
-    # 判定字段全量降级收纳进「技术细节」区（spec §5，有意变更）
-    assert "**Vulnerable Location:** user input → /api/users" in result
-    assert "**Sink Call:** sqlite3.execute" in result
+    # 信息归并（spec 2026-08-26 §4.1，有意变更）：链 dump/Sink 行并入问题点与数据流，
+    # 不再在细节区独立成行
+    assert "**Vulnerable Location:**" not in result
+    assert "**Sink Call:**" not in result
+    assert "- **Issue:**" in result  # sink 名进说明句
+    assert "sqlite3.execute" in result
     assert "**Concat Occurrences:** query + user_input" in result
     assert "**Protection Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
@@ -109,9 +112,11 @@ def test_render_xss_card_full():
     )
     result = render_vuln_card(vuln, "xss")
     assert "### XSS-VULN-001" in result
-    assert "**Vulnerable Location:** query param → /search" in result
-    assert "**Sink Function:** innerHTML" in result
-    assert "**Render Context:** HTML context" in result
+    assert "**Vulnerable Location:**" not in result
+    assert "**Sink Function:**" not in result
+    assert "**Render Context:**" not in result
+    assert "innerHTML" in result.split("- **Issue:**", 1)[1].splitlines()[0]
+    assert "HTML context" in result  # render_context 并入说明句
     assert "**Encoding Observed:** None" in result
     assert "**Verdict:** Exploitable" in result
     assert "**PoC:** <script>alert(1)</script>" in result
@@ -131,8 +136,10 @@ def test_render_auth_card_full():
     )
     result = render_vuln_card(vuln, "auth")
     assert "### AUTH-VULN-001" in result
-    assert "**Source Endpoint:** /api/login" in result
-    assert "**Vulnerable Code Location:** auth/handlers.py:42" in result
+    assert "**Source Endpoint:**" not in result
+    assert "**Vulnerable Code Location:**" not in result
+    assert "- **Endpoints:** /api/login" in result  # 归入受影响入口节
+    assert "- **Location:** auth/handlers.py:42" in result  # 归入问题点节
     assert "**Missing Defense:** No rate limiting" in result
     assert "**Exploitation Hypothesis:** Brute force possible" in result
     assert "**Suggested Exploit Technique:** Dictionary attack" in result
@@ -154,7 +161,8 @@ def test_render_authz_card_full():
     )
     result = render_vuln_card(vuln, "authz")
     assert "### AUTHZ-VULN-001" in result
-    assert "**Endpoint:** /api/users/{id}" in result
+    assert "**Endpoint:**" not in result
+    assert "- **Endpoints:** /api/users/{id}" in result
     assert "**Role Context:** Authenticated user" in result
     assert "**Guard Evidence:** No ownership check" in result
     assert "**Side Effect:** Access other users' data" in result
@@ -177,7 +185,8 @@ def test_render_ssrf_card_full():
     )
     result = render_vuln_card(vuln, "ssrf")
     assert "### SSRF-VULN-001" in result
-    assert "**Source Endpoint:** /api/fetch" in result
+    assert "**Source Endpoint:**" not in result
+    assert "- **Endpoints:** /api/fetch" in result
     assert "**Vulnerable Parameter:** url" in result
     assert "**Missing Defense:** No URL allowlist" in result
 
@@ -326,7 +335,7 @@ def test_llm_card_synthesizes_entry_table(monkeypatch):
         endpoint="POST /contributions",
         sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23")
     card = render_vuln_card(v, "injection", None)
-    assert "受影响接口：POST /contributions" in card
+    assert "- **接口:** POST /contributions" in card
     assert "| preTax | app/routes/contributions.js:32 |  |" in card
     assert "| afterTax | app/routes/contributions.js:32 |  |" in card
 
@@ -340,8 +349,7 @@ def test_description_section_no_inline_chain_dump(monkeypatch):
     desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
     assert "preTax & req.body" not in desc
     assert "服务端无沙箱" in desc
-    details = card.split("#### 漏洞细节", 1)[1]
-    assert "**脆弱位置:**" in details
+    assert "**脆弱位置:**" not in card  # §4.1 删行（链归数据流分点）
 
 def test_card_no_internal_labels(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
@@ -420,7 +428,7 @@ async def test_render_findings_from_queues(tmp_path):
     findings = (deliverables / "injection_findings.md").read_text()
     assert "## Injection Vulnerabilities" in findings
     assert "### INJECTION-001" in findings
-    assert "**Sink Call:** db.execute" in findings
+    assert "db.execute" in findings.split("- **Issue:**", 1)[1].splitlines()[0]
     assert "Disclaimer" in findings
 
 
@@ -502,7 +510,7 @@ async def test_render_findings_reads_queue_from_intermediate_subdir(tmp_path):
     )
     content = findings.read_text()
     assert "### INJECTION-TIER-001" in content
-    assert "**Sink Call:** db.execute" in content
+    assert "db.execute" in content
 
 
 @pytest.mark.asyncio
@@ -548,7 +556,7 @@ async def test_render_recovers_bare_list_queue(tmp_path):
 
     findings = (deliverables / "auth_findings.md").read_text()
     assert "### AUTH-1" in findings
-    assert "**Source Endpoint:** POST /login" in findings
+    assert "- **Endpoints:** POST /login" in findings
     assert "auto-recovered" in findings.lower() or "bare-list" in findings.lower()
 
 
@@ -658,7 +666,7 @@ async def test_render_findings_with_subdirs_queue_in_whitebox_findings_in_blackb
     assert bb_findings.exists(), "findings must land in blackbox/ subdirectory"
     content = bb_findings.read_text()
     assert "### INJECTION-BB-001" in content
-    assert "**Sink Call:** db.execute" in content
+    assert "db.execute" in content
 
     # findings must NOT leak into root or whitebox/
     assert not (root / "injection_findings.md").exists(), \
@@ -708,7 +716,7 @@ def test_render_injection_card_zh_labels(monkeypatch):
         sink_call="sqlite3.execute", notes="测试备注",
     )
     result = render_vuln_card(vuln, "injection")
-    assert "**Sink 调用:** sqlite3.execute" in result
+    assert "未经校验即进入 sqlite3.execute" in result
     assert "严重程度：" in result
     assert ("**漏洞成因（研判依据）**" in result and "**危害**" in result
             and "#### 漏洞细节" in result)
@@ -848,7 +856,7 @@ def test_card_title_not_repeated_in_description_section(monkeypatch):
     # source→path 链 dump 不再混排成因段（移居漏洞细节区 vulnerable_location）
     desc = card.split("**漏洞成因（研判依据）**", 1)[1].split("**危害**", 1)[0]
     assert " → " not in desc
-    assert "**脆弱位置:**" in card.split("#### 漏洞细节", 1)[1]
+    assert "**脆弱位置:**" not in card  # §4.1 删行（链归数据流分点）
 
 
 def test_card_description_falls_back_to_deterministic_without_clues():
@@ -860,3 +868,131 @@ def test_card_description_falls_back_to_deterministic_without_clues():
     card = render_vuln_card(v, "injection")
     desc = card.split("**Root Cause (Basis)**", 1)[1].split("**Impact**", 1)[0]
     assert desc.strip()  # 回退确定性描述，成因段不为空
+
+
+# --- 卡片信息归并（spec 2026-08-26 §4）：细节区收敛 + 问题点三要素 + 受影响入口重构 ---
+
+def test_details_section_drops_consolidated_kv_lines():
+    """§4.1 细节区收敛：脆弱位置/来源详情/Sink 函数/Sink 调用/渲染上下文/
+    脆弱代码位置/端点/来源端点 8 行不再出现（各自归并到问题点/受影响入口/数据流）；
+    PoC/数据流/防护/判定保留。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        source="Body field: req.body.preTax (app/routes/contributions.js:13)",
+        path="POST /contributions → eval at contributions.js:32",
+        sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23",
+        sink_function="eval(req.body.preTax)",
+        source_detail="req.body.preTax destructured at contributions.js:13",
+        render_context="HTML_BODY",
+        vulnerable_code_location="app/routes/contributions.js:32",
+        witness_payload="1;require('child_process')",
+        verdict="vulnerable",
+        dataflow_steps=[
+            {"label": "handleContributionsUpdate 读取 req.body.preTax",
+             "file": "app/routes/contributions.js", "line": 42},
+            {"label": "eval() 服务端 JS 求值",
+             "file": "app/routes/contributions.js", "line": 32},
+        ],
+    )
+    result = render_vuln_card(vuln, "injection", snippet=None)
+    assert "#### Vulnerability Details" in result
+    details = result.split("#### Vulnerability Details", 1)[1]
+    for line in ("**Vulnerable Location:**", "**Source Detail:**",
+                 "**Sink Function:**", "**Sink Call:**", "**Render Context:**",
+                 "**Vulnerable Code Location:**", "**Endpoint:**",
+                 "**Source Endpoint:**"):
+        assert line not in details, line
+    # 保留项照旧
+    assert "**PoC:**" in details
+    assert "**Dataflow:**" in details
+    assert "**Verdict:**" in details or "**Protection Observed:**" in details
+
+
+def test_issue_section_three_elements_without_snippet():
+    """§4.2 问题点三要素：snippet 缺省时位置+说明仍渲染（现状 if snippet:
+    整节省略是缺陷）；sink_call id 解析出 file:line 位置与 sink 名。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        source="Body field: req.body.preTax (app/routes/contributions.js:13)",
+        sink_call="app/routes/contributions.js:ContributionsHandler:eval:32:23",
+    )
+    result = render_vuln_card(vuln, "injection", snippet=None)
+    assert "**Vulnerable Code**" in result
+    assert "- **Location:** app/routes/contributions.js:32" in result
+    assert "eval" in result.split("- **Issue:**", 1)[1].splitlines()[0]
+
+
+def test_issue_section_location_fallback_chain():
+    """§4.2 位置回退链：sink_call 解析 → affected_entries[0].sink_location。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        source="req.body.preTax",
+        affected_entries=[{"parameter": "preTax",
+                           "sink_location": "app/routes/contributions.js:32",
+                           "chain_id": "INJ-GN-01", "track": "gitnexus"}],
+    )
+    result = render_vuln_card(vuln, "injection", snippet=None)
+    assert "- **Location:** app/routes/contributions.js:32" in result
+
+
+def test_xss_render_context_folded_into_issue_desc():
+    """§4.2 渲染上下文并入说明句（仅 XSS）：细节区无独立行，说明句尾带
+    （{ctx} 上下文）。"""
+    vuln = XssVulnerability(
+        ID="XSS-VULN-02", vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="high",
+        source="Body field: req.body.firstName (app/routes/profile.js:42)",
+        sink_function="render at app/views/profile.html:41",
+        render_context="HTML_ATTRIBUTE",
+        witness_payload='" autofocus onfocus=alert(1) x="',
+    )
+    result = render_vuln_card(vuln, "xss", snippet=None)
+    issue_desc = result.split("- **Issue:**", 1)[1].splitlines()[0]
+    assert "HTML_ATTRIBUTE" in issue_desc
+    assert "**Render Context:**" not in result
+
+
+def test_entry_section_endpoints_list_line():
+    """§4.3 受影响入口：endpoints 新字段渲染接口列表行（多接口，写入+触发分开）。"""
+    vuln = XssVulnerability(
+        ID="XSS-VULN-01", vulnerability_type="Stored XSS",
+        externally_exploitable=True, confidence="high",
+        title="Stored XSS: memo rendered without encoding",
+        endpoints=["POST /memos (write)", "GET /memos (trigger)"],
+        affected_parameters=["memo (body)"],
+    )
+    result = render_vuln_card(vuln, "xss", snippet=None)
+    assert "- **Endpoints:** POST /memos (write), GET /memos (trigger)" in result
+
+
+def test_entry_section_endpoint_line_not_masked_by_title():
+    """§4.3 删除「endpoint 在标题里就不渲染接口行」：结构化数据不被叙事掩盖。"""
+    vuln = InjectionVulnerability(
+        ID="INJ-VULN-01", vulnerability_type="SQLi",
+        externally_exploitable=True, confidence="high",
+        title="命令注入：POST /contributions 直接 eval()（RCE）",
+        endpoint="POST /contributions",
+        affected_parameters=["preTax"],
+    )
+    result = render_vuln_card(vuln, "injection", snippet=None)
+    # 接口行必须在受影响入口节内（标签行），不是细节区 kv 行
+    assert "- **Endpoints:** POST /contributions" in result
+
+
+def test_gn_only_meta_line_no_duplicate_pending_review(monkeypatch):
+    """§4.4 元信息行「待复核」不重复：confidence=needs_review 已显示待复核时，
+    gn_only 不再追加第二个。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    vuln = XssVulnerability(
+        ID="XSS-GN-01", vulnerability_type="xss",
+        externally_exploitable=False, confidence="needs_review",
+        source_track="gitnexus",
+        source="preTax (app/routes/contributions.js:ContributionsHandler:7)",
+        sink_call="app/routes/contributions.js:ContributionsHandler:render:21:19",
+    )
+    result = render_vuln_card(vuln, "xss", snippet=None)
+    meta = next(l for l in result.splitlines() if "严重程度" in l)
+    assert meta.count("待复核") == 1

@@ -30,6 +30,9 @@ class BaseVulnerability(BaseModel):
     cwe_id: str | None = None              # "CWE-95"
     owasp_category: str | None = None      # "A03:2021-Injection"
     endpoint: str | None = None            # 归一化 "POST /contributions"
+    # spec 2026-08-26 §5：该漏洞涉及的全部接口（写入+触发分开），元素可带角色
+    # 注记如 "POST /memos (write)"；collector/prompt 侧 T2 教 LLM 输出，旧 queue 缺省。
+    endpoints: list[str] | None = None
     affected_parameters: list[str] | None = None
     affected_entries: list[dict] | None = None  # {parameter, sink_location, chain_id, track, direct}
     verification: str | None = None        # static_analysis | dynamically_verified

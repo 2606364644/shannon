@@ -65,11 +65,17 @@ _GN_VULN = {
 }
 
 
-async def _run(tmp_path):
-    monkeypatch_set = activities
+async def _run(tmp_path, parity_client="raise"):
+    """parity_client：track-parity LLM stub。默认 raise（_gitnexus_verdict_llm_client
+    现成 raise 桩 → enhance 优雅退化），防既有测试真调 LLM；显式注入 fake 走配对/
+    补全路径。"""
     from unittest.mock import patch
-    with patch.object(monkeypatch_set, "_get_paths",
-                      lambda i: (tmp_path, _wb(tmp_path), tmp_path)):
+    client = (parity_client if callable(parity_client)
+              else activities._gitnexus_verdict_llm_client)
+    with patch.object(activities, "_get_paths",
+                      lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
+         patch.object(activities, "_make_verdict_llm_client",
+                      lambda *a, **k: client):
         set_audit_session(_RecordingSession())
         try:
             return await activities.run_merge_dual_track_queues(_input(tmp_path))
@@ -245,3 +251,60 @@ async def test_merge_preserves_gitnexus_only_reachability_false(tmp_path):
     v = out["vulnerabilities"][0]
     assert v["merge_source"] == "gitnexus-only"
     assert v["externally_exploitable"] is False  # 保持，不被 verdict 覆写
+
+
+# ── 双轨呈现一致性（spec 2026-08-26 §6）：确定性 merge 后接 track parity ──────
+
+@pytest.mark.asyncio
+async def test_merge_runs_parity_pairing_on_key_mismatch(tmp_path, monkeypatch):
+    """确定性 key 配不上的同洞卡（sink 不同名、无 endpoint → strict key），
+    track-parity LLM 配对 high → GN 卡并入 LLM 卡（both）。"""
+    _inter(tmp_path).joinpath("injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_LLM_VULN, ID="L9",
+                                             sink_call="marked(doc.memo)")]}))
+    _inter(tmp_path).joinpath("injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_GN_VULN, ID="G9",
+                                             sink_call="render:27:19")]}))
+
+    async def fake_client(prompt, **kw):
+        return json.dumps({"pairs": [{"gn_id": "G9", "llm_id": "L9",
+                                      "confidence": "high",
+                                      "reason": "same stored-xss flow"}]})
+
+    result = await _run(tmp_path, parity_client=fake_client)
+
+    out = json.loads(
+        (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
+    assert [v["ID"] for v in out["vulnerabilities"]] == ["L9"]
+    assert out["vulnerabilities"][0]["merge_source"] == "both"
+
+
+@pytest.mark.asyncio
+async def test_merge_parity_completes_gn_only_card(tmp_path, monkeypatch):
+    """配对 low 不合并 → 剩余 GN-only 卡补全叙事字段（title/impact 写盘）。"""
+    _inter(tmp_path).joinpath("injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_LLM_VULN, ID="L9",
+                                             sink_call="marked(doc.memo)")]}))
+    _inter(tmp_path).joinpath("injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_GN_VULN, ID="G9",
+                                             sink_call="render:27:19")]}))
+
+    async def fake_client(prompt, **kw):
+        if "pairs" in prompt:
+            return json.dumps({"pairs": [{"gn_id": "G9", "llm_id": "L9",
+                                          "confidence": "low"}]})
+        return json.dumps({
+            "title": "命令注入：preTax 未校验进入 eval()（RCE）",
+            "impact": "攻击者可执行任意代码。",
+            "remediation": "将 eval 替换为 Number() 并校验类型。",
+            "severity": "critical"})
+
+    await _run(tmp_path, parity_client=fake_client)
+
+    out = json.loads(
+        (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
+    gn = next(v for v in out["vulnerabilities"] if v["ID"] == "G9")
+    assert gn["merge_source"] == "gitnexus-only"
+    assert gn["title"].startswith("命令注入")
+    assert gn["impact"] == "攻击者可执行任意代码。"
+    assert gn["severity"] == "critical"

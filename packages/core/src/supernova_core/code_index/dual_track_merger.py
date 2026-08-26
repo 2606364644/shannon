@@ -8,6 +8,8 @@ dangerous-side merge for future recon wiring.
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import dataclass
 
 from supernova_core.code_index.gn_collapse import (
     collapse_gn_entries,
@@ -281,6 +283,136 @@ def _has_danger(value: object) -> bool:
         return False
     lowered = value.lower()
     return any(keyword in lowered for keyword in _DANGER_KEYWORDS)
+
+
+# --- LLM 辅助跨轨配对归并（spec 2026-08-26 §6.1）---
+# 确定性 _finding_key 配不上的同洞卡（sink 粒度/称谓不同、跨接口存储型链各见半条），
+# 由轻量 LLM 单次比对配对；仅 high 置信对应用合并——误合并（两个不同的洞合成一张
+# 卡、叙事互相污染）比漏合并更伤报告可信度，保守优先。
+
+@dataclass(frozen=True)
+class TrackPair:
+    """一条跨轨配对建议（LLM 输出，经 ID/置信度校验后存活）。"""
+    gn_id: str
+    llm_id: str
+    confidence: str  # high | medium | low
+    reason: str | None = None
+
+
+def _pairing_summary_line(f: Vulnerability) -> str:
+    """单卡一行摘要：ID / title / 接口 / sink / 参数。"""
+    endpoint = (getattr(f, "endpoint", None)
+                or extract_endpoint(getattr(f, "path", None))
+                or getattr(f, "source_endpoint", None) or "-")
+    sink = (getattr(f, "sink_function", None) or getattr(f, "sink_call", None)
+            or getattr(f, "vulnerable_parameter", None) or "-")
+    params = getattr(f, "affected_parameters", None) or []
+    if not params:
+        src = getattr(f, "source", None)
+        params = [src.split("(", 1)[0].strip()] if isinstance(src, str) and src else []
+    return (f"- {f.ID} | title={getattr(f, 'title', None) or '-'} | "
+            f"endpoint={endpoint} | sink={sink} | params={','.join(map(str, params)) or '-'}")
+
+
+def build_pairing_prompt(llm_findings: list[Vulnerability],
+                         gitnexus_findings: list[Vulnerability]) -> str:
+    """每 class 一次的批量配对 prompt：双列摘要 → JSON pairs 输出契约。"""
+    llm_lines = "\n".join(_pairing_summary_line(f) for f in llm_findings) or "- (none)"
+    gn_lines = "\n".join(_pairing_summary_line(f) for f in gitnexus_findings) or "- (none)"
+    return f"""Two vulnerability lists below describe findings from independent analysis tracks
+of the SAME codebase. Some entries describe the SAME underlying vulnerability
+(e.g. a stored XSS where one track names the template-expression sink and the
+other the template render function; a chain seen from its write endpoint vs its
+trigger endpoint). Match them.
+
+LLM-track findings:
+{llm_lines}
+
+GitNexus-track findings:
+{gn_lines}
+
+Output STRICT JSON only (no markdown fence, no prose):
+{{"pairs": [{{"gn_id": "<GitNexus ID>", "llm_id": "<LLM ID>",
+             "confidence": "high|medium|low", "reason": "<one line>"}}]}}
+
+Rules:
+- Only pair entries that are the SAME vulnerability (same param flowing to the
+  same dangerous sink location, even if named at different granularity or via
+  different endpoints of one stored/reflected flow).
+- "high" ONLY when param and sink location clearly correspond; when unsure use
+  "medium"/"low" or omit the pair entirely.
+- Different vulnerabilities must NOT be paired."""
+
+
+_PAIR_CONFIDENCES = frozenset({"high", "medium", "low"})
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def parse_pairing_response(raw: object, valid_gn_ids: set[str],
+                           valid_llm_ids: set[str]) -> list[TrackPair]:
+    """解析 LLM 配对输出：容忍 markdown fence / 前后杂文；幻觉 ID 与非法置信度
+    整对丢弃；非法 JSON → []（调用方按无配对处理）。"""
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    import json
+    text = raw.strip()
+    m = _JSON_OBJ_RE.search(text)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+    except (json.JSONDecodeError, ValueError):
+        return []
+    pairs: list[TrackPair] = []
+    for p in data.get("pairs") or []:
+        if not isinstance(p, dict):
+            continue
+        gn_id, llm_id = str(p.get("gn_id") or ""), str(p.get("llm_id") or "")
+        conf = str(p.get("confidence") or "").strip().lower()
+        if gn_id not in valid_gn_ids or llm_id not in valid_llm_ids:
+            continue
+        if conf not in _PAIR_CONFIDENCES:
+            continue
+        reason = p.get("reason")
+        pairs.append(TrackPair(gn_id, llm_id, conf,
+                               str(reason) if isinstance(reason, str) else None))
+    return pairs
+
+
+def apply_pairing_merge(merged: list[Vulnerability],
+                        pairs: list[TrackPair]) -> list[Vulnerability]:
+    """应用 high 置信配对：GN 卡并入对应 LLM 卡（复用 both 分支字段融合：
+    entries 并集 / severity 取高 / evidence_chain 兜底 / verdict OR），GN 独立卡
+    移除。中低置信与找不到卡的配对跳过。"""
+    by_id = {f.ID: f for f in merged}
+    consumed_gn: set[str] = set()
+    replacements: dict[str, Vulnerability] = {}
+    for pair in pairs:
+        if pair.confidence != "high":
+            continue
+        llm = by_id.get(pair.llm_id)
+        gn = by_id.get(pair.gn_id)
+        if llm is None or gn is None or pair.gn_id in consumed_gn:
+            continue
+        replacements[pair.llm_id] = _clone_with_merge_fields(
+            llm,
+            merge_source="both",
+            confidence="high",
+            vulnerable=_is_vulnerable(llm) or _is_vulnerable(gn),
+            evidence_chain=getattr(llm, "evidence_chain", None)
+            or getattr(gn, "evidence_chain", None),
+            externally_exploitable_override=_authz_ee_or(llm, gn),
+            other_severity=effective_severity(gn),
+            other_entries=getattr(gn, "affected_entries", None),
+            other_params=getattr(gn, "affected_parameters", None),
+            other_endpoint=getattr(gn, "endpoint", None),
+        )
+        consumed_gn.add(pair.gn_id)
+    if not consumed_gn:
+        return merged
+    logger.info("pairing merge: %d high-confidence pair(s) applied", len(consumed_gn))
+    return [replacements.get(f.ID, f) for f in merged
+            if f.ID not in consumed_gn]
 
 
 def _merge_intel(
