@@ -76,6 +76,9 @@ async def build_ssrf_findings(
             source_endpoint=route_label or chain.entry_point_id,  # best-effort; renderer tolerant
             vulnerable_parameter=chain.source_param,
             vulnerable_code_location=chain.sink_call_site_id,
+            # spec 2026-08-26 §7 根因修复：回填 sink 全标识供 gn_collapse 折叠
+            # （vulnerable_code_location 保留兼容渲染层位置回退链）。
+            sink_call=chain.sink_call_site_id,
             missing_defense=verdict.mismatch_reason,
             exploitation_hypothesis=None,
             suggested_exploit_technique=None,

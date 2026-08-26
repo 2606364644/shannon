@@ -222,6 +222,28 @@ async def test_build_xss_finding_carries_title():
 
 
 @pytest.mark.asyncio
+async def test_build_xss_finding_carries_sink_call():
+    """F1 折叠修复：XssVulnerability 回填 sink_call（sink_call_site_id 全标识）——
+    gn_collapse._unit_key 靠它折叠 GN 单元（NodeGoat 15 条笛卡尔积链一条没折的
+    根因），affected_entries[].sink_location 也由它解析（对齐 injection_builder
+    sink_call 先例，test_injection_builder.py:57）。"""
+    sid = "app.py:h:innerHTML:5:0"
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("generic", source="q", sink_id=sid)],
+        language_coverage=["typescript"],
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"><script>",'
+                '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
+                '"confidence":"high"}')
+
+    findings = await build_xss_findings(
+        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+    assert findings[0].sink_call == sid
+
+
+@pytest.mark.asyncio
 async def test_build_xss_entry_points_prefixes_path_with_route():
     """O2 前半：entry_points join 命中 → path 带 "METHOD /path" 前缀；miss → 原样。"""
     sid = "app.py:h:innerHTML:5:0"

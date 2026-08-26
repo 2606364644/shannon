@@ -2,7 +2,7 @@
 from supernova_core.code_index.gn_collapse import (
     collapse_gn_entries, extract_endpoint, extract_param, parse_sink_call_site_id,
 )
-from supernova_core.models.queue_schemas import InjectionVulnerability
+from supernova_core.models.queue_schemas import InjectionVulnerability, XssVulnerability
 
 def _gn(id_, param, sink, path="POST /contributions → chain", severity=None):
     return InjectionVulnerability(
@@ -53,3 +53,44 @@ def test_collapse_severity_takes_max():
           _gn("INJ-GN-02", "preTax", SINK33, severity=None)]  # 兜底 critical(eval)
     out = collapse_gn_entries(gn)
     assert out[0].severity == "critical"
+
+
+def _gn_xss(id_, param, sink_call, path):
+    """真实形态 XssVulnerability GN 条目（F1 后 builder 回填 sink_call）。"""
+    return XssVulnerability(
+        ID=id_, vulnerability_type="Reflected", externally_exploitable=True,
+        confidence="low", source=f"{param} (app/routes/contributions.js:ContributionsHandler:7)",
+        path=path, sink_function="render", sink_call=sink_call,
+        verdict="vulnerable", source_track="gitnexus", render_context="HTML_BODY")
+
+
+def test_collapse_xss_findings_by_sink_call():
+    """F1：XssVulnerability 凭 sink_call 折叠——NodeGoat 真实形态（preTax/afterTax/
+    roth × render:21/50/58/70 同接口同 sink 函数，12 条笛卡尔积）折成 1 主记录
+    12 入口行。修复前 XssVulnerability 无 sink_call 字段 → _unit_key 落
+    ("__strict__", id(f)) 一条不折（spec 2026-08-26 §7 的根因修复）。"""
+    gn = [_gn_xss(
+        f"XSS-GN-{i:02d}", p,
+        f"app/routes/contributions.js:ContributionsHandler:render:{ln}:{ln}",
+        "preTax -> app/routes/contributions.js:ContributionsHandler:render (llm-pass-failed)")
+        for i, (p, ln) in enumerate(
+            [(p, ln) for p in ("preTax", "afterTax", "roth") for ln in (21, 50, 58, 70)],
+            start=1)]
+    out = collapse_gn_entries(gn)
+    assert len(out) == 1
+    assert out[0].ID == "XSS-GN-01"
+    assert len(out[0].affected_entries) == 12
+    # sink_location 出 file:line（渲染层 _FILE_LINE_RE 可提，问题点节/入口表修复）
+    assert out[0].affected_entries[0]["sink_location"] == "app/routes/contributions.js:21"
+    assert set(out[0].affected_parameters) == {"preTax", "afterTax", "roth"}
+
+
+def test_collapse_xss_without_sink_call_keeps_strict_no_overmerge():
+    """无 sink_call 且 path 无路由的 XssVulnerability（旧 queue 数据）仍走
+    strict key 各自成条——不因同文件/同 sink_function 文本被过度合并。"""
+    gn = [
+        _gn_xss("XSS-GN-01", "preTax", None, "preTax -> render chain"),
+        _gn_xss("XSS-GN-02", "afterTax", None, "afterTax -> render chain"),
+    ]
+    out = collapse_gn_entries(gn)
+    assert len(out) == 2

@@ -58,7 +58,11 @@ FORBIDDEN_PLACEHOLDERS = {
 
 # 白名单：GitNexus 轨内部 LLM 判定（authz_gitnexus_judge）合法消费确定性 IDOR 候选，
 # 属轨内判定（等同 chain_verdict），不是"确定性→LLM 轨"跨轨注入。
-WHITELISTED_PLACEHOLDERS = {"AUTHZ_GITNEXUS_CANDIDATES"}
+WHITELISTED_PLACEHOLDERS = {"AUTHZ_GITNEXUS_CANDIDATES", "GN_ONLY_CANDIDATES"}
+# 白名单口径：GN_ONLY_CANDIDATES 是 GitNexus 轨内 GN-only 卡深度富化
+# （gn_finding_enrichment.txt / run_gn_finding_enrichment，spec 2026-08-26 §6.2
+# deep 档）的候选注入——输入是 GN 轨自己的 merge 产物，等同 authz judge 轨内
+# 判定与 chain_verdict，不是「确定性→LLM 轨」跨轨注入。
 
 
 def test_no_llm_track_prompt_has_forbidden_placeholders():

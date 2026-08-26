@@ -22,7 +22,10 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "github-slugger": "^2.0.0",
+    "hast-util-to-string": "^3.0.1",
     "hast-util-to-text": "^4.0.2",
+    "highlight.js": "^11.11.2",
     "i18next": "^26.3.5",
     "i18next-browser-languagedetector": "^8.2.1",
     "js-yaml": "^4.3.1",
@@ -39,7 +42,8 @@
     "rehype-slug": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^2.6.1"
+    "tailwind-merge": "^2.6.1",
+    "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",

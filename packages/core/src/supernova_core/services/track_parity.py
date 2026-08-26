@@ -134,12 +134,16 @@ async def enhance_track_parity(
     merged: list[Vulnerability],
     vuln_class: str,
     llm_client: LlmClient,
+    *,
+    complete: bool = True,
 ) -> list[Vulnerability]:
     """merge activity 内的编排入口（确定性 merge 之后、落盘之前）。
 
-    配对（每 class 一次）→ 补全（剩余 gn-only 逐卡一次）。任一 LLM 失败/
-    不可解析都优雅退化（log + 保持现状），绝不抛出——报告管线不因增强层
-    阻塞（spec §6 退化口径）。单侧空时零调用（成本守门）。"""
+    配对（每 class 一次）→ 补全（剩余 gn-only 逐卡一次；``complete=False`` 跳过
+    ——SUPERNOVA_GN_ENRICH_MODE=deep 时轻量补全让位给独立深度富化 step，避免
+    双重 LLM 花费）。任一 LLM 失败/不可解析都优雅退化（log + 保持现状），绝不
+    抛出——报告管线不因增强层阻塞（spec §6 退化口径）。单侧空时零调用
+    （成本守门）。"""
     llm_only = [f for f in merged if f.merge_source == "llm-only"]
     gn_only = [f for f in merged if f.merge_source == "gitnexus-only"]
 
@@ -156,6 +160,9 @@ async def enhance_track_parity(
                 merged = apply_pairing_merge(merged, pairs)
         except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
             logger.warning("track-parity pairing skipped (LLM unavailable): %s", exc)
+
+    if not complete:
+        return merged
 
     for i, f in enumerate(merged):
         if f.merge_source != "gitnexus-only":

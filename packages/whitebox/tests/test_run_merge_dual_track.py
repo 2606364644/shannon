@@ -1,11 +1,13 @@
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 
 import pytest
 
 from supernova_core.utils.paths import INTERMEDIATE_SUBDIR
 from supernova_whitebox.audit.session_registry import clear_audit_session, set_audit_session
 from supernova_whitebox.pipeline import activities
+
+_NULL_CONTEXT = nullcontext
 
 
 class _RecordingSession:
@@ -65,17 +67,21 @@ _GN_VULN = {
 }
 
 
-async def _run(tmp_path, parity_client="raise"):
-    """parity_client：track-parity LLM stub。默认 raise（_gitnexus_verdict_llm_client
-    现成 raise 桩 → enhance 优雅退化），防既有测试真调 LLM；显式注入 fake 走配对/
-    补全路径。"""
+async def _run(tmp_path, parity_client="raise", enrich_mode=None):
+    """parity_client：track-parity LLM stub。默认 raise（raise 桩 → enhance 优雅
+    退化），防既有测试真调 LLM；显式注入 fake 走配对/补全路径。
+    enrich_mode：monkeypatch gn_enrich_mode 的档位（None = 不 patch，默认 deep）。"""
     from unittest.mock import patch
     client = (parity_client if callable(parity_client)
               else activities._gitnexus_verdict_llm_client)
+    mode_ctx = (patch.object(activities, "gn_enrich_mode",
+                             lambda: enrich_mode)
+                if enrich_mode else _NULL_CONTEXT())
     with patch.object(activities, "_get_paths",
                       lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
-         patch.object(activities, "_make_verdict_llm_client",
-                      lambda *a, **k: client):
+         patch.object(activities, "_make_track_parity_client",
+                      lambda *a, **k: client), \
+         mode_ctx:
         set_audit_session(_RecordingSession())
         try:
             return await activities.run_merge_dual_track_queues(_input(tmp_path))
@@ -299,7 +305,7 @@ async def test_merge_parity_completes_gn_only_card(tmp_path, monkeypatch):
             "remediation": "将 eval 替换为 Number() 并校验类型。",
             "severity": "critical"})
 
-    await _run(tmp_path, parity_client=fake_client)
+    await _run(tmp_path, parity_client=fake_client, enrich_mode="light")
 
     out = json.loads(
         (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
@@ -308,3 +314,84 @@ async def test_merge_parity_completes_gn_only_card(tmp_path, monkeypatch):
     assert gn["title"].startswith("命令注入")
     assert gn["impact"] == "攻击者可执行任意代码。"
     assert gn["severity"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_merge_enrich_mode_deep_skips_light_completion(tmp_path):
+    """deep（默认档）：配对照跑，merge 内轻量补全跳过——GN-only 卡叙事字段
+    留给独立深度富化 step（避免同卡双重 LLM 花费）。配对 low 不合并时 GN 卡
+    保持裸字段（title/impact 不被轻量补全改写）。"""
+    _inter(tmp_path).joinpath("injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_LLM_VULN, ID="L9",
+                                             sink_call="marked(doc.memo)")]}))
+    _inter(tmp_path).joinpath("injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_GN_VULN, ID="G9",
+                                             sink_call="render:27:19")]}))
+
+    async def fake_client(prompt, **kw):
+        if "pairs" in prompt:
+            return json.dumps({"pairs": [{"gn_id": "G9", "llm_id": "L9",
+                                          "confidence": "low"}]})
+        raise AssertionError("deep 档不应发起轻量补全调用")
+
+    await _run(tmp_path, parity_client=fake_client, enrich_mode="deep")
+
+    out = json.loads(
+        (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
+    gn = next(v for v in out["vulnerabilities"] if v["ID"] == "G9")
+    assert gn["merge_source"] == "gitnexus-only"
+    assert gn.get("impact") is None  # 轻量补全未跑，字段保持确定性原值
+
+
+@pytest.mark.asyncio
+async def test_merge_enrich_mode_off_skips_parity_entirely(tmp_path):
+    """off 档：track-parity 整层关闭——client 工厂根本不被调用（零 LLM 成本）。"""
+    _inter(tmp_path).joinpath("injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_LLM_VULN, ID="L9",
+                                             sink_call="marked(doc.memo)")]}))
+    _inter(tmp_path).joinpath("injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [dict(_GN_VULN, ID="G9",
+                                             sink_call="render:27:19")]}))
+
+    from unittest.mock import patch
+    with patch.object(
+            activities, "_make_track_parity_client",
+            side_effect=AssertionError("off 档不应构建 parity client")):
+        await _run(tmp_path, parity_client="unused", enrich_mode="off")
+
+    out = json.loads(
+        (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
+    ids = sorted(v["ID"] for v in out["vulnerabilities"])
+    assert ids == ["G9", "L9"]  # 确定性 merge 结果直出，无配对无补全
+
+
+@pytest.mark.asyncio
+async def test_merge_collapses_llm_same_endpoint_params(tmp_path):
+    """LLM 轨同接口多参数归并（数据层，2026-08-26 用户口径：多参数不拆卡）。
+
+    黑盒 NodeGoat 现场形态：POST /contributions 的 preTax/afterTax/roth 三条
+    → merge 落盘 SSOT 前 collapse_llm_entries 归并成 1 条——黑盒 add_exploit
+    per queue ID → evidence 1 卡；白盒渲染/速查表读同一 SSOT 自动跟随。
+    主条目 severity 最高；入口表每参数一行（chain_id 溯源原条目）。
+    """
+    vulns = [
+        dict(_LLM_VULN, ID=f"INJ-VULN-{i:02d}",
+             path=f"POST /contributions → handler → eval(req.body.{p})",
+             source=f"req.body.{p} @ app/routes/contributions.js:32",
+             severity="critical" if p == "afterTax" else "high")
+        for i, p in enumerate(("preTax", "afterTax", "roth"), start=1)
+    ]
+    _inter(tmp_path).joinpath("injection_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": vulns}))
+
+    await _run(tmp_path)
+
+    out = json.loads(
+        (_inter(tmp_path) / "injection_exploitation_queue.json").read_text())
+    assert len(out["vulnerabilities"]) == 1
+    v = out["vulnerabilities"][0]
+    assert v["ID"] == "INJ-VULN-02"  # severity 最高（critical）为主条目
+    assert {e["parameter"] for e in v["affected_entries"]} == {
+        "preTax", "afterTax", "roth"}
+    assert {e["chain_id"] for e in v["affected_entries"]} == {
+        "INJ-VULN-01", "INJ-VULN-02", "INJ-VULN-03"}

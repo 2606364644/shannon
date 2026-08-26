@@ -82,6 +82,12 @@ class XssVulnerability(BaseVulnerability):
     authentication_required: str | None = None
     accessible_routes: str | None = None
     path: str | None = None
+    # GN 轨 sink 全标识（file:cls:fn:line:col，xss_builder 回填）——gn_collapse
+    # _unit_key 凭它折叠 GN 单元 + 解析 affected_entries[].sink_location（对齐
+    # InjectionVulnerability.sink_call 先例；spec 2026-08-26 §7 根因：缺此字段时
+    # 15 条参数×行笛卡尔积链一条不折）。LLM 轨不产此字段（collector schema
+    # 契约不合并，维持 sink_function 族）。
+    sink_call: str | None = None
     sink_function: str | None = None
     render_context: str | None = None
     encoding_observed: str | None = None
@@ -105,6 +111,9 @@ class SsrfVulnerability(BaseVulnerability):
     source_endpoint: str | None = None
     vulnerable_parameter: str | None = None
     vulnerable_code_location: str | None = None
+    # GN 轨 sink 全标识（ssrf_builder 回填）——同 XssVulnerability.sink_call 注释：
+    # gn_collapse 折叠与 sink_location 解析凭它（spec 2026-08-26 §7 根因修复）。
+    sink_call: str | None = None
     missing_defense: str | None = None
     exploitation_hypothesis: str | None = None
     suggested_exploit_technique: str | None = None

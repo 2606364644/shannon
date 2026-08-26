@@ -14,6 +14,11 @@ def parse_sink_call_site_id(s: str) -> tuple[str | None, str | None]:
         return (None, None)
     return (parts[-3], f"{parts[0]}:{parts[-2]}")
 
+def _sink_file(sink_call: str) -> str | None:
+    """sink_call_site_id 的文件段（不含行号）——_unit_key 文件级回退用。"""
+    parts = (sink_call or "").split(":")
+    return parts[0] if len(parts) >= 4 else None
+
 def extract_endpoint(path_or_endpoint: str | None) -> str | None:
     if not isinstance(path_or_endpoint, str):
         return None
@@ -30,13 +35,19 @@ def extract_param(source: str | None) -> str | None:
     return head or None
 
 def _unit_key(f):
-    sink_func, _loc = parse_sink_call_site_id(getattr(f, "sink_call", "") or "")
+    sink_call = getattr(f, "sink_call", "") or ""
+    sink_func, _loc = parse_sink_call_site_id(sink_call)
     endpoint = (getattr(f, "endpoint", None)
                 and extract_endpoint(f.endpoint)) or extract_endpoint(getattr(f, "path", None))
     if endpoint:
         return (getattr(f, "vulnerability_type", None), endpoint, sink_func)
-    if sink_func and _loc:
-        return (getattr(f, "vulnerability_type", None), _loc, sink_func)  # 文件级回退
+    # 文件级回退（spec 2026-08-26 §7/F1）：path 无路由前缀时（XSS 常态——
+    # http_route_label join miss），按 文件+sink 函数 折叠——同文件同函数不同行
+    # 是同一漏洞单元的多调用点（对齐 endpoint 分支的折叠粒度；含行号的 file:line
+    # 会让每行各成一组，15 条参数×行笛卡尔积链一条不折）。跨文件绝不合并。
+    sink_file = _sink_file(sink_call)
+    if sink_func and sink_file:
+        return (getattr(f, "vulnerability_type", None), sink_file, sink_func)
     return ("__strict__", id(f))
 
 def collapse_gn_entries(findings: list) -> list:

@@ -74,17 +74,20 @@ function makeSegmentSlugPlugin(segmentIndex: number) {
   };
 }
 
-/** 从「INJ-VULN-01/02/03」这类文本提取完整 vuln ID（展开 /02 /03，复用 prefix）。 */
+/** 从「INJ-VULN-01/02/03」这类文本提取完整 vuln ID（展开 /02 /03，复用完整 stem）。
+ *  ID 口径对齐 vuln-block 的 VULN_HEADING_RE/VULN_ID_RE（`<类前缀>(-<大写中段>)+-序号`）：
+ *  兼容双轨——LLM 轨 -VULN- 与 GitNexus 轨 -GN-/-GN-EXPLORE-/-GN-LOGIC-（XSS-GN-01、
+ *  AUTHZ-GN-EXPLORE-01 等）。旧正则只认 -VULN-，GN 卡进不了 topRiskIds 联动。 */
 export function extractVulnIds(text: string): string[] {
   const ids: string[] = [];
-  const re = /\b([A-Z]+)-VULN-(\d+)((?:\/\d+)*)/g;
+  const re = /\b([A-Z]+(?:-[A-Z]+)+)-(\d+)((?:\/\d+)*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const prefix = m[1];
-    ids.push(`${prefix}-VULN-${m[2]}`);
+    const stem = m[1];
+    ids.push(`${stem}-${m[2]}`);
     if (m[3]) {
       for (const slashNum of m[3].matchAll(/\/(\d+)/g)) {
-        ids.push(`${prefix}-VULN-${slashNum[1]}`);
+        ids.push(`${stem}-${slashNum[1]}`);
       }
     }
   }

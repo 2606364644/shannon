@@ -186,6 +186,10 @@ async def build_xss_findings(
             source_detail=verdict.evidence_chain,
             path=path,
             sink_function=_sink_function_label(chain.sink_call_site_id),
+            # spec 2026-08-26 §7 根因修复：回填 sink 全标识——gn_collapse _unit_key
+            # 凭它折叠 GN 单元（缺它 15 条参数×行笛卡尔积链一条不折），
+            # affected_entries[].sink_location 亦由它解析（对齐 injection_builder 先例）。
+            sink_call=chain.sink_call_site_id,
             render_context=_RENDER_CONTEXT.get(chain.render_context, "HTML_BODY"),
             encoding_observed=None,
             verdict=verdict.verdict,

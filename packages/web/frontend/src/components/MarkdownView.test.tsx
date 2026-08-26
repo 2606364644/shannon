@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import i18n from "@/i18n";
-import { MarkdownView } from "./MarkdownView";
+import { MarkdownView, extractVulnIds } from "./MarkdownView";
 
 // 真实报告结构镜像（参考 NodeGoat comprehensive_security_assessment_report.md）：
 // - H1 报告标题
@@ -445,6 +445,35 @@ body.
     expect(firstAnchor?.textContent).toMatch(/INJ-VULN-01/);
   });
 
+  it("执行摘要 hero 的 GN 漏洞 ID 也提锚链接（GitNexus 轨 -GN- 进 topRiskIds 联动）", () => {
+    const md = [
+      "# 安全评估报告",
+      "",
+      "## 执行摘要",
+      "",
+      "1. **存储型 XSS**（XSS-GN-01）：profile 投毒",
+      "2. **垂直越权**（AUTHZ-GN-EXPLORE-01）：userId 越权",
+      "",
+      "## XSS",
+      "",
+      "### XSS-GN-01: 存储型 XSS",
+      "- **vulnerability_type:** Stored XSS",
+      "",
+      "## Authz",
+      "",
+      "### AUTHZ-GN-EXPLORE-01: 垂直越权",
+      "- **vulnerability_type:** Vertical",
+    ].join("\n");
+    const { container } = render(<MarkdownView markdown={md} />);
+    const hero = container.querySelector('[data-testid="exec-summary-hero"]');
+    expect(hero).not.toBeNull();
+    const hrefs = Array.from(hero?.querySelectorAll("a[href^='#']") ?? []).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("#XSS-GN-01");
+    expect(hrefs).toContain("#AUTHZ-GN-EXPLORE-01");
+  });
+
   it("无执行摘要时不渲染 hero（不写死结构）", () => {
     const { container } = render(<MarkdownView markdown={"# 报告\n\n正文"} />);
     expect(container.querySelector('[data-testid="exec-summary-hero"]')).toBeNull();
@@ -466,6 +495,37 @@ body.
     expect(container.querySelector("table")).not.toBeNull();
     expect(container.querySelectorAll("th").length).toBeGreaterThanOrEqual(2);
     expect(container.querySelectorAll("td").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("extractVulnIds（双轨 ID 口径，与 vuln-block VULN_HEADING_RE/VULN_ID_RE 对齐）", () => {
+  it("LLM 轨 -VULN-：单 ID + /NN 展开（回归守卫）", () => {
+    expect(extractVulnIds("**RCE**（INJ-VULN-01）：eval")).toEqual(["INJ-VULN-01"]);
+    expect(extractVulnIds("**注入**（INJ-VULN-01/02/03）")).toEqual([
+      "INJ-VULN-01",
+      "INJ-VULN-02",
+      "INJ-VULN-03",
+    ]);
+  });
+
+  it("GitNexus 轨 -GN-：XSS-GN-01 / XSS-GN-13 / 多段 AUTHZ-GN-EXPLORE-01、AUTH-GN-LOGIC-01", () => {
+    expect(extractVulnIds("**XSS**（XSS-GN-01）：反射")).toEqual(["XSS-GN-01"]);
+    expect(extractVulnIds("**XSS**（XSS-GN-13）")).toEqual(["XSS-GN-13"]);
+    expect(extractVulnIds("**越权**（AUTHZ-GN-EXPLORE-01）")).toEqual(["AUTHZ-GN-EXPLORE-01"]);
+    expect(extractVulnIds("**认证**（AUTH-GN-LOGIC-01）")).toEqual(["AUTH-GN-LOGIC-01"]);
+  });
+
+  it("GN /NN 展开复用完整 stem（含 -GN-EXPLORE 中段）", () => {
+    expect(extractVulnIds("（XSS-GN-01/03）")).toEqual(["XSS-GN-01", "XSS-GN-03"]);
+    expect(extractVulnIds("（AUTHZ-GN-EXPLORE-01/02）")).toEqual([
+      "AUTHZ-GN-EXPLORE-01",
+      "AUTHZ-GN-EXPLORE-02",
+    ]);
+  });
+
+  it("非漏洞 ID 形态不误报——对齐 VULN_ID_RE（须有 -<大写中段>-）", () => {
+    expect(extractVulnIds("INJ-01")).toEqual([]);
+    expect(extractVulnIds("llm-chain-1 是攻击链，非漏洞 ID")).toEqual([]);
   });
 });
 

@@ -1,5 +1,12 @@
 <output_language>
-全部叙述性、描述性文字用简体中文撰写——包括漏洞队列(exploitation_queue)中每个漏洞的 title(标题)字段:漏洞标题用简体中文撰写,仅漏洞类型、参数名、路径、端点保留英文(如"反射型 XSS:搜索参数 q → /search innerHTML"、"IDOR:DELETE /api/Feedbacks/:id 缺少归属校验")。以下技术标识必须保留英文原文,不得翻译:
+全部叙述性、描述性文字用简体中文撰写，覆盖以下全部产物（黑盒实证：只管标题会导致正文整段英文）：
+
+1. 漏洞队列(exploitation_queue)每个漏洞的全部叙述字段：title(标题)、notes、impact(危害)、remediation(修复建议)、mismatch_reason、sanitization_observed、concat_occurrences、missing_defense 等。漏洞标题用简体中文撰写，仅漏洞类型、参数名、路径、端点保留英文（如"反射型 XSS：搜索参数 q → /search innerHTML"、"IDOR：DELETE /api/Feedbacks/:id 缺少归属校验"）。不要只写 'SQLi' 这种裸标签。
+2. 数据流步骤 dataflow_steps 每步的 label：描述性部分用简体中文（如"读取请求体参数并传入渲染"），函数名/调用点/文件名保留英文。
+3. add_exploit 工具调用的全部叙述参数：impact(影响)、exploitation_steps(利用步骤)、proof_of_impact(影响证据)、current_blocker(当前阻碍)、what_we_tried(已尝试)、evidence_of_vulnerability(漏洞证据)、expected_impact(预期影响)、downgrade_reason(降级原因)、reason(原因)、evidence(证据)——利用报告正文由这些参数渲染，必须与标题同语言。
+4. 各交付文件（*_analysis_deliverable.md、*_exploitation_evidence.md 等）的正文叙述段落。
+
+以下技术标识必须保留英文原文，不得翻译：
 - 漏洞编号(如 AUTH-VULN-01、INJ-VULN-02)
 - 代码、命令、文件路径与行号(如 server/app/controller/image.js:102)
 - HTTP 方法与状态码(如 GET /api/fileProxyGet、HTTP 302)

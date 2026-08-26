@@ -1,11 +1,28 @@
 <output_language>
-Write all narrative and descriptive prose in English — including the `title` field of each
-vulnerability in the exploitation queue: write every vulnerability title in English (e.g.,
-"Reflected XSS: search param q → /search innerHTML"). The following technical identifiers
-MUST be kept in their original form, never translated:
-- Vulnerability IDs (e.g. AUTH-VULN-01, INJ-VULN-02)
-- Code, commands, file paths and line numbers (e.g. server/app/controller/image.js:102)
-- HTTP methods and status codes (e.g. GET /api/fileProxyGet, HTTP 302)
+Write all narrative and descriptive prose in English, covering ALL of the following
+outputs (blackbox evidence: instructing only the title leaves body prose in another
+language mixed into the report):
+
+1. Every narrative field of each vulnerability in the exploitation queue: title,
+   notes, impact, remediation, mismatch_reason, sanitization_observed,
+   concat_occurrences, missing_defense, etc. Write every vulnerability title in
+   English (e.g., "Reflected XSS: search param q → /search innerHTML"). Never use
+   a bare label like 'SQLi' as the whole title.
+2. The label of each dataflow_steps entry: descriptive parts in English (e.g.,
+   "reads body param and passes it to render"); function names / call sites /
+   file names stay as code identifiers.
+3. Every narrative argument of your add_exploit tool calls: impact,
+   exploitation_steps, proof_of_impact, current_blocker, what_we_tried,
+   evidence_of_vulnerability, expected_impact, downgrade_reason, reason, evidence —
+   the exploitation report body is rendered from these arguments and must match
+   the title's language.
+4. The narrative prose of every deliverable file (*_analysis_deliverable.md,
+   *_exploitation_evidence.md, etc.).
+
+The following technical identifiers MUST be kept in their original form, never translated:
+- Vulnerability IDs (e.g., AUTH-VULN-01, INJ-VULN-02)
+- Code, commands, file paths and line numbers (e.g., server/app/controller/image.js:102)
+- HTTP methods and status codes (e.g., GET /api/fileProxyGet, HTTP 302)
 - URLs, header names, JSON field names, cookie names
 - Technical acronyms (SSRF, SSTI, XSS, CSRF, RBAC, HSTS, IDOR, OAuth, JWT, PKCE)
 

@@ -28,7 +28,7 @@ from supernova_core.logging.log_bus import LogBus
 from supernova_core.agents.executor import AgentExecutor
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.recon_context_summarizer import summarize_recon_context
-from supernova_core.config.concurrency import is_gitnexus_llm_enabled
+from supernova_core.config.concurrency import gn_enrich_mode, is_gitnexus_llm_enabled
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
 from supernova_whitebox.audit.session import AuditSession
@@ -973,6 +973,13 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 elif not gitnexus_findings:
                     continue  # both tracks empty
 
+                # LLM 轨同接口多参数归并（数据层，2026-08-26 用户口径：多参数
+                # 不拆卡、多接口才拆卡）：SSOT 落盘前归并——黑盒 add_exploit per
+                # queue ID → evidence 1 卡，白盒渲染/速查表读同一 SSOT 自动跟随。
+                # 仅 taint 三类（auth/authz missing-control 每条独立漏洞不归并）。
+                from supernova_core.code_index.llm_collapse import collapse_llm_entries
+                llm_findings = collapse_llm_entries(llm_findings, vuln_class)
+
                 merged = merge_dual_track_queues(
                     llm_findings,
                     gitnexus_findings,
@@ -982,22 +989,31 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 # 由轻量 LLM 配对归并（仅 high 应用），剩余 GN-only 卡补全叙事/评级
                 # 字段——两轨卡片字段同构。LLM 不可用优雅退化（enhance 内部捕获，
                 # 维持确定性 merge 结果），报告管线不因增强层阻塞。
+                # 开关 SUPERNOVA_GN_ENRICH_MODE（独立于 SUPERNOVA_GITNEXUS_LLM_ENABLED，
+                # 2026-08-26 用户口径「判定关省 token、双轨一致性层开」）：off 全跳；
+                # light 配对+merge 内轻量补全；deep（默认）只配对——轻量补全让位给
+                # 独立深度富化 step（run_gn_finding_enrichment，多轮读码产全字段），
+                # 避免同卡双重 LLM 花费。
                 both_before = sum(
                     1 for f in merged if f.merge_source == "both")
-                try:
-                    from supernova_core.services.track_parity import (
-                        enhance_track_parity,
-                    )
-                    _parity_client = _make_verdict_llm_client(
-                        str(repo) if repo else "",
-                        provider_config=getattr(input, "provider_config", None),
-                    )
-                    merged = await enhance_track_parity(
-                        merged, vuln_class, _parity_client)
-                except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
-                    logger.warning(
-                        "track-parity skipped for %s (client setup failed): %s",
-                        vuln_class, exc)
+                _enrich_mode = gn_enrich_mode()
+                if _enrich_mode != "off":
+                    try:
+                        from supernova_core.services.track_parity import (
+                            enhance_track_parity,
+                        )
+                        _parity_client = _make_track_parity_client(
+                            str(repo) if repo else "",
+                            provider_config=getattr(input, "provider_config", None),
+                        )
+                        merged = await enhance_track_parity(
+                            merged, vuln_class, _parity_client,
+                            complete=(_enrich_mode == "light"),
+                        )
+                    except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
+                        logger.warning(
+                            "track-parity skipped for %s (client setup failed): %s",
+                            vuln_class, exc)
                 parity_paired = sum(
                     1 for f in merged if f.merge_source == "both") - both_before
                 # 合并版写回 intermediate/（SSOT；下游 resolve_intermediate 优先读到合并版）
@@ -1041,6 +1057,195 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
     except Exception as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+
+
+# GN-only 深度富化可回填字段（spec 2026-08-26 §6.2 deep 档）：原值为空/占位时写。
+# 保护字段（externally_exploitable/verdict/flow_id/merge_source/source_track/
+# affected_entries/sanitizer_annotations/ID）归确定性层与合并器，绝不覆写。
+_ENRICHABLE_FIELDS = (
+    "title", "notes", "severity", "impact", "remediation", "cwe_id", "cvss",
+    "owasp_category", "witness_payload", "mismatch_reason", "path",
+    "source_detail", "sink_function", "encoding_observed", "accessible_routes",
+    "authentication_required", "dataflow_steps", "endpoints",
+    "affected_parameters",
+)
+# chain-verdict 降级占位前缀（LLM 关/失败时的 fallback 文案）——富化输出可替换。
+_DEGRADED_PREFIXES = ("llm chain-verdict pass",)
+# chain_verdict._fallback_title 的确定性形态（"{vuln_class}：{src} → {sink}"）——
+# 非叙事标题，富化输出可替换（叙事 title 永不以裸类名+冒号/via 开头）。
+import re as _re
+_FALLBACK_TITLE_RE = _re.compile(r"^(xss|injection|ssrf)(：|: | via )", _re.IGNORECASE)
+
+
+def _render_gn_only_candidates(findings: list) -> str:
+    """GN-only 条目渲染成富化 prompt 的候选 markdown（确定性事实，无叙事）。"""
+    lines: list[str] = []
+    for f in findings:
+        entries = getattr(f, "affected_entries", None) or []
+        entry_rows = "\n".join(
+            f"  - param={e.get('parameter')} sink_location={e.get('sink_location')}"
+            for e in entries if isinstance(e, dict)) or "  (none)"
+        lines.append(
+            f"- ID: {f.ID}\n"
+            f"  class: {getattr(f, 'vulnerability_type', None)}\n"
+            f"  source: {getattr(f, 'source', None)}\n"
+            f"  sink_call: {getattr(f, 'sink_call', None) or getattr(f, 'sink_function', None)}\n"
+            f"  flow_id: {getattr(f, 'flow_id', None)}\n"
+            f"  path: {getattr(f, 'path', None)}\n"
+            f"  render_context: {getattr(f, 'render_context', None)}\n"
+            f"  evidence_chain: {getattr(f, 'evidence_chain', None)}\n"
+            f"  affected_entries:\n{entry_rows}"
+        )
+    return "\n".join(lines) or "(none)"
+
+
+def _apply_gn_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
+    """富化 agent 输出按 ID 回填进 findings（原地）。
+
+    宽松解析：structured_output dict / JSON 文本皆可；逐条按 ID 匹配，白名单
+    字段仅原值为 None/空/降级占位时写入。返回 (回填条数, warnings)。
+    """
+    warnings: list[str] = []
+    data: object = raw
+    if isinstance(data, str):
+        try:
+            import json as _json
+            data = _json.loads(data)
+        except (ValueError, TypeError):
+            return 0, [f"gn-enrichment: unparseable output ({len(raw)} chars)"]
+    if not isinstance(data, dict):
+        return 0, ["gn-enrichment: output not a JSON object"]
+    entries = data.get("vulnerabilities")
+    if not isinstance(entries, list):
+        return 0, ["gn-enrichment: no vulnerabilities array"]
+    by_id = {f.ID: f for f in findings}
+    enriched = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        eid = str(entry.get("ID") or "")
+        target = by_id.get(eid)
+        if target is None:
+            warnings.append(f"gn-enrichment: unknown ID {eid!r} skipped")
+            continue
+        data_f = target.model_dump()
+        touched = False
+        for field in _ENRICHABLE_FIELDS:
+            new = entry.get(field)
+            if new is None or (isinstance(new, str) and not new.strip()):
+                continue
+            if field == "dataflow_steps" and not isinstance(new, list):
+                continue
+            old = data_f.get(field)
+            is_degraded = (isinstance(old, str)
+                           and any(old.strip().lower().startswith(p)
+                                   for p in _DEGRADED_PREFIXES))
+            replaceable = old in (None, "", []) or is_degraded
+            if field == "title" and isinstance(old, str) and old.strip():
+                replaceable = replaceable or bool(_FALLBACK_TITLE_RE.match(old.strip()))
+            if replaceable:
+                data_f[field] = new
+                touched = True
+        if touched:
+            findings[findings.index(target)] = type(target).model_validate(data_f)
+            enriched += 1
+    if not enriched and entries:
+        warnings.append("gn-enrichment: 0 findings enriched (all IDs unknown or no new fields)")
+    return enriched, warnings
+
+
+@activity.defn
+async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
+    """GN-only 深度富化（spec 2026-08-26 §6.2 deep 档，用户口径 2026-08-26：
+    轻量单次升级为深度多轮——agent 自己 grep/read 追链，产 dataflow_steps/
+    witness_payload 全字段，卡片与 LLM 轨同构）。
+
+    位置：merge（run_merge_dual_track_queues，含 track-parity 配对）之后、
+    render_findings 之前；读合并后 SSOT {vc}_exploitation_queue.json，过滤
+    merge_source=="gitnexus-only" 的 taint 三类条目（authz 深判已有叙事；
+    auth 无 GN 轨），逐 class 一次 run_gitnexus_verdict_agent 多轮富化，
+    按 ID 回填写回同一 SSOT。
+
+    开关：SUPERNOVA_GN_ENRICH_MODE（concurrency.gn_enrich_mode）——仅 "deep"
+    档执行（off/light 跳过：light 已由 merge 内轻量补全承担）；独立于
+    SUPERNOVA_GITNEXUS_LLM_ENABLED（判定关省 token 时富化照常）。失败降级
+    为不富化（保留确定性字段），由 workflow 层 non-fatal 包裹。
+    """
+    from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等)
+    mode = gn_enrich_mode()
+    if mode != "deep":
+        return {"skipped": mode, "enriched_classes": {}, "total_enriched": 0}
+    repo, deliverables, _ = _get_paths(input)
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+
+    prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+    max_turns = int(os.getenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", "30"))
+    enriched_classes: dict[str, dict] = {}
+    total_enriched = 0
+    async with get_audit_session().track_step(
+            "vulnerability-analysis", "gn-finding-enrichment",
+            intent=intent_for("gn-finding-enrichment")):
+        for vuln_class in ("injection", "xss", "ssrf"):
+            queue_path = resolve_intermediate(
+                deliverables, f"{vuln_class}_exploitation_queue.json")
+            if queue_path is None or not queue_path.exists():
+                continue
+            parsed = VulnerabilityQueue.parse_lenient(
+                queue_path.read_text(encoding="utf-8"))
+            findings = list(parsed.queue.vulnerabilities)
+            gn_only = [f for f in findings
+                       if getattr(f, "merge_source", None) == "gitnexus-only"
+                       and getattr(f, "source_track", None) == "gitnexus"]
+            if not gn_only:
+                continue
+            prompt = prompt_manager.load_sync(
+                "gn_finding_enrichment",
+                variables={
+                    "gn_only_candidates": _render_gn_only_candidates(gn_only),
+                },
+            )
+            try:
+                result = await run_gitnexus_verdict_agent(
+                    prompt=prompt,
+                    repo_path=str(repo),
+                    structured_output_schema={
+                        "type": "object",
+                        "properties": {
+                            "vulnerabilities": {"type": "array"},
+                        },
+                    },
+                    audit_session=get_audit_session(),
+                    provider_config=input.provider_config,   # P3c 阶段 1
+                    max_turns=max_turns,
+                )
+            except Exception as exc:  # noqa: BLE001 — 富化失败不阻塞报告
+                logger.warning(
+                    "gn-finding-enrichment: %s agent failed (keep deterministic "
+                    "fields): %s", vuln_class, exc)
+                enriched_classes[vuln_class] = {
+                    "candidates": len(gn_only), "enriched": 0,
+                    "failed": str(exc)[:200]}
+                continue
+            raw = result.structured_output
+            if raw is None and result.text:
+                raw = result.text
+            enriched, warnings = _apply_gn_enrichment(findings, raw)
+            for w in warnings:
+                logger.warning("%s (%s)", w, vuln_class)
+            atomic_write_json(
+                queue_path,
+                {"vulnerabilities": [f.model_dump() for f in findings]},
+            )
+            enriched_classes[vuln_class] = {
+                "candidates": len(gn_only), "enriched": enriched}
+            total_enriched += enriched
+            logger.info(
+                "gn-finding-enrichment: %s %d/%d GN-only cards enriched",
+                vuln_class, enriched, len(gn_only))
+    return {"skipped": None, "enriched_classes": enriched_classes,
+            "total_enriched": total_enriched}
 
 
 @activity.defn
@@ -1381,6 +1586,30 @@ def _make_verdict_llm_client(repo_path: str, provider_config: dict | None = None
     return _client
 
 
+def _make_track_parity_client(repo_path: str, provider_config: dict | None = None):
+    """track-parity（配对归并/轻量补全，spec 2026-08-26 §6）专用单次结构化 client。
+
+    与 _make_verdict_llm_client 的差别在开关语义：**不受 SUPERNOVA_GITNEXUS_LLM_ENABLED
+    门控**——用户关 chain-verdict 判定省 token 时（2026-08-26 用户口径：判定关、
+    双轨一致性层开），本层仍由 SUPERNOVA_GN_ENRICH_MODE（concurrency.gn_enrich_mode）
+    独立控制（off 时调用方根本不建 client）。实现同真分支：output_format 透传
+    run_claude_prompt 单次结构化输出，structured_output 优先。"""
+    from supernova_core.agents.runner import run_claude_prompt
+
+    async def _client(prompt: str, **kwargs) -> str:
+        result = await run_claude_prompt(
+            prompt=prompt, repo_path=repo_path, model_tier="medium",
+            structured_output_schema=kwargs.get("output_format"),
+            provider_config=provider_config,
+        )
+        so = result.structured_output
+        if so is not None:
+            import json as _json
+            return _json.dumps(so)
+        return result.text
+    return _client
+
+
 async def run_gitnexus_verdict_agent(
     *,
     prompt: str,
@@ -1388,11 +1617,14 @@ async def run_gitnexus_verdict_agent(
     structured_output_schema: dict | None = None,
     audit_session: "AuditSession | None" = None,
     provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
+    max_turns: int | None = None,
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
-    max_turns 走 SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。返回完整 ClaudeRunResult
-    （含 turns/cost/structured_output），不截断为 str——区别于 _make_verdict_llm_client 的单次薄包装。
+    max_turns 显式参数优先；None 走 SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。
+    返回完整 ClaudeRunResult（含 turns/cost/structured_output），不截断为 str——区别于
+    _make_verdict_llm_client 的单次薄包装。GN-only 深度富化（run_gn_finding_enrichment）
+    传 SUPERNOVA_GN_ENRICH_MAX_TURNS 走此参数，不污染 authz 深判的 env。
 
     audit_session 非 None 时构造 SessionToolAuditLogger（对齐 run_agent :167/183/198），多轮
     grep/read 工具调用经逐轮审计；为 None 时 tool_audit_logger=None（行为同前，向后兼容）。
@@ -1417,7 +1649,8 @@ async def run_gitnexus_verdict_agent(
             prompt=prompt,
             repo_path=repo_path,
             model_tier="medium",
-            max_turns=int(os.getenv("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", "30")),
+            max_turns=(max_turns if max_turns is not None else
+                       int(os.getenv("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", "30"))),
             structured_output_schema=structured_output_schema,
             tool_audit_logger=tool_audit_logger,
             provider_config=provider_config,   # P3c 阶段 1
