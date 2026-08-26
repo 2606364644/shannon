@@ -169,13 +169,22 @@ def test_workflow_run_resolves_vuln_classes_via_select_function():
 
 
 def test_assemble_report_reads_vuln_classes_from_input():
-    """assemble_report 应从 input.vuln_classes 读（默认 ALL），不再硬编码。"""
+    """assemble_report 应从 input.vuln_classes 读（默认 ALL），不再硬编码。
+
+    单源化（spec 2026-08-26-report-single-source-rendering §3）后选中类过滤
+    移入 _build_report_data_initial（rd 组装时过滤 + stats 重算）；assemble_report
+    经该 helper 兑现契约。"""
     import inspect
 
-    from supernova_whitebox.pipeline.activities import assemble_report
+    from supernova_whitebox.pipeline.activities import (
+        _build_report_data_initial, assemble_report,
+    )
 
-    src = inspect.getsource(assemble_report)
-    assert "input.vuln_classes" in src, "assemble_report 必须读 input.vuln_classes"
+    src = inspect.getsource(_build_report_data_initial)
+    assert "input.vuln_classes" in src, "rd 组装必须读 input.vuln_classes"
+    assert "_build_report_data_initial(input" in inspect.getsource(assemble_report), (
+        "assemble_report 必须经 _build_report_data_initial 兑现选中类契约"
+    )
 
 
 def test_activity_input_has_vuln_classes_field():

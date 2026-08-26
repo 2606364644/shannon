@@ -51,13 +51,10 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
         StepSpec("attack-chain-assembly", "组装攻击链"),
     ),
     "reporting": (
-        StepSpec("write-structured-poc", "结构化 POC 写回(render_findings 前,md 卡原生 POC 节)"),
-        StepSpec("render-findings",   "渲染漏洞条目(若存在队列)"),
-        StepSpec("assemble-report",   "拼接各分项报告"),
-        StepSpec("run-report-agent",  "撰写执行摘要并清理报告"),
-        StepSpec("verify-report-vuln-blocks", "漏洞节覆盖校验+自愈(report-executive 之后,防丢节)"),
-        StepSpec("inject-attack-chains", "注入攻击链章节(report-executive 之后,防覆盖)"),
-        StepSpec("inject-gitnexus-track-status", "GitNexus 轨 fail-fast 状态注记(report-executive 之后,防覆盖)"),
+        StepSpec("write-structured-poc", "结构化 POC 写回(queue SSOT,卡片原生 POC 节)"),
+        StepSpec("assemble-report",   "组装 report_data.json 初版(单源 SSOT)+分项 findings 单点渲染"),
+        StepSpec("report-polish",     "report_data 终版(执行摘要+QA 七节覆盖率+回炉)"),
+        StepSpec("export-report-markdown", "report_data 确定性导出 comprehensive md+PoC 集(含同构校验)"),
     ),
 }
 

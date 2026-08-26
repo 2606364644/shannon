@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+import pytest
+
 import supernova_whitebox.pipeline.activities as act
 from supernova_whitebox.pipeline.shared import ActivityInput
 from supernova_whitebox.audit.session_registry import (
@@ -25,11 +27,23 @@ class _RecordingSession:
         await self.log_step(name, phase, "complete")
 
 
-async def test_assemble_report_writes_comprehensive_report(tmp_path, monkeypatch):
+async def test_assemble_report_writes_rd_and_findings_not_md(tmp_path, monkeypatch):
+    """spec 2026-08-26-report-single-source-rendering §3：assemble 产
+    report_data.json（根交付物）+ 分项 findings.md（从 rd 单点渲染）；
+    不再产 comprehensive md（移至 export activity）。"""
+    import json
+
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
-    (deliverables / "auth_analysis_deliverable.md").write_text(
-        "# 认证分析报告\nAUTH-VULN-01", encoding="utf-8")
+    (deliverables / "intermediate").mkdir()
+    (deliverables / "intermediate" / "xss_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{
+            "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+            "externally_exploitable": True, "confidence": "high",
+            "severity": "high", "title": "存储型 XSS：POST /memos",
+            "report_poc": {"curl": "curl -X POST http://t/memos",
+                           "request": {"method": "POST", "url": "http://t/memos"}},
+        }]}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))
 
     rec = _RecordingSession()
@@ -39,9 +53,16 @@ async def test_assemble_report_writes_comprehensive_report(tmp_path, monkeypatch
     finally:
         clear_audit_session()
 
-    report = deliverables / "comprehensive_security_assessment_report.md"
-    assert report.exists()
-    assert "认证分析报告" in report.read_text(encoding="utf-8")
+    # rd.json：根交付物（单源 SSOT）
+    data = json.loads(
+        (deliverables / "report_data.json").read_text(encoding="utf-8"))
+    assert data["vulnerabilities"][0]["id"] == "XSS-VULN-01"
+    # findings.md：从 rd 单点渲染（同一渲染函数，含卡与 POC 节）
+    findings = (deliverables / "xss_findings.md").read_text(encoding="utf-8")
+    assert "### XSS-VULN-01" in findings
+    assert "```bash" in findings  # POC 写回已在 queue → 卡原生 POC 节
+    # comprehensive md 不再由 assemble 产
+    assert not (deliverables / "comprehensive_security_assessment_report.md").exists()
     events = [(n, e) for (n, _ph, e) in rec.steps]
     assert ("assemble-report", "start") in events
     assert ("assemble-report", "complete") in events
@@ -115,14 +136,20 @@ async def test_inject_attack_chains_noop_when_missing(tmp_path, monkeypatch) -> 
 
 
 async def test_assemble_report_no_longer_appends_attack_chains(tmp_path, monkeypatch) -> None:
-    """assemble_report 移除了攻击链追加；攻击链章节由 inject_attack_chains 负责。"""
+    """assemble 不产 comprehensive md——攻击链由 export activity 从 rd.attack_chains
+    渲染（spec §3 退役清单：inject_attack_chains md 注入退役）。"""
     from supernova_whitebox.pipeline import activities
     import json
 
     deliverables = tmp_path / "whitebox"
     deliverables.mkdir()
-    (deliverables / "auth_findings.md").write_text(
-        "## Authentication Vulnerabilities\n\n### AUTH-VULN-01\n", encoding="utf-8")
+    (deliverables / "intermediate").mkdir()
+    (deliverables / "intermediate" / "auth_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [{
+            "ID": "AUTH-VULN-01", "vulnerability_type": "Auth",
+            "externally_exploitable": True, "confidence": "high",
+            "severity": "medium", "title": "t",
+        }]}), encoding="utf-8")
     (deliverables / "attack_chains.json").write_text(
         json.dumps({"chains": [{"id": "llm-chain-1", "name": "n"}]}), encoding="utf-8",
     )
@@ -135,8 +162,8 @@ async def test_assemble_report_no_longer_appends_attack_chains(tmp_path, monkeyp
     finally:
         clear_audit_session()
 
-    report = (deliverables / "comprehensive_security_assessment_report.md").read_text(encoding="utf-8")
-    assert "## 攻击链" not in report  # assemble 不再碰攻击链
+    # assemble 阶段不产任何 comprehensive md（攻击链章节亦无从注入）
+    assert not (deliverables / "comprehensive_security_assessment_report.md").exists()
 
 
 async def test_render_attack_chains_zh_labels(tmp_path):
@@ -210,8 +237,8 @@ async def test_inject_model_info_en_anchor(tmp_path, monkeypatch):
 
 
 async def test_assemble_report_writes_report_data(tmp_path, monkeypatch):
-    """T1（spec 2026-08-26-report-generation-agent §3）：assemble 之后产
-    report_data.json（SSOT）——与 comprehensive md 同目录；non-fatal。"""
+    """T1（spec 2026-08-26-report-generation-agent §3）：assemble 产
+    report_data.json（SSOT）——单源化后是根交付物（md/前端都吃它）。"""
     import json
 
     deliverables = tmp_path / "deliverables" / "whitebox"
@@ -238,18 +265,15 @@ async def test_assemble_report_writes_report_data(tmp_path, monkeypatch):
     assert data["schema_version"] == 1
     assert data["vulnerabilities"][0]["id"] == "XSS-VULN-01"
     assert data["stats"]["by_type"]["xss"]["count"] == 1
-    # md 主链路不受影响
-    assert (deliverables / "comprehensive_security_assessment_report.md").exists()
 
 
-async def test_assemble_report_report_data_nonfatal(tmp_path, monkeypatch):
-    """report_data 组装失败不阻塞 md 主链路（每步独立降级铁律）。"""
+async def test_assemble_report_report_data_failure_is_fatal(tmp_path, monkeypatch):
+    """单源化语义翻转（spec §3）：rd.json 是根交付物——组装失败 fatal
+    （md/前端都吃它，失败=部署问题显式暴露；不再是「md 主链路 non-fatal」）。"""
     import supernova_core.services.report_data_builder as builder
 
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
-    (deliverables / "auth_analysis_deliverable.md").write_text(
-        "# 认证分析报告\nAUTH-VULN-01", encoding="utf-8")
     monkeypatch.setattr(act, "_get_paths", lambda inp: (tmp_path, deliverables, tmp_path))
 
     async def _boom(*a, **kw):
@@ -259,9 +283,9 @@ async def test_assemble_report_report_data_nonfatal(tmp_path, monkeypatch):
     rec = _RecordingSession()
     set_audit_session(rec)
     try:
-        await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
+        with pytest.raises(Exception):
+            await act.assemble_report(ActivityInput(repo_path=str(tmp_path)))
     finally:
         clear_audit_session()
 
-    assert (deliverables / "comprehensive_security_assessment_report.md").exists()
     assert not (deliverables / "report_data.json").exists()

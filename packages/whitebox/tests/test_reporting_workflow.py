@@ -1,8 +1,15 @@
-"""reporting phase 接入断言。
+"""reporting phase 接入断言（spec 2026-08-26-report-single-source-rendering §3）。
 
 reporting 真实执行依赖 temporalio worker + LLM,无法在 CI 单元测试;
-此处用静态分析断言 workflow 串起了 render_findings → assemble_report →
-run_agent(REPORT),行为正确性靠人工冒烟(Task 7 / spec §6.4)。
+此处用静态分析断言 workflow 串起新时序:
+
+    write_structured_poc → assemble_report（rd 初版+分项单点渲染,不产 md）
+    → run_report_polish（摘要+QA 七节覆盖率+回炉）
+    → export_report_markdown_files（rd → comprehensive md + poc_collection）
+
+md 链路旧步骤（render_findings / run_agent(report) / verify_report_vuln_blocks /
+inject_attack_chains / inject_gitnexus_track_status / generate_poc_report）
+退役——md 改由 export activity 从 report_data 确定性导出（单源）。
 """
 from pathlib import Path
 
@@ -12,84 +19,74 @@ def _workflow_src() -> str:
     return p.read_text(encoding="utf-8")
 
 
+# 退役步骤的源码锚点（可执行调用字面量，非注释）
+_RETIRED_MARKERS = (
+    "activities.render_findings",
+    '"agent_name": "report"',
+    "activities.verify_report_vuln_blocks",
+    "activities.inject_attack_chains",
+    "activities.inject_gitnexus_track_status",
+    "activities.generate_poc_report",
+)
+
+
 def test_reporting_phase_calls_assemble_report():
     src = _workflow_src()
     assert "activities.assemble_report" in src, "reporting phase 须调 assemble_report"
 
 
-def test_reporting_phase_runs_report_agent():
+def test_reporting_phase_calls_polish_and_export():
     src = _workflow_src()
-    # run_agent 以 agent_name="report" 调用,跑 REPORT agent 生成执行摘要。
-    # workflows.py 既有的 agent_name 覆写约定是 dict-spread:
-    #   ActivityInput(**{**act_input.__dict__, "agent_name": "<name>"})
-    # (见 pre-recon/recon 等阶段),因此这里匹配该字面量形式。
-    assert '"agent_name": "report"' in src, (
-        "reporting phase 须以 agent_name=report 调 run_agent 跑 REPORT agent"
+    assert "activities.run_report_polish" in src
+    assert "activities.export_report_markdown_files" in src, (
+        "reporting phase 须调 export_report_markdown_files（md 单源导出）"
     )
 
 
-def test_reporting_phase_order_assemble_before_report():
+def test_reporting_phase_export_after_polish():
+    """export 吃 polish 后的终版 rd——顺序硬约束。"""
     src = _workflow_src()
+    i_polish = src.find("activities.run_report_polish")
+    assert i_polish != -1
+    assert src.find("activities.export_report_markdown_files", i_polish) != -1, (
+        "export_report_markdown_files 必须在 run_report_polish 之后（吃终版 report_data）"
+    )
+
+
+def test_reporting_phase_write_structured_poc_before_assemble():
+    src = _workflow_src()
+    i_poc = src.find("activities.write_structured_poc")
     i_assemble = src.find("activities.assemble_report")
-    # REPORT agent 调用(agent_name="report" 字面量)必须在 assemble_report 之后;
-    # 锚定可执行代码字面量,避免匹配到注释里的 "report" 字样。
-    assert i_assemble != -1
-    assert src.find('"agent_name": "report"', i_assemble) != -1, (
-        "run_agent(agent_name=report) 必须在 assemble_report 之后"
-    )
+    assert i_poc != -1 and i_assemble != -1
+    assert i_poc < i_assemble, "write_structured_poc 必须先于 assemble_report"
 
 
-def test_reporting_phase_has_inject_attack_chains_after_run_report_agent() -> None:
-    """攻击链注入必须在 run-report-agent 之后（顺序硬约束，防覆盖回归）。"""
-    from supernova_whitebox.pipeline.step_intents import step_names
-    steps = step_names("reporting")
-    assert "inject-attack-chains" in steps
-    assert steps.index("inject-attack-chains") > steps.index("run-report-agent")
-
-
-def test_reporting_phase_inject_attack_chains_after_report_agent_in_workflow() -> None:
-    """源码级硬约束：workflows.py 里 inject_attack_chains 必须在 run-report-agent 之后调用（防覆盖回归）。
-
-    step_intents 注册表只保证 *意图* 顺序；若有人删掉 workflows.py 里
-    `await workflow.execute_activity(activities.inject_attack_chains, …)` 调用但保留
-    step_intents 条目，上面的注册表测试仍会通过，覆盖回归会再次发生。本测试直接
-    扫源码，镜像 sibling `test_reporting_phase_order_assemble_before_report` 的
-    `_workflow_src()` + `.find()` 链式模式，锚定可执行代码字面量。
-    """
+def test_reporting_phase_retired_md_activities_not_scheduled():
     src = _workflow_src()
-    # 锚定 run-report-agent 对应的 execute_activity 调用（agent_name="report" 字面量，
-    # 与 sibling 测试同款锚点；不匹配注释里的 "report" 字样）。
-    i_report = src.find('"agent_name": "report"')
-    assert i_report != -1, "找不到 run-report-agent 调用（agent_name=report 字面量）"
-    assert src.find("activities.inject_attack_chains", i_report) != -1, (
-        "inject_attack_chains 必须在 run-report-agent 之后执行（防 report-executive 覆盖攻击链章节）"
-    )
+    for marker in _RETIRED_MARKERS:
+        assert marker not in src, f"退役 md 链路步骤仍被调度: {marker}"
 
 
-def test_reporting_phase_verify_blocks_after_report_agent() -> None:
-    """漏洞节覆盖校验必须在 run-report-agent 之后（注册表顺序）。
-
-    report-executive 的自写脚本压缩回归(2026-08-19)防线:节数不足自愈重建,
-    必须在 agent 覆盖报告之后校验、在 inject_attack_chains 注入之前重建
-    (否则重建会丢掉后续注入的章节)。
-    """
+def test_reporting_phase_step_registry_matches_new_timing():
+    """step_intents 注册表与新时序一致（退役步移除、export 步新增）。"""
     from supernova_whitebox.pipeline.step_intents import step_names
-    steps = step_names("reporting")
-    assert "verify-report-vuln-blocks" in steps
-    assert steps.index("verify-report-vuln-blocks") > steps.index("run-report-agent")
-    assert steps.index("verify-report-vuln-blocks") < steps.index("inject-attack-chains")
+    assert step_names("reporting") == (
+        "write-structured-poc",
+        "assemble-report",
+        "report-polish",
+        "export-report-markdown",
+    )
 
 
-def test_reporting_phase_verify_blocks_in_workflow_source() -> None:
-    """源码级硬约束：workflows.py 里 verify_report_vuln_blocks 调用必须夹在
-    run-report-agent 与 inject_attack_chains 之间（镜像 sibling 双锚定模式）。"""
-    src = _workflow_src()
-    i_report = src.find('"agent_name": "report"')
-    assert i_report != -1, "找不到 run-report-agent 调用（agent_name=report 字面量）"
-    i_verify = src.find("activities.verify_report_vuln_blocks", i_report)
-    assert i_verify != -1, (
-        "verify_report_vuln_blocks 必须在 run-report-agent 之后执行（防 report-executive 丢漏洞节）"
-    )
-    assert src.find("activities.inject_attack_chains", i_verify) != -1, (
-        "verify_report_vuln_blocks 必须在 inject_attack_chains 之前执行（重建不丢后续注入章节）"
-    )
+def test_export_activity_registered_on_workers():
+    """b51eb9a4 教训：新 activity 两处 worker 注册表（CLI worker.py + web
+    runner.py）都必须 import + 列入 activities，漏注册会 fail-fast/静默不跑。"""
+    root = Path(__file__).resolve().parents[3]
+    for rel in ("packages/whitebox/src/supernova_whitebox/worker.py",
+                "packages/worker/src/supernova_worker/runner.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        count = src.count("export_report_markdown_files")
+        assert count >= 2, (
+            f"export_report_markdown_files 在 {rel} 仅出现 {count} 次，"
+            f"预期 >= 2（import + activities 列表）"
+        )

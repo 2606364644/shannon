@@ -675,13 +675,14 @@ class WhiteboxScanWorkflow:
                 )
             finally:
                 self._state.current_agent = None
-            self._state.current_agent = "render-findings"
-            await workflow.execute_activity(
-                activities.render_findings, act_input,
-                start_to_close_timeout=timedelta(minutes=5),
-                retry_policy=retry_for("standard"),
-            )
-            # 轴1:拼接各分项 → 综合报告(确定性)
+            # === §3（spec 2026-08-26-report-single-source-rendering）报告段新时序 ===
+            # 单源链路：assemble 组装 report_data.json 初版（根交付物）+ 分项
+            # findings 单点渲染（render_findings 逻辑并入，不产 md）→ polish
+            # 终版（摘要 + QA 七节覆盖率 + 回炉）→ export 从 rd 确定性导出
+            # comprehensive md + poc_collection.md。md 链路旧步骤（render_findings /
+            # run_agent(report) / verify_report_vuln_blocks / inject_attack_chains /
+            # inject_gitnexus_track_status / generate_poc_report）退役（§3.1 清单：
+            # md 不再有独立渲染/agent 改写/注入链路——前端与 md 永远同构）。
             self._state.current_agent = "assemble-report"
             await workflow.execute_activity(
                 activities.assemble_report,
@@ -690,59 +691,10 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry_for("standard"),
             )
-            # 轴1:REPORT agent 加执行摘要 + 清理(report-executive.txt)
-            self._state.current_agent = "run-report-agent"
-            await workflow.execute_activity(
-                activities.run_agent,
-                ActivityInput(**{**act_input.__dict__, "agent_name": "report"}),
-                start_to_close_timeout=timedelta(minutes=15),
-                retry_policy=retry_for("standard"),
-            )
-            # 漏洞节覆盖校验+自愈（report-executive 之后）：agent 自写脚本压缩正文丢
-            # ### ID 结构节会让报告页统计全 0（2026-08-19 回归），节数不足则重建底稿版。
-            # 必须在 inject_attack_chains 之前——重建覆盖报告，先注入会被冲掉。
-            self._state.current_agent = "verify-report-vuln-blocks"
-            await workflow.execute_activity(
-                activities.verify_report_vuln_blocks,
-                ActivityInput(**{**act_input.__dict__,
-                                 "vuln_classes": [str(vt) for vt in selected_classes]}),
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry_for("standard"),
-            )
-            # 攻击链章节最后注入（report-executive 之后），避免被 agent 重写覆盖丢失
-            self._state.current_agent = "inject-attack-chains"
-            await workflow.execute_activity(
-                activities.inject_attack_chains, act_input,
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry_for("standard"),
-            )
-            # GitNexus 轨判定状态注记(report-executive 之后,防覆盖;fail-fast plan Task 6)
-            self._state.current_agent = "inject-gitnexus-track-status"
-            await workflow.execute_activity(
-                activities.inject_gitnexus_track_status, act_input,
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry_for("standard"),
-            )
-            self._state.current_agent = None
-            # === 报告增强：生成 PoC md（失败由 activity 内部吞掉，不影响主报告） ===
-            self._state.current_agent = "generate-poc-report"
-            try:
-                # §8 契约硬化:PoC 是非关键报告增强,timeout/ActivityError 绝不阻塞主流程。
-                # activity 内部 try/except 抓不到 Temporal start_to_close_timeout(runtime
-                # cancel 非 Python 异常),须在 workflow 层兜底(sentinel_dashboard 2026-07-22 回归)。
-                await workflow.execute_activity(
-                    activities.generate_poc_report, act_input,
-                    start_to_close_timeout=timedelta(minutes=20),
-                    retry_policy=retry_for("poc"),
-                )
-            except Exception:  # noqa: BLE001 — PoC 任何失败(含 ActivityError)只降级
-                pass
-            finally:
-                self._state.current_agent = None
-            # === T5：report_data 终版组装（§5.4/§5.5 摘要+QA；non-fatal） ===
+            # === T5：report_data 终版组装（§5.4/§5.5 摘要+QA 七节覆盖率；non-fatal） ===
             # 全部富化（merge/接口表/POC）已写回 queue 后重建 report_data.json，
-            # LLM 摘要 + QA 校验（缺 endpoints 回炉一次）。任何失败不阻塞扫描
-            # 收尾（rd.json 已有 assemble 时的初版兜底）。
+            # LLM 摘要 + QA 校验 + 回炉。任何失败不阻塞扫描收尾（rd.json 已有
+            # assemble 时的初版兜底；export 吃得到初版，md 仍可产出）。
             self._state.current_agent = "report-polish"
             try:
                 await workflow.execute_activity(
@@ -765,6 +717,27 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
                 )
+            finally:
+                self._state.current_agent = None
+            # === §3 export：rd → comprehensive md + poc_collection（含同构校验） ===
+            # 确定性纯函数（分钟内）：失败 = 部署问题显式暴露 → fatal（对齐
+            # assemble 语义）；同构 mismatch 在 activity 内写 qa.checks 不抛。
+            # ActivityNotRegistered fail-fast（b51eb9a4 教训：静默不跑 = 交付物缺）。
+            self._state.current_agent = "export-report-markdown"
+            try:
+                await workflow.execute_activity(
+                    activities.export_report_markdown_files, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_for("standard"),
+                )
+            except Exception as exc:  # noqa: BLE001 — 重抛（fatal），仅加注册失职的显式面
+                if _activity_not_registered_hint(exc):
+                    raise ApplicationFailure(
+                        f"Export report markdown activity is not registered: {exc}",
+                        type="ActivityNotRegistered",
+                        non_retryable=True,
+                    ) from exc
+                raise
             finally:
                 self._state.current_agent = None
             await workflow.execute_activity(

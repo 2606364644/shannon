@@ -49,16 +49,25 @@ def _write_queue(d, vulns, name="xss_exploitation_queue.json"):
 
 
 async def test_polish_rebuilds_with_enrichments_and_llm_summary(tmp_path, monkeypatch):
-    """polish 重建 rd（含 report_endpoints/report_poc）+ ④LLM 摘要写回。"""
+    """polish 重建 rd（含 report_endpoints/report_poc）+ ④LLM 摘要写回。
+
+    §6 后 QA 阈值抬升：fixture 需七节齐（problem_points/params/行号链/
+    narrative/POC），否则触发回炉路径（未 patch 的 agent 会真调 LLM）。"""
     d = _wb(tmp_path)
     _write_queue(d, [{
         "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
         "externally_exploitable": True, "confidence": "high",
         "merge_source": "llm-only", "title": "t", "severity": "high",
+        "notes": "成因", "impact": "危害", "remediation": "修复",
         "report_endpoints": [{"method": "POST", "path": "/memos",
+                              "params": ["memo"],
                               "route_registered_at": "app/routes/index.js:66",
                               "sink_location": "app/views/memos.html:31"}],
+        "report_problem_points": [{"location": "app/views/memos.html:31",
+                                   "description": "未消毒渲染",
+                                   "snippet": "<%- memo %>"}],
         "report_poc": {"witness_payload": "<img src=x>",
+                       "curl": "curl -X POST http://t/memos",
                        "request": {"method": "POST", "url": "http://t/memos"}},
     }])
     monkeypatch.setattr(activities, "_get_paths",
@@ -92,7 +101,15 @@ async def test_polish_summary_deterministic_fallback(tmp_path, monkeypatch):
         "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
         "externally_exploitable": True, "confidence": "high",
         "merge_source": "llm-only", "title": "t", "severity": "critical",
-        "report_endpoints": [{"method": "POST", "path": "/memos"}],
+        "notes": "成因", "impact": "危害", "remediation": "修复",
+        "report_endpoints": [{"method": "POST", "path": "/memos",
+                              "params": ["memo"],
+                              "sink_location": "app/views/memos.html:31"}],
+        "report_problem_points": [{"location": "app/views/memos.html:31",
+                                   "description": "未消毒渲染",
+                                   "snippet": "<%- memo %>"}],
+        "report_poc": {"curl": "curl -X POST http://t/memos",
+                       "request": {"method": "POST", "url": "http://t/memos"}},
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
@@ -110,20 +127,42 @@ async def test_polish_summary_deterministic_fallback(tmp_path, monkeypatch):
 
 
 async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypatch):
-    """⑤QA：taint 卡缺 endpoints → 回炉一次（富化 agent）→ 仍缺则 qa.passed=false。"""
+    """⑤QA：taint 卡缺 endpoints → 回炉一次（富化 agent）→ 仍缺则 qa.passed=false。
+
+    §6 扩展：同一富化 agent payload 兼供 narrative 回炉（id/ID 双 key，
+    endpoints+problem_points+notes/impact/remediation 一并补齐）。"""
     d = _wb(tmp_path)
     _write_queue(d, [{
         "ID": "XSS-GN-01", "vulnerability_type": "Reflected",
         "externally_exploitable": True, "confidence": "unadjudicated",
         "merge_source": "gitnexus-only", "title": "t", "severity": "high",
+        "endpoint": "GET /contributions",
+        "witness_payload": "<img src=x>",
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
-    rework_payload = {"vulnerabilities": [{
+    # 两个 agent 各按自己的 schema 产 payload（生产中本就是不同 agent 调用）：
+    # 第 1 次调用 = 接口富化（endpoints 为 dict 列表 + problem_points）；
+    # 第 2 次调用 = narrative 深富化（endpoints 字段名在 queue 是 str 列表，互不混用）。
+    ep_payload = {"vulnerabilities": [{
         "id": "XSS-GN-01",
         "endpoints": [{"method": "GET", "path": "/contributions",
+                       "params": ["preTax"],
                        "sink_location": "app/routes/contributions.js:21"}],
+        "problem_points": [{"location": "app/routes/contributions.js:21",
+                            "description": "eval 直达",
+                            "snippet": "eval(preTax)"}],
     }]}
+    narr_payload = {"vulnerabilities": [{
+        "ID": "XSS-GN-01",
+        "notes": "成因", "impact": "危害", "remediation": "修复",
+    }]}
+
+    async def _agent_side_effect(**kw):
+        payload = _agent_side_effect.payloads.pop(0)
+        return SimpleNamespace(structured_output=payload, text=None)
+    _agent_side_effect.payloads = [ep_payload, narr_payload]
+
     with patch.object(activities, "run_claude_prompt",
                       return_value=SimpleNamespace(
                           structured_output={"narrative": "s",
@@ -132,17 +171,17 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
                                              "remediation_order": None},
                           text=None)), \
          patch.object(activities, "run_gitnexus_verdict_agent",
-                      return_value=SimpleNamespace(
-                          structured_output=rework_payload, text=None)):
+                      side_effect=_agent_side_effect):
         result = await activities.run_report_polish(_FakeInput(tmp_path))
 
-    assert result["reworked"] == 1
+    assert result["reworked"] == ["XSS-GN-01"]  # 多路回炉去重（同一卡只记一次）
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     assert data["qa"]["passed"] is True
     assert data["qa"]["reworked_ids"] == ["XSS-GN-01"]
     v = data["vulnerabilities"][0]
     assert v["endpoints"][0]["path"] == "/contributions"
-    # queue 也被回炉写回（md 下次 assemble 同源）
+    assert v["problem_points"][0]["location"] == "app/routes/contributions.js:21"
+    # queue 也被回炉写回（下次 rebuild 同源）
     queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
                        .read_text(encoding="utf-8"))
     assert queue["vulnerabilities"][0]["report_endpoints"][0]["path"] == \
@@ -172,6 +211,177 @@ async def test_polish_qa_flags_when_rework_also_fails(tmp_path, monkeypatch):
     check = next(c for c in data["qa"]["checks"]
                  if "endpoints" in c["check"])
     assert "SSRF-GN-01" in check["failed_ids"]
+
+
+# ---------- §6（spec 2026-08-26-report-single-source-rendering）七节覆盖率 QA ----------
+
+async def test_polish_qa_seven_section_checks(tmp_path, monkeypatch):
+    """§6：七节覆盖率逐卡 checks——缺 problem_points/poc/params/narrative/
+    行号链各记 failed_ids（显式呈现，不静默）。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [{
+        # taint 卡：接口有但无参数/无行号链，无 problem_points/POC/narrative
+        "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "title": "t", "severity": "high",
+        "report_endpoints": [{"method": "POST", "path": "/memos"}],
+    }])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    with patch.object(activities, "run_claude_prompt",
+                      return_value=SimpleNamespace(
+                          structured_output={"narrative": "s",
+                                             "risk_level": "高",
+                                             "top_risks": [],
+                                             "remediation_order": None},
+                          text=None)), \
+         patch.object(activities, "run_gitnexus_verdict_agent",
+                      side_effect=RuntimeError("agent down")):
+        await activities.run_report_polish(_FakeInput(tmp_path))
+
+    data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
+    checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
+    assert checks["problem_points_present"] == ["XSS-VULN-01"]
+    assert checks["poc_complete"] == ["XSS-VULN-01"]
+    assert checks["params_present"] == ["XSS-VULN-01"]
+    assert checks["narrative_complete"] == ["XSS-VULN-01"]
+    assert checks["endpoint_rows_have_locations"] == ["XSS-VULN-01"]
+    assert data["qa"]["passed"] is False
+
+
+async def test_polish_qa_seven_section_checks_scoping(tmp_path, monkeypatch):
+    """§6 口径：params/行号链/problem_points 只查 taint 卡；poc/narrative 查全卡；
+    齐全的卡不进 failed_ids。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [{
+        # 齐 卡（taint 七节全齐）
+        "ID": "XSS-VULN-02", "vulnerability_type": "Stored",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "title": "t2", "severity": "high",
+        "notes": "c", "impact": "i", "remediation": "r",
+        "report_endpoints": [{"method": "POST", "path": "/memos",
+                              "params": ["memo"],
+                              "sink_location": "app.js:9"}],
+        "report_problem_points": [{"location": "app.js:9",
+                                   "description": "d", "snippet": "s"}],
+        "report_poc": {"curl": "curl http://t",
+                       "request": {"method": "GET", "url": "http://t"}},
+    }], name="xss_exploitation_queue.json")
+    _write_queue(d, [{
+        # auth 卡：无 endpoints/problem_points（非 taint，不查）；缺 narrative/POC
+        "ID": "AUTH-VULN-01", "vulnerability_type": "Auth",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "title": "t", "severity": "medium",
+    }], name="auth_exploitation_queue.json")
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    with patch.object(activities, "run_claude_prompt",
+                      return_value=SimpleNamespace(
+                          structured_output={"narrative": "s",
+                                             "risk_level": "高",
+                                             "top_risks": [],
+                                             "remediation_order": None},
+                          text=None)), \
+         patch.object(activities, "run_gitnexus_verdict_agent",
+                      side_effect=RuntimeError("agent down")):
+        await activities.run_report_polish(_FakeInput(tmp_path))
+
+    data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
+    checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
+    # taint 专属 checks：齐 卡不入，auth 卡（非 taint）也不入
+    assert checks["problem_points_present"] == []
+    assert checks["params_present"] == []
+    assert checks["endpoint_rows_have_locations"] == []
+    # 全卡 checks：auth 缺 narrative/POC 入列
+    assert checks["poc_complete"] == ["AUTH-VULN-01"]
+    assert checks["narrative_complete"] == ["AUTH-VULN-01"]
+
+
+async def test_polish_reworks_missing_pocs(tmp_path, monkeypatch):
+    """§6 回炉：缺 POC 的卡走结构化 POC 写回路径（复用 write_structured_poc
+    逻辑，仅补缺失卡）→ queue 写回 report_poc → 重建后 poc_complete 过。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [{
+        "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "title": "t", "severity": "high",
+        "notes": "c", "impact": "i", "remediation": "r",
+        "endpoint": "POST /memos",
+        "witness_payload": "<img src=x>",
+        "report_endpoints": [{"method": "POST", "path": "/memos",
+                              "params": ["memo"],
+                              "sink_location": "app.js:9"}],
+        "report_problem_points": [{"location": "app.js:9",
+                                   "description": "d", "snippet": "s"}],
+    }])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    with patch.object(activities, "run_claude_prompt",
+                      return_value=SimpleNamespace(
+                          structured_output={"narrative": "s",
+                                             "risk_level": "高",
+                                             "top_risks": [],
+                                             "remediation_order": None},
+                          text=None)), \
+         patch.object(activities, "run_gitnexus_verdict_agent",
+                      side_effect=RuntimeError("no enrichment needed")):
+        result = await activities.run_report_polish(_FakeInput(tmp_path))
+
+    assert "XSS-VULN-01" in result["reworked"]
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    assert queue["vulnerabilities"][0]["report_poc"]["request"]["method"] == "POST"
+    data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
+    checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
+    assert checks["poc_complete"] == []
+
+
+async def test_polish_reworks_missing_narratives(tmp_path, monkeypatch):
+    """§6 回炉：narrative 缺段 → GN 深富化路径（gn_finding_enrichment prompt
+    + 白名单仅补空缺）→ queue 写回 → 重建后 narrative_complete 过。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [{
+        "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "title": "t", "severity": "high",
+        "impact": "只有危害段",
+        "report_endpoints": [{"method": "POST", "path": "/memos",
+                              "params": ["memo"],
+                              "sink_location": "app.js:9"}],
+        "report_problem_points": [{"location": "app.js:9",
+                                   "description": "d", "snippet": "s"}],
+        "report_poc": {"curl": "curl http://t",
+                       "request": {"method": "GET", "url": "http://t"}},
+    }])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    enrich_payload = {"vulnerabilities": [{
+        "ID": "XSS-VULN-01", "notes": "成因补全", "remediation": "修复补全",
+    }]}
+    with patch.object(activities, "run_claude_prompt",
+                      return_value=SimpleNamespace(
+                          structured_output={"narrative": "s",
+                                             "risk_level": "高",
+                                             "top_risks": [],
+                                             "remediation_order": None},
+                          text=None)), \
+         patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=SimpleNamespace(
+                          structured_output=enrich_payload, text=None)) as m_agent:
+        result = await activities.run_report_polish(_FakeInput(tmp_path))
+
+    # 深富化 agent 被调（gn_finding_enrichment prompt）
+    assert m_agent.called
+    assert "XSS-VULN-01" in result["reworked"]
+    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    qv = queue["vulnerabilities"][0]
+    assert qv["notes"] == "成因补全"
+    assert qv["remediation"] == "修复补全"
+    assert qv["impact"] == "只有危害段"  # 已有段不覆写（白名单仅补空缺）
+    data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
+    checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
+    assert checks["narrative_complete"] == []
 
 
 # ---------- §4.2（spec 2026-08-26-vuln-card-seven-sections）POC 写回时序前移 ----------

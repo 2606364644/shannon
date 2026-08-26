@@ -1568,6 +1568,9 @@ async def run_risk_scoring(input: ActivityInput) -> dict:
 
 @activity.defn
 async def render_findings(input: ActivityInput) -> None:
+    """【退役 2026-08-26（spec 2026-08-26-report-single-source-rendering §3.1）】
+    逻辑并入 assemble_report（findings.md 从 report_data 单点渲染）；workflow
+    不再调度。函数保留防注册表断链，验收阶段统一清理。"""
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
@@ -1593,32 +1596,24 @@ async def render_findings(input: ActivityInput) -> None:
 
 @activity.defn
 async def assemble_report(input: ActivityInput) -> None:
-    """轴1:把各 *_analysis_deliverable.md 拼接成 comprehensive report。
+    """组装 report_data.json 初版（单源 SSOT）+ 分项 findings 单点渲染。
 
-    ReportAssembler 已实现 evidence → findings → analysis_deliverable 三级回退,
-    天然支持 white-box 产物。拼接产物随后由 REPORT agent(report-executive)
-    加执行摘要并清理。攻击链章节由后续 inject_attack_chains activity 注入
-    （report-executive 之后），避免被覆盖。GitNexus 轨判定状态注记由后续
-    inject_gitnexus_track_status activity 注入（同样 report-executive 之后）。
-
-    T1（spec 2026-08-26-report-generation-agent §3）：assemble 之后产
-    report_data.json（三轨统一报告 SSOT）——agent 富化（merge 内）已写回
-    queue，此处确定性组装；web report-data API / 前端纯渲染 / md 导出同源。
-    组装失败 non-fatal（md 主链路不受影响）。
+    spec 2026-08-26-report-single-source-rendering §3：comprehensive md 不再
+    在此产（移至 run_report_polish 之后的 export_report_markdown_files）；
+    render_findings 逻辑并入（findings.md 从 report_data 渲染——与 md 导出
+    同一渲染函数，单点）。rd 组装失败 fatal：rd.json 是单源链路的根交付物
+    （md / web 前端都吃它），失败 = 部署问题显式暴露（不再是「md 主链路
+    non-fatal」的旧语义）。
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等;见 session_recovery.py)
     try:
-        from supernova_core.services.report_assembler import ReportAssembler
-
         _, deliverables, _ = _get_paths(input)
-        report_path = deliverables / "comprehensive_security_assessment_report.md"
-        vuln_classes = input.vuln_classes or list(ALL_VULN_CLASSES)
         async with get_audit_session().track_step(
             "reporting", "assemble-report", intent=intent_for("assemble-report")
         ):
-            await ReportAssembler.assemble(deliverables, vuln_classes, report_path)
-            await _write_report_data_safely(input, deliverables)
+            rd = await _build_report_data_initial(input, deliverables)
+            await _render_findings_deliverables_from_rd(rd, deliverables)
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -1627,38 +1622,102 @@ async def assemble_report(input: ActivityInput) -> None:
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
-async def _write_report_data_safely(input: ActivityInput, deliverables: Path) -> None:
-    """report_data.json 组装落盘（T1）；non-fatal——失败 warning 不阻塞 md 主链路。
+async def _build_report_data_initial(input: ActivityInput, deliverables: Path):
+    """rd.json 初版组装落盘（spec §3；fatal——根交付物）。
 
     scan id 推断：workspace_path（web=scan_dir）目录名 → session.json 祖先 →
     "unknown"。模块属性调用（report_data_builder.build_report_data）以支持
-    测试 monkeypatch。
+    测试 monkeypatch。选中类过滤：input.vuln_classes 非空时 rd 只含选中类
+    （resume/减类重跑防旧 queue 泄漏进报告——旧 md 路径 assemble 的同款契约）。
     """
-    log = logging.getLogger(__name__)
-    try:
-        from supernova_core.models.report_data import ScanMeta
-        from supernova_core.services import report_data_builder
+    from supernova_core.models.report_data import ScanMeta
+    from supernova_core.services import report_data_builder
 
-        scan_id = "unknown"
-        if input.workspace_path:
-            scan_id = Path(input.workspace_path).name
-        else:
-            for ancestor in deliverables.resolve().parents:
-                if (ancestor / "session.json").exists():
-                    scan_id = ancestor.name
-                    break
-        scan_meta = ScanMeta(id=scan_id, track="whitebox")
-        report_data = await report_data_builder.build_report_data(
-            deliverables, scan_meta)
-        await report_data_builder.write_report_data(
-            report_data, deliverables / "report_data.json")
-    except Exception as exc:  # noqa: BLE001 — 每步独立降级铁律
-        log.warning("report_data.json 组装失败（non-fatal，md 主链路不受影响）: %s", exc)
+    scan_id = "unknown"
+    if input.workspace_path:
+        scan_id = Path(input.workspace_path).name
+    else:
+        for ancestor in deliverables.resolve().parents:
+            if (ancestor / "session.json").exists():
+                scan_id = ancestor.name
+                break
+    report_data = await report_data_builder.build_report_data(
+        deliverables, ScanMeta(id=scan_id, track="whitebox"))
+    selected = {str(vc) for vc in (input.vuln_classes or [])}
+    if selected:
+        report_data.vulnerabilities = [
+            v for v in report_data.vulnerabilities if v.type in selected]
+        report_data.stats = _filter_stats_for_classes(
+            report_data.stats, report_data.vulnerabilities)
+    await report_data_builder.write_report_data(
+        report_data, deliverables / "report_data.json")
+    return report_data
+
+
+def _filter_stats_for_classes(stats, vulns):
+    """按过滤后卡片重算 stats（by_type 只留选中类；by_severity 重数；
+    severity_range 语义对齐 builder._severity_range）。"""
+    from supernova_core.models.report_data import ReportStats, TypeStats
+    from supernova_core.services.severity_rules import SEVERITY_ORDER
+
+    if stats is None:
+        return None
+    by_class: dict[str, list] = {}
+    by_severity: dict[str, int] = {}
+    for v in vulns:
+        by_class.setdefault(v.type, []).append(v)
+        if v.severity:
+            by_severity[v.severity] = by_severity.get(v.severity, 0) + 1
+    by_type: dict[str, TypeStats] = {}
+    for vuln_class, items in by_class.items():
+        ranked = sorted([v.severity for v in items if v.severity],
+                        key=lambda s: SEVERITY_ORDER.get(s, 0))
+        severity_range = (ranked[0] if ranked[0] == ranked[-1]
+                          else f"{ranked[0]}-{ranked[-1]}") if ranked else None
+        by_type[vuln_class] = TypeStats(count=len(items),
+                                        severity_range=severity_range)
+    return ReportStats(by_type=by_type, by_severity=by_severity)
+
+
+async def _render_findings_deliverables_from_rd(rd, deliverables: Path) -> None:
+    """分项 findings.md 从 report_data 单点渲染（spec §3：render_findings 并入）。
+
+    文件名对齐 FindingsRenderer（CLASS_CONFIG.findings_file）；卡片复用
+    render_vuln_card（经 ``_VulnView`` 合并视图——与 md 导出同一渲染路径，
+    单点）。rd 中无卡的类不产文件（对齐「无 queue 不产」现状）；幂等重写
+    （rd 是唯一事实源，重跑跟随最新 rd）。
+    """
+    from supernova_core.services.findings_renderer import (
+        CLASS_CONFIG, render_vuln_card, _M as _FINDINGS_MESSAGES,
+    )
+    from supernova_core.services.report_markdown_exporter import _VulnView
+    from supernova_core.utils.file_io import async_write_file
+
+    by_class: dict[str, list[tuple[str, object]]] = {}
+    for rv in rd.vulnerabilities:
+        by_class.setdefault(rv.type, []).append((rv.id, _VulnView(rv)))
+    for vuln_class, cfg in CLASS_CONFIG.items():
+        entries = by_class.get(vuln_class) or []
+        if not entries:
+            continue
+        sections: list[str] = [f"## {_FINDINGS_MESSAGES.get(cfg.heading)}", ""]
+        for card_id, view in entries:
+            try:
+                sections.append(render_vuln_card(view, vuln_class))
+            except Exception as exc:  # noqa: BLE001 — 单卡渲染失败不拖垮整文件
+                logger.warning("findings 渲染 %s 失败（跳过该卡）: %s",
+                               card_id, exc)
+        sections.extend(["", _FINDINGS_MESSAGES.get("disclaimer"), ""])
+        await async_write_file(deliverables / cfg.findings_file,
+                               "\n".join(sections))
 
 
 @activity.defn
 async def verify_report_vuln_blocks(input: ActivityInput) -> None:
-    """report-executive 后校验 + 自愈:最终报告 ### ID 节数 vs 底稿期望数。
+    """【退役 2026-08-26（spec §3.1）】md 改由 report_data 确定性导出后无需
+    自愈（同构校验移入 export_report_markdown_files）；workflow 不再调度。
+
+    原职责：report-executive 后校验 + 自愈:最终报告 ### ID 节数 vs 底稿期望数。
 
     回归(2026-08-19 另一环境):report agent 自写 cleanup 脚本把正文压成
     「模式汇总+行内 ID 引用」,丢掉全部结构化漏洞节——前端 splitByVulnBlocks
@@ -1694,7 +1753,10 @@ async def verify_report_vuln_blocks(input: ActivityInput) -> None:
 
 @activity.defn
 async def inject_attack_chains(input: ActivityInput) -> None:
-    """报告阶段最后注入：attack_chains.json → ## 攻击链 章节追加到最终报告。
+    """【退役 2026-08-26（spec §3.1）】攻击链由导出器从 rd.attack_chains 渲染；
+    workflow 不再调度。
+
+    原职责：报告阶段最后注入：attack_chains.json → ## 攻击链 章节追加到最终报告。
 
     必须在 run-report-agent 之后运行——report-executive agent 重写
     comprehensive_security_assessment_report.md（同 deliverable_filename）,
@@ -1725,7 +1787,10 @@ async def inject_attack_chains(input: ActivityInput) -> None:
 
 @activity.defn
 async def inject_gitnexus_track_status(input: ActivityInput) -> None:
-    """GitNexus 轨 fail-fast 状态注记(report-executive 之后注入,防覆盖)。
+    """【退役 2026-08-26（spec §3.1）】GN 判定状态由导出器从卡级
+    confidence/merge_source 渲染；workflow 不再调度。
+
+    原职责：GitNexus 轨 fail-fast 状态注记(report-executive 之后注入,防覆盖)。
 
     必须在 run-report-agent 之后运行——report-executive agent 重写整个
     comprehensive_security_assessment_report.md,若在此之前注入会被覆盖丢失
@@ -1785,7 +1850,11 @@ async def inject_gitnexus_track_status(input: ActivityInput) -> None:
 
 @activity.defn
 async def generate_poc_report(input: ActivityInput) -> None:
-    """报告增强：生成 curl/Burp PoC md 文档。失败不阻塞主报告（吞异常）。
+    """【退役 2026-08-26（spec §3.1）】poc_collection.md 改由
+    export_report_markdown_files 从 report_data.poc 单源导出（poc_generator
+    的独立 HttpRequestSpec 源收编）；workflow 不再调度。
+
+    原职责：报告增强：生成 curl/Burp PoC md 文档。失败不阻塞主报告（吞异常）。
 
     §4.2（spec 2026-08-26-vuln-card-seven-sections）：结构化 POC 写回已拆到
     独立 activity write_structured_poc（render_findings 之前执行），本 activity
@@ -1829,8 +1898,14 @@ async def write_structured_poc(input: ActivityInput) -> None:
         log.warning("poc: whitebox write_structured_poc failed (non-blocking): %s", exc)
 
 
-async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> None:
-    """T4 接线：每类 queue 逐卡并行 build_structured_poc → report_poc 写回。"""
+async def _write_structured_pocs(
+    input: ActivityInput, deliverables: Path,
+    only_ids: set[str] | None = None,
+) -> list[str]:
+    """T4 接线：每类 queue 逐卡并行 build_structured_poc → report_poc 写回。
+
+    ``only_ids``（§6 回炉用）：非空时只补这些卡（POC 回炉不重打全量 LLM、
+    不覆写已有 report_poc）。返回写了 report_poc 的卡 ID 列表。"""
     from supernova_core.models.queue_schemas import VulnerabilityQueue
     from supernova_core.services.poc_structured import (
         _coerce_expected_response,
@@ -1839,6 +1914,7 @@ async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> No
         build_structured_poc,
     )
     base_url = input.web_url or "http://TARGET"
+    written: list[str] = []
 
     for vuln_class in (input.vuln_classes or list(ALL_VULN_CLASSES)):
         cfg = _QUEUE_FILES.get(vuln_class)
@@ -1857,6 +1933,9 @@ async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> No
         for f in findings:
             entry = f.model_dump()
             try:
+                if (only_ids is not None and f.ID not in only_ids):
+                    entries.append(entry)
+                    continue
                 # build_structured_poc 同步契约（llm_fn sync）——确定性部分直调，
                 # expected_response 由 activity 层异步补（run_claude_prompt 是 async）
                 poc = build_structured_poc(f, base_url=base_url)
@@ -1874,16 +1953,85 @@ async def _write_structured_pocs(input: ActivityInput, deliverables: Path) -> No
                         if expected:
                             poc["expected_response"] = expected
                     except Exception as exc:  # noqa: BLE001 — LLM 失败降级
-                        log.warning("structured poc expected_response %s "
-                                    "failed (deterministic only): %s", f.ID, exc)
+                        logger.warning("structured poc expected_response %s "
+                                       "failed (deterministic only): %s", f.ID, exc)
                     entry = apply_structured_poc(entry, poc)
                     changed = True
+                    written.append(f.ID)
             except Exception as exc:  # noqa: BLE001 — 单卡失败保确定性
-                log.warning("structured poc %s failed (keep deterministic): %s",
-                            f.ID, exc)
+                logger.warning("structured poc %s failed (keep deterministic): %s",
+                               f.ID, exc)
             entries.append(entry)
         if changed:
             atomic_write_json(queue_path, {"vulnerabilities": entries})
+    return written
+
+
+@activity.defn
+async def export_report_markdown_files(input: ActivityInput) -> None:
+    """report_data.json → 两 md 交付物 + 同构校验（spec §3/§6，polish 之后）。
+
+    comprehensive_security_assessment_report.md = export_report_markdown(rd)；
+    exploitable_poc_collection.md = export_poc_collection(rd)（PoC 单源）。
+    同构校验（§6）：md ``### ID`` 卡数 = rd 卡数；quick_reference 非空时行数 =
+    卡数。mismatch → 写回 rd.qa.checks（md_json_isomorphic /
+    quick_reference_isomorphic）显式呈现，不静默、不抛。IO/解析异常 →
+    fatal（对齐 assemble 语义：确定性导出失败 = 部署问题显式暴露）。
+    """
+    from supernova_whitebox.audit.session_registry import get_audit_session
+    await ensure_audit_session(input)
+    try:
+        _, deliverables, _ = _get_paths(input)
+        async with get_audit_session().track_step(
+                "reporting", "export-report-markdown",
+                intent=intent_for("export-report-markdown")):
+            from supernova_core.models.report_data import ReportData, ReportQA, QACheck
+            from supernova_core.services import report_data_builder
+            from supernova_core.services.report_assembler import count_vuln_headings
+            from supernova_core.services.report_markdown_exporter import (
+                export_poc_collection, export_report_markdown,
+            )
+            from supernova_core.utils.file_io import async_write_file
+
+            rd_path = deliverables / "report_data.json"
+            rd = ReportData.model_validate_json(
+                rd_path.read_text(encoding="utf-8"))
+            md = export_report_markdown(rd)
+            await async_write_file(
+                deliverables / "comprehensive_security_assessment_report.md", md)
+            await async_write_file(
+                deliverables / "exploitable_poc_collection.md",
+                export_poc_collection(rd))
+
+            # --- 同构校验（确定性，§6）---
+            rd_ids = [v.id for v in rd.vulnerabilities]
+            missing_in_md = [vid for vid in rd_ids if f"### {vid}" not in md]
+            extra_checks: list[QACheck] = []
+            if missing_in_md or count_vuln_headings(md) != len(rd_ids):
+                extra_checks.append(QACheck(check="md_json_isomorphic",
+                                            failed_ids=missing_in_md))
+            if rd.quick_reference:
+                card_ids = set(rd_ids)
+                qr_failed = [r.id for r in rd.quick_reference
+                             if r.id not in card_ids]
+                if len(rd.quick_reference) != len(rd_ids) or qr_failed:
+                    extra_checks.append(QACheck(
+                        check="quick_reference_isomorphic", failed_ids=qr_failed))
+            if extra_checks:
+                if rd.qa is None:
+                    rd.qa = ReportQA()
+                rd.qa.checks.extend(extra_checks)
+                rd.qa.passed = not any(c.failed_ids for c in rd.qa.checks)
+                await report_data_builder.write_report_data(rd, rd_path)
+                logger.warning(
+                    "export: 同构校验失败（显式呈现，不静默）: %s",
+                    [c.model_dump() for c in extra_checks])
+    except PentestError as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    except Exception as e:
+        error_type, retryable = classify_error_for_temporal(e)
+        raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
 
 
 # taint 三类 + authz/auth 的 queue 文件名（结构化 POC / polish 重建遍历用）
@@ -1939,16 +2087,53 @@ async def run_report_polish(input: ActivityInput) -> dict:
             "reporting", "report-polish", intent=intent_for("report-polish")):
         rd = await report_data_builder.build_report_data(deliverables, _scan_meta())
 
-        # --- ⑤QA：taint 卡缺 endpoints → 回炉一次 ---
-        missing = [v for v in rd.vulnerabilities
-                   if v.type in _TAINT_CLASSES and not v.endpoints]
-        reworked_ids: list[str] = []
-        if missing:
-            reworked_ids = await _rework_missing_endpoints(
-                input, deliverables, repo, missing, prompt_manager)
-            if reworked_ids:
-                rd = await report_data_builder.build_report_data(
-                    deliverables, _scan_meta())
+        # --- ⑤QA（§6 扩展）：七节覆盖率缺口分组 → 回炉一次（多路）→ 复检 ---
+        # 分组口径：taint 专属（endpoints/params/problem_points/行号链走接口
+        # 富化 agent——产出三兄弟同源）；全卡（POC 走结构化写回路径；narrative
+        # 缺段走 GN 深富化路径，白名单仅补空缺）。单轮回炉，失败保产物 +
+        # qa.passed=false 显式呈现。
+        def _poc_incomplete(v) -> bool:
+            p = v.poc
+            return p is None or not (p.curl or p.raw_http or p.request is not None)
+
+        def _params_missing(v) -> bool:
+            return (v.type in _TAINT_CLASSES and v.endpoints
+                    and not any(e.params for e in v.endpoints))
+
+        def _locs_missing(v) -> bool:
+            return (v.type in _TAINT_CLASSES and v.endpoints
+                    and not any(e.sink_location for e in v.endpoints))
+
+        def _narrative_missing(v) -> bool:
+            return (v.narrative is None
+                    or not (v.narrative.cause and v.narrative.impact
+                            and v.narrative.remediation))
+
+        missing_endpoints = [v for v in rd.vulnerabilities
+                             if v.type in _TAINT_CLASSES and not v.endpoints]
+        missing_pp = [v for v in rd.vulnerabilities
+                      if v.type in _TAINT_CLASSES and not v.problem_points]
+        enrich_targets = _dedupe_by_id(
+            missing_endpoints + missing_pp
+            + [v for v in rd.vulnerabilities if _params_missing(v)]
+            + [v for v in rd.vulnerabilities if _locs_missing(v)])
+        missing_poc = [v for v in rd.vulnerabilities if _poc_incomplete(v)]
+        missing_narr = [v for v in rd.vulnerabilities if _narrative_missing(v)]
+
+        reworked: set[str] = set()
+        if enrich_targets:
+            reworked.update(await _rework_missing_endpoints(
+                input, deliverables, repo, enrich_targets, prompt_manager))
+        if missing_poc:
+            reworked.update(await _rework_missing_pocs(
+                input, deliverables, [v.id for v in missing_poc]))
+        if missing_narr:
+            reworked.update(await _rework_missing_narratives(
+                input, deliverables, repo, missing_narr, prompt_manager))
+        reworked_ids = sorted(reworked)
+        if reworked_ids:
+            rd = await report_data_builder.build_report_data(
+                deliverables, _scan_meta())
 
         checks: list[QACheck] = []
         taint_missing = [v.id for v in rd.vulnerabilities
@@ -1960,6 +2145,23 @@ async def run_report_polish(input: ActivityInput) -> dict:
         bad_sev = [v.id for v in rd.vulnerabilities
                    if v.severity not in SEVERITY_ORDER]
         checks.append(QACheck(check="severity_valid", failed_ids=bad_sev))
+        # §6 七节覆盖率（逐卡缺口，显式呈现）
+        checks.append(QACheck(
+            check="problem_points_present",
+            failed_ids=[v.id for v in rd.vulnerabilities
+                        if v.type in _TAINT_CLASSES and not v.problem_points]))
+        checks.append(QACheck(
+            check="poc_complete",
+            failed_ids=[v.id for v in rd.vulnerabilities if _poc_incomplete(v)]))
+        checks.append(QACheck(
+            check="params_present",
+            failed_ids=[v.id for v in rd.vulnerabilities if _params_missing(v)]))
+        checks.append(QACheck(
+            check="narrative_complete",
+            failed_ids=[v.id for v in rd.vulnerabilities if _narrative_missing(v)]))
+        checks.append(QACheck(
+            check="endpoint_rows_have_locations",
+            failed_ids=[v.id for v in rd.vulnerabilities if _locs_missing(v)]))
         qa = ReportQA(passed=not any(c.failed_ids for c in checks),
                       checks=checks, reworked_ids=reworked_ids)
 
@@ -2004,7 +2206,7 @@ async def run_report_polish(input: ActivityInput) -> dict:
         await report_data_builder.write_report_data(
             rd, deliverables / "report_data.json")
         return {"summary": summary_source, "qa_passed": qa.passed,
-                "reworked": len(reworked_ids)}
+                "reworked": reworked_ids}
 
 
 def _deterministic_summary(rd):
@@ -2035,11 +2237,108 @@ def _deterministic_summary(rd):
         risk_level=risk_level, top_risks=top_risks)
 
 
+def _dedupe_by_id(cards) -> list:
+    """按 id 去重保序（§6 回炉分组：同一卡多缺口只喂 agent 一次）。"""
+    seen: set[str] = set()
+    out = []
+    for v in cards:
+        if v.id not in seen:
+            seen.add(v.id)
+            out.append(v)
+    return out
+
+
+async def _rework_missing_pocs(
+    input: ActivityInput, deliverables: Path, missing_ids: list[str],
+) -> list[str]:
+    """§6 回炉：缺 POC 的卡走结构化 POC 写回（复用 write_structured_poc 路径，
+    only_ids 只补缺失卡——不重打全量 LLM、不覆写已有 report_poc）。"""
+    try:
+        return await _write_structured_pocs(input, deliverables,
+                                            only_ids=set(missing_ids))
+    except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
+        logger.warning("report-polish: poc rework failed: %s", exc)
+        return []
+
+
+async def _rework_missing_narratives(
+    input: ActivityInput, deliverables: Path, repo: Path,
+    missing, prompt_manager,
+) -> list[str]:
+    """§6 回炉：narrative 缺段 → GN 深富化路径（gn_finding_enrichment agent，
+    白名单字段仅补空缺——已有段不覆写）。"""
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+    from supernova_whitebox.audit.session_registry import get_audit_session
+
+    by_class: dict[str, list] = {}
+    for v in missing:
+        by_class.setdefault(v.type, []).append(v)
+    reworked: list[str] = []
+    for vuln_class, cards in by_class.items():
+        cfg = _QUEUE_FILES.get(vuln_class)
+        if cfg is None:
+            continue
+        queue_path = resolve_intermediate(deliverables, cfg)
+        if queue_path is None or not queue_path.exists():
+            continue
+        parsed = VulnerabilityQueue.parse_lenient(
+            queue_path.read_text(encoding="utf-8"), vuln_class=vuln_class)
+        findings = list(parsed.queue.vulnerabilities)
+        card_ids = {v.id for v in cards}
+        targets = [f for f in findings if f.ID in card_ids]
+        if not targets:
+            continue
+        prompt = prompt_manager.load_sync(
+            "gn_finding_enrichment",
+            variables={
+                "gn_only_candidates": _render_gn_only_candidates(targets),
+            },
+        )
+        try:
+            result = await run_gitnexus_verdict_agent(
+                prompt=prompt,
+                repo_path=str(repo),
+                structured_output_schema={
+                    "type": "object",
+                    "properties": {"vulnerabilities": {"type": "array"}},
+                },
+                audit_session=get_audit_session(),
+                provider_config=input.provider_config,
+                max_turns=int(os.getenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", "30")),
+            )
+        except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
+            logger.warning("report-polish: narrative rework %s failed: %s",
+                           vuln_class, exc)
+            continue
+        raw = result.structured_output
+        if raw is None and result.text:
+            raw = result.text
+        enriched, warnings = _apply_gn_enrichment(findings, raw)
+        for w in warnings:
+            logger.warning("%s (narrative rework %s)", w, vuln_class)
+        if enriched:
+            atomic_write_json(
+                queue_path,
+                {"vulnerabilities": [f.model_dump() for f in findings]},
+            )
+            # _apply_gn_enrichment 是整对象替换（非原地）——从 findings 重查
+            by_id_after = {f.ID: f for f in findings}
+            fixed = [i for i in card_ids
+                     if (by_id_after.get(i) is not None
+                         and getattr(by_id_after[i], "notes", None)
+                         and getattr(by_id_after[i], "impact", None)
+                         and getattr(by_id_after[i], "remediation", None))]
+            reworked.extend(sorted(fixed))
+    return reworked
+
+
 async def _rework_missing_endpoints(
     input: ActivityInput, deliverables: Path, repo: Path,
     missing, prompt_manager,
 ) -> list[str]:
-    """⑤回炉：缺 endpoints 的 taint 卡喂回接口富化 agent 一次；写回 queue。"""
+    """⑤回炉（§6 扩展）：缺 endpoints/params/problem_points/行号链的卡喂回
+    接口富化 agent 一次（同一 agent 产出 report_endpoints + report_problem_points）；
+    写回 queue。"""
     from supernova_core.models.queue_schemas import VulnerabilityQueue
     from supernova_whitebox.audit.session_registry import get_audit_session
 
@@ -2096,7 +2395,8 @@ async def _rework_missing_endpoints(
                 {"vulnerabilities": [f.model_dump() for f in findings]},
             )
             reworked_ids = {f.ID for f in targets
-                            if getattr(f, "report_endpoints", None)}
+                            if (getattr(f, "report_endpoints", None)
+                                or getattr(f, "report_problem_points", None))}
             reworked.extend(sorted(reworked_ids))
     return reworked
 

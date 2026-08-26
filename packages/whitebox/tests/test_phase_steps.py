@@ -28,10 +28,13 @@ def test_step_names_matches_phase_steps_order():
     assert step_names("risk-scoring") == ("risk-scoring", "dataflow-hints")
     assert step_names("attack-chain") == ("attack-chain-assembly",)
     assert step_names("reporting") == (
+        # 单源化时序（spec 2026-08-26-report-single-source-rendering §3）：
+        # render-findings 并入 assemble；run-report-agent/verify/inject×2 退役；
+        # md 由 export-report-markdown 从 report_data 确定性导出。
         "write-structured-poc",
-        "render-findings", "assemble-report", "run-report-agent",
-        "verify-report-vuln-blocks",
-        "inject-attack-chains", "inject-gitnexus-track-status",
+        "assemble-report",
+        "report-polish",
+        "export-report-markdown",
     )
 
 
