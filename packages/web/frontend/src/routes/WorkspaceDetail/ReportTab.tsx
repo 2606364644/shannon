@@ -144,25 +144,13 @@ function SingleReport({ ws, scanId, scanType }: { ws: string; scanId: string; sc
   const filename = reportDownloadFilename(scanId);
 
   if (rd.loading) return <ReportSkeleton />;
-  // 报告是长文档型页面：正文需可读字宽护栏（max-w-5xl 居中），与 live/logs 满宽控制台
-  // 形成有意的对比。scan header/tabs 仍满宽（在 ReportTab 之外的 ScanDetail 层）。
+  // 满宽控制台立场（2026-08-26 放宽）：与 live/logs/产物页一致铺满 AppShell 内容区
+  // （超宽屏由 AppShell max-w-[2400px] 兜底）；可读行宽护栏下沉到叙述文本容器
+  // （RichText max-w-3xl）——宽度给表格/curl/POC 等结构化数据，不给散文。
   if (rd.data)
-    return (
-      <div className="mx-auto max-w-5xl">
-        <StructuredReportShell data={rd.data} mdPath={mdPath} filename={filename} />
-      </div>
-    );
-  if (rd.notFound)
-    return (
-      <div className="mx-auto max-w-5xl">
-        <LegacyMdReport path={mdPath} filename={filename} />
-      </div>
-    );
-  return (
-    <div className="mx-auto max-w-5xl">
-      <ErrorState message={t("workspaceDetail.report.loadError", { error: rd.error })} />
-    </div>
-  );
+    return <StructuredReportShell data={rd.data} mdPath={mdPath} filename={filename} />;
+  if (rd.notFound) return <LegacyMdReport path={mdPath} filename={filename} />;
+  return <ErrorState message={t("workspaceDetail.report.loadError", { error: rd.error })} />;
 }
 
 /** 组合：三子 tab，各拉对应 track。黑盒/融合子 tab 按 selectedRun（版本化 run，spec
@@ -208,8 +196,8 @@ function CombinedReport({ ws, scanId, scanType }: { ws: string; scanId: string; 
   }
 
   return (
-    // 同 SingleReport：组合报告三视图 + 正文统一收进可读字宽列（max-w-5xl 居中）。
-    <div className="mx-auto max-w-5xl space-y-3">
+    // 同 SingleReport：满宽控制台立场（护栏下沉到 RichText，见 SingleReport 注释）。
+    <div className="space-y-3">
       <Tabs value={track} onValueChange={(v) => setTrack(v as Track)}>
         <TabsList>
           <TabsTrigger value="whitebox">{t("workspaceDetail.report.combined.tabWhitebox")}</TabsTrigger>

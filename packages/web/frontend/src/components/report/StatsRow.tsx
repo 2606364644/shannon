@@ -27,8 +27,10 @@ export function StatsRow({ stats }: { stats: ReportStatsData }) {
   const types = Object.entries(stats.by_type ?? {});
   return (
     <section data-testid="stats-row" className="space-y-3" aria-label={t("report.byType")}>
+      {/* auto-fit：类型卡数量可变（by_type 条目），满宽报告页下按 ≥220px 自适应
+          列数，不再固定 5 列在类型少时留空位、多时挤（2026-08-26 放宽配套）。 */}
       {types.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           {types.map(([key, ts]) => (
             <article
               key={key}
