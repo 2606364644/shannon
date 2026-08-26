@@ -794,7 +794,8 @@ class ScanStore:
             shutil.rmtree(scan_dir)
         else:
             # 源② legacy ws 根：删 scan 产物，保留 ws 级元数据 / 其他 scan / repo。
-            # 迁移机制通常已把根 scan 搬进 __legacy__/scans/（变源①），此处仅边缘残留。
+            # 启动收纳机制已退役（2026-08-27，随 __legacy__ 概念移除），此处为历史形态
+            # 的读兼容兜底。
             for entry in scan_dir.iterdir():
                 if entry.name in self._WS_LEVEL_KEEP:
                     continue

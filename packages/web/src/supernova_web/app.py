@@ -50,15 +50,20 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(3600)
     app.state._purge_task = asyncio.create_task(_purge_loop())
 
-    # 启动迁移序列（顺序敏感）：
-    #   1) 旧全局 repos/<name> -> workspaces/__legacy__/repos/<name>（创建 __legacy__ ws 目录）
-    #   2) ws 根 legacy scan（session.json）-> scans/<legacy_id>/（T5 解耦 1:N）
-    #   3) 给所有 legacy/真实 ws（含 __legacy__）补 canonical admin (manager)
-    #   4) per-ws 补写仓库 meta（覆盖 __legacy__ 的搬迁仓库）
-    #   5) 重建孤儿 scan 状态（遍历 ScanStore scans，含迁移后的 legacy scan）
+    # 启动对账序列（顺序敏感）：
+    #   1) 给所有真实 ws 补 canonical admin (manager)
+    #   2) 为历史用户创建同名工作区（在成员补充后，避免用户名与残留目录同名时误判）
+    #   3) per-ws 补写仓库 meta（读时自愈 _ensure_meta 的启动兜底）
+    #   4) 重建孤儿 scan 状态（遍历 ScanStore scans）
     # purge_loop 与本序列无依赖、保持原位即可。
-    _migrate_legacy_repos(app)
-    _migrate_legacy_scans(app)
+    # 注 1：旧全局 repos/<name> 的启动搬迁（_migrate_legacy_repos）已于 2026-08-27 退役——
+    # 每次启动物理搬走在用仓库会令扫描当场 "Repository not found"
+    # （NodeGoat-20260826-171403 实证）。全局 repos/ 视为废弃：启动不碰，手动放入的
+    # 仓库经仓库页 link-dir 显式关联（linked_repos.json，谁关联谁可见）。守护测试
+    # tests/test_legacy_repo_migration.py::test_startup_leaves_global_repos_untouched。
+    # 注 2：ws 根平铺 scan/伪 ws 的启动收纳（_migrate_legacy_scans → __legacy__）已于
+    # 2026-08-27 随 __legacy__ 概念一并退役（部署全走 web UI，CLI 直连实质废弃）。
+    # 启动不移动任何存量目录。守护测试 tests/test_legacy_scan_migration.py。
     _migrate_legacy_workspace_members(app)
     # 先完成 legacy scan/repo 归并，再为历史用户创建同名工作区，避免用户名与旧 scan 同名时
     # 把旧 scan 临时当成正式 workspace。
@@ -104,7 +109,7 @@ async def _reconcile_orphaned_scans(app: FastAPI) -> None:
     (interrupted) + 失败原因。
 
     T5: 改遍历 ScanStore._scan_entries（per-scan），而非 ws 根目录 -- 1:N 后 scan 在
-    scans/<id>/（含迁移后的 legacy scan）。容器重启会杀掉 scan_manager._watch 协程，
+    scans/<id>/（ScanStore 双源兼容历史 ws 根形态）。容器重启会杀掉 scan_manager._watch 协程，
     导致在途 scan 永不写 scan_end、session 卡 running、live SSE 空等。此处一次性兜底，
     使重开 live 页能正常显「已中断」+ 原因。单 scan 异常不阻塞启动。
     """
@@ -142,215 +147,14 @@ def _migrate_legacy_workspace_members(app: FastAPI) -> None:
     )
 
 
-def _migrate_legacy_repos(app: FastAPI) -> None:
-    """启动迁移：把旧全局 ``repos/<name>`` 搬到 ``workspaces/__legacy__/repos/<name>``。
-
-    背景：web repos 隔离 P2 前，所有 clone 仓库落在共享全局 ``repos/`` 下（无 ws 归属）。
-    P2 起 repos 按 ws 分桶（``workspaces/<ws>/repos/``），旧全局目录废弃。本函数在启动时
-    一次性把残留的旧全局仓库迁入 ``__legacy__`` ws，使其对 admin 可见、可扫。
-
-    仅迁 top-level 且含 ``.git`` 的目录（避免误搬普通文件夹）；目标已存在或源缺失则跳过
-    （幂等）。admin 分配由 ``_migrate_legacy_workspace_members`` 复用既有逻辑，**此处不
-    重复实现**。单仓库失败不阻塞启动（best-effort）。
-
-    final-review C1：搬迁后给 ``__legacy__/`` 补写 ``workspace.json``（mirror
-    ``POST /api/workspaces`` 的写法），否则 indexer ``read_workspace_meta`` 不认
-    ``__legacy__`` -> GET /api/workspaces 对全员（含 admin）不可见。仅在 ``__legacy__``
-    已作为真实 ws 目录存在（至少迁了一个仓库）时写，幂等（已存在则不覆盖），写失败不阻塞启动。
-    """
-    import shutil
-
-    cfg = app.state.config
-    old_root = cfg.repos_dir
-    if not old_root.is_dir():
-        return
-    legacy_ws = cfg.workspaces_dir / "__legacy__"
-    legacy_repos = legacy_ws / "repos"
-    for sub in list(old_root.iterdir()):
-        if not sub.is_dir() or sub.name.startswith("."):
-            continue
-        if not (sub / ".git").exists():
-            continue  # 仅迁真仓库（含 .git），跳过普通文件夹
-        target = legacy_repos / sub.name
-        if target.exists():
-            continue  # 幂等：目标已存在，跳过（不覆盖）
-        try:
-            legacy_repos.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(sub), str(target))
-        except Exception:
-            # 单仓库失败不影响其他仓库与整体启动
-            continue
-
-    # final-review C1：__legacy__ ws 目录已存在（至少迁了一个仓库）-> 补写 workspace.json，
-    # 使其在 GET /api/workspaces 可见（indexer read_workspace_meta 认 workspace.json）。T2
-    # 后 ws 元数据与 scan 状态机解耦：ws 级写 workspace.json（非 session.json），空 ws 经
-    # indexer 聚合 scan_count=0 可见。mirror POST /api/workspaces 的写法。幂等 + best-effort。
-    if legacy_repos.is_dir():
-        from .components.scan_store import write_workspace_meta
-        meta_file = legacy_ws / "workspace.json"
-        if not meta_file.exists():
-            try:
-                write_workspace_meta(legacy_ws, name="__legacy__", owner="legacy")
-            except Exception:
-                # 写 workspace.json 失败不阻塞启动（best-effort）
-                pass
-
-
-_LEGACY_WS = "__legacy__"
-# workspace.json owner 为以下自动填充值时，该 ws 是 scan 固化/迁移产生的伪 ws（非 admin 手建）。
-_AUTO_OWNERS = {"legacy", "host", "web"}
-# scan 默认目录命名：<hostname>_YYYYMMDD-HHMMSS / <repo>_<epoch> /
-# <hostname>_shannon-<epoch> / <repo>_<scan_type>-<epoch> —— 共同特征为以 <sep><6+位数字> 结尾。
-_SCAN_NAME_RE = re.compile(r"^.+[-_]\d{6,}$")
-
-
-def _is_scan_name(name: str) -> bool:
-    """目录名是否符合 scan 默认命名（用于识别被误固化为 ws 的旧 scan）。"""
-    return bool(_SCAN_NAME_RE.match(name))
-
-
-def _ensure_legacy_ws(workspaces_dir: Path) -> Path:
-    """确保 __legacy__ ws 存在且有 workspace.json（indexer read_workspace_meta 可见）。"""
-    legacy = workspaces_dir / _LEGACY_WS
-    legacy.mkdir(parents=True, exist_ok=True)
-    if not (legacy / "workspace.json").exists():
-        try:
-            from .components.scan_store import write_workspace_meta
-            write_workspace_meta(legacy, name=_LEGACY_WS, owner="legacy")
-        except Exception:
-            pass  # best-effort：写失败不阻塞
-    return legacy
-
-
-def _unique_scan_target(scans_dir: Path, scan_id: str) -> Path:
-    """在 scans_dir 下确定目标 scan 目录，名字冲突时追加 -2/-3。"""
-    target = scans_dir / scan_id
-    i = 2
-    while target.exists():
-        target = scans_dir / f"{scan_id}-{i}"
-        i += 1
-    return target
-
-
-def _rmdir_if_empty(d: Path) -> None:
-    """目录为空才删（防误删仍有内容的目录）。"""
-    try:
-        next(d.iterdir())  # 非空 -> 返回首项；空 -> StopIteration
-    except StopIteration:
-        try:
-            d.rmdir()
-        except OSError:
-            pass
-    except OSError:
-        pass
-
-
-def _migrate_legacy_scans(app: FastAPI) -> None:
-    """把 workspaces 根下的旧 scan 收纳进 __legacy__ ws 的 scans/ 下。
-
-    web 多租户化后，工作区是 admin 手建的容器（workspace.json + 成员制），scan 应落在
-    某个 ws 的 scans/ 下。但历史遗留两类旧 scan 平铺在 workspaces 根，被 indexer 误识别
-    成工作区（read_workspace_meta 回退根 session.json），污染工作区列表。本函数在启动时
-    把它们统一收纳进 __legacy__ ws：
-
-    - 情况 A（未固化 legacy scan）：ws 根 session.json + 无 workspace.json + 无 config.yaml
-      -> session.json + 产物搬入 __legacy__/scans/<legacy_id>/，原目录删除（不再提升为 ws）。
-    - 情况 B（已固化伪 ws）：有 workspace.json 且 owner 为自动值 {legacy,host,web} 且目录名
-      匹配 scan 命名 -> 先备份 workspace.json 到 __legacy__/.migrated/，再把 scans/* 搬入
-      __legacy__/scans/，删原伪 ws 目录。
-    - 其余（真 ws / __legacy__ 自身 / 无 session.json 的残留目录）-> 不动。
-
-    - legacy_id 从 session.json created_at 派生 YYYYMMDD-HHMMSS（碰撞 -2/-3）；缺失/异常回退
-      ws 目录名。
-    - 幂等：A 搬走 session.json 后根无 session.json -> 跳过；B 删目录后不存在 -> 跳过。
-    - best-effort：损坏 session.json / 单目录失败不阻断启动。
-    - 不动 read_workspace_meta（保留 session.json 回退兼容真旧 ws）；不动 CLI/worker.py。
-    """
-    import json
-    import shutil
-
-    from .components.workspaces_indexer import _to_unix
-
-    cfg = app.state.config
-    if not cfg.workspaces_dir.is_dir():
-        return
-    _SCAN_ARTIFACTS = (
-        "events.ndjson", "deliverables", "agents", "heartbeat",
-        "cancel.requested", "prompts", "workflow.log", "activity_failures.log",
-    )
-    # __legacy__ ws lazy 建：仅在确有旧 scan 要搬时才 ensure，避免无 legacy 时凭空
-    # 多出一个空 __legacy__ ws 污染工作区列表。
-    for ws_dir in cfg.workspaces_dir.iterdir():
-        if not ws_dir.is_dir() or ws_dir.name == _LEGACY_WS:
-            continue
-        root_session = ws_dir / "session.json"
-        has_meta = (ws_dir / "workspace.json").exists()
-
-        # 情况 A：未固化 legacy scan（根 session.json，无 ws 元数据，无 ws 级 config）
-        if (root_session.exists() and not has_meta
-                and not (ws_dir / "config.yaml").exists()):
-            try:
-                data = json.loads(root_session.read_text("utf-8"))
-                if not isinstance(data, dict):
-                    continue
-            except (json.JSONDecodeError, OSError):
-                continue  # 损坏 -> 跳过不崩
-            ts = _to_unix(data.get("created_at"))
-            legacy_id = (datetime.fromtimestamp(ts).strftime("%Y%m%d-%H%M%S")
-                         if ts else ws_dir.name)
-            try:
-                legacy_ws = _ensure_legacy_ws(cfg.workspaces_dir)
-                legacy_scans = legacy_ws / "scans"
-                legacy_scans.mkdir(parents=True, exist_ok=True)
-                target = _unique_scan_target(legacy_scans, legacy_id)
-                target.mkdir(parents=True, exist_ok=True)
-                for name in _SCAN_ARTIFACTS:
-                    src = ws_dir / name
-                    if src.exists():
-                        shutil.move(str(src), str(target / name))
-                # session.json 最后搬（搬完即标志已迁，幂等）
-                shutil.move(str(root_session), str(target / "session.json"))
-                _rmdir_if_empty(ws_dir)  # 原目录搬空 -> 删除（不提升为 ws）
-            except Exception:
-                continue  # best-effort：session.json 仍在根，下次重试
-            continue
-
-        # 情况 B：已固化伪 ws（自动 owner + scan 命名）-> 降级进 __legacy__
-        if has_meta:
-            try:
-                meta = json.loads((ws_dir / "workspace.json").read_text("utf-8"))
-            except (json.JSONDecodeError, OSError):
-                meta = {}
-            if (isinstance(meta, dict) and meta.get("owner") in _AUTO_OWNERS
-                    and _is_scan_name(ws_dir.name)):
-                try:
-                    legacy_ws = _ensure_legacy_ws(cfg.workspaces_dir)
-                    legacy_scans = legacy_ws / "scans"
-                    migrated_dir = legacy_ws / ".migrated"
-                    migrated_dir.mkdir(parents=True, exist_ok=True)
-                    src_meta = ws_dir / "workspace.json"
-                    if src_meta.exists():  # 备份 ws 元数据
-                        shutil.move(str(src_meta),
-                                    str(migrated_dir / f"{ws_dir.name}.json"))
-                    src_scans = ws_dir / "scans"
-                    if src_scans.is_dir():  # 搬 scans/* 进 __legacy__/scans/
-                        legacy_scans.mkdir(parents=True, exist_ok=True)
-                        for sub in list(src_scans.iterdir()):
-                            target = _unique_scan_target(legacy_scans, sub.name)
-                            shutil.move(str(sub), str(target))
-                    shutil.rmtree(ws_dir)  # 删原伪 ws 壳
-                except Exception:
-                    continue  # best-effort
-        # 其余（真 ws / 无 session.json 残留）-> 不动
-
-
 def _reconcile_repo_meta(app: FastAPI) -> None:
     """对每个 workspace 跑 RepoManager.migrate_legacy(ws)——为已存在但缺 meta 的仓库
-    补写 ``.supernova-repo.json``（含从旧全局迁入 ``__legacy__`` 的仓库）。
+    补写 ``.supernova-repo.json``（读时自愈 _ensure_meta 的启动兜底）。
 
     旧名 ``_migrate_legacy_repos`` 与本函数语义不符（migrate_legacy 不搬仓库、只补 meta），
-    2026-07-26 web repos isolation P2 Task 7 重命名为 ``_reconcile_repo_meta``，腾出原名
-    给「搬旧全局 repos → __legacy__ ws」的新函数。单 ws 异常不阻塞启动（best-effort）。
+    2026-07-26 web repos isolation P2 Task 7 重命名为 ``_reconcile_repo_meta``。曾短暂存在的
+    「搬旧全局 repos → __legacy__ ws」同名启动搬迁函数已于 2026-08-27 退役（见 lifespan
+    注释），勿重建。单 ws 异常不阻塞启动（best-effort）。
     """
     cfg = app.state.config
     if not cfg.workspaces_dir.is_dir():

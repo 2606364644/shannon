@@ -67,24 +67,33 @@ def test_startup_provisions_historical_user_workspaces(tmp_workspaces, monkeypat
     assert st.get_workspace_member_role("existing", ops.id) is None
 
 
-def test_user_named_legacy_scan_gets_fresh_workspace_after_migration(tmp_workspaces, monkeypatch):
+def test_user_named_stale_dir_blocks_ws_provisioning_without_touching_it(
+    tmp_workspaces, monkeypatch,
+):
+    """启动对账退役收纳（2026-08-27）后的新语义守护：残留同名目录（历史根平铺 scan
+    形态）不被启动移动/改造——ensure_all_user_workspaces 遇 FileExistsError 跳过该
+    用户（绝不覆盖已有目录内容），session.json 原样保留，不产生 __legacy__。"""
     monkeypatch.setenv("SUPERNOVA_WEB_COOKIE_SECURE", "0")
     monkeypatch.setenv("SUPERNOVA_WORKER_ROOT", str(tmp_workspaces.parent))
     app = create_app()
     st = app.state.auth_store
     admin = st.create_user("admin", "h", role="admin")
     alice = st.create_user("alice", "h")
-    legacy_scan = app.state.config.workspaces_dir / "alice"
-    legacy_scan.mkdir()
-    (legacy_scan / "session.json").write_text(
+    stale_dir = app.state.config.workspaces_dir / "alice"
+    stale_dir.mkdir()
+    (stale_dir / "session.json").write_text(
         '{"status":"completed","scan_type":"whitebox","created_at":"2026-08-01T00:00:00Z"}'
     )
 
     with TestClient(app):
         pass
 
-    alice_ws = app.state.config.workspaces_dir / "alice"
-    assert (alice_ws / "workspace.json").exists()
+    # 残留目录原样保留：不被搬走、不被改造为 ws（无 workspace.json）
+    assert (stale_dir / "session.json").exists()
+    assert not (stale_dir / "workspace.json").exists()
+    # 成员关系照常登记（DB 层 alice=manager、admin 兜底 manager）——目录不被覆盖是
+    # 守护重点，ws 登记与文件改造解耦
     assert st.get_workspace_member_role("alice", alice.id) == "manager"
     assert st.get_workspace_member_role("alice", admin.id) == "manager"
-    assert (app.state.config.workspaces_dir / "__legacy__").exists()
+    # 不产生 __legacy__
+    assert not (app.state.config.workspaces_dir / "__legacy__").exists()

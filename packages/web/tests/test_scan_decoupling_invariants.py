@@ -19,24 +19,6 @@ def test_one_scan_id_one_session_json(tmp_path):
     assert len(session_jsons) == 1
 
 
-def test_migrate_no_root_session_leak(tmp_path):
-    """迁移后 legacy scan 的根 session.json 入 __legacy__/scans/<id>/，原目录无残留。"""
-    from supernova_web.app import _migrate_legacy_scans
-    from types import SimpleNamespace
-    ws = tmp_path / "NodeGoat_20260713-231325"
-    ws.mkdir()
-    (ws / "session.json").write_text(json.dumps(
-        {"status": "completed", "created_at": 1780000000.0, "owner": "web"}))
-    app = SimpleNamespace(state=SimpleNamespace(
-        config=SimpleNamespace(workspaces_dir=tmp_path)))
-    _migrate_legacy_scans(app)
-    # 原 scan 目录删除（不再提升为独立 ws），根 session.json 无残留
-    assert not ws.exists()
-    # session.json 搬入 __legacy__/scans/<id>/，全树仅此一个
-    session_jsons = list((tmp_path / "__legacy__").rglob("session.json"))
-    assert len(session_jsons) == 1
-
-
 # ── 不变量 2: GET /api/workspaces ws status = latest scan 聚合 ─────────────────
 
 def test_ws_status_equals_latest_scan(authed_client, tmp_workspaces):
