@@ -21,6 +21,7 @@ def test_report_vulnerability_minimal_fields():
     assert vuln.merged_from == []
     assert vuln.endpoints == []
     assert vuln.poc is None
+    assert vuln.problem_points == []
 
 
 def test_report_vulnerability_requires_id_and_type():
@@ -104,6 +105,42 @@ async def test_build_report_data_maps_queue_fields(tmp_path):
     assert v.evidence.verdict == "vulnerable"
     # raw 保留原始 entry（md 导出复用 render_vuln_card）
     assert v.raw is not None and v.raw["ID"] == "XSS-VULN-01"
+
+
+async def test_build_report_data_problem_points_passthrough(tmp_path):
+    """report_problem_points（问题点富化写回）→ problem_points 透传；畸形条目丢弃。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "xss_exploitation_queue.json", [
+        {
+            "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+            "severity": "high", "confidence": "high",
+            "externally_exploitable": True,
+            "report_problem_points": [
+                {"location": "app/views/memos.html:31",
+                 "description": "memo 未经消毒进入模板渲染",
+                 "snippet": "<div><%- memo %></div>"},
+                {"description": "缺 location 的畸形条目"},
+                {"location": "   "},
+            ],
+        },
+        {
+            "ID": "XSS-VULN-02", "vulnerability_type": "Reflected",
+            "severity": "high", "confidence": "high",
+            "externally_exploitable": True,
+        },
+    ])
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+    by_id = {v.id: v for v in rd.vulnerabilities}
+    pp = by_id["XSS-VULN-01"].problem_points
+    assert len(pp) == 1
+    assert pp[0].location == "app/views/memos.html:31"
+    assert pp[0].description == "memo 未经消毒进入模板渲染"
+    assert pp[0].snippet == "<div><%- memo %></div>"
+    # 无写回字段的卡缺省空列表（GN/黑盒卡降级路径）
+    assert by_id["XSS-VULN-02"].problem_points == []
 
 
 async def test_build_report_data_endpoint_fallback(tmp_path):

@@ -49,6 +49,10 @@ class BaseVulnerability(BaseModel):
     # ②卡片富化（T3）：接口一体表行（models/report_data.EndpointEntry 形态 dict，
     # 含 route_registered_at/source_location/sink_location 行号链）
     report_endpoints: list[dict] | None = None
+    # ②′问题点富化（spec 2026-08-26-vuln-card-seven-sections §4.1，同 T3 写回）：
+    # 问题点三要素行（models/report_data.ProblemPoint 形态 dict：
+    # location/description/snippet，snippet 为 repo 真实源码）
+    report_problem_points: list[dict] | None = None
     # ③POC 增强（T4）：结构化 POC（models/report_data.PocBlock 形态 dict：
     # request/preconditions/expected_response/witness_payload）
     report_poc: dict | None = None

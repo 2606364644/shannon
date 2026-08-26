@@ -83,6 +83,16 @@ class VulnNarrative(BaseModel):
     remediation: str | None = None
 
 
+class ProblemPoint(BaseModel):
+    """问题点三要素（spec 2026-08-26-vuln-card-seven-sections §3 节 3）：
+    位置 + 说明 + 代码片段。endpoint 富化 agent 读源码产出，写回 queue 的
+    ``report_problem_points``（builder 纯透传，不合成不推断）。"""
+
+    location: str
+    description: str | None = None
+    snippet: str | None = None
+
+
 class VulnEvidence(BaseModel):
     verification: Literal["static", "dynamic"] = "static"
     dynamic_evidence: str | None = None    # 黑盒实测输出；白盒为 None
@@ -108,6 +118,7 @@ class ReportVulnerability(BaseModel):
     merge_source: str | None = None     # both/llm-only/gitnexus-only
     merged_from: list[str] = Field(default_factory=list)   # ①归并终审产物
     narrative: VulnNarrative | None = None
+    problem_points: list[ProblemPoint] = Field(default_factory=list)
     endpoints: list[EndpointEntry] = Field(default_factory=list)
     affected_entries: list[dict[str, Any]] = Field(default_factory=list)
     dataflow_steps: list[dict[str, Any]] = Field(default_factory=list)

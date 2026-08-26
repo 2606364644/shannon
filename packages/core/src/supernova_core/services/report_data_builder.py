@@ -22,6 +22,7 @@ from supernova_core.models.report_data import (
     TypeStats,
     VulnEvidence,
     VulnNarrative,
+    ProblemPoint,
 )
 from supernova_core.models.queue_schemas import VulnerabilityQueue
 from supernova_core.services.findings_renderer import CLASS_CONFIG
@@ -128,6 +129,26 @@ def _narrative(vuln) -> VulnNarrative | None:
     if cause or impact or remediation:
         return VulnNarrative(
             cause=cause, impact=impact, remediation=remediation)
+
+
+def _problem_points(vuln) -> list[ProblemPoint]:
+    """report_problem_points（富化写回）→ ProblemPoint 透传（不合成不推断）。
+
+    宽松校验与 endpoint 写回同立场：非 dict / 缺 location 的畸形条目丢弃。
+    """
+    points: list[ProblemPoint] = []
+    for item in (getattr(vuln, "report_problem_points", None) or []):
+        if not isinstance(item, dict):
+            continue
+        location = str(item.get("location") or "").strip()
+        if not location:
+            continue
+        points.append(ProblemPoint(
+            location=location,
+            description=item.get("description"),
+            snippet=item.get("snippet"),
+        ))
+    return points
     return None
 
 
@@ -159,6 +180,7 @@ def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict) -> ReportVulne
         merge_source=getattr(vuln, "merge_source", None),
         merged_from=list(getattr(vuln, "merged_from", None) or []),
         narrative=_narrative(vuln),
+        problem_points=_problem_points(vuln),
         endpoints=_endpoint_entries(vuln),
         affected_entries=list(getattr(vuln, "affected_entries", None) or []),
         dataflow_steps=list(getattr(vuln, "dataflow_steps", None) or []),
