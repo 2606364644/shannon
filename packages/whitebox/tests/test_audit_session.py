@@ -15,6 +15,13 @@ def _audit_dir(tmp_path: Path) -> Path:
     return generate_audit_path(_make_meta(tmp_path))
 
 
+async def _flush(session: AuditSession) -> None:
+    """读 workflow.log 前排空 dispatcher——2026-08-05 dispatch 非阻塞化（入队即
+    返回，后台 drain task 异步写盘）后，不排空就读会竞态读到空文件。close() 会
+    join 队列再关流（graceful 排空，对齐 core test_file_renderer 的既定契约）。"""
+    await session.close()
+
+
 async def test_initialize_creates_directories(tmp_path: Path):
     meta = _make_meta(tmp_path)
     session = AuditSession(meta)
@@ -55,6 +62,7 @@ async def test_log_phase_start_and_complete(tmp_path: Path):
     await session.initialize()
     await session.log_phase_start("recon")
     await session.log_phase_complete("recon")
+    await _flush(session)
     ad = _audit_dir(tmp_path)
     wf_content = (ad / "workflow.log").read_text()
     assert "[PHASE] Starting recon" in wf_content
@@ -113,6 +121,7 @@ async def test_log_resume_header(tmp_path: Path):
         completed_agents=["recon"],
     )
     await session.log_resume_header(info)
+    await _flush(session)
     ad = _audit_dir(tmp_path)
     wf_content = (ad / "workflow.log").read_text()
     assert "[RESUME]" in wf_content
@@ -161,10 +170,10 @@ async def test_full_lifecycle(tmp_path: Path):
     assert "Supernova Pentest - Workflow Log" in wf
     assert "Workflow ID: wf-lifecycle" in wf
     assert "[PHASE] Starting recon" in wf
-    assert "[AGENT] recon: Starting" in wf
+    assert "[AGENT] ▶ recon started (attempt 1)" in wf
     assert "[TOOL]  recon: Read:" in wf
     assert "[LLM]   recon: Turn 1:" in wf
-    assert "[AGENT] recon: Completed" in wf
+    assert "[AGENT] ✓ recon Completed" in wf
     assert "[PHASE] Completed recon" in wf
     assert "Workflow COMPLETED" in wf
 
@@ -199,9 +208,11 @@ async def test_log_step_writes_step_line(tmp_path: Path):
     await session.initialize()
     await session.log_step("code-index", "pre-recon", "start")
     await session.log_step("code-index", "pre-recon", "complete", duration_ms=9000)
+    await _flush(session)
     ad = _audit_dir(tmp_path)
     wf = (ad / "workflow.log").read_text()
-    assert "[STEP]" in wf
+    # 标签列补齐到 5 字符：渲染为 "[STEP ]"（对齐 core test_file_renderer 契约）
+    assert "[STEP ]" in wf
     assert "code-index" in wf
 
 
@@ -210,6 +221,7 @@ async def test_log_phase_start_passes_steps(tmp_path: Path):
     session = AuditSession(meta)
     await session.initialize()
     await session.log_phase_start("pre-recon", steps=("code-index", "pre-recon"))
+    await _flush(session)
     ad = _audit_dir(tmp_path)
     assert "[PHASE] Starting pre-recon" in (ad / "workflow.log").read_text()
 
@@ -220,9 +232,11 @@ async def test_track_step_emits_start_then_complete(tmp_path: Path):
     await session.initialize()
     async with session.track_step("pre-recon", "merge-sinks"):
         pass
+    await _flush(session)
     wf = (_audit_dir(tmp_path) / "workflow.log").read_text()
-    assert "[STEP] merge-sinks: Starting" in wf
-    assert "[STEP] merge-sinks: Completed" in wf
+    # step_body 单源化格式：○ start / ✓ complete（core test_file_renderer 锁定）
+    assert "[STEP ] ○ merge-sinks" in wf
+    assert "[STEP ] ✓ merge-sinks" in wf
 
 
 async def test_track_step_emits_complete_with_error_on_exception(tmp_path: Path):
@@ -233,6 +247,8 @@ async def test_track_step_emits_complete_with_error_on_exception(tmp_path: Path)
     with pytest.raises(RuntimeError):
         async with session.track_step("pre-recon", "adjudication"):
             raise RuntimeError("boom")
+    await _flush(session)
     wf = (_audit_dir(tmp_path) / "workflow.log").read_text()
-    assert "[STEP] adjudication: Starting" in wf
-    assert "boom" in wf   # error surfaced in the complete step line
+    assert "[STEP ] ○ adjudication" in wf
+    # 异常路径：complete 行带 ✗ + error（step_body 单源化格式）
+    assert "[STEP ] ✗ adjudication  — boom" in wf
