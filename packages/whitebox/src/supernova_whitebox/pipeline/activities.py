@@ -10,7 +10,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
 from supernova_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
-from supernova_core.models.audit import WorkflowSummary
+from supernova_core.models.audit import AgentEndResult, WorkflowSummary
 from supernova_core.models.errors import (
     ErrorCode,
     PentestError,
@@ -1106,18 +1106,28 @@ def _apply_gn_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
     字段仅原值为 None/空/降级占位时写入。返回 (回填条数, warnings)。
     """
     warnings: list[str] = []
+
+    def _shape(x: object) -> str:
+        # 翻车时带 raw 实际形态（type + 前 200 字符）——agents log 不记最终输出
+        # 文本，warning 不带内容则只能靠推断翻车原因（NodeGoat 2026-08-26 教训）。
+        return f"type={type(x).__name__}, head={str(x)[:200]!r}"
+
     data: object = raw
     if isinstance(data, str):
         try:
             import json as _json
             data = _json.loads(data)
         except (ValueError, TypeError):
-            return 0, [f"gn-enrichment: unparseable output ({len(raw)} chars)"]
+            return 0, [f"gn-enrichment: unparseable output ({_shape(raw)})"]
+    if isinstance(data, list):
+        # 裸数组根（NodeGoat 2026-08-26 实形态：structured_output=[{...}]，schema
+        # 契约是 {"vulnerabilities":[...]}，agent 差一层包装）——适配而非整轮报废。
+        data = {"vulnerabilities": data}
     if not isinstance(data, dict):
-        return 0, ["gn-enrichment: output not a JSON object"]
+        return 0, [f"gn-enrichment: output not a JSON object ({_shape(data)})"]
     entries = data.get("vulnerabilities")
     if not isinstance(entries, list):
-        return 0, ["gn-enrichment: no vulnerabilities array"]
+        return 0, [f"gn-enrichment: no vulnerabilities array ({_shape(data)})"]
     by_id = {f.ID: f for f in findings}
     enriched = 0
     for entry in entries:
@@ -1210,6 +1220,7 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
                 result = await run_gitnexus_verdict_agent(
                     prompt=prompt,
                     repo_path=str(repo),
+                    agent_name=f"gn-enrich-{vuln_class}",
                     structured_output_schema={
                         "type": "object",
                         "properties": {
@@ -1300,6 +1311,7 @@ async def run_endpoint_enrichment(input: ActivityInput) -> dict:
             result = await run_gitnexus_verdict_agent(
                 prompt=prompt,
                 repo_path=str(repo),
+                agent_name=f"endpoint-enrich-{vuln_class}",
                 structured_output_schema={
                     "type": "object",
                     "properties": {"vulnerabilities": {"type": "array"}},
@@ -2298,6 +2310,7 @@ async def _rework_missing_narratives(
             result = await run_gitnexus_verdict_agent(
                 prompt=prompt,
                 repo_path=str(repo),
+                agent_name=f"gn-enrich-rework-{vuln_class}",
                 structured_output_schema={
                     "type": "object",
                     "properties": {"vulnerabilities": {"type": "array"}},
@@ -2372,6 +2385,7 @@ async def _rework_missing_endpoints(
             result = await run_gitnexus_verdict_agent(
                 prompt=prompt,
                 repo_path=str(repo),
+                agent_name=f"endpoint-enrich-rework-{vuln_class}",
                 structured_output_schema={
                     "type": "object",
                     "properties": {"vulnerabilities": {"type": "array"}},
@@ -2472,6 +2486,7 @@ async def run_gitnexus_verdict_agent(
     audit_session: "AuditSession | None" = None,
     provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
     max_turns: int | None = None,
+    agent_name: str = "gitnexus-verdict",
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
@@ -2483,6 +2498,13 @@ async def run_gitnexus_verdict_agent(
     audit_session 非 None 时构造 SessionToolAuditLogger（对齐 run_agent :167/183/198），多轮
     grep/read 工具调用经逐轮审计；为 None 时 tool_audit_logger=None（行为同前，向后兼容）。
 
+    记账（2026-08-27 修成本漏记）：audit_session 非 None 时，result 的 cost/tokens/model
+    经 end_agent(AgentEndResult) 记入 session.json metrics——此前调用方只消费
+    structured_output，深判 LLM 消耗在总账不可见（2026-08-25 NodeGoat 扫描实证
+    authz 深判 7 轮成本整笔漏记）。run_claude_prompt 全捕获异常恒返回 result，
+    成功/失败两路都记账。一次扫描内多次调用（富化逐 class/回炉）须传唯一
+    agent_name，防 metrics.agents 同名条目互相覆盖（totals 累加、agents 覆盖）。
+
     供 spec-1 的 run_authz_gitnexus_judge 多轮判定用。单测 mock run_claude_prompt 验证
     max_turns 透传 / audit_session 注入 tool_audit_logger。
     """
@@ -2493,13 +2515,13 @@ async def run_gitnexus_verdict_agent(
             SessionToolAuditLogger,
         )
         tool_audit_logger = SessionToolAuditLogger(
-            audit_session, "gitnexus-verdict", attempt=1
+            audit_session, agent_name, attempt=1
         )
     agent_start = time.monotonic()
     try:
         if tool_audit_logger is not None:
             await tool_audit_logger.initialize()
-        return await run_claude_prompt(
+        result = await run_claude_prompt(
             prompt=prompt,
             repo_path=repo_path,
             model_tier="medium",
@@ -2516,6 +2538,25 @@ async def run_gitnexus_verdict_agent(
                 success=True,
                 duration_ms=int((time.monotonic() - agent_start) * 1000),
             )
+    # 记账（见 docstring）：成功/失败都记；run_claude_prompt 抛异常（理论上不抛）
+    # 时无 result 可记，异常继续上抛由 caller 降级处理。
+    if audit_session is not None:
+        tokens = result.tokens
+        await audit_session.end_agent(agent_name, AgentEndResult(
+            success=result.success,
+            duration_ms=int((time.monotonic() - agent_start) * 1000),
+            cost_usd=result.cost or 0.0,
+            cost_currency=result.cost_currency,
+            model=result.model,
+            error=result.error,
+            num_turns=result.turns,
+            input_tokens=tokens.input_tokens if tokens else None,
+            output_tokens=tokens.output_tokens if tokens else None,
+            cache_read_tokens=tokens.cache_read_input_tokens if tokens else None,
+            cache_creation_tokens=(
+                tokens.cache_creation_input_tokens if tokens else None),
+        ))
+    return result
 
 
 def _make_gitnexus_progress_cb(session):

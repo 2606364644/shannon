@@ -126,6 +126,34 @@ async def test_enrichment_skipped_when_mode_not_deep(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_enrichment_agent_name_per_class(tmp_path):
+    """deep 档：verdict agent 记账唯一名带 vuln_class——逐 class 调用防
+    metrics.agents 同名条目互相覆盖（totals 累加、agents 覆盖）。"""
+    import supernova_whitebox.audit.session_registry as session_registry
+
+    captured: list[dict] = []
+
+    async def fake_agent(**kw):
+        captured.append(kw)
+        return _Result()
+
+    async def noop_ensure(input):
+        return None
+
+    _write_queue(tmp_path, [dict(_GN_VULN)])
+    with patch.object(activities, "_get_paths",
+                      lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
+         patch.object(activities, "gn_enrich_mode", lambda: "deep"), \
+         patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
+         patch.object(session_registry, "get_audit_session",
+                      lambda: _RecordingSession()), \
+         patch.object(activities, "ensure_audit_session", noop_ensure):
+        await activities.run_gn_finding_enrichment(_FakeInput(tmp_path))
+
+    assert [c.get("agent_name") for c in captured] == ["gn-enrich-xss"]
+
+
+@pytest.mark.asyncio
 async def test_enrichment_backfills_gn_only_by_id(tmp_path):
     """deep 档：GN-only 卡按 ID 回填富化字段（叙事/评级/数据流/PoC），
     降级占位 mismatch_reason 被替换；llm-only 卡不动。"""
@@ -171,6 +199,27 @@ async def test_enrichment_backfills_gn_only_by_id(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_enrichment_bare_array_root_backfills(tmp_path):
+    """agent 产裸数组根（structured_output=[{...}]，NodeGoat 2026-08-26 实翻车
+    形态：两次 "output not a JSON object" 整轮报废）：包装成
+    {"vulnerabilities":[...]} 走既有白名单回填。"""
+    result_so = [{
+        "ID": "XSS-GN-01",
+        "impact": "攻击者可在受害者浏览器执行任意脚本。",
+        "witness_payload": "<img src=x onerror=alert(1)>",
+    }]
+    _write_queue(tmp_path, [dict(_GN_VULN)])
+    result = await _run(tmp_path, agent_result=_Result(so=result_so))
+    assert result["total_enriched"] == 1
+
+    out = json.loads((_wb(tmp_path) / "intermediate" /
+                      "xss_exploitation_queue.json").read_text())
+    gn = next(v for v in out["vulnerabilities"] if v["ID"] == "XSS-GN-01")
+    assert gn["impact"] == "攻击者可在受害者浏览器执行任意脚本。"
+    assert gn["witness_payload"] == "<img src=x onerror=alert(1)>"
+
+
+@pytest.mark.asyncio
 async def test_enrichment_agent_failure_keeps_deterministic_fields(tmp_path):
     """agent 失败：降级不阻塞——queue 保持确定性字段原样，返回 failed 标记。"""
     _write_queue(tmp_path, [dict(_GN_VULN)])
@@ -198,6 +247,30 @@ async def test_enrichment_no_gn_only_skips_agent(tmp_path):
     result = await _run(tmp_path, agent_exc=AssertionError("无候选不应调 agent"))
     assert result["total_enriched"] == 0
     assert "xss" not in result["enriched_classes"]
+
+
+def test_apply_gn_enrichment_failure_warnings_include_raw_shape():
+    """翻车 warning 带 raw 实际形态（type + 前 200 字符）——NodeGoat 2026-08-26
+    调查只能靠推断（agents log 不记最终输出文本），下次翻车应一眼定位产出形态。"""
+    # 非 str/dict/list 根（如 int）
+    enriched, warnings = activities._apply_gn_enrichment([], 42)
+    assert enriched == 0
+    assert len(warnings) == 1
+    assert "int" in warnings[0] and "42" in warnings[0]
+
+    # str 但不可解析
+    _, warnings = activities._apply_gn_enrichment([], "前置叙述无 JSON")
+    assert len(warnings) == 1
+    assert "str" in warnings[0] and "前置叙述无 JSON" in warnings[0]
+
+    # dict 但无 vulnerabilities 数组
+    _, warnings = activities._apply_gn_enrichment([], {"result": "done"})
+    assert len(warnings) == 1
+    assert "dict" in warnings[0] and "result" in warnings[0]
+
+    # 长产出截断到 200 字符（防 warning 刷屏）
+    _, warnings = activities._apply_gn_enrichment([], "x" * 500)
+    assert len(warnings[0]) < 300
 
 
 def test_worker_registers_gn_finding_enrichment():

@@ -159,9 +159,11 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
     }]}
 
     async def _agent_side_effect(**kw):
+        _agent_side_effect.calls.append(kw.get("agent_name"))
         payload = _agent_side_effect.payloads.pop(0)
         return SimpleNamespace(structured_output=payload, text=None)
     _agent_side_effect.payloads = [ep_payload, narr_payload]
+    _agent_side_effect.calls = []
 
     with patch.object(activities, "run_claude_prompt",
                       return_value=SimpleNamespace(
@@ -175,6 +177,10 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
         result = await activities.run_report_polish(_FakeInput(tmp_path))
 
     assert result["reworked"] == ["XSS-GN-01"]  # 多路回炉去重（同一卡只记一次）
+    # 回炉 agent 记账唯一名（防 metrics.agents 同名覆盖）：接口富化/narrative
+    # 富化各带 vuln_class 后缀，与主富化（endpoint-enrich-*/gn-enrich-*）分流。
+    assert _agent_side_effect.calls == [
+        "endpoint-enrich-rework-xss", "gn-enrich-rework-xss"]
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     assert data["qa"]["passed"] is True
     assert data["qa"]["reworked_ids"] == ["XSS-GN-01"]
@@ -370,8 +376,9 @@ async def test_polish_reworks_missing_narratives(tmp_path, monkeypatch):
                           structured_output=enrich_payload, text=None)) as m_agent:
         result = await activities.run_report_polish(_FakeInput(tmp_path))
 
-    # 深富化 agent 被调（gn_finding_enrichment prompt）
+    # 深富化 agent 被调（gn_finding_enrichment prompt）+ 记账唯一名
     assert m_agent.called
+    assert m_agent.call_args.kwargs["agent_name"] == "gn-enrich-rework-xss"
     assert "XSS-VULN-01" in result["reworked"]
     queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
                        .read_text(encoding="utf-8"))

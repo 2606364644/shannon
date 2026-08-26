@@ -195,6 +195,10 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "auth-vuln": "vulnerability-analysis",
     "ssrf-vuln": "vulnerability-analysis",
     "authz-vuln": "vulnerability-analysis",
+    # GN 深判/富化 agent（run_gitnexus_verdict_agent 记账，2026-08-27 修成本
+    # 漏记）：authz judge 跑在 vulnerability-analysis 相。富化唯一名
+    # （gn-enrich-*/endpoint-enrich-*）不进 map——不聚合 phase，只进 agents+totals。
+    "gitnexus-verdict": "vulnerability-analysis",
     "recon-blackbox": "recon",
     "injection-exploit": "exploitation",
     "xss-exploit": "exploitation",

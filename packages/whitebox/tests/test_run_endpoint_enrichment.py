@@ -107,6 +107,8 @@ async def test_endpoint_enrichment_writes_report_endpoints(tmp_path, monkeypatch
     prompt = mock_agent.call_args.kwargs["prompt"]
     assert "POST /memos" in prompt
     assert "app/routes/index.js" in prompt
+    # 记账唯一名（防 metrics.agents 同名覆盖，逐 class 唯一）
+    assert mock_agent.call_args.kwargs["agent_name"] == "endpoint-enrich-xss"
 
 
 async def test_endpoint_enrichment_drops_hallucinated_and_malformed(tmp_path, monkeypatch):
