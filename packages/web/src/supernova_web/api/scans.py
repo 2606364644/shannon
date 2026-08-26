@@ -232,12 +232,15 @@ def _dataflow_view_for(scan_dir: Path):
 
 
 def report_for(scan_dir, track: str | None = None) -> str:
-    """读 scan_dir 的综合报告 md（+ PoC 拼接）。
+    """读 scan_dir 的综合报告 md。
 
     track 解析：显式传入 > auto-infer（``DeliverablesReader._infer_track``，combined_report.md
     存在时优先 combined）。统一在 ``deliverables/{resolved}/`` 桶内挑报告（comprehensive 优先，
     否则首个 md）——不跨桶，跨桶 list_reports 会按错桶 read -> FileNotFoundError（regression）。
-    PoC 拼接仅 whitebox 桶（PoC 集合是白盒产物；blackbox/combined 自含）。
+
+    不再拼接 PoC md（spec 2026-08-26-report-single-source-rendering §3.1）：新管线下
+    comprehensive md 卡自带 POC 节，尾部再拼 poc_collection 会重复；PoC 集合是独立
+    交付物（DeliverablesTab 可见）。
 
     零回归：显式 track=None 时等价 auto-infer 单桶读——纯白盒/纯黑盒行为与旧 list_reports 一致
     （单桶时 comprehensive 挑选结果相同）。
@@ -250,12 +253,7 @@ def report_for(scan_dir, track: str | None = None) -> str:
     chosen = next((x for x in mds if "comprehensive" in x.lower()), mds[0] if mds else None)
     if not chosen:
         return ""  # 该桶无报告产物 -> 200 空文本
-    body = reader.read(chosen, resolved)
-    if resolved == "whitebox":
-        poc = reader.read_poc()
-        if poc:
-            return f"{body.rstrip()}\n\n---\n\n{poc.lstrip()}"
-    return body
+    return reader.read(chosen, resolved)
 
 
 def logs_for(scan_dir, file: str | None):

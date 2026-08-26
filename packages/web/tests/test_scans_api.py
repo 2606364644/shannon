@@ -648,18 +648,17 @@ def test_scan_logs_dual_mode(authed_client, tmp_workspaces):
     assert client.get("/api/workspaces/L/scans/s1/logs?file=nope.log").status_code == 404
 
 
-def test_scan_report_appends_poc(authed_client, tmp_workspaces):
-    """report 拼接 PoC md（--- 分隔 + 代码块保留）。"""
+def test_scan_report_no_poc_concat(authed_client, tmp_workspaces):
+    """report 端点不拼接 PoC md（spec 2026-08-26-report-single-source-rendering
+    §3.1）：新管线下 comprehensive md 卡自带 POC 节，尾部再拼 poc_collection
+    会重复；PoC 集合是独立交付物（DeliverablesTab 可见），md 端点返回纯报告。"""
     scan_dir = _scan_with(tmp_workspaces, "P", scan_id="s1")
     dl = scan_dir / "deliverables" / "whitebox"; dl.mkdir(parents=True)
     (dl / "comprehensive_security_assessment_report.md").write_text("# 综合报告\n\n正文")
     (dl / "exploitable_poc_collection.md").write_text(
         "# 可利用漏洞 PoC 集合（白盒）\n\n```bash\ncurl -i -X GET 'https://t/x'\n```")
     body = authed_client.get("/api/workspaces/P/scans/s1/report").text
-    assert body.startswith("# 综合报告")
-    assert "---" in body
-    assert "# 可利用漏洞 PoC 集合（白盒）" in body
-    assert "```bash" in body and "curl -i" in body
+    assert body == "# 综合报告\n\n正文"  # 纯 md，无 --- 拼接、无 PoC 内容
 
 
 def test_scan_report_no_report_empty_200(authed_client, tmp_workspaces):
