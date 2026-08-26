@@ -25,6 +25,22 @@
 #   3) 绕开代理直接拉国内镜像（拉一次就缓存，之后不再拉）：
 #      docker pull docker.m.daocloud.io/temporalio/temporal:latest \
 #        && docker tag docker.m.daocloud.io/temporalio/temporal:latest temporalio/temporal:latest
+#
+# 开了系统代理、镜像能拉了，但 --build 时 pip 报 "DO NOT MATCH THE HASHES"？
+#   不是包被篡改——是 Docker Desktop 系统代理为 VM 级透明代理，build 容器内 pip/apt/npm
+#   的国内镜像流量也被劫持走 Clash，只剩 ~200kB/s（直连的 1/100），大 wheel 长连接被掐断，
+#   截断文件去校验 hash 必然 mismatch（特征：报错前一行进度停在 60% 左右、龟速）。
+#   治本（已配置，2026-08-25）：settings-store.json 写 manual proxy + bypass 分流——
+#     ProxyHTTPMode=manual, OverrideProxyHTTP/HTTPS=http://127.0.0.1:7890,
+#     OverrideProxyExclude=mirrors.cloud.tencent.com
+#   docker.io 走代理出网、腾讯镜像容器内直连满速。改动后需重启 Docker Desktop。
+#
+# manual 代理模式下 build 又在 "load metadata" 卡 auth.docker.io 超时（dial tcp 162.125.x.x）？
+#   manual 模式只给 daemon 配代理，buildkit resolver 不继承 → 直连被 DNS 污染（162.125.x.x
+#   是 Dropbox 段假 IP）。docker pull 走 daemon 是通的。止血：先 daemon 预拉基础镜像再 build
+#   （buildkit 与 daemon 共享镜像存储，FROM 命中本地就不发请求）：
+#      docker pull python:3.12-slim-bookworm node:20-slim
+#   改 Dockerfile 换新基础镜像 tag 时，同样先手动 pull 一次。
 set -euo pipefail
 
 # 切到仓库根（脚本可能在子目录被调用）
