@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import i18n from "@/i18n";
 import { ReportView } from "./ReportView";
 import { ExecutiveSummary } from "./ExecutiveSummary";
@@ -450,5 +450,165 @@ describe("buildRawHttp（Burp 格式确定性拼装，导出纯函数）", () =>
     expect(
       buildRawHttp({ method: "GET", url: "http://t/x", headers: { Host: "t2.example" } }),
     ).toBe("GET /x HTTP/1.1\nHost: t2.example");
+  });
+});
+
+// ── spec 2026-08-26-report-single-source-rendering §7：速查表 / 整卡折叠 / qa 逐卡缺口 ──
+
+const qrData: ReportData = {
+  ...data,
+  quick_reference: [
+    {
+      id: "XSS-VULN-01",
+      title: "备忘录存储型 XSS",
+      params: ["memo (body)"],
+      endpoints: ["POST /memos (write, isLoggedIn)"],
+      severity: "high",
+      verification: "静态分析",
+      confidence: "待复核",
+    },
+    {
+      id: "INJ-VULN-02",
+      title: "NoSQL 注入（黑盒实测）",
+      params: ["preTax (body)"],
+      endpoints: ["POST /contributions"],
+      severity: "critical",
+      verification: "动态实测",
+      confidence: "高",
+    },
+  ],
+};
+
+describe("速查表节（quick_reference）", () => {
+  it("渲染速查表：行数 = 卡数；无 quick_reference（旧数据）整节省略", () => {
+    const { unmount } = render(<ReportView data={qrData} />);
+    expect(screen.getByTestId("quick-reference")).toBeInTheDocument();
+    expect(screen.getAllByTestId("quick-ref-row").length).toBe(2);
+    unmount();
+    render(<ReportView data={data} />);
+    expect(screen.queryByTestId("quick-reference")).not.toBeInTheDocument();
+  });
+
+  it("行点击 → 定位对应卡（focusAnchor smooth 滚动，同步路径——卡未折叠）", () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={qrData} />);
+    fireEvent.click(screen.getByTestId("quick-ref-jump-XSS-VULN-01"));
+    expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "smooth" });
+  });
+
+  it("卡折叠时点速查表行 → 先展开再定位（waitFor 异步路径）", async () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={qrData} />);
+    fireEvent.click(screen.getAllByTestId("vuln-collapse-toggle")[0]);
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).queryByTestId("sec-cause")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("quick-ref-jump-XSS-VULN-01"));
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "smooth" }));
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).getByTestId("sec-cause")).toBeInTheDocument(); // 卡已展开
+  });
+});
+
+describe("整卡折叠（spec §7：卡头 chevron + 键盘可达）", () => {
+  it("默认全展开；点卡头折叠 → 只留卡头（aria-expanded=false），再点恢复", () => {
+    render(<ReportView data={data} />);
+    const toggles = screen.getAllByTestId("vuln-collapse-toggle");
+    expect(toggles.length).toBe(2);
+    expect(toggles[0].getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggles[0]);
+    expect(screen.getAllByTestId("vuln-collapse-toggle")[0].getAttribute("aria-expanded")).toBe("false");
+    const card0 = screen.getAllByTestId("report-vuln-card")[0];
+    expect(within(card0).queryByTestId("sec-cause")).not.toBeInTheDocument();
+    // 卡头（ID+标题+severity）折叠态仍可见
+    expect(within(card0).getByText("XSS-VULN-01")).toBeInTheDocument();
+    expect(within(card0).getByTestId("vuln-title")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId("vuln-collapse-toggle")[0]);
+    expect(screen.getAllByTestId("vuln-collapse-toggle")[0].getAttribute("aria-expanded")).toBe("true");
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).getByTestId("sec-cause")).toBeInTheDocument();
+  });
+
+  it("卡头是原生 button（键盘可达：Enter/Space 原生触发 click）", () => {
+    render(<ReportView data={data} />);
+    const btn = screen.getAllByRole("button", { name: /XSS-VULN-01/ }).find(
+      (b) => b.getAttribute("data-testid") === "vuln-collapse-toggle",
+    );
+    expect(btn).toBeTruthy();
+    expect(btn!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("批量收起/展开：collapse-all 后全部卡身隐藏，expand-all 恢复", () => {
+    render(<ReportView data={data} />);
+    fireEvent.click(screen.getByTestId("collapse-all"));
+    for (const card of screen.getAllByTestId("report-vuln-card")) {
+      expect(within(card).queryByTestId("sec-remediation")).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByTestId("expand-all"));
+    for (const card of screen.getAllByTestId("report-vuln-card")) {
+      expect(within(card).getByTestId("sec-remediation")).toBeInTheDocument();
+    }
+  });
+
+  it("目录联动：全部收起后点 TOC 条目 → 目标卡展开（其余仍折叠）+ 定位", async () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={data} />);
+    fireEvent.click(screen.getByTestId("collapse-all"));
+    const toc = screen.getByTestId("report-toc");
+    fireEvent.click(toc.querySelector('[data-toc-id="XSS-VULN-01"]')!);
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: "smooth" }));
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).getByTestId("sec-cause")).toBeInTheDocument();
+    expect(within(screen.getAllByTestId("report-vuln-card")[1]).queryByTestId("sec-remediation")).not.toBeInTheDocument();
+  });
+
+  it("执行摘要 top_risks 联动：折叠卡后点 top-risk 链接 → 目标卡展开", async () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={data} />);
+    fireEvent.click(screen.getByTestId("collapse-all"));
+    fireEvent.click(screen.getAllByTestId("top-risk-link")[0]);
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).getByTestId("sec-cause")).toBeInTheDocument();
+  });
+});
+
+describe("qa 横幅升级（逐卡缺口清单，spec §6）", () => {
+  const qaData: ReportData = {
+    ...data,
+    qa: {
+      passed: false,
+      checks: [
+        { check: "problem_points_present", failed_ids: ["XSS-VULN-01"] },
+        { check: "poc_complete", failed_ids: ["INJ-VULN-02", "XSS-VULN-01"] },
+        { check: "some_future_check", failed_ids: ["INJ-VULN-02"] },
+      ],
+      reworked_ids: [],
+    },
+  };
+
+  it("每 check 一行（i18n 文案 + 未知 check 显示原 key）+ failed_ids 徽章", () => {
+    render(<ReportView data={qaData} />);
+    const banner = screen.getByTestId("report-qa-banner");
+    expect(within(banner).getByText(/缺问题点/)).toBeInTheDocument();
+    expect(within(banner).getByText(/缺 POC/)).toBeInTheDocument();
+    expect(within(banner).getByText("some_future_check")).toBeInTheDocument(); // 未知 key 原样
+    const badges = within(banner).getAllByTestId("qa-gap-vuln");
+    expect(badges.length).toBe(4); // 1 + 2 + 1
+    expect(badges.map((b) => b.textContent)).toContain("INJ-VULN-02");
+  });
+
+  it("failed_ids 徽章点击 → 定位对应卡（折叠时先展开）", async () => {
+    const scrollTo = vi.fn();
+    window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+    render(<ReportView data={qaData} />);
+    fireEvent.click(screen.getByTestId("collapse-all"));
+    fireEvent.click(screen.getAllByTestId("qa-gap-vuln")[0]); // XSS-VULN-01
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    expect(within(screen.getAllByTestId("report-vuln-card")[0]).getByTestId("sec-cause")).toBeInTheDocument();
+  });
+
+  it("qa.passed=false 无 failed checks → 横幅在但无缺口行", () => {
+    render(<ReportView data={{ ...data, qa: { passed: false, checks: [], reworked_ids: [] } }} />);
+    expect(screen.getByTestId("report-qa-banner")).toBeInTheDocument();
+    expect(screen.queryAllByTestId("qa-gap-vuln").length).toBe(0);
   });
 });

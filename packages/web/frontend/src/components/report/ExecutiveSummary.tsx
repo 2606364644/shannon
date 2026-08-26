@@ -12,7 +12,15 @@ import { RichText } from "./RichText";
  * top_risks 锚点经 focusAnchor 精准定位（2026-08-26：量 sticky 遮蔽带落点 + coral
  * 描边闪烁，目录跳转同一语言）；section 挂 REPORT_EXEC_SUMMARY_ID 供报告目录定位。
  */
-export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary }) {
+export function ExecutiveSummary({
+  summary,
+  onLocateRisk,
+}: {
+  summary: ReportExecutiveSummary;
+  /** top_risks 跳转钩子（单源化 §7 折叠联动）：ReportView 传「先展开目标卡再
+   *  定位」；缺省行为不变（直接 focusAnchor）——独立渲染（旧测试）零影响。 */
+  onLocateRisk?: (id: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <section
@@ -44,7 +52,8 @@ export function ExecutiveSummary({ summary }: { summary: ReportExecutiveSummary 
                   href={`#${r.vuln_id}`}
                   onClick={(e) => {
                     e.preventDefault();
-                    focusAnchor(r.vuln_id);
+                    if (onLocateRisk) onLocateRisk(r.vuln_id);
+                    else focusAnchor(r.vuln_id);
                   }}
                   className="kv-vuln-id font-mono text-[13px] text-primary"
                   data-testid="top-risk-link"

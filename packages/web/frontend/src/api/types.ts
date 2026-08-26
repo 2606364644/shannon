@@ -434,6 +434,18 @@ export interface ReportQA {
   reworked_ids: string[];
 }
 
+/** 漏洞速查表行（spec 2026-08-26-report-single-source-rendering §5）：builder 确定性
+ *  产（vulnerabilities + affected_parameters），前端与 md 都只渲染不派生。 */
+export interface QuickReferenceRow {
+  id: string;
+  title?: string | null;
+  params: string[];
+  endpoints: string[];
+  severity?: string | null;
+  verification?: string | null;
+  confidence?: string | null;
+}
+
 /** 顶层 SSOT。attack_chains 步骤为自由 dict（组装器透传）。 */
 export interface ReportData {
   schema_version: number;
@@ -442,6 +454,7 @@ export interface ReportData {
   stats?: ReportStatsData | null;
   vulnerabilities: ReportVulnerability[];
   attack_chains: Array<{ id: string; steps?: Record<string, unknown>[]; narrative?: string | null }>;
+  quick_reference?: QuickReferenceRow[];
   qa?: ReportQA | null;
 }
 

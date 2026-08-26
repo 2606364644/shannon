@@ -1074,7 +1074,27 @@
     "verificationStatic": "Static analysis",
     "verificationDynamic": "Dynamically verified",
     "mergedFrom": "merged",
-    "qaFailed": "QA checks failed"
+    "qaFailed": "QA checks failed",
+    "quickReference": "Quick Reference",
+    "quickRefTitle": "Title",
+    "quickRefEndpoints": "Endpoints",
+    "quickRefSeverity": "Severity",
+    "quickRefVerification": "Verification",
+    "quickRefConfidence": "Confidence",
+    "collapseAll": "Collapse all",
+    "expandAll": "Expand all",
+    "toggleVulnCard": "Toggle vulnerability card {{id}}",
+    "qaGapIntro": "Per-card gaps",
+    "qaChecks": {
+      "taint_endpoints_present": "Missing affected endpoints",
+      "title_present": "Missing title",
+      "severity_valid": "Invalid severity",
+      "problem_points_present": "Missing problem points",
+      "poc_complete": "Incomplete POC (curl + Burp)",
+      "params_present": "Missing params",
+      "narrative_complete": "Incomplete narrative (cause/impact/remediation)",
+      "endpoint_rows_have_locations": "Endpoints missing file:line chain"
+    }
   },
   "theme": {
     "toggleAria": "Toggle theme",

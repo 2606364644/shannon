@@ -21,7 +21,15 @@ const SEV_DOT_C: Record<string, string> = {
   low: "hsl(var(--muted-foreground))",
 };
 
-export function ReportToc({ data }: { data: ReportData }) {
+export function ReportToc({
+  data,
+  onLocate,
+}: {
+  data: ReportData;
+  /** 跳转钩子（单源化 §7 折叠联动）：ReportView 传「先展开目标卡再定位」；
+   *  缺省行为不变（直接 focusAnchor）——独立渲染（旧测试）零影响。 */
+  onLocate?: (id: string) => void;
+}) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
   const visibleRef = useRef<Set<string>>(new Set());
@@ -61,7 +69,8 @@ export function ReportToc({ data }: { data: ReportData }) {
 
   const locate = (id: string) => {
     setActiveId(id); // 立即置高亮：smooth 滚动期间不等 scrollspy 回填
-    focusAnchor(id);
+    if (onLocate) onLocate(id);
+    else focusAnchor(id);
   };
 
   const itemCls = (id: string) =>

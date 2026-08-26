@@ -1074,7 +1074,27 @@
     "verificationStatic": "静态分析",
     "verificationDynamic": "动态实测",
     "mergedFrom": "并入",
-    "qaFailed": "QA 校验未通过"
+    "qaFailed": "QA 校验未通过",
+    "quickReference": "漏洞速查表",
+    "quickRefTitle": "标题",
+    "quickRefEndpoints": "接口",
+    "quickRefSeverity": "严重程度",
+    "quickRefVerification": "验证",
+    "quickRefConfidence": "置信度",
+    "collapseAll": "全部收起",
+    "expandAll": "全部展开",
+    "toggleVulnCard": "展开/收起漏洞卡 {{id}}",
+    "qaGapIntro": "逐卡缺口",
+    "qaChecks": {
+      "taint_endpoints_present": "缺受影响接口",
+      "title_present": "缺标题",
+      "severity_valid": "severity 无效",
+      "problem_points_present": "缺问题点",
+      "poc_complete": "缺 POC（curl + Burp）",
+      "params_present": "缺参数",
+      "narrative_complete": "叙事缺段（成因/危害/修复建议）",
+      "endpoint_rows_have_locations": "接口缺行号链"
+    }
   },
   "theme": {
     "toggleAria": "切换主题",
