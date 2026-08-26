@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Download } from "lucide-react";
 import {
   blackboxRunDeliverablesPath, scanDeliverablesPath,
+  blackboxRunDeliverablesDownloadUrl, scanDeliverablesDownloadUrl,
 } from "../../api/client";
 import { useApiText } from "@/api/useApiResource";
 import type { DeliverablesFile, Vulnerability } from "../../api/types";
@@ -10,6 +11,7 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { VulnCard } from "../../components/VulnCard";
 import { ErrorState } from "../../components/ErrorState";
 import { CopyButton } from "../../components/CopyButton";
+import { deliverablesDownloadFilename } from "@/lib/download";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -66,6 +68,19 @@ export function FileStage({ ws, scanId, file, runId, onBack }: {
         <Badge variant="outline" className="font-mono text-xs text-muted-foreground">{file.kind}</Badge>
         <span className="text-xs text-muted-foreground">{formatBytes(file.size)}</span>
         {text && <CopyButton value={shownText} ariaLabel={t("workspaceDetail.deliverables.copyContent")} />}
+        {/* 下载：走后端 ?download=1 附件（磁盘原文），所有 kind 可下——与 CopyButton
+            不同（复制需先有预览内容），empty_json/other/未加载的 big_json 也能下载。 */}
+        <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
+          <a
+            href={runId
+              ? blackboxRunDeliverablesDownloadUrl(ws, scanId, runId, file.path)
+              : scanDeliverablesDownloadUrl(ws, scanId, file.path)}
+            download={deliverablesDownloadFilename(file.path)}
+          >
+            <Download aria-hidden />
+            {t("workspaceDetail.deliverables.download")}
+          </a>
+        </Button>
       </div>
       {error ? (
         <ErrorState message={t("workspaceDetail.deliverables.fileLoadError", { error })} />

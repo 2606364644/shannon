@@ -884,7 +884,8 @@
       "loadAnyway": "Load anyway",
       "truncated": "…Content too long; showing first {{size}} characters",
       "unsupportedKind": "This file type cannot be previewed",
-      "copyContent": "Copy file content"
+      "copyContent": "Copy file content",
+      "download": "Download"
     },
     "dataflow": {
       "title": "Data flow",

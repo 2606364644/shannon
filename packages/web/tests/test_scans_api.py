@@ -260,6 +260,66 @@ def test_scan_deliverables(authed_client, tmp_workspaces):
     assert any(f["path"] == "whitebox/report.md" for f in s["files"])
 
 
+# ── 产物下载（?download=1 → FileResponse 附件：磁盘原文，无 preview_limit 截断）──
+
+# 大于默认 preview_limit（2MB）→ 预览截断 / 下载全文的分界
+_BIG = "x" * (3 * 1024 * 1024)
+
+
+def test_scan_deliverables_download(authed_client, tmp_workspaces):
+    """scan 级下载：attachment 头 + basename 文件名 + 全文无截断（3MB > preview_limit）。"""
+    scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    dl = scan_dir / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "big_report.md").write_text(_BIG, encoding="utf-8")
+    r = authed_client.get(
+        "/api/workspaces/WS/scans/s1/deliverables"
+        "?path=whitebox%2Fbig_report.md&download=1")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].startswith('attachment; filename="big_report.md"')
+    assert len(r.text) == len(_BIG)  # 磁盘原文，无 [truncated: 标注
+    assert "[truncated:" not in r.text
+
+
+def test_scan_deliverables_download_404(authed_client, tmp_workspaces):
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    r = authed_client.get(
+        "/api/workspaces/WS/scans/s1/deliverables?path=whitebox%2Fnope.md&download=1")
+    assert r.status_code == 404
+
+
+def test_scan_deliverables_preview_still_truncated(authed_client, tmp_workspaces):
+    """回归：无 download 参数仍走预览语义（超 preview_limit 截断 + 标注）。"""
+    scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    dl = scan_dir / "deliverables" / "whitebox"
+    dl.mkdir(parents=True)
+    (dl / "big_report.md").write_text(_BIG, encoding="utf-8")
+    r = authed_client.get(
+        "/api/workspaces/WS/scans/s1/deliverables?path=whitebox%2Fbig_report.md")
+    assert r.status_code == 200
+    assert "[truncated:" in r.text
+    assert len(r.text) < len(_BIG)
+
+
+def test_blackbox_run_deliverables_download(authed_client, tmp_workspaces):
+    """run 级下载（strip 模式）：无前缀 path 按 blackbox 桶解析，附件返回原文。"""
+    from supernova_web.components.scan_store import ScanStore
+    _make_scan(tmp_workspaces, "WS", scan_id="s1")
+    store = ScanStore(tmp_workspaces)
+    store.create_blackbox_run("WS", "s1")
+    run_dir = tmp_workspaces / "WS" / "scans" / "s1" / "blackbox-runs" / "run-1"
+    bbd = run_dir / "deliverables" / "blackbox"
+    bbd.mkdir(parents=True)
+    (bbd / "comprehensive_security_assessment_report.md").write_text("# 黑盒报告全文")
+    r = authed_client.get(
+        "/api/workspaces/WS/scans/s1/blackbox-runs/run-1/deliverables"
+        "?path=comprehensive_security_assessment_report.md&download=1")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].startswith(
+        'attachment; filename="comprehensive_security_assessment_report.md"')
+    assert r.text == "# 黑盒报告全文"
+
+
 def test_scan_report(authed_client, tmp_workspaces):
     scan_dir = _make_scan(tmp_workspaces, "WS", scan_id="s1")
     dl = scan_dir / "deliverables" / "whitebox"

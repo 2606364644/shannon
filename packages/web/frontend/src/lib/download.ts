@@ -28,3 +28,16 @@ export function reportDownloadFilename(
   const trackPart = track ? `-${track}` : "";
   return `${scanId}${runPart}-report${trackPart}.md`;
 }
+
+/**
+ * 产物文件下载文件名：path 首段是 track 时带前缀（如
+ * whitebox/report/comprehensive_report.md → whitebox-comprehensive_report.md），
+ * 区分组合扫描三桶同名报告；run 级 strip 路径 / legacy 平铺无 track 段 → 仅 basename。
+ */
+const TRACK_SEGMENTS = new Set(["whitebox", "blackbox", "combined"]);
+
+export function deliverablesDownloadFilename(path: string): string {
+  const segs = path.split("/");
+  const prefix = segs.length > 1 && TRACK_SEGMENTS.has(segs[0]) ? `${segs[0]}-` : "";
+  return `${prefix}${segs[segs.length - 1]}`;
+}

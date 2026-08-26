@@ -297,6 +297,20 @@ export const blackboxRunDeliverablesPath = (
     ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/deliverables?path=${encodeURIComponent(file)}`
     : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/deliverables`;
 
+// ── 产物下载（FileStage 下载按钮）──────────────────────────────────────────────
+// 后端同端点 ?download=1 → FileResponse 附件（磁盘原文：无 preview_limit 截断、
+// big_json/empty_json/other 也可下）。cookie 认证自动附带（GET 无 CSRF），
+// URL 含 /api 前缀直接喂 <a href>（与 scanEventsUrl 的完整 URL 约定一致）。
+
+/** scan 级产物文件下载 URL。 */
+export const scanDeliverablesDownloadUrl = (ws: string, scanId: string, file: string) =>
+  `/api${scanDeliverablesPath(ws, scanId, file)}&download=1`;
+
+/** run 级产物文件下载 URL（run 视图，selectedRun 非空时用）。 */
+export const blackboxRunDeliverablesDownloadUrl = (
+  ws: string, scanId: string, runId: string, file: string) =>
+  `/api${blackboxRunDeliverablesPath(ws, scanId, runId, file)}&download=1`;
+
 /** run events SSE URL（tail run-K/events.ndjson）。 */
 export const blackboxRunEventsUrl = (ws: string, scanId: string, runId: string) =>
   `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/events`;

@@ -884,7 +884,8 @@
       "loadAnyway": "仍要加载",
       "truncated": "…内容过长，仅显示前 {{size}} 字符",
       "unsupportedKind": "该文件类型不支持在线预览",
-      "copyContent": "复制文件内容"
+      "copyContent": "复制文件内容",
+      "download": "下载"
     },
     "dataflow": {
       "title": "数据流",
