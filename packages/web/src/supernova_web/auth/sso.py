@@ -11,7 +11,20 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import BaseModel
 
+from .models import SsoConfig
+
 CALLBACK_PATH = "/api/auth/sso/callback"
+
+
+def resolve_runtime(cfg: SsoConfig) -> SsoConfig:
+    """DB 原始配置 → 运行时配置（spec 2026-08-26 §7.2）：
+    public_base_url 空 → 回落 https://{auth_domain}（对齐原 WebConfig 语义）；
+    尾部斜杠归一。纯函数不改动入参（存库原始值保持可回显）。"""
+    public = cfg.public_base_url or (f"https://{cfg.auth_domain}" if cfg.auth_domain else "")
+    return SsoConfig(enabled=cfg.enabled, auth_domain=cfg.auth_domain,
+                     public_base_url=public.rstrip("/"), passport_base=cfg.passport_base,
+                     session_ttl_hours=cfg.session_ttl_hours,
+                     updated_at=cfg.updated_at, updated_by=cfg.updated_by)
 
 
 class SsoTicketError(Exception):

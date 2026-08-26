@@ -267,6 +267,93 @@ def test_whitelist_get_includes_enabled(admin_sso_client):
     assert r.json()["enabled"] is True  # 默认开
 
 
+# ---------- admin runtime config（spec 2026-08-26 §7）----------
+
+@pytest.fixture
+def admin_plain_client(plain_client):
+    """SSO 关闭默认态 + admin 登录。admin config 端点不受 sso_enabled 404 短路——
+    它就是用来在 SSO 关闭时配置并开启 SSO 的（spec §7.1）。"""
+    plain_client.app.state.auth_store.create_user("admin", hash_password("pw12345"), role="admin")
+    tok = plain_client.get("/api/auth/csrf").json()["csrf_token"]
+    r = plain_client.post("/api/auth/login", json={"username": "admin", "password": "pw12345"},
+                          headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    return plain_client
+
+
+def test_admin_config_requires_admin(plain_client):
+    assert plain_client.get("/api/auth/sso/admin/config").status_code == 401
+    plain_client.app.state.auth_store.create_user("plain", hash_password("pw12345"))
+    tok = plain_client.get("/api/auth/csrf").json()["csrf_token"]
+    plain_client.post("/api/auth/login", json={"username": "plain", "password": "pw12345"},
+                      headers={"X-CSRF-Token": tok})
+    assert plain_client.get("/api/auth/sso/admin/config").status_code == 403
+
+
+def test_admin_config_get_defaults(admin_plain_client):
+    """SSO 关闭默认态:GET 返回默认配置 + audit 字段。"""
+    r = admin_plain_client.get("/api/auth/sso/admin/config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["auth_domain"] == ""
+    assert body["public_base_url"] == ""
+    assert body["passport_base"] == "https://passport.futuoa.com"
+    assert body["session_ttl_hours"] == 24
+    assert "updated_at" in body and "updated_by" in body
+
+
+def test_admin_config_put_validation_chain(admin_plain_client):
+    """PUT 校验链（spec 2026-08-26 §6）:坏配置 400 且不落库。"""
+    csrf = {"X-CSRF-Token": admin_plain_client.cookies.get("sn-csrf")}
+    cases = [
+        # enabled=1 缺 auth_domain
+        {"enabled": True, "auth_domain": "", "public_base_url": "",
+         "passport_base": "https://passport.futuoa.com", "session_ttl_hours": 24},
+        # passport 非 https（spec 2026-08-25 §9）
+        {"enabled": False, "auth_domain": "d", "public_base_url": "",
+         "passport_base": "http://pp.test", "session_ttl_hours": 24},
+        # public_base_url 非空但非 http(s)
+        {"enabled": False, "auth_domain": "d", "public_base_url": "ftp://x",
+         "passport_base": "https://passport.futuoa.com", "session_ttl_hours": 24},
+        # ttl 下界 / 上界
+        {"enabled": False, "auth_domain": "d", "public_base_url": "",
+         "passport_base": "https://passport.futuoa.com", "session_ttl_hours": 0},
+        {"enabled": False, "auth_domain": "d", "public_base_url": "",
+         "passport_base": "https://passport.futuoa.com", "session_ttl_hours": 999},
+    ]
+    for body in cases:
+        assert admin_plain_client.put("/api/auth/sso/admin/config", json=body,
+                                      headers=csrf).status_code == 400, body
+    got = admin_plain_client.get("/api/auth/sso/admin/config").json()
+    assert got["enabled"] is False and got["session_ttl_hours"] == 24  # 全拒后值不变
+
+
+def test_admin_config_put_requires_csrf(admin_plain_client):
+    assert admin_plain_client.put("/api/auth/sso/admin/config",
+                                  json={"enabled": False}).status_code == 403
+
+
+def test_admin_config_put_immediate_effect(admin_plain_client):
+    """运行时即时生效（spec 2026-08-26 §12 验收 1）:开→config/login 立即变,全程无重启。"""
+    csrf = {"X-CSRF-Token": admin_plain_client.cookies.get("sn-csrf")}
+    ok = {"enabled": True, "auth_domain": "codescan.test.local", "public_base_url": "",
+          "passport_base": "https://passport.futuoa.com", "session_ttl_hours": 24}
+    r = admin_plain_client.put("/api/auth/sso/admin/config", json=ok, headers=csrf)
+    assert r.status_code == 200
+    assert admin_plain_client.get("/api/auth/sso/config").json() == {"enabled": True}
+    assert admin_plain_client.get("/api/auth/sso/login").status_code == 302
+    got = admin_plain_client.get("/api/auth/sso/admin/config").json()
+    assert got["auth_domain"] == "codescan.test.local"
+    assert got["updated_by"] == "admin"
+    # 再关 → 立即 404
+    r2 = admin_plain_client.put("/api/auth/sso/admin/config",
+                                json={**ok, "enabled": False}, headers=csrf)
+    assert r2.status_code == 200
+    assert admin_plain_client.get("/api/auth/sso/config").json() == {"enabled": False}
+    assert admin_plain_client.get("/api/auth/sso/login").status_code == 404
+
+
 # ---------- logout sso_logout_url / _user_out 扩展 ----------
 
 def test_me_includes_avatar_fields(sso_client, monkeypatch):

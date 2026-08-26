@@ -54,23 +54,16 @@ def test_sso_defaults(monkeypatch):
     assert cfg.sso_session_ttl_hours == 24
 
 
-def test_sso_enabled_requires_domain(monkeypatch):
+def test_sso_bad_env_no_longer_fail_fast(monkeypatch):
+    """2026-08-26 语义迁移（spec 2026-08-26 §5/§6）:启动 fail-fast 已删——坏 env 不再崩
+    WebConfig（原 RuntimeError 场景:enabled=1 缺 domain / passport 非 https）。env 种子保留
+    原值,降级在 store.ensure_sso_config_seeded 种子时做（见 test_auth_sso_store 降级用例）。"""
     monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
     monkeypatch.delenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", raising=False)
-    from supernova_web.config import WebConfig
-    with pytest.raises(RuntimeError, match="SSO_AUTH_DOMAIN"):
-        WebConfig()
-
-
-def test_sso_enabled_requires_https_passport_base(monkeypatch):
-    """spec §9：validateTicket 传输 ticket 明文，passport 基址必须 https——启动 fail-fast。
-    （默认 https://passport.futuoa.com 不抛已由 test_sso_public_base_derivation 覆盖。）"""
-    monkeypatch.setenv("SUPERNOVA_WEB_SSO_ENABLED", "1")
-    monkeypatch.setenv("SUPERNOVA_WEB_SSO_AUTH_DOMAIN", "codescan.test.local")
     monkeypatch.setenv("SUPERNOVA_WEB_SSO_PASSPORT_BASE", "http://passport.test")
     from supernova_web.config import WebConfig
-    with pytest.raises(RuntimeError, match="PASSPORT_BASE"):
-        WebConfig()
+    cfg = WebConfig()  # 不抛
+    assert cfg.sso_enabled is True  # WebConfig 保留 env 原值（种子降级在 store 层）
 
 
 def test_sso_public_base_derivation(monkeypatch):

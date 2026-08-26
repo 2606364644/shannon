@@ -609,7 +609,8 @@
     "section": {
       "branding": "品牌",
       "personalization": "个人化",
-      "system": "系统"
+      "system": "系统",
+      "sso": "SSO / OA 登录"
     },
     "themeTitle": "主题",
     "themeSystem": "跟随系统",
@@ -651,7 +652,22 @@
     "errors": {
       "loadFailed": "状态加载失败：{{error}}"
     },
-    "perWsHint": "各工作区的扫描配置在工作区详情的「配置」页单独编辑。"
+    "perWsHint": "各工作区的扫描配置在工作区详情的「配置」页单独编辑。",
+    "ssoConfig": {
+      "title": "SSO 配置",
+      "subtitle": "OA 单点登录运行时配置,保存后即时生效(无需重启)",
+      "enabledLabel": "启用 SSO",
+      "authDomain": "本站域名(AUTH_DOMAIN)",
+      "passportBase": "OA 基址(PASSPORT_BASE)",
+      "publicBaseUrl": "回跳前缀(PUBLIC_BASE_URL)",
+      "publicBaseUrlHint": "留空默认 https://{本站域名};内网 http 部署可覆盖",
+      "ttlHours": "会话时长(小时,1-168)",
+      "save": "保存",
+      "saved": "已保存,即时生效",
+      "invalidConfig": "配置校验失败:启用时域名必填;OA 基址须 https;回跳前缀须 http(s)://;时长 1-168",
+      "updatedBy": "最后更新:{{by}} · {{at}}",
+      "notUpdated": "尚未修改(初始种子)"
+    }
   },
   "workspaceDetail": {
     "backToList": "返回列表",

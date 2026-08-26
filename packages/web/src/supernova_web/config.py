@@ -63,19 +63,10 @@ class WebConfig:
         ).rstrip("/")
         # SSO 会话时长（cookie max_age 同步）；账密会话仍走 session_ttl_hours（12h）。
         self.sso_session_ttl_hours = int(os.environ.get("SUPERNOVA_WEB_SSO_SESSION_TTL_HOURS", "24"))
-        if self.sso_enabled and not self.sso_auth_domain:
-            raise RuntimeError(
-                "SUPERNOVA_WEB_SSO_ENABLED=1 需同时配置 SUPERNOVA_WEB_SSO_AUTH_DOMAIN"
-                "（OA 侧登记的本站域名），见 docs/superpowers/specs/2026-08-25-sso-auth-design.md §7"
-            )
-        # spec §9：validateTicket 调用强制 https——ticket 明文经该基址传输，http 会被
-        # 链路窃听/中间人截获再重放。内网 http passport 放开档暂不做（YAGNI，将来加 env 档）。
-        if self.sso_enabled and not self.sso_passport_base.startswith("https://"):
-            raise RuntimeError(
-                "SUPERNOVA_WEB_SSO_ENABLED=1 时 SUPERNOVA_WEB_SSO_PASSPORT_BASE 必须以 https://"
-                " 开头（validateTicket 传输 ticket 明文，禁止明文 http），"
-                "见 docs/superpowers/specs/2026-08-25-sso-auth-design.md §9"
-            )
+        # 2026-08-26 配置运行时化（spec 2026-08-26 §5/§6）：原两个启动 fail-fast
+        # （enabled 缺 domain / passport 非 https）已删——env 降级为 auth.db sso_config
+        # 单行表的首次种子来源，坏 env 由 store.ensure_sso_config_seeded 种子时降级
+        # （enabled=0 / 默认 passport）不崩溃；运行时校验移到 PUT /sso/admin/config。
 
     @property
     def workspaces_dir(self) -> Path:

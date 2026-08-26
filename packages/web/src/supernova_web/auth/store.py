@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 
-from .models import SessionRow, User
+from .models import SessionRow, SsoConfig, User
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -66,6 +69,17 @@ CREATE TABLE IF NOT EXISTS sso_whitelist_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   enabled INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
+-- SSO 运行时配置（spec 2026-08-26 §4）：单行表；env 仅首次种子，设置页唯一写入方。
+CREATE TABLE IF NOT EXISTS sso_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  auth_domain TEXT NOT NULL DEFAULT '',
+  public_base_url TEXT NOT NULL DEFAULT '',
+  passport_base TEXT NOT NULL DEFAULT 'https://passport.futuoa.com',
+  session_ttl_hours INTEGER NOT NULL DEFAULT 24,
+  updated_at TEXT,
   updated_by TEXT
 );
 """
@@ -367,3 +381,64 @@ class AuthStore:
         with self._conn() as c:
             cur = c.execute("DELETE FROM sso_used_tickets WHERE used_at < ?", (cutoff,))
             return cur.rowcount
+
+    # ── SSO 运行时配置（spec 2026-08-26 §4/§5/§7.1）────────────────────────────
+
+    def ensure_sso_config_seeded(self, seed: SsoConfig | None = None) -> None:
+        """一次性种子：表空才 INSERT（此后 env 失效，DB 是唯一运行时真相）。
+        坏 env 降级不崩溃（原启动 fail-fast 语义迁移至此）：enabled=1 缺
+        auth_domain → 种 enabled=0；passport_base 非 https → 种默认基址。"""
+        s = seed or SsoConfig()
+        if s.enabled and not s.auth_domain:
+            logger.warning(
+                "SSO seed: enabled=1 但 auth_domain 为空（原为启动 fail-fast），降级种 enabled=0")
+            s = SsoConfig(enabled=False, auth_domain=s.auth_domain,
+                          public_base_url=s.public_base_url, passport_base=s.passport_base,
+                          session_ttl_hours=s.session_ttl_hours)
+        if s.passport_base and not s.passport_base.startswith("https://"):
+            logger.warning("SSO seed: passport_base=%r 非 https，降级种默认基址", s.passport_base)
+            s = SsoConfig(enabled=s.enabled, auth_domain=s.auth_domain,
+                          public_base_url=s.public_base_url,
+                          passport_base=SsoConfig().passport_base,
+                          session_ttl_hours=s.session_ttl_hours)
+        with self._conn() as c:
+            row = c.execute("SELECT 1 FROM sso_config WHERE id=1").fetchone()
+            if row is not None:
+                return  # 幂等：表非空不覆盖（admin 改过的配置不被重启冲掉）
+            c.execute(
+                "INSERT INTO sso_config(id, enabled, auth_domain, public_base_url, passport_base, session_ttl_hours, updated_at, updated_by) "
+                "VALUES(1,?,?,?,?,?,?,?)",
+                (1 if s.enabled else 0, s.auth_domain, s.public_base_url, s.passport_base,
+                 s.session_ttl_hours, None, "seed"),
+            )
+
+    def get_sso_config(self) -> SsoConfig:
+        """读运行时配置；无行（老库 seed 未跑）回落默认值不落库（防御）。"""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT enabled, auth_domain, public_base_url, passport_base, session_ttl_hours, updated_at, updated_by "
+                "FROM sso_config WHERE id=1"
+            ).fetchone()
+        if row is None:
+            return SsoConfig()
+        return SsoConfig(enabled=bool(row[0]), auth_domain=row[1], public_base_url=row[2],
+                         passport_base=row[3], session_ttl_hours=row[4],
+                         updated_at=row[5] or "", updated_by=row[6] or "")
+
+    def update_sso_config(self, cfg: SsoConfig, updated_by: str) -> None:
+        """admin 设置页全量更新（校验在 route 层，此处纯写）。两步式 upsert 对齐仓库惯例。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO sso_config(id, enabled, auth_domain, public_base_url, passport_base, session_ttl_hours, updated_at, updated_by) "
+                "VALUES(1,?,?,?,?,?,?,?)",
+                (1 if cfg.enabled else 0, cfg.auth_domain, cfg.public_base_url,
+                 cfg.passport_base, cfg.session_ttl_hours, now, updated_by),
+            )
+            c.execute(
+                "UPDATE sso_config SET enabled=?, auth_domain=?, public_base_url=?, passport_base=?, session_ttl_hours=?, updated_at=?, updated_by=? "
+                "WHERE id=1",
+                (1 if cfg.enabled else 0, cfg.auth_domain, cfg.public_base_url,
+                 cfg.passport_base, cfg.session_ttl_hours, now, updated_by),
+            )

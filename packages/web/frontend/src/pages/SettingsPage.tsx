@@ -18,6 +18,8 @@ import { useAuth } from "@/auth/AuthContext";
 import { useBrand, useBrandEditor } from "@/brand/BrandContext";
 import { BrandMark } from "@/components/layout/BrandMark";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { SsoConfigCard } from "@/components/SsoConfigCard";
+import { SsoWhitelistPanel } from "@/components/SsoWhitelistPanel";
 
 const MAX_BRAND = 32;
 
@@ -301,6 +303,7 @@ export function SettingsPage() {
   const { data, loading, error, refresh } = useSystemStatus();
   const { user, refreshUser } = useAuth();
   const [cpOpen, setCpOpen] = useState(false);
+  const isAdmin = user?.role === "admin";
 
   return (
     <div className="space-y-5">
@@ -383,6 +386,16 @@ export function SettingsPage() {
           </Card>
         </Section>
       </div>
+
+      {/* ▍SSO / OA 登录（admin-only；spec 2026-08-26：配置运行时化 + 白名单面板自 /users 迁入） */}
+      {isAdmin && (
+        <Section eyebrow={t("settings.section.sso")}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <SsoConfigCard />
+            <SsoWhitelistPanel />
+          </div>
+        </Section>
+      )}
 
       <ChangePasswordDialog open={cpOpen} onOpenChange={setCpOpen} onChanged={refreshUser} />
     </div>

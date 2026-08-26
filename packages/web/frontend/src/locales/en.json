@@ -609,7 +609,8 @@
     "section": {
       "branding": "Branding",
       "personalization": "Personalization",
-      "system": "System"
+      "system": "System",
+      "sso": "SSO / OA Login"
     },
     "themeTitle": "Theme",
     "themeSystem": "Auto",
@@ -651,7 +652,22 @@
     "errors": {
       "loadFailed": "Status load failed: {{error}}"
     },
-    "perWsHint": "Each workspace's scan config is edited on its own Config page in workspace detail."
+    "perWsHint": "Each workspace's scan config is edited on its own Config page in workspace detail.",
+    "ssoConfig": {
+      "title": "SSO Configuration",
+      "subtitle": "Runtime OA SSO config; saved changes take effect immediately (no restart)",
+      "enabledLabel": "Enable SSO",
+      "authDomain": "Site domain (AUTH_DOMAIN)",
+      "passportBase": "Passport base (PASSPORT_BASE)",
+      "publicBaseUrl": "Return-url base (PUBLIC_BASE_URL)",
+      "publicBaseUrlHint": "Empty defaults to https://{site domain}; override for intranet http deploys",
+      "ttlHours": "Session TTL (hours, 1-168)",
+      "save": "Save",
+      "saved": "Saved, effective immediately",
+      "invalidConfig": "Validation failed: domain required when enabled; passport base must be https; return-url base must be http(s)://; TTL within 1-168",
+      "updatedBy": "Last updated: {{by}} · {{at}}",
+      "notUpdated": "Not modified (initial seed)"
+    }
   },
   "workspaceDetail": {
     "backToList": "Back to list",

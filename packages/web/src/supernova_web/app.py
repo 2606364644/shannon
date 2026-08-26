@@ -443,6 +443,14 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .auth.middleware import AuthMiddleware
     auth_store = AuthStore(str(cfg.auth_db_path))
     auth_store.init_schema()
+    # SSO 运行时配置一次性种子（spec 2026-08-26 §5）：env → auth.db sso_config 单行表，
+    # 表空才种（此后 env 失效，设置页 PUT 是唯一写入方）。挂 create_app 同步段而非
+    # lifespan——TestClient 不进 with 不跑 lifespan，env→DB 种子链路测试依赖同步性。
+    from .auth.models import SsoConfig
+    auth_store.ensure_sso_config_seeded(SsoConfig(
+        enabled=cfg.sso_enabled, auth_domain=cfg.sso_auth_domain,
+        public_base_url=cfg.sso_public_base_url, passport_base=cfg.sso_passport_base,
+        session_ttl_hours=cfg.sso_session_ttl_hours))
     app.state.auth_store = auth_store
     app.state.session_manager = SessionManager(auth_store, ttl_hours=cfg.session_ttl_hours)
     app.add_middleware(AuthMiddleware)

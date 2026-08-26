@@ -11,7 +11,7 @@ from . import sso as sso_mod
 from .brute import BruteGuard
 from .csrf import generate_csrf_token, verify_csrf
 from .dependencies import current_user, require_admin
-from .models import User
+from .models import SsoConfig, User
 from .passwords import hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -132,20 +132,26 @@ def change_password(body: ChangePasswordIn, request: Request, user: User = Depen
     return {"ok": True}
 
 
-# ── SSO（富途 OA passport，spec 2026-08-25 §5.2）──────────────────────────────
+# ── SSO（富途 OA passport，spec 2026-08-25 §5.2；配置运行时化 spec 2026-08-26）─────
+
+def _sso_rt(request: Request) -> SsoConfig:
+    """SSO 运行时配置（spec 2026-08-26 §7.2）：每请求直读 auth.db sso_config 单行表
+    （admin 设置页 PUT 即时生效，无重启），public_base_url 空 → resolve_runtime 回落。"""
+    return sso_mod.resolve_runtime(request.app.state.auth_store.get_sso_config())
+
 
 @router.get("/sso/config")
 def sso_config(request: Request):
     """公开：前端登录页据此渲染/隐藏「使用 OA 账号登录」按钮。"""
-    return {"enabled": request.app.state.config.sso_enabled}
+    return {"enabled": _sso_rt(request).enabled}
 
 
 @router.get("/sso/login")
 def sso_login(request: Request, next: str = "/"):
-    cfg = request.app.state.config
-    if not cfg.sso_enabled:
+    sc = _sso_rt(request)
+    if not sc.enabled:
         raise HTTPException(status_code=404, detail="sso disabled")
-    url = sso_mod.build_passport_login_url(cfg.sso_passport_base, cfg.sso_public_base_url, next)
+    url = sso_mod.build_passport_login_url(sc.passport_base, sc.public_base_url, next)
     return RedirectResponse(url, status_code=302)
 
 
@@ -154,8 +160,9 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
     """OA 登录后 302 回调。校验链（spec §5.2）：开关→ticket 存在→防重放→
     validateTicket→白名单→JIT 建户→建 session。任一失败 302 /login?sso_error=<code>。"""
     cfg = request.app.state.config
+    sc = _sso_rt(request)
     store = request.app.state.auth_store
-    if not cfg.sso_enabled:
+    if not sc.enabled:
         raise HTTPException(status_code=404, detail="sso disabled")
     next_path = sso_mod.safe_next(next)
 
@@ -167,7 +174,7 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
     if store.is_ticket_used(AUTH_TICKET):
         return _fail("replayed_ticket")
     try:
-        info = sso_mod.validate_ticket(cfg.sso_passport_base, cfg.sso_auth_domain, AUTH_TICKET)
+        info = sso_mod.validate_ticket(sc.passport_base, sc.auth_domain, AUTH_TICKET)
     except sso_mod.SsoTicketError as exc:
         # 安全收口：只落机器码 + ticket 前 8 位掩码——upstream_error 的 message 含完整
         # validateTicket URL（即 ticket 明文），禁 str(exc)/__cause__/traceback 入日志。
@@ -194,13 +201,13 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
     store.update_avatar(user.id, info.avatar_url)
 
     sid = request.app.state.session_manager.create(
-        user.id, ttl_hours=cfg.sso_session_ttl_hours, auth_method="sso")
+        user.id, ttl_hours=sc.session_ttl_hours, auth_method="sso")
     resp = RedirectResponse(next_path, status_code=302)
-    resp.set_cookie("sn-sid", sid, **_cookie_kwargs(cfg, request, ttl_hours=cfg.sso_session_ttl_hours))
+    resp.set_cookie("sn-sid", sid, **_cookie_kwargs(cfg, request, ttl_hours=sc.session_ttl_hours))
     tok = generate_csrf_token()  # 对齐账密登录：建会话后续签 csrf
     resp.set_cookie("sn-csrf", tok, httponly=False, samesite="lax",
                     secure=_cookie_secure(cfg, request),
-                    max_age=cfg.sso_session_ttl_hours * 3600)
+                    max_age=sc.session_ttl_hours * 3600)
     return resp
 
 
@@ -213,7 +220,7 @@ def sso_whitelist_list(request: Request):
     # 关闭态 404 必须先于 admin 判定：Depends(require_admin) 在函数体之前执行，
     # 未登录请求会先撞 401（spec「SSO 关闭 404」且不向未认证方泄露端点存在），
     # 故此处函数体内先查开关再手动调 require_admin（其读 request.state.user，直接调用等价）。
-    if not request.app.state.config.sso_enabled:
+    if not _sso_rt(request).enabled:
         raise HTTPException(status_code=404, detail="sso disabled")
     require_admin(request)
     rows = request.app.state.auth_store.get_sso_whitelist()
@@ -251,10 +258,45 @@ def sso_whitelist_set_enabled(body: WhitelistToggleIn, request: Request, admin: 
     # 检查顺序照抄同文件白名单写端点（sso_whitelist_add）：Depends(require_admin)
     # 先于函数体（未登录 401 / 非 admin 403）→ _check_csrf（403）→ SSO 关闭 404。
     _check_csrf(request)
-    if not request.app.state.config.sso_enabled:
+    if not _sso_rt(request).enabled:
         raise HTTPException(status_code=404, detail="sso disabled")
     request.app.state.auth_store.set_whitelist_enabled(body.enabled, admin.username)
     return {"ok": True, "enabled": body.enabled}
+
+
+# ── SSO 运行时配置 admin API（spec 2026-08-26 §7.1）───────────────────────────
+# 注意：本组端点不受 sso_enabled 404 短路——它就是用来在 SSO 关闭时配置并开启的。
+
+class SsoConfigIn(BaseModel):
+    """PUT body：全量更新 5 项（spec §6 校验在端点内）。"""
+    enabled: bool
+    auth_domain: str = ""
+    public_base_url: str = ""
+    passport_base: str = "https://passport.futuoa.com"
+    session_ttl_hours: int = 24
+
+
+@router.get("/sso/admin/config")
+def sso_admin_config_get(request: Request, _admin: User = Depends(require_admin)):
+    """SSO 5 项运行时配置现值 + updated_at/by（public_base_url 回显原始值，回落不落库）。"""
+    return request.app.state.auth_store.get_sso_config()
+
+
+@router.put("/sso/admin/config")
+def sso_admin_config_put(body: SsoConfigIn, request: Request, admin: User = Depends(require_admin)):
+    """全量更新 SSO 配置，即时生效（校验链 spec 2026-08-26 §6——原启动 fail-fast 迁移至此）。"""
+    _check_csrf(request)
+    if not body.passport_base.startswith("https://"):
+        raise HTTPException(status_code=400, detail="passport_base must start with https://")
+    if body.enabled and not body.auth_domain.strip():
+        raise HTTPException(status_code=400, detail="auth_domain is required when enabled")
+    if body.public_base_url and not body.public_base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="public_base_url must start with http:// or https://")
+    if not 1 <= body.session_ttl_hours <= 168:
+        raise HTTPException(status_code=400, detail="session_ttl_hours must be within 1-168")
+    cfg = SsoConfig(**body.model_dump())
+    request.app.state.auth_store.update_sso_config(cfg, admin.username)
+    return request.app.state.auth_store.get_sso_config()
 
 
 @router.post("/logout")
@@ -262,15 +304,16 @@ def logout(request: Request):
     if not verify_csrf(request.headers.get("x-csrf-token"), request.cookies.get("sn-csrf")):
         raise HTTPException(status_code=403, detail="invalid csrf token")
     cfg = request.app.state.config
+    sc = _sso_rt(request)
     sid = request.cookies.get("sn-sid")
     # SSO 会话登出：响应带 OA 登出跳转 URL（前端清态后 assign；账密会话为 None 维持原行为）。
     # 顺序铁律：先 get_session 拿 auth_method 再 revoke——revoke 后 get_session 返 None。
     sso_logout_url = None
-    if cfg.sso_enabled and sid:
+    if sc.enabled and sid:
         row = request.app.state.auth_store.get_session(sid)
         if row is not None and row.auth_method == "sso":
             sso_logout_url = sso_mod.build_passport_logout_url(
-                cfg.sso_passport_base, cfg.sso_public_base_url)
+                sc.passport_base, sc.public_base_url)
     if sid:
         request.app.state.session_manager.revoke(sid)
     resp = JSONResponse({"ok": True, "sso_logout_url": sso_logout_url})

@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from supernova_web.auth import sso
+from supernova_web.auth.models import SsoConfig
 
 
 def test_safe_next_table():
@@ -106,3 +107,29 @@ def test_validate_ticket_upstream_error():
         sso.validate_ticket("https://passport.futuoa.com", "d", "T-1",
                             transport=httpx.MockTransport(handler))
     assert ei.value.code == "upstream_error"
+
+
+# ── resolve_runtime（spec 2026-08-26 §7.2：public_base_url 回落）────────────────
+
+def test_resolve_runtime_empty_public_base_falls_back_to_domain():
+    """public_base_url 空 → 回落 https://{auth_domain}（对齐原 WebConfig 语义）。"""
+    cfg = SsoConfig(enabled=True, auth_domain="codescan.futu5.com", public_base_url="")
+    rt = sso.resolve_runtime(cfg)
+    assert rt.public_base_url == "https://codescan.futu5.com"
+    assert rt.enabled is True
+    assert rt.passport_base == "https://passport.futuoa.com"
+    assert rt.session_ttl_hours == 24
+
+
+def test_resolve_runtime_explicit_public_base_kept_and_normalized():
+    """显式配置优先（内网 http 场景）；尾部斜杠归一。"""
+    cfg = SsoConfig(enabled=True, auth_domain="d.internal", public_base_url="http://10.0.0.5:7878/")
+    rt = sso.resolve_runtime(cfg)
+    assert rt.public_base_url == "http://10.0.0.5:7878"
+
+
+def test_resolve_runtime_does_not_mutate_input():
+    """纯函数：不改动传入配置（存库的原始值保持可回显）。"""
+    cfg = SsoConfig(auth_domain="x.com", public_base_url="")
+    sso.resolve_runtime(cfg)
+    assert cfg.public_base_url == ""

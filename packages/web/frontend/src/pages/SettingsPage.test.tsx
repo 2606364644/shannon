@@ -38,6 +38,14 @@ const okBody = {
 const server = setupServer(
   http.get("/api/system-status", () => HttpResponse.json(okBody)),
   http.get("/api/branding", () => HttpResponse.json({ brand_name: null })),
+  // SSO section（spec 2026-08-26）：默认 handler——admin 渲染配置卡/白名单面板的初始 fetch
+  http.get("/api/auth/sso/admin/config", () => HttpResponse.json({
+    enabled: false, auth_domain: "", public_base_url: "",
+    passport_base: "https://passport.futuoa.com", session_ttl_hours: 24,
+    updated_at: "2026-08-26T01:00:00+00:00", updated_by: "seed",
+  })),
+  http.get("/api/auth/sso/config", () => HttpResponse.json({ enabled: false })),
+  http.get("/api/auth/sso/whitelist", () => HttpResponse.json({ whitelist: [], enabled: true })),
 );
 
 function renderWithTheme(ui: ReactElement) {
@@ -262,5 +270,75 @@ describe("SettingsPage 品牌名编辑", () => {
     await screen.findByText("品牌");
     expect(screen.getByText("仅管理员可改名")).toBeInTheDocument();
     expect(screen.queryByTestId("brand-save")).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage SSO 配置（spec 2026-08-26 运行时化）", () => {
+  beforeEach(async () => {
+    mockUser.role = "admin";
+    await act(async () => {
+      await i18n.changeLanguage("zh");
+    });
+  });
+
+  const cfgBody = {
+    enabled: false, auth_domain: "", public_base_url: "",
+    passport_base: "https://passport.futuoa.com", session_ttl_hours: 24,
+    updated_at: "2026-08-26T01:00:00+00:00", updated_by: "seed",
+  };
+
+  it("admin: SSO section 渲染——eyebrow + 配置卡回显 + 白名单面板迁入", async () => {
+    renderWithTheme(<SettingsPage />);
+    expect(await screen.findByText("SSO / OA 登录")).toBeInTheDocument();
+    // 配置卡异步加载完成(msw 默认 handler 回默认配置)
+    const card = await screen.findByTestId("sso-config-card");
+    expect(card).toBeInTheDocument();
+    // GET admin config 回显(passport 默认基址 / 更新者)
+    expect((screen.getByLabelText(/OA 基址/) as HTMLInputElement).value).toBe("https://passport.futuoa.com");
+    expect(screen.getByText(/seed/)).toBeInTheDocument();
+    // 白名单面板（自 UsersPage 迁入）挂载于本 section
+    expect(screen.getByTestId("sso-whitelist-panel")).toBeInTheDocument();
+  });
+
+  it("admin: 开开关+填域名 → 保存调 PUT 全量 body,成功后回显更新者", async () => {
+    const puts: unknown[] = [];
+    server.use(
+      http.put("/api/auth/sso/admin/config", async ({ request }) => {
+        puts.push(await request.json());
+        return HttpResponse.json({ ...cfgBody, enabled: true, auth_domain: "codescan.test.local", updated_by: "admin" });
+      }),
+    );
+    renderWithTheme(<SettingsPage />);
+    await screen.findByTestId("sso-config-card");
+    fireEvent.click(screen.getByTestId("sso-config-toggle"));
+    fireEvent.change(screen.getByLabelText(/本站域名/), { target: { value: "codescan.test.local" } });
+    fireEvent.click(screen.getByTestId("sso-config-save"));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toMatchObject({
+      enabled: true, auth_domain: "codescan.test.local",
+      passport_base: "https://passport.futuoa.com", session_ttl_hours: 24,
+    });
+    expect(await screen.findByText(/admin/)).toBeInTheDocument();
+  });
+
+  it("admin: 保存 400 → 内联错误提示(testid),不崩", async () => {
+    server.use(
+      http.put("/api/auth/sso/admin/config", () =>
+        HttpResponse.json({ detail: "auth_domain is required when enabled" }, { status: 400 })),
+    );
+    renderWithTheme(<SettingsPage />);
+    await screen.findByTestId("sso-config-card");
+    fireEvent.click(screen.getByTestId("sso-config-toggle"));
+    fireEvent.click(screen.getByTestId("sso-config-save"));
+    await waitFor(() => expect(screen.getByTestId("sso-config-error")).toBeInTheDocument());
+  });
+
+  it("非 admin: SSO section 整体不渲染", async () => {
+    mockUser.role = "user";
+    renderWithTheme(<SettingsPage />);
+    await screen.findByText("个人化");
+    expect(screen.queryByText("SSO / OA 登录")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sso-config-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sso-whitelist-panel")).not.toBeInTheDocument();
   });
 });

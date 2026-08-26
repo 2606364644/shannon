@@ -26,3 +26,16 @@ class SessionRow(BaseModel):
     expires_at: str  # ISO8601
     last_seen_at: str  # ISO8601
     auth_method: str = "password"  # 登录来源；登出时判定是否返回 OA 登出跳转
+
+
+class SsoConfig(BaseModel):
+    """SSO 运行时配置（spec 2026-08-26 §4，auth.db `sso_config` 单行表）。
+    env 仅作首次种子来源；此后设置页（PUT admin config）是唯一写入方。
+    public_base_url 留空 → 运行时回落 https://{auth_domain}（sso.resolve_runtime）。"""
+    enabled: bool = False
+    auth_domain: str = ""
+    public_base_url: str = ""
+    passport_base: str = "https://passport.futuoa.com"
+    session_ttl_hours: int = 24
+    updated_at: str = ""  # ISO8601；种子/更新时填
+    updated_by: str = ""
