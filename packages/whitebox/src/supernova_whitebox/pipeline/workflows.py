@@ -509,11 +509,19 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("gitnexus-verdict"),
                 )
             except Exception as exc:
+                # Activity registration drift is an infrastructure/deployment error, not
+                # a degradable enrichment failure.  Do not report a falsely completed
+                # scan when the worker cannot execute a required pipeline step.
+                if _activity_not_registered_hint(exc):
+                    raise ApplicationFailure(
+                        f"GN finding enrichment activity is not registered: {exc}",
+                        type="ActivityNotRegistered",
+                        non_retryable=True,
+                    ) from exc
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"gn finding enrichment failed (non-fatal)"
-                                       f"{_activity_not_registered_hint(exc)}: {exc}",
+                       "info_message": f"gn finding enrichment failed (non-fatal): {exc}",
                        "info_level": "warning"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
@@ -529,11 +537,16 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("gitnexus-verdict"),
                 )
             except Exception as exc:
+                if _activity_not_registered_hint(exc):
+                    raise ApplicationFailure(
+                        f"Endpoint enrichment activity is not registered: {exc}",
+                        type="ActivityNotRegistered",
+                        non_retryable=True,
+                    ) from exc
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"endpoint enrichment failed (non-fatal)"
-                                       f"{_activity_not_registered_hint(exc)}: {exc}",
+                       "info_message": f"endpoint enrichment failed (non-fatal): {exc}",
                        "info_level": "warning"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
@@ -706,11 +719,16 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:  # noqa: BLE001 — rd 初版兜底已落盘
+                if _activity_not_registered_hint(exc):
+                    raise ApplicationFailure(
+                        f"Report polish activity is not registered: {exc}",
+                        type="ActivityNotRegistered",
+                        non_retryable=True,
+                    ) from exc
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
-                       "info_message": f"report polish failed (non-fatal)"
-                                       f"{_activity_not_registered_hint(exc)}: {exc}",
+                       "info_message": f"report polish failed (non-fatal): {exc}",
                        "info_level": "warning"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
