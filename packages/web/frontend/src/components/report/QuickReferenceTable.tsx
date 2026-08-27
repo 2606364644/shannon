@@ -1,24 +1,12 @@
 import { useTranslation } from "react-i18next";
 import type { QuickReferenceRow } from "@/api/types";
 import { focusAnchor } from "@/utils/focusAnchor";
+import { SEV_CAP, SEV_PILL, SEV_EDGE } from "@/lib/severity-visual";
 
-/** severity（小写）→ 药丸配色（与 VulnerabilityCard.SEV_PILL 同源暖色通道）。 */
-const SEV_PILL: Record<string, string> = {
-  critical: "bg-red/15 text-red",
-  high: "bg-orange/15 text-orange",
-  medium: "bg-yellow/15 text-yellow",
-  low: "bg-muted text-muted-foreground",
-};
-
-/** severity（小写）→ 行左缘色规（与 VulnerabilityCard.SEV_EDGE 同语言）：行序是
- *  类序分组 + 类内降序（builder 定，与 md 同源不可重排），左缘色带让埋在后位类的
- *  Critical 与首行 Critical 同权重——长表扫左缘即得全局危险地图。 */
-const SEV_EDGE: Record<string, string> = {
-  critical: "border-l-2 border-l-red/70",
-  high: "border-l-2 border-l-orange/70",
-  medium: "border-l-2 border-l-yellow/70",
-  low: "border-l-2 border-l-muted-foreground/40",
-};
+/** 行左缘色规（与 VulnerabilityCard.SEV_EDGE 同语言，单源 lib/severity-visual；
+ *  小写 severity 经 SEV_CAP 归一）：行序是类序分组 + 类内降序（builder 定，与 md
+ *  同源不可重排），左缘色带让埋在后位类的 Critical 与首行 Critical 同权重——
+ *  长表扫左缘即得全局危险地图。 */
 
 /** 动态验证判定（值域来自 report_assembler._verification_cell 映射：zh「已动态
  *  验证」/ en "Dynamically Verified" / 未知名原样透传）——含「动态」/ dynamic 即
@@ -92,7 +80,7 @@ export function QuickReferenceTable({
                 <tr
                   key={r.id}
                   data-testid="quick-ref-row"
-                  className={`cursor-pointer border-b border-border/50 transition-colors last:border-b-0 hover:bg-accent/40${sev in SEV_EDGE ? ` ${SEV_EDGE[sev]}` : ""}`}
+                  className={`cursor-pointer border-b border-border/50 transition-colors last:border-b-0 hover:bg-accent/40${SEV_CAP[sev] ? ` ${SEV_EDGE[SEV_CAP[sev]]}` : ""}`}
                   onClick={() => locate(r.id)}
                 >
                   <td className={`${cellCls} font-mono`}>
@@ -123,9 +111,9 @@ export function QuickReferenceTable({
                     {r.endpoints.length > 0 ? r.endpoints.join(", ") : "—"}
                   </td>
                   <td className={cellCls}>
-                    {sev in SEV_PILL ? (
+                    {SEV_CAP[sev] ? (
                       <span
-                        className={`inline-flex rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[sev]}`}
+                        className={`inline-flex rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[SEV_CAP[sev]]}`}
                       >
                         {sev}
                       </span>

@@ -104,13 +104,29 @@ const safeOnlyTree: DataflowTree = {
 describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
   afterEach(() => i18n.changeLanguage("zh"));
-  it("renders vulnerable branch as flowing red dashed path（打通枝）", () => {
+  it("renders vulnerable branch as red dashed path（打通枝；静态——flow 不再常驻）", () => {
     const { container } = render(<PruningTreeFig trees={[vulnerableTree]} />);
     const path = container.querySelector('path[data-branch="vulnerable"]');
     expect(path).toBeTruthy();
-    // 流动动画 class（CSS @keyframes flow → stroke-dashoffset）
-    expect(path?.getAttribute("class") ?? "").toContain("flow");
     expect(path?.getAttribute("class") ?? "").toContain("branch-vuln");
+    // 动效预算（spec 2026-08-27 §3）：流动动画只在 hover/selected 触发（CSS 层），
+    // 常驻 .flow 已撤——动画是阅读辅助，不是环境噪音
+    expect(path?.getAttribute("class") ?? "").not.toContain("flow");
+  });
+
+  it("tokens.css 动效契约：flow 由 hovered/selected/直接 hover 触发；sink-pulse 放缓 2.2s；reduced-motion 镜像", () => {
+    const css = readFileSync(resolve(__dirname, "../../../styles/tokens.css"), "utf8");
+    // 打通枝流动触发器（含直接 hover，指针反馈不需要 React 状态）
+    expect(css).toMatch(/\.branch-vuln\.hovered[^{]*,[^{]*svg g\[data-branch-id\]:hover \.branch-vuln[^{]*\{[^}]*animation:\s*flow/);
+    // 常驻 .flow 组合类已删（防回流）
+    expect(css).not.toMatch(/\.branch-vuln\.flow\s*\{/);
+    // sink-pulse 单焦点保留，1.8s → 2.2s 放缓一档
+    expect(css).toMatch(/animation:\s*sink-pulse 2\.2s/);
+    // reduced-motion 镜像逐选择器对齐（触发规则特异性高于旧覆盖；聚合所有 reduce 块）
+    const reduced = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g)]
+      .map((m) => m[1]).join("\n");
+    expect(reduced).toMatch(/\.branch-vuln\.hovered/);
+    expect(reduced).toMatch(/data-branch-id/);
   });
 
   it("renders safe branch with ✂ marker + 残端不到 sink（剪断枝）", () => {

@@ -26,9 +26,10 @@ export function ReachableBadge({ reachable }: { reachable: boolean }) {
       </Badge>
     );
   }
+  /* 可达性走字形通道（⌖ 中性），不与 severity 抢红色（spec 2026-08-27 §2.1） */
   return (
-    <Badge variant="outline" className="font-mono text-red border-red/40">
-      ● 可达
+    <Badge variant="outline" className="font-mono text-foreground/75">
+      ⌖ 可达
     </Badge>
   );
 }

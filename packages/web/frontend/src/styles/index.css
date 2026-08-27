@@ -53,10 +53,8 @@
   .supernova-spinner::before { animation: none; content: "•"; }
 }
 
-/* Card 可达性变体（spec §4，供子项目 VulnCard：<Card className="card-reachable">） */
-.card-reachable {
-  border-left: 3px solid hsl(var(--c-red));
-}
+/* Card 可达性变体 .card-reachable 已删（2026-08-27 spec 警报语义层 §2.1：
+   「可达性=红左边」与 severity 双重编码冲突，且全库零使用——只留测试保活的死 CSS）。 */
 
 /* ===== 概览 Dashboard 猎杀特效带（重设计 2026-08-14）=====
    两种可切换特效：信号轨迹（脉冲线周期横扫）+ 污点流光（source→sink 泳道流动）。

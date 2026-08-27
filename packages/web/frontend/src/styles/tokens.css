@@ -68,6 +68,12 @@
   --font-serif: "IBM Plex Serif", Georgia, serif;
   --radius: 12px;
 
+  /* severity 文本步（spec 2026-08-27 §4，Radix 步阶方法论 color-mix 落地）：
+     同一 hue 的「文本步」与「tint 底步」分离——tint 底用原色（bg-{sev}/15），
+     文本向白提亮一档（深底 62% 亮度红文本实测仅 3.1-3.8:1）。扩展主题继承本值。 */
+  --sev-text-strength: 72%;
+  --sev-text-toward: white;
+
   /* 层 E · elevation（深 · claude.ai 暗色浮层：alpha 白 hairline + 柔黑落影） */
   --shadow-card: 0 0 0 1px hsl(36 10% 100% / 0.05), 0 1px 2px hsl(0 0% 0% / 0.2), 0 2px 8px hsl(0 0% 0% / 0.25);
 
@@ -127,6 +133,12 @@
   --c-orange: 26 70% 37%;
   --c-yellow: 40 70% 29%;
   --c-amber: 36 73% 34%;
+
+  /* 层 C' · severity 文本步（浅色：向黑压深一档——白底 46% 亮度红药丸文本实测
+     3.6-4.4:1。AA 验证器 src/styles/__tests__/tokens-contrast.test.ts 锁定；
+     扩展浅色主题继承本值） */
+  --sev-text-strength: 76%;
+  --sev-text-toward: black;
 
   /* 层 D · prose 主题（浅 · 暖墨文字配暖白底） */
   --prose-body: 40 4% 17%;
@@ -965,6 +977,45 @@ html body {
   --shadow-toolbar-hover: 0 2px 4px hsl(0 0% 5% / 0.08), 0 8px 20px -8px hsl(0 0% 5% / 0.12);
 }
 
+/* —— severity dot 形状通道（spec 2026-08-27 警报语义层 §2.2，本设计的签名）——
+   填充比例编码 rank：Low ○ 空环 / Medium ◑ 半填充 / High ◕ 3/4 / Critical ● 满填充。
+   色经 currentColor 继承消费方 pill 的 text-*（text-red 等），色相降级为辅助强化——
+   近单色主题（kami/openai/notion）red/orange/yellow 色相弱时形状仍跨主题等强分级。
+   尺寸 6px 对齐旧 size-1.5 消费点（StatsRow/VulnerabilityCard/MarkdownView dot）。 */
+.sev-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.sev-dot-critical {
+  background: currentColor;
+}
+.sev-dot-high {
+  background: conic-gradient(currentColor 0 75%, transparent 75% 100%);
+}
+.sev-dot-medium {
+  background: conic-gradient(currentColor 0 50%, transparent 50% 100%);
+}
+.sev-dot-low {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+/* severity 文本步类（spec 2026-08-27 §4）：tint 底（bg-{sev}/15）与文本分离——
+   文本 = 原 hue 向 --sev-text-toward 混 --sev-text-strength（深色向白 / 浅色向黑，
+   扩展主题按模式继承基础值）。药丸/卡面 severity 文本统一走本类，AA 由
+   tokens-contrast.test.ts 全主题锁定。color-mix 需 2023+ 浏览器（自托管工具，可接受）。 */
+.sev-text-red {
+  color: color-mix(in srgb, hsl(var(--c-red)) var(--sev-text-strength), var(--sev-text-toward));
+}
+.sev-text-orange {
+  color: color-mix(in srgb, hsl(var(--c-orange)) var(--sev-text-strength), var(--sev-text-toward));
+}
+.sev-text-yellow {
+  color: color-mix(in srgb, hsl(var(--c-yellow)) var(--sev-text-strength), var(--sev-text-toward));
+}
+
 /* —— 剪枝树（PruningTreeFig）专用动画与 class（spec 2026-08-20 §5 视觉语言）——
    组件自研 SVG 不引可视化库；列对齐 x=step_index×COL_W，逐节点对齐。
    打通枝=红虚线流动 / 剪断枝=绿实线至防护节点+✂残端 / sink 靶心红脉动或灰虚线 /
@@ -977,8 +1028,12 @@ html body {
   stroke-dasharray: 7 5;
   stroke-linecap: round;
 }
-/* 打通枝专属流动动画（.flow 组合类驱动 stroke-dashoffset；brief token.css 示例口径）*/
-.branch-vuln.flow {
+/* 打通枝流动（2026-08-27 动效预算 spec §3）：从常驻 .flow 组合类改为阅读辅助——
+   仅 hovered/selected（React 联动态）或直接 hover 该枝（指针反馈，无需状态）时
+   流动，动画顺着正在看的链走；常驻态保持静态红虚线（verdict 语义不依赖动效）。 */
+.branch-vuln.hovered,
+.branch-vuln.selected,
+svg g[data-branch-id]:hover .branch-vuln {
   animation: flow 1.1s linear infinite;
 }
 .branch-safe {
@@ -1050,7 +1105,8 @@ html body {
   fill: none;
   stroke: hsl(var(--c-red));
   stroke-width: 2.4;
-  animation: sink-pulse 1.8s ease-in-out infinite;
+  /* 2.2s（2026-08-27 动效预算放缓一档）：页面唯一保留的 ambient 动画——单焦点 */
+  animation: sink-pulse 2.2s ease-in-out infinite;
 }
 .sink-idle {
   fill: none;
@@ -1148,7 +1204,10 @@ svg g[data-branch-id] {
   50% { opacity: 0.55; transform: scale(1.08); transform-box: fill-box; transform-origin: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .branch-vuln.flow { animation: none; }
+  /* 镜像 2026-08-27 动效触发器选择器（触发规则特异性高于单类，须逐选择器对齐） */
+  .branch-vuln.hovered,
+  .branch-vuln.selected,
+  svg g[data-branch-id]:hover .branch-vuln { animation: none; }
   .sink-pulse { animation: none; }
 }
 
@@ -1169,11 +1228,16 @@ svg g[data-branch-id] {
   border-color: hsl(var(--c-yellow));
   background: hsl(var(--c-yellow) / 0.07);
 }
-/* 缺失关卡内的「流动断线」：红色渐隐虚线向 sink 方向滚动 */
+/* 缺失关卡内的「流动断线」：静态红渐隐虚线常驻；滚动仅 hover/focus-within 触发
+   （2026-08-27 动效预算 §3——三处常驻无限动画收敛为一页 ≤1 个 ambient） */
 .guard-gap-flow {
   height: 3px;
   border-radius: 2px;
   background: repeating-linear-gradient(90deg, hsl(var(--c-red)) 0 7px, transparent 7px 14px);
+  animation: none;
+}
+.guard-missing:hover .guard-gap-flow,
+.guard-missing:focus-within .guard-gap-flow {
   animation: guard-gap-move 0.9s linear infinite;
 }
 @keyframes guard-gap-move {
@@ -1190,7 +1254,9 @@ svg g[data-branch-id] {
   15%, 55% { outline-color: hsl(var(--primary)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .guard-gap-flow { animation: none; }
+  .guard-gap-flow,
+  .guard-missing:hover .guard-gap-flow,
+  .guard-missing:focus-within .guard-gap-flow { animation: none; }
   .dataflow-flash { animation: none; }
 }
 

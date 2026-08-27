@@ -45,11 +45,11 @@ describe("TypeSummaryCards", () => {
     expect(container.querySelector('[data-testid="type-card-stripe"]')?.className).toContain("bg-orange");
   });
 
-  it("severity range 文字着色（Critical→text-red，High→text-orange）", () => {
+  it("severity range 文字着色走文本步（Critical→sev-text-red，spec 2026-08-27 §4 AA）", () => {
     const { container } = render(<TypeSummaryCards typeAggs={[makeAgg()]} />);
     const card = container.querySelector('[data-testid="type-card"]');
-    expect(card?.innerHTML).toContain("text-red");
-    expect(card?.innerHTML).toContain("text-orange");
+    expect(card?.innerHTML).toContain("sev-text-red");
+    expect(card?.innerHTML).toContain("sev-text-orange");
   });
 
   it("findingsText 存在时渲染，缺失时不渲染", () => {

@@ -90,7 +90,9 @@ function sinkColIndex(tree: DataflowTree): number {
 
 /** verdict → SVG path class（打通红流动 / 剪断绿 / unknown 橙）。 */
 function branchClass(verdict: DataflowBranch["verdict"]): string {
-  if (verdict === "vulnerable") return "branch-vuln flow";
+  // 打通枝不再常驻 .flow（2026-08-27 动效预算 spec §3）：流动动画由 tokens.css
+  // 在 hovered/selected/直接 hover 时触发——静态红虚线已表达 verdict 语义
+  if (verdict === "vulnerable") return "branch-vuln";
   if (verdict === "safe") return "branch-safe";
   return "branch-unknown";
 }

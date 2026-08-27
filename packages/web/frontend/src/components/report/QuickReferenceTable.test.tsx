@@ -34,6 +34,15 @@ const rows: QuickReferenceRow[] = [
     verification: "静态分析",
     confidence: "中",
   },
+  {
+    id: "AUTHZ-VULN-01",
+    title: "低危越权（点线档）",
+    params: ["uid (query)"],
+    endpoints: ["GET /profile/:uid"],
+    severity: "low",
+    verification: "静态分析",
+    confidence: "低",
+  },
 ];
 
 beforeEach(() => i18n.changeLanguage("zh"));
@@ -45,7 +54,7 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
     expect(screen.getByTestId("quick-reference")).toBeInTheDocument();
     expect(screen.getByText("漏洞速查表")).toBeInTheDocument();
     const trs = screen.getAllByTestId("quick-ref-row");
-    expect(trs.length).toBe(3);
+    expect(trs.length).toBe(4); // 2026-08-27 增补 low 档行（线型阶梯断言）
     for (const h of ["标题", "参数", "接口", "严重程度", "验证", "置信度"]) {
       expect(screen.getByText(h)).toBeInTheDocument();
     }
@@ -85,6 +94,13 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
     expect(trs[1].className).toContain("border-l-red"); // critical（INJ-VULN-02）
     expect(trs[0].className).toContain("border-l-orange"); // high（XSS-VULN-01）
     expect(trs[2].className).toContain("border-l-yellow"); // medium（INJ-VULN-03）
+  });
+
+  it("行左缘线型阶梯：medium 虚线 / low 点线（spec 2026-08-27 §2.3 形状通道跨主题兜底）", () => {
+    render(<QuickReferenceTable rows={rows} onLocate={() => {}} />);
+    const trs = screen.getAllByTestId("quick-ref-row");
+    expect(trs[2].className).toContain("[border-left-style:dashed]"); // medium（INJ-VULN-03）
+    expect(trs[3].className).toContain("[border-left-style:dotted]"); // low（AUTHZ-VULN-01）
   });
 
   it("params >3 截断（对齐 md _params_cell 口径）：显示前 3 + 等 N 个，title 悬停可见全量", () => {

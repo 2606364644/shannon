@@ -22,6 +22,7 @@ import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { copyToClipboard } from "@/lib/clipboard";
+import { SEV_PILL, SEV_DOT, SEV_EDGE } from "@/lib/severity-visual";
 import { ChevronDown, ChevronRight, ListCollapse, List, LayoutPanelTop, LayoutGrid } from "lucide-react";
 import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
@@ -397,31 +398,10 @@ function makeProseComponents(t: TFunction) {
 
 const REMARK_PLUGINS = [remarkGfm];
 
-/** severity → 配色：报告里不同危害程度用不同颜色区分（左轨边框 / 底色微染 / 圆点 / 标签文字）。 */
-// severity 配色：DSF 暖色语义通道 --c-red/orange/yellow（与 coral 主色同暖系，Claude 感）。
-// 只在「药丸标签 + 圆点」上着色；卡片本体保持 bg-card + hairline + shadow-card 的 Claude 卡面
-// （对齐 AttackChainSection，不搞 alert 式色条/底色）。
-const SEV_PILL: Record<string, string> = {
-  Critical: "bg-red/15 text-red",
-  High: "bg-orange/15 text-orange",
-  Medium: "bg-yellow/15 text-yellow",
-  Low: "bg-muted text-muted-foreground",
-};
-const SEV_DOT: Record<string, string> = {
-  Critical: "bg-red",
-  High: "bg-orange",
-  Medium: "bg-yellow",
-  Low: "bg-muted-foreground",
-};
-/** severity → 卡左缘色规（2026-08-26 标题升主标题配套，与结构化路径
- *  VulnerabilityCard.SEV_EDGE 同源）：ExecutiveSummary 红左规语言的梯度推广，
- *  长列表滚动扫视时左缘色带即 triage（色带编码危险度而非装饰）。 */
-const SEV_EDGE: Record<string, string> = {
-  Critical: "border-l-2 border-l-red/70",
-  High: "border-l-2 border-l-orange/70",
-  Medium: "border-l-2 border-l-yellow/70",
-  Low: "border-l-2 border-l-muted-foreground/40",
-};
+/** severity 视觉单源（spec 2026-08-27 §2.4）：hue 药丸 + 填充比例 dot + 线型左缘，
+ *  与结构化路径（VulnerabilityCard/StatsRow/QuickReferenceTable）共用 lib/severity-visual
+ *  （import 见顶部）。只在「药丸标签 + 圆点 + 左缘」着色；卡片本体保持 bg-card +
+ *  hairline + shadow-card 的 Claude 卡面（对齐 AttackChainSection，不搞 alert 式色条/底色）。 */
 
 /** 从漏洞块派生一行可扫的「是什么」小标题：优先 Sink/Location 的 basename:行号，其次 vulnType。
  *  GitNexus 轨漏洞标题只有 ID（无描述），靠这个给出有意义的扫描线索。 */
@@ -889,7 +869,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
                             className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${SEV_PILL[sev]}`}
                             data-testid="vuln-sev"
                           >
-                            <span className={`size-1.5 rounded-full ${SEV_DOT[sev]}`} aria-hidden="true" data-testid="vuln-dot" />
+                            <span className={`sev-dot ${SEV_DOT[sev]}`} aria-hidden="true" data-testid="vuln-dot" />
                             {t(`vuln.severity.${sev}`, { defaultValue: sev })}
                           </span>
                           <ChevronDown

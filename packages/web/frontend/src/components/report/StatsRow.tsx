@@ -1,20 +1,10 @@
 import { useTranslation } from "react-i18next";
 import type { ReportStatsData } from "@/api/types";
+import { SEV_CAP, SEV_PILL, SEV_DOT } from "@/lib/severity-visual";
 
-/** severity 展示序（小写=report_data.json 键），配色对齐 md 路径 ThreatOverview 暖色通道。 */
+/** severity 展示序（小写=report_data.json 键）；视觉映射单源 lib/severity-visual
+ *  （spec 2026-08-27 §2.4：hue 药丸 + 填充比例 dot）。 */
 const SEV_ORDER = ["critical", "high", "medium", "low"] as const;
-const SEV_CAP: Record<string, string> = {
-  critical: "Critical", high: "High", medium: "Medium", low: "Low",
-};
-const SEV_PILL: Record<string, string> = {
-  Critical: "bg-red/15 text-red",
-  High: "bg-orange/15 text-orange",
-  Medium: "bg-yellow/15 text-yellow",
-  Low: "bg-muted text-muted-foreground",
-};
-const SEV_DOT: Record<string, string> = {
-  Critical: "bg-red", High: "bg-orange", Medium: "bg-yellow", Low: "bg-muted-foreground",
-};
 
 /**
  * 统计行（spec 2026-08-26 §7.2）：吃 report_data.stats——确定性聚合由组装器
@@ -72,7 +62,7 @@ export function StatsRow({ stats }: { stats: ReportStatsData }) {
               data-testid={`stat-sev-${sev}`}
               className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10.5px] ${SEV_PILL[cap]}`}
             >
-              <span className={`size-1.5 rounded-full ${SEV_DOT[cap]}`} aria-hidden="true" />
+              <span className={`sev-dot ${SEV_DOT[cap]}`} aria-hidden="true" />
               {cap} <b className="font-medium">{stats.by_severity?.[sev] ?? 0}</b>
             </span>
           );

@@ -60,6 +60,13 @@ describe("MarkdownView", () => {
     expect(card).toHaveTextContent("CommandInjection");
   });
 
+  it("vuln 块 sev dot 走填充比例形状类（spec 2026-08-27 §2.2 形状通道）", () => {
+    render(<MarkdownView markdown={MD} />);
+    const dot = screen.getByTestId("vuln-dot");
+    expect(dot.className).toMatch(/sev-dot-(low|medium|high|critical)/);
+    expect(dot.className).not.toMatch(/bg-(red|orange|yellow)/);
+  });
+
   it("TOC 含类型 + 执行摘要条目（从 DOM 读真实 id）", () => {
     const { container } = render(<MarkdownView markdown={MD} />);
     const toc = container.querySelector('[data-testid="toc"]');

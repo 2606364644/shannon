@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import i18n from "@/i18n";
 import { GuardChain, controlAnchorId } from "../GuardChain";
 import type { ControlFinding } from "@/api/types";
@@ -78,5 +80,19 @@ describe("GuardChain — 认证/授权关卡链（spec §5 区 2）", () => {
     i18n.changeLanguage("en");
     const { container } = render(<GuardChain controls={[control]} />);
     expect(container.textContent ?? "").toContain("Authentication / authorization risks");
+  });
+
+  it("tokens.css 动效契约：guard-gap-flow 常驻静止，hover/focus-within 才滚动（spec 2026-08-27 §3）", () => {
+    const css = readFileSync(resolve(__dirname, "../../../styles/tokens.css"), "utf8");
+    // 常驻静止（默认 animation: none——静态红渐隐虚线仍在，滚动是交互反馈）
+    expect(css).toMatch(/\.guard-gap-flow\s*\{[^}]*animation:\s*none/);
+    // hover / focus-within 触发滚动
+    expect(css).toMatch(
+      /\.guard-missing:hover \.guard-gap-flow[^{]*,[^{]*\.guard-missing:focus-within \.guard-gap-flow[^{]*\{[^}]*animation:\s*guard-gap-move/,
+    );
+    // reduced-motion 镜像（触发规则特异性更高，须对齐；聚合所有 reduce 块）
+    const reduced = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g)]
+      .map((m) => m[1]).join("\n");
+    expect(reduced).toMatch(/\.guard-missing:hover \.guard-gap-flow/);
   });
 });

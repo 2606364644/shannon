@@ -17,11 +17,12 @@ export const SEVERITY_BG: Record<Severity, string> = {
   Low: "bg-muted-foreground",
 };
 
-/** severity → 文字色（类型卡 range 文字 / 图例文字复用）。 */
+/** severity → 文字色（类型卡 range 文字 / 图例文字复用）。文本步类（spec
+ *  2026-08-27 §4）：向白/向黑混一档保全主题 AA——原 text-red 直用白底实测 3.8-4.4:1。 */
 export const SEVERITY_TEXT: Record<Severity, string> = {
-  Critical: "text-red",
-  High: "text-orange",
-  Medium: "text-yellow",
+  Critical: "sev-text-red",
+  High: "sev-text-orange",
+  Medium: "sev-text-yellow",
   Low: "text-muted-foreground",
 };
 

@@ -202,6 +202,26 @@ describe("VulnerabilityCard", () => {
     expect(screen.getByText(/高危/)).toBeInTheDocument(); // vuln.severity.High zh
   });
 
+  it("可达徽章中性 ⌖ 字形（非红——可达性不与 severity 抢红色通道，spec 2026-08-27 §2.1）", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const badge = screen.getByText(/⌖/);
+    expect(badge.textContent).toContain("可达");
+    expect(badge.className).not.toContain("text-red");
+    expect(badge.className).not.toContain("border-red");
+  });
+
+  it("sev dot 形状通道（填充比例）+ Medium 虚线左缘（spec 2026-08-27 §2.2/§2.3）", () => {
+    const { rerender } = render(<VulnerabilityCard v={vuln} />);
+    expect(screen.getByTestId("report-vuln-sev").querySelector("span")?.className).toContain("sev-dot-high");
+    rerender(<VulnerabilityCard v={{ ...vuln, severity: "critical" }} />);
+    expect(screen.getByTestId("report-vuln-sev").querySelector("span")?.className).toContain("sev-dot-critical");
+    // Medium：左缘 hue=yellow + 线型=虚线（近单色主题兜底通道）
+    rerender(<VulnerabilityCard v={{ ...vuln, severity: "medium" }} />);
+    const cardCls = screen.getByTestId("report-vuln-card").className;
+    expect(cardCls).toContain("border-l-yellow");
+    expect(cardCls).toContain("[border-left-style:dashed]");
+  });
+
   it("narrative 节独立纵排（弃 3 列 grid）：成因/危害/修复建议各成节，节头标签按七节基准", () => {
     render(<VulnerabilityCard v={vuln} />);
     expect(screen.getByTestId("sec-cause").textContent).toContain("渲染 memo 时未转义");

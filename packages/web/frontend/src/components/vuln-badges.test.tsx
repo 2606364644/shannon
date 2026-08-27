@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { MergeSourceBadge, ReachableBadge } from "./vuln-badges";
 
 describe("MergeSourceBadge", () => {
@@ -23,21 +21,13 @@ describe("MergeSourceBadge", () => {
 });
 
 describe("ReachableBadge", () => {
-  it("reachable=true → ● 可达 + red", () => {
+  it("reachable=true → ⌖ 可达 中性（不与 severity 抢红色通道，spec 2026-08-27 §2.1）", () => {
     const { container } = render(<ReachableBadge reachable={true} />);
-    expect(container.textContent).toMatch(/可达/);
-    expect(container.querySelector(".text-red")).toBeTruthy();
+    expect(container.textContent).toMatch(/⌖ 可达/);
+    expect(container.querySelector(".text-red")).toBeNull();
   });
   it("reachable=false → ○ 内部 + muted", () => {
     render(<ReachableBadge reachable={false} />);
     expect(screen.getByText(/内部/)).toBeInTheDocument();
-  });
-});
-
-describe("card-reachable utility（spec §4 Card 可达性变体）", () => {
-  it("index.css 含 .card-reachable 规则消费 --red", () => {
-    const css = readFileSync(resolve(__dirname, "../styles/index.css"), "utf8");
-    expect(css).toContain(".card-reachable");
-    expect(css).toContain("hsl(var(--c-red))");
   });
 });

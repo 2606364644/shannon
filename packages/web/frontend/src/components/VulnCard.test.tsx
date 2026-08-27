@@ -70,11 +70,23 @@ describe("VulnCard", () => {
     expect(screen.getByText(/URL_Manipulation/)).toBeInTheDocument();
   });
 
-  it("externally_exploitable=true → 可达 ● 徽章 + red 边框语义", () => {
+  it("ID 是标识符不是警报：中性 semibold，不再 text-red（spec 2026-08-27 §2.1）", () => {
+    render(<VulnCard v={base} />);
+    const id = screen.getByText("SSRF-01");
+    expect(id.className).toContain("text-foreground");
+    expect(id.className).toContain("font-semibold");
+    expect(id.className).not.toContain("text-red");
+  });
+
+  it("externally_exploitable=true → 可达徽章中性 ⌖ 字形（非红，不与 severity 抢通道）", () => {
     const { container } = render(<VulnCard v={{ ...base, externally_exploitable: true }} />);
-    expect(screen.getByText(/可达/)).toBeInTheDocument();
-    // red 边框语义：Card 根节点 border-red/50
-    expect(container.firstChild).toHaveClass("border-red/50");
+    const badge = screen.getByText(/⌖/);
+    expect(badge.textContent).toContain("可达");
+    // 红色稀缺预算：可达徽章不走红通道
+    expect(badge.className).not.toContain("text-red");
+    expect(badge.className).not.toContain("border-red");
+    // 可达性不再整卡红边（与 severity 双重编码冲突）
+    expect(container.firstChild).not.toHaveClass("border-red/50");
   });
 
   it("externally_exploitable=false → 无可达徽章 + 无 red 边框", () => {
@@ -113,10 +125,10 @@ describe("VulnCard", () => {
     expect(head).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("可达漏洞有 red 边框语义", () => {
-    render(<VulnCard v={{ ID: "X", vulnerability_type: "t", externally_exploitable: true }} />);
-    // 可达徽章
+  it("可达漏洞有中性可达徽章（red 边框语义已撤，spec 2026-08-27 §2.1）", () => {
+    const { container } = render(<VulnCard v={{ ID: "X", vulnerability_type: "t", externally_exploitable: true }} />);
     expect(screen.getByText(/可达/)).toBeInTheDocument();
+    expect(container.firstChild).not.toHaveClass("border-red/50");
   });
 
   it("i18n: 切英文可达徽章为 Reachable", () => {

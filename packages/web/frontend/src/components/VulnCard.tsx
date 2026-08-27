@@ -32,7 +32,7 @@ export function VulnCard({ v, dataflowTreeId }: { v: Vulnerability; dataflowTree
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((o) => !o);
   return (
-    <Card className={`gap-0 ${v.externally_exploitable ? "border-red/50" : ""}`}>
+    <Card className="gap-0">
       <CardHeader
         className="flex cursor-pointer select-none flex-row flex-wrap items-center gap-2 font-mono text-sm"
         role="button"
@@ -46,10 +46,13 @@ export function VulnCard({ v, dataflowTreeId }: { v: Vulnerability; dataflowTree
           }
         }}
       >
-        <span className="font-bold text-red">{v.ID}</span>
+        {/* ID 中性 semibold（spec 2026-08-27 §2.1：ID 是标识符不是警报——队列里逐条
+            标红携带零信息，红色稀缺预算留给 severity/top risks） */}
+        <span className="font-semibold text-foreground">{v.ID}</span>
         <span>{v.title || v.vulnerability_type}</span>
+        {/* 可达性走字形通道（⌖ 中性徽章），不与 severity 抢红色 */}
         {v.externally_exploitable && (
-          <Badge variant="outline" className="border-red/40 text-red">● {t("vuln.reachable")}</Badge>
+          <Badge variant="outline" className="text-foreground/75">⌖ {t("vuln.reachable")}</Badge>
         )}
         <MergeSourceBadge src={v.merge_source} />
         {v.confidence && <Badge variant="outline" className="text-muted-foreground">{v.confidence}</Badge>}
