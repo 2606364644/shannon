@@ -88,6 +88,7 @@ class AnthropicProvider(BaseProvider):
         collector: "CollectorBase | None" = None,
         progress: "ProgressSpec | None" = None,
         proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → CLI 子进程 env
+        usage_sink: "UsageSink | None" = None,   # cancel 兜底记账（2026-08-28；CLI 子进程被杀拿不到中途值，占位不写）
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt

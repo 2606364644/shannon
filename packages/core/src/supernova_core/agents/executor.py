@@ -12,7 +12,7 @@ from supernova_core.utils.atomic_write import atomic_write_json
 from supernova_core.utils.billing import is_spending_cap_behavior
 from supernova_core.utils.paths import intermediate_path
 
-from supernova_core.agents.runner import run_claude_prompt
+from supernova_core.agents.runner import UsageSink, run_claude_prompt
 from supernova_core.agents.validators import get_queue_filename, validate_deliverable
 from supernova_core.agents.vuln_queue_reconcile import reconcile_findings
 from supernova_core.agents.progress_tool import make_progress
@@ -257,6 +257,10 @@ def _archive_dismissed_from_safe_vectors(deliverables: Path, vc: str,
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
         self.prompt_manager = prompt_manager
+        # cancel 中途已花 usage 出口（2026-08-28 authcheck 超时丢账修复）：
+        # execute 开始时创建新实例下传 provider；被 cancel 时 provider 写入已累积
+        # 消耗，activity 兜底从这里读。未 execute / 已正常返回时无意义。
+        self.usage_sink: "UsageSink | None" = None
 
     async def execute(
         self,
@@ -333,6 +337,8 @@ class AgentExecutor:
         progress = make_progress(agent_name)
 
         start_time = time.monotonic()
+        # 每次 execute 新建 sink（不跨次串账）；provider cancel 分支写入已花值。
+        self.usage_sink = UsageSink()
         result = await run_claude_prompt(
             prompt=prompt,
             repo_path=str(repo),
@@ -347,6 +353,7 @@ class AgentExecutor:
             progress=progress,
             provider_config=provider_config,   # P3c 阶段 1
             proxy_url=proxy_url,   # Task 4：per-scan 代理穿线到 provider
+            usage_sink=self.usage_sink,   # cancel 兜底记账通道（2026-08-28）
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 

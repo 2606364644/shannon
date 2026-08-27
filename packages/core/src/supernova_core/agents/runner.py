@@ -25,6 +25,39 @@ class TokenUsage:
 
 
 @dataclass
+class UsageSink:
+    """cancel 中途的已花 usage 出口（2026-08-28 authcheck 超时丢账修复）。
+
+    Temporal start_to_close_timeout 到期以 CancelledError cancel 掉 activity 时，
+    run_claude_prompt 正常返回的 usage 拿不到（except Exception 接不住 BaseException）。
+    通道：executor.execute 每次创建新实例挂 ``self.usage_sink`` 并下传 provider；
+    provider 在被 cancel 前把已累积 usage 写入（openai 引擎 context_wrapper.usage
+    每 turn 累积；anthropic CLI 子进程被杀拿不到中途值，保持 0）；activity 的
+    cancel 兜底从 executor.usage_sink 读已花值记账。纯数据载体，不算价——
+    cost 由 provider cancel 分支用 compute_cost 算好传入。
+    """
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_currency: str | None = None
+    model: str | None = None
+
+    def record(self, *, model: str | None, input_tokens: int, output_tokens: int,
+               cache_read_tokens: int, cache_creation_tokens: int,
+               cost_usd: float, cost_currency: str | None) -> None:
+        """写入一次部分消耗（provider cancel 分支调用；覆盖语义，非累加）。"""
+        self.model = model
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cache_read_tokens = cache_read_tokens
+        self.cache_creation_tokens = cache_creation_tokens
+        self.cost_usd = cost_usd
+        self.cost_currency = cost_currency
+
+
+@dataclass
 class ProviderConfig:
     """AI Provider 配置"""
     type: Literal[
@@ -130,6 +163,7 @@ async def run_claude_prompt(
     collector: "CollectorBase | None" = None,
     progress: "ProgressSpec | None" = None,
     proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → provider.call
+    usage_sink: "UsageSink | None" = None,   # cancel 兜底记账通道（2026-08-28）→ provider.call
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -187,6 +221,7 @@ async def run_claude_prompt(
             collector=collector,
             progress=progress,
             proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
+            usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
         )
 
         # 5. 检查花费上限行为

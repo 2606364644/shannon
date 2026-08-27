@@ -739,11 +739,24 @@ class AuthValidationWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_for("log"),
             )
-            return await workflow.execute_activity(
-                activities.run_auth_validation_probe, act_input,
-                start_to_close_timeout=timedelta(minutes=10),
-                retry_policy=retry_for("auth-validation"),
-            )
+            # 真实 status（2026-08-28 authcheck 超时丢账修复 · 状态失真半）：probe 抛异常
+            # （超时耗尽 / 引擎错）→ finally 里 finalize 传 failed + error 后 re-raise——
+            # 修复前硬编码 completed，3×10min 全超时也显示"成功完成"。probe 正常返回
+            # （含业务性 success=False 结论）→ 生命周期完整 → completed。usage 聚合在
+            # finalize_summary 内从 session.get_metrics()（MetricsTracker）取，cancel 落账
+            # （activities probe 的 BaseException 分支）后自动累积，无需此处传。
+            probe_error: str | None = None
+            try:
+                return await workflow.execute_activity(
+                    activities.run_auth_validation_probe, act_input,
+                    # 窗口经 input 传入（env 在 sandbox 外解析，默认 600s=原 10min）
+                    start_to_close_timeout=timedelta(
+                        seconds=input.probe_timeout_seconds or 600),
+                    retry_policy=retry_for("auth-validation"),
+                )
+            except Exception as e:
+                probe_error = f"{type(e).__name__}: {e}"
+                raise  # workflow failed 语义保持（web 侧照常读到失败）
         finally:
             if proxy_url:
                 try:
@@ -757,9 +770,12 @@ class AuthValidationWorkflow:
             if display_ok:
                 # finalize_summary：drain LogBus + log_workflow_complete + 停 heartbeat + 清 session。
                 # summary 最小集（auth-validation 无 agent_metrics 聚合，finalize_summary 容错 .get 读）。
+                summary: dict = {"status": "completed" if probe_error is None else "failed"}
+                if probe_error is not None:
+                    summary["error"] = probe_error
                 await workflow.execute_activity(
                     activities.finalize_summary,
-                    args=[act_input, {"status": "completed"}],
+                    args=[act_input, summary],
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=retry_for("log"),
                 )

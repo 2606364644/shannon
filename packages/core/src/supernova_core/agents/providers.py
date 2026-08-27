@@ -20,6 +20,7 @@ from .tool_audit_logger import ToolAuditLogger
 
 if TYPE_CHECKING:
     from supernova_core.collectors.base import CollectorBase
+    from .runner import UsageSink
 
 
 # ============================================================================
@@ -78,6 +79,7 @@ class BaseProvider(ABC):
         audit_logger: ToolAuditLogger | None = None,
         max_turns: int | None = None,
         collector: "CollectorBase | None" = None,
+        usage_sink: "UsageSink | None" = None,   # cancel 兜底记账（2026-08-28）
     ) -> ClaudeRunResult:
         """
         调用 AI 模型执行 prompt

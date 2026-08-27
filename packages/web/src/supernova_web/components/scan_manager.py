@@ -88,6 +88,25 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _auth_probe_timeout_seconds(env_overrides: dict[str, str] | None) -> int:
+    """authcheck probe 窗口（秒）：SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS。
+
+    ws env 段优先（SCAN_ENV_KEYS 白名单内）→ web 进程 env → 默认 600（=原 10min，
+    不改变现有行为）。容量铁律（CLAUDE.md §1）同型：authcheck 3×10min 全超时白烧
+    30 分钟（NodeGoat-20260827-152204），窗口须可按 provider 实测重估。sandbox 禁
+    os.getenv（RestrictedWorkflowAccessError），env 在此（sandbox 外）解析后经
+    BlackboxAuthValidationInput.probe_timeout_seconds 传入 workflow。
+    """
+    raw = (env_overrides or {}).get("SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS")
+    if raw is None:
+        raw = os.environ.get("SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS")
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else 600
+    except (TypeError, ValueError):
+        return 600
+
+
 def _find_queue_files(dlv: Path) -> list[Path]:
     """收集 deliverables/ 下的 *_exploitation_queue.json（跨仓关联 C2 复用校验用）。
 
@@ -1243,6 +1262,7 @@ class ScanManager:
         # HOST 档案：选中 → mappings（单 cred workflow 据此起 host proxy）；都不传 → {} 直连。
         host_mappings = self._host_config_mappings(
             await self._resolve_host_config_sources(host_profile_id, host_url, ws))
+        _env_ov = self._resolve_env_overrides(ws)
         inp = BlackboxAuthValidationInput(
             web_url=profile.login_url,
             config_path=str(cfg_file),
@@ -1253,7 +1273,8 @@ class ScanManager:
             # 块1c：event_file 落点 = probe_dir/events.ndjson。workflow 经 setup_display 把
             # agent 登录每步写此文件（验证过程可见），verify-log 端点读它回看/实时观看。
             event_file=str(probe_dir / "events.ndjson"),
-            env_overrides=self._resolve_env_overrides(ws),
+            env_overrides=_env_ov,
+            probe_timeout_seconds=_auth_probe_timeout_seconds(_env_ov),
         )
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,
@@ -3006,13 +3027,15 @@ class ScanManager:
             provider_config = self._resolve_provider_config(ws)
         except Exception:
             provider_config = None
+        _env_ov = self._resolve_env_overrides(ws)
         inp = BlackboxAuthValidationInput(
             web_url=web_url, config_path=config_path,
             workspace_path=str(probe_dir),
             event_file=str(scan_dir / "authcheck-events.ndjson"),  # 独立 events
             api_key=provider_config.get("api_key") if provider_config else None,
             provider_config=provider_config,
-            env_overrides=self._resolve_env_overrides(ws),
+            env_overrides=_env_ov,
+            probe_timeout_seconds=_auth_probe_timeout_seconds(_env_ov),
             host_mappings=host_mappings or {})
         handle = await client.start_workflow(
             AuthValidationWorkflow.run, inp,

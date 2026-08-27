@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -957,6 +958,34 @@ async def run_auth_validation_probe(input: BlackboxActivityInput) -> AuthValidat
             failure_point="engine" if is_engine_failure(e) else "out_of_band",
             failure_detail=f"{type(e).__name__}: {e}",
         )
+    except BaseException as e:
+        # cancel 兜底记账（2026-08-28 authcheck 超时丢账，NodeGoat-20260827-152204 现场）：
+        # Temporal start_to_close_timeout 到期以 CancelledError cancel 掉 activity，
+        # 穿透上方 except Exception（BaseException 分支）→ end_agent 永不执行 →
+        # AgentEvent end 缺失、已花 usage 丢账。此处从 executor.usage_sink（provider
+        # cancel 分支已写入的部分消耗）取值落 end_agent 后原样 re-raise——cancel/
+        # 重试语义不变。sink 无值（引擎拿不到中途消耗）照记 0 的 end（有 end 行、
+        # error 注明 cancelled，好过凭空消失）。记账 best-effort：失败不拦 cancel。
+        dur_ms = int((time.monotonic() - agent_start) * 1000)
+        sink = getattr(executor, "usage_sink", None)
+        try:
+            await asyncio.shield(session.end_agent(agent_name.value, AgentEndResult(
+                success=False, duration_ms=dur_ms,
+                cost_usd=sink.cost_usd if sink is not None else 0.0,
+                cost_currency=(sink.cost_currency if sink is not None and sink.cost_currency
+                               else "USD"),
+                attempt_number=attempt,
+                error=f"{type(e).__name__}: activity cancelled/timeout after {dur_ms}ms",
+                model=sink.model if sink is not None else None,
+                input_tokens=sink.input_tokens if sink is not None else None,
+                output_tokens=sink.output_tokens if sink is not None else None,
+                cache_read_tokens=sink.cache_read_tokens if sink is not None else None,
+                cache_creation_tokens=(sink.cache_creation_tokens
+                                       if sink is not None else None),
+            )))
+        except BaseException:
+            pass  # shield 后再被 cancel / 记账失败：不拦原 cancel
+        raise
     dur_ms = int((time.monotonic() - agent_start) * 1000)
     await tool_audit_logger.close(success=result.success, duration_ms=dur_ms)
     await session.end_agent(agent_name.value, AgentEndResult(

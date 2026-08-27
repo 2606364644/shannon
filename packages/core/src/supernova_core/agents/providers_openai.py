@@ -389,6 +389,7 @@ class OpenAIProvider(BaseProvider):
         collector: "CollectorBase | None" = None,
         progress: "ProgressSpec | None" = None,
         proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → ToolContext（Task 2 工具读此字段）
+        usage_sink: "UsageSink | None" = None,   # cancel 兜底记账（2026-08-28）
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
@@ -465,6 +466,29 @@ class OpenAIProvider(BaseProvider):
                             output_format=output_format,
                         )
             return result
+        except asyncio.CancelledError:
+            # cancel 兜底记账（2026-08-28 authcheck 超时丢账）：Temporal
+            # start_to_close_timeout cancel 掉 activity 时 CancelledError 穿透
+            # except Exception（BaseException），正常返回路径的 usage 拿不到。
+            # context_wrapper.usage 已累积已完成 turn 的消耗（SDK 无清零）——
+            # 归一 + 计价（与 _handle_error error path 同款）写 usage_sink 后
+            # 原样上抛，cancel/重试语义不变。归一+计价失败不拦 cancel。
+            if usage_sink is not None and streaming is not None:
+                try:
+                    from .openai_result_mapper import _usage_from
+                    from .pricing import compute_cost
+                    u = _usage_from(streaming)
+                    ca = compute_cost(model, u)
+                    usage_sink.record(
+                        model=model,
+                        input_tokens=u.input_tokens,
+                        output_tokens=u.output_tokens,
+                        cache_read_tokens=u.cache_read_input_tokens,
+                        cache_creation_tokens=u.cache_creation_input_tokens,
+                        cost_usd=ca.cost, cost_currency=ca.currency)
+                except (TypeError, AttributeError, ValueError):
+                    pass
+            raise
         except Exception as e:
             duration = int((time.time() - start_time) * 1000)
             return self._handle_error(e, duration, model, run_result=streaming)

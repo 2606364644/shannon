@@ -72,6 +72,12 @@ class BlackboxAuthValidationInput(BasePipelineInput):
     # Combined auth precheck may run in its own workflow, but it must receive the
     # same immutable HOST snapshot as the subsequent blackbox workflow.
     host_mappings: dict[str, str] = field(default_factory=dict)
+    # probe 窗口（秒，默认 600=原 10min）：容量铁律（CLAUDE.md §1）同型——authcheck
+    # 3×10min 全超时白烧 30 分钟（NodeGoat-20260827-152204），窗口须可按 provider
+    # 实测重估。sandbox 禁 os.getenv（RestrictedWorkflowAccessError），env
+    # SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS 由 sandbox 外（web scan_manager 构造
+    # input 处）解析后传入。
+    probe_timeout_seconds: int = 600
     # 完整 provider 配置穿线（对齐 BlackboxPipelineInput P3c 阶段 1：base_url+key+模型一体）。
     # 仅传 api_key 会让 base_url/模型回落 worker env profile——key 与端点来自两套配置时
     # 必然 401（2026-08-17 NodeGoat 探针根因）。None=CLI/env 兜底路径，行为不变。
