@@ -2822,14 +2822,33 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 # Merge second-order findings into this vc's queue so they
                 # get written + counted alongside the single-hop ones.
                 findings = list(findings or []) + second_order_by_vc.get(vc, [])
+                # 判非漏洞分流（spec 2026-08-27 §4）：verdict="safe" 卡不进
+                # gitnexus_queue（不进报告 / SSOT / 黑盒输入），转
+                # dismissed_findings.json 留档（人工分析）；needs_review /
+                # unadjudicated 保守保留（「没判成 ≠ 非漏洞」）。
+                # findings 保持全量（chain_verdicts 数据流视图用，见下方
+                # _dump_chain_verdicts 与 P3 同模式）。
+                from supernova_core.services.dismissed_archive import (
+                    append_dismissed,
+                    split_dismissed,
+                )
+                kept_findings, _dismissed = split_dismissed(findings, vuln_class=vc)
+                if _dismissed:
+                    append_dismissed(
+                        intermediate_path(deliverables, "dismissed_findings.json"),
+                        _dismissed)
+                    logger.info(
+                        "gitnexus chain-verdict %s: %d safe finding(s) archived "
+                        "to dismissed_findings.json (not in queue/report)",
+                        vc, len(_dismissed))
                 # P3 分流：presumed-safe 来源判 vulnerable 的条目出 queue
                 # (chain_verdicts 落盘仍用全量 findings,见下方 _dump_chain_verdicts)。
                 queue_findings = [
-                    f for f in findings
+                    f for f in kept_findings
                     if not (getattr(f, "flow_id", "") in presumed_safe_flow_ids
                             and getattr(f, "verdict", "") == "vulnerable")
                 ]
-                if len(queue_findings) < len(findings):
+                if len(queue_findings) < len(kept_findings):
                     logger.info(
                         "gitnexus chain-verdict %s: %d presumed-safe vulnerable "
                         "finding(s) routed to chain_verdicts only (not queue)",

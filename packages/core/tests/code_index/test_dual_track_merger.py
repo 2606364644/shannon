@@ -641,3 +641,31 @@ def test_apply_pairing_attach_missing_cards_skipped():
          TrackPair("XSS-GN-13", "GHOST-VULN", "high", mode="attach")])
     assert len(out) == 2
     assert all(f.merged_from is None for f in out)
+
+
+# --- spec 2026-08-27 §4：GN-only 判非漏洞卡不进 union（报告准入防线）---
+
+def test_gitnexus_only_safe_excluded_from_union():
+    """GN-only verdict="safe" 卡（判非漏洞）→ 不进 union（不进报告 / SSOT /
+    黑盒输入）。主修复在 activity 分流（queue 写入侧 split_dismissed +
+    dismissed_findings.json 留档）；此处 merge 入口防线兜 GN queue 文件被
+    直接喂入的回归（旧 session 产物 / 混合部署旧 worker）。
+
+    边界不动：both 配对卡不踢（LLM 主导 + GN 分歧信息保留在卡上，
+    verdict OR 语义不变）；LLM-only / GN-only vulnerable / needs_review /
+    unadjudicated 照常保留（「没判成 ≠ 非漏洞」）。"""
+    gn = [_inj("G1", "safe", source="q", sink_call="db.exec"),
+          _inj("G2", "vulnerable", source="q2", sink_call="db.exec2")]
+    out = merge_dual_track_queues([], gn, mode="verdict")
+    assert [f.ID for f in out] == ["G2"]
+
+
+def test_both_safe_pairing_still_merges():
+    """both 配对的 GN safe 卡不被踢——配对卡 verdict OR 语义不变（防误伤
+    test_one_vulnerable_one_safe_or_takes_vulnerable 反向 + both_safe 现状）。"""
+    llm = [_inj("L1", "vulnerable", source="q", sink_call="db.exec")]
+    gn = [_inj("G1", "safe", source="q", sink_call="db.exec")]
+    out = merge_dual_track_queues(llm, gn, mode="verdict")
+    assert len(out) == 1
+    assert out[0].merge_source == "both"
+    assert out[0].verdict == "vulnerable"

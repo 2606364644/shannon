@@ -433,6 +433,34 @@ async def test_write_report_data_json(tmp_path):
     assert data["vulnerabilities"][0]["title"] == "中文标题"  # ensure_ascii=False
 
 
+async def test_build_report_data_skips_not_vulnerable(tmp_path):
+    """防线（spec 2026-08-27 §4）：verdict=not_vulnerable 卡不进报告。
+
+    主修复在 GN queue 写入侧分流（activity 层 split_dismissed）；此处是终末
+    防线——旧 session 产物 / schema 回归兜底，防非漏洞卡混入报告。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "xss_exploitation_queue.json", [
+        {"ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+         "externally_exploitable": True, "confidence": "high", "severity": "high",
+         "verdict": "vulnerable"},
+        {"ID": "XSS-GN-02", "vulnerability_type": "Reflected",
+         "externally_exploitable": False, "confidence": "high",
+         "verdict": "not_vulnerable"},
+        # 拿不准/没判成保守保留（「没判成 ≠ 非漏洞」）
+        {"ID": "XSS-GN-03", "vulnerability_type": "Reflected",
+         "externally_exploitable": False, "confidence": "needs_review",
+         "verdict": "needs_review"},
+    ])
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+    ids = [v.id for v in rd.vulnerabilities]
+    assert ids == ["XSS-VULN-01", "XSS-GN-03"]
+    # 速查表 / 统计同步干净（同源过滤）
+    assert [r.id for r in rd.quick_reference] == ids
+
+
 # ---------- T1 md 导出（report_markdown_exporter）----------
 # 已迁出至 test_report_markdown_exporter.py（spec 2026-08-26 单源化，
 # builder 与 exporter 测试文件分离）。

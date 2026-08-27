@@ -333,9 +333,10 @@ async def test_presumed_safe_vulnerable_excluded_from_queue_kept_in_verdicts(
 
 
 @pytest.mark.asyncio
-async def test_presumed_safe_safe_verdict_still_in_queue(tmp_path, monkeypatch):
-    """P3 边界：presumed-safe 来源判 safe → 照常进 queue（safe 条目本来全量落，
-    externally_exploitable=False，与其它 safe 条目一致，报告无影响）。"""
+async def test_presumed_safe_safe_verdict_archived_not_in_queue(tmp_path, monkeypatch):
+    """P3 边界 × 2026-08-27 §4 新口径：presumed-safe 来源判 safe → 判非漏洞
+    分流优先——不进 queue、进 dismissed_findings.json 留档（原「safe 全量落
+    queue」口径已被「非漏洞不进报告」取代）；chain_verdicts 数据流视图仍全量。"""
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [
@@ -355,8 +356,57 @@ async def test_presumed_safe_safe_verdict_still_in_queue(tmp_path, monkeypatch):
     finally:
         clear_audit_session()
 
-    queue = json.loads(
+    # queue 不落（0 张 safe 卡不写文件，与「零 finding 不产空文件」一致）
+    assert not (deliverables / "intermediate" / "injection_gitnexus_queue.json").exists()
+    assert result["per_class"].get("injection") is None
+    dismissed = json.loads(
+        (deliverables / "intermediate" / "dismissed_findings.json").read_text())
+    assert [d["ID"] for d in dismissed["dismissed"]] == ["INJ-GN-01"]
+
+
+# ===== spec 2026-08-27 §4：GN 判非漏洞分流——queue 不含 safe 卡 + dismissed 留档 =====
+
+@pytest.mark.asyncio
+async def test_safe_verdict_excluded_from_queue_and_archived(tmp_path, monkeypatch):
+    """chain_verdict 判 safe（非漏洞）→ 不进 gitnexus_queue、进
+    dismissed_findings.json 留档（人工分析，不进报告）；chain_verdicts 数据流
+    视图仍全量落（safe 链可见）。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_pgraph(deliverables, [
+        _flow("sql_value", source="a", sink_id="app.py:h:db.execute:5:0"),
+        _flow("sql_value", source="b", sink_id="app.py:h:db.execute:6:0"),
+    ])
+
+    async def fake_llm(prompt, **kw):
+        if "db.execute:5" in prompt:
+            return ('{"verdict":"vulnerable","witness_payload":"\'",'
+                    '"evidence_chain":"a->db","mismatch_reason":"concat",'
+                    '"confidence":"high"}')
+        return ('{"verdict":"safe","witness_payload":null,'
+                '"evidence_chain":"b->db","mismatch_reason":"parameterized query",'
+                '"confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    q = json.loads(
         (deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
-    assert len(queue["vulnerabilities"]) == 1
-    assert queue["vulnerabilities"][0]["verdict"] == "safe"
+    assert [v["ID"] for v in q["vulnerabilities"]] == ["INJ-GN-01"]
+    assert q["vulnerabilities"][0]["verdict"] == "vulnerable"
     assert result["per_class"]["injection"] == 1
+
+    dismissed = json.loads(
+        (deliverables / "intermediate" / "dismissed_findings.json").read_text())
+    assert [d["ID"] for d in dismissed["dismissed"]] == ["INJ-GN-02"]
+    d = dismissed["dismissed"][0]
+    assert d["source_track"] == "gitnexus"
+    assert d["vuln_class"] == "injection"
+    assert d["dismissed_at_stage"] == "chain-verdict"
+    assert d["dismiss_reason"] == "parameterized query"
+    assert d["evidence"] == "b->db"

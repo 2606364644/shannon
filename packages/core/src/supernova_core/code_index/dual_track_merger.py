@@ -269,6 +269,17 @@ def merge_dual_track_queues(
                 )
             )
         elif gitnexus is not None:
+            # 防线（spec 2026-08-27 §4）：GN-only verdict="safe"（判非漏洞）卡
+            # 不进 union——非漏洞卡不进报告 / SSOT / 黑盒输入。主修复在
+            # activity 写入侧分流（split_dismissed + dismissed_findings.json
+            # 留档）；此处兜 GN queue 文件被直接喂入的回归。both 配对卡不
+            # 踢（verdict OR 语义不变，分歧信息保留）。
+            if getattr(gitnexus, "verdict", None) == "safe":
+                logger.info(
+                    "dual-track merge: drop gitnexus-only safe finding %s "
+                    "(judged not vulnerable; activity-side split should have "
+                    "archived it)", getattr(gitnexus, "ID", "?"))
+                continue
             merged.append(
                 _clone_with_merge_fields(
                     gitnexus,

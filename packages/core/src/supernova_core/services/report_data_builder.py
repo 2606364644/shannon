@@ -373,11 +373,23 @@ async def build_report_data(
                            cfg.queue_file, exc)
             continue
         report_vulns = []
+        kept_vulns = []
         for vuln in parsed.queue.vulnerabilities:
+            # 防线（spec 2026-08-27 §4）：verdict=not_vulnerable 卡不进报告。
+            # 主修复在 GN queue 写入侧分流（activity 层 split_dismissed）；
+            # 此处终末防线兜旧 session 产物 / schema 回归——非漏洞卡已留档
+            # dismissed_findings.json，报告只承载漏洞与待复核（needs_review /
+            # unadjudicated 保守保留：「没判成 ≠ 非漏洞」）。
+            if getattr(vuln, "verdict", None) == "not_vulnerable":
+                logger.info(
+                    "report_data: skip not_vulnerable card %s (%s, "
+                    "dismissed archive has it)", vuln.ID, vuln_class)
+                continue
             raw = vuln.model_dump(exclude_none=True)
             report_vulns.append(_report_vulnerability(vuln, vuln_class, raw))
+            kept_vulns.append(vuln)
         vulns_by_class[vuln_class] = report_vulns
-        queue_vulns_by_class[vuln_class] = list(parsed.queue.vulnerabilities)
+        queue_vulns_by_class[vuln_class] = kept_vulns
 
     all_vulns = [v for vs in vulns_by_class.values() for v in vs]
     return ReportData(
