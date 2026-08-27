@@ -498,6 +498,8 @@ export interface DeliverablesSummary {
  *  所在步）才存 code；纯透传步 has_code=false。LLM 枝节点无源码 → has_code:false。 */
 export interface DataflowNode {
   func: string | null;
+  /** LLM 枝叙事句原句（label 归一为短标识符后全文进此，tooltip/明细行消费）。 */
+  note?: string | null;
   file: string | null;
   line: number | null;
   transformation?: string | null;
@@ -516,6 +518,8 @@ export interface DataflowSanitizer {
 /** 枝 source（入口/存储起点）。2ND 枝 type="storage"，write 侧 file:line 并入 label。 */
 export interface DataflowSource {
   label: string | null;
+  /** LLM 枝叙事句原句（label 归一后全文进此）。 */
+  note?: string | null;
   type: string | null;            // "storage" | entry source_type | null
   entry?: string | null;
   file?: string | null;
@@ -544,6 +548,8 @@ export interface DataflowFinding {
 /** sink 元信息（树粒度=sink）。GN 侧有 rule_id/category/code；LLM 自立树只有位置。 */
 export interface DataflowSink {
   label: string | null;
+  /** LLM 自立树叙事句原句（label 归一后全文进此）。 */
+  note?: string | null;
   file: string | null;
   line: number | null;
   rule_id?: string | null;

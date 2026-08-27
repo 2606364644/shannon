@@ -383,6 +383,7 @@ function TreeCard({
             y={sinkY}
             hasVuln={hasVuln}
             label={tree.sink.label ?? "sink"}
+            note={tree.sink.note}
             t={t}
           />
         </svg>
@@ -701,10 +702,11 @@ function SourcePill({
   // 主行基线：有副行时上移，无副行居中
   const mainY = hasSub ? -4 : 4;
   const subY = 11;
-  // tooltip：截断全名（主/副各自补）+ 存储中转白话（2ND 枝）+ 跨树提示（并存拼接）；
-  // 都无 → source 基本描述
+  // tooltip：叙事原句（note，label 归一为短标识符后全文在此；无 note 才退截断全名）
+  // + 存储中转白话（2ND 枝）+ 跨树提示（并存拼接）；都无 → source 基本描述
   const tipParts: string[] = [];
-  if (labelCut) tipParts.push(label);
+  if (source.note) tipParts.push(source.note);
+  else if (labelCut) tipParts.push(label);
   if (metaCut && metaText) tipParts.push(metaText);
   if (isStorage) tipParts.push(t("workspaceDetail.dataflow.storageRelayFull"));
   if (crossTreeTip) tipParts.push(t("workspaceDetail.dataflow.crossTreeTooltip", { sinks: crossTreeTip }));
@@ -789,7 +791,11 @@ function NodeView({
   const fullLabel = node.line != null ? `${node.func ?? "?"}:${node.line}` : (node.func ?? "?");
   const lines = fitLabelTwoLines(fullLabel, COL_W - 24);
   const labelCut = lines.join("").replace("…", "") !== fullLabel;
-  const nodeTooltip = pubTooltip ?? (labelCut ? fullLabel : undefined);
+  // tooltip：note=LLM 叙事原句（label 归一为短标识符后全文在此）优先，
+  // 与 pubFunc 提示/截断全名并存（2026-08-27 label 归一配套）
+  const nodeTooltip =
+    [node.note, pubTooltip ?? (labelCut ? fullLabel : null)].filter(Boolean).join(" ｜ ") ||
+    undefined;
   return (
     <g data-node={step} x={x} transform={`translate(${x} ${y})`}>
       {nodeTooltip && <title>{nodeTooltip}</title>}
@@ -915,19 +921,23 @@ function SinkTarget({
   y,
   hasVuln,
   label,
+  note,
   t,
 }: {
   x: number;
   y: number;
   hasVuln: boolean;
   label: string;
+  /** LLM 自立树叙事原句（label 归一为短标识符后全文在此）。 */
+  note?: string | null;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const sinkCls = hasVuln ? "sink-pulse" : "sink-idle";
   const noInputTip = hasVuln ? undefined : t("workspaceDetail.dataflow.sinkNoInput");
   // sink 名按列宽预算拆 ≤2 行（长名溢出 viewBox 右界被裁=「文字缺失」），全名进 <title>
   const lines = fitLabelTwoLines(label, COL_W - 24);
-  const tooltip = [label, noInputTip].filter(Boolean).join(" · ");
+  // tooltip：叙事原句（note）优先，否则 label 全名（截断与否都给全名，对齐旧语义）
+  const tooltip = [note ?? label, noInputTip].filter(Boolean).join(" · ");
   return (
     <g data-sink-target={hasVuln ? "vuln" : "safe"} transform={`translate(${x} ${y})`} className={sinkCls}>
       {/* 原生 SVG tooltip（hover 教读图；截断时含全名） */}

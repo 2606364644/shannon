@@ -107,7 +107,12 @@ export function BranchRow({ branch, highlighted = false, onHover, selected = fal
 
       {/* source → 节点链 → sink 摘要行 */}
       <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-muted-foreground">
-        <span className="text-[hsl(var(--c-cyan))]">{branch.source.label ?? "source"}</span>
+        <span
+          className="text-[hsl(var(--c-cyan))]"
+          title={branch.source.note ?? undefined}
+        >
+          {branch.source.label ?? "source"}
+        </span>
         {/* 2ND 存储中转枝标记（spec §5 白话：先存进数据库，读出来才发起请求） */}
         {branch.source.type === "storage" && (
           <span
@@ -128,7 +133,14 @@ export function BranchRow({ branch, highlighted = false, onHover, selected = fal
               data-node-key={`n${i}`}
               onClick={() => toggleNode(`n${i}`)}
               className="rounded px-1 hover:bg-accent hover:text-accent-foreground"
-              title={n.file != null ? `${n.file}:${n.line ?? ""}` : undefined}
+              title={
+                [
+                  n.note,
+                  n.file != null ? `${n.file}:${n.line ?? ""}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ｜ ") || undefined
+              }
             >
               {n.func ?? "step"}
               {n.line != null ? `:${n.line}` : ""}

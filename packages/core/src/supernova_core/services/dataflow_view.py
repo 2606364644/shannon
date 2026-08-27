@@ -54,6 +54,41 @@ _SNIPPET_RADIUS = 5     # ±5 行
 _SNIPPET_MAX_LINES = 10  # ≤10 行/节点
 # 2ND finding combined_sources 形如 "write:w.py:7 (users.bio) + read:r.js:3"
 _WRITE_LOC_RE = re.compile(r"write:(\S+?):(\d+)")
+# LLM 叙事句 label 归一（2026-08-27 展示诊断）：prompt 契约要 dataflow_steps[].label
+# 为短标识符，但 GLM 实际常产 40-70 字中文叙事句（"processAuditTips 将服务器 value
+# 拼接进…"）——前端剪枝树 COL_W=180px 紧凑几何被长句撑爆（截断"…"满天飞）。
+# 组装层归一：句首短标识符进 func/label（原句全句进 note，前端 tooltip/明细行消费），
+# 对齐 poc collector L0-L3 收集层归一惯例。
+_IDENT_TOKEN_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$.\-]{1,}")  # ≥2 字符标识符（含 a.b、v-html）
+_CJK_RE = re.compile(r"[一-鿿]")
+# 引导字前缀允许集：纯中文 + 空白 + 常见中文标点（不含 < 等标记符号——「拼接进含 <span」
+# 的 span 不是函数名，不得采信）
+_GUIDING_PREFIX_RE = re.compile(r"[一-鿿\s：:，,。、（()）\[\]「」‘’\"'…·]+")
+
+
+def _short_label(label: object, file_: object, line: object) -> tuple[str | None, str | None]:
+    """LLM 叙事句 label → (短标识符, note 原句)。
+
+    - 整体已是标识符形态（无空格/中文，≤80 字符）→ 原样，note=None（省体积）。
+    - 句首标识符（前置仅 ≤3 个中文引导字，如「传入 getByX」「调用 crmApi.get」）
+      → 采信该标识符，note=原句。
+    - 句首不可信（前置中文 >3 字，如「拼接进含 <span…」）→ basename:line 兜底，
+      note=原句；file 也缺 → (None, 原句)。
+    """
+    s = label.strip() if isinstance(label, str) else ""
+    if s:
+        if len(s) <= 80 and _IDENT_TOKEN_RE.fullmatch(s):
+            return s, None
+        m = _IDENT_TOKEN_RE.search(s)
+        prefix = s[: m.start()] if m is not None else None
+        if (m is not None and len(_CJK_RE.findall(prefix)) <= 3
+                and (prefix == "" or _GUIDING_PREFIX_RE.fullmatch(prefix))):
+            return m.group(0), s
+    base = _basename(file_)
+    note = s or None
+    if base is None:
+        return None, note
+    return (f"{base}:{line}" if isinstance(line, int) else base), note
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +307,7 @@ def _source_from_flow(
                and sp.get("param_name") == flow.get("source_param")), None)
     return {
         "label": (sp or {}).get("expression") or flow.get("source_param"),
+        "note": None,
         "type": flow.get("source_type"),
         "entry": entry_labels.get(entry_id) or entry_id,
         "file": (sp or {}).get("file_path"),
@@ -296,6 +332,7 @@ def _nodes_from_steps(
         snippet = _code_snippet(blocks_by_file, file_, line) if story else None
         nodes.append({
             "func": _func_label(blocks_by_file, step, None),
+            "note": None,
             "file": file_,
             "line": line,
             "transformation": step.get("transformation") or None,
@@ -334,17 +371,25 @@ def _llm_entry_hint(f: dict) -> str | None:
 
 
 def _llm_source(f: dict, first_step: dict | None) -> dict:
-    """LLM 枝 source：优先 dataflow_steps 首节点，兜底 finding 自述字段。"""
+    """LLM 枝 source：优先 dataflow_steps 首节点，兜底 finding 自述字段。
+
+    label 经 ``_short_label`` 归一（叙事句 → 句首短标识符），原句进 note。
+    """
     if first_step:
+        short, note = _short_label(
+            first_step.get("label"), first_step.get("file"), first_step.get("line"))
         return {
-            "label": first_step.get("label"),
+            "label": short,
+            "note": note,
             "type": None,
             "entry": _llm_entry_hint(f),
             "file": first_step.get("file"),
             "line": first_step.get("line"),
         }
+    short, note = _short_label(f.get("source") or f.get("vulnerable_parameter"), None, None)
     return {
-        "label": (f.get("source") or f.get("vulnerable_parameter") or None),
+        "label": short,
+        "note": note,
         "type": None,
         "entry": _llm_entry_hint(f),
         "file": None,
@@ -377,15 +422,19 @@ def _llm_branch(f: dict, steps: list[dict], *, keep_terminal: bool = False) -> d
          "file": st.get("file"), "line": st.get("line"), "effective": None}
         for st in steps if st.get("protection")
     ]
-    nodes = [{
-        "func": st.get("label"),
-        "file": st.get("file"),
-        "line": st.get("line"),
-        "transformation": None,
-        "intermediate_vars": [],
-        "code": None,
-        "has_code": False,
-    } for st in node_steps]
+    nodes = []
+    for st in node_steps:
+        short, note = _short_label(st.get("label"), st.get("file"), st.get("line"))
+        nodes.append({
+            "func": short,
+            "note": note,
+            "file": st.get("file"),
+            "line": st.get("line"),
+            "transformation": None,
+            "intermediate_vars": [],
+            "code": None,
+            "has_code": False,
+        })
     return {
         "branch_id": f.get("ID"),
         "track": "llm",
@@ -427,6 +476,7 @@ def _second_order_branch(
         "verdict_reason": f.get("mismatch_reason") or f.get("missing_defense") or None,
         "source": {
             "label": label,
+            "note": None,
             "type": "storage",
             "entry": None,
             "file": wfile,
@@ -435,6 +485,38 @@ def _second_order_branch(
         "nodes": nodes,
         "sanitizers": [_sanitizer_from_annotation(a, verdict) for a in annotations],
     }
+
+
+def _merge_verdict_rows(rows: list[dict], flows: dict[str, dict]) -> list[dict]:
+    """同 (flow_id, effective sink) 多行判定合并为一行（2026-08-27 重复枝修复）。
+
+    真实数据（NodeGoat）：builder 对同 flow 产多条候选链各自判定，同 flow
+    最多 x5 行且 verdict 可能冲突（vulnerable×3 + safe×2）——旧三元组 dedup
+    键 (flow_id, verdict, reason) 挡不住冲突行，同一数据流在树上画成多条
+    重复枝。合并口径（保守原则，与双轨 verdict OR 同精神）：任一
+    vulnerable → vulnerable（宁报不漏）；reason 取选定 verdict 的首条非空。
+    row 缺 sink_call_site_id 时 effective sink 从 flow 兜底（与消费口径一致）。
+    """
+    merged: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, str]] = []
+    for row in rows:
+        flow_id = row.get("flow_id") or ""
+        sink_id = (row.get("sink_call_site_id")
+                   or (flows.get(flow_id) or {}).get("sink_call_site_id") or "")
+        key = (flow_id, sink_id)
+        cur = merged.get(key)
+        if cur is None:
+            merged[key] = {**row, "verdict": _normalize_verdict(row.get("verdict"))}
+            order.append(key)
+            continue
+        rv = _normalize_verdict(row.get("verdict"))
+        cv = _normalize_verdict(cur.get("verdict"))
+        if rv == "vulnerable" and cv != "vulnerable":
+            cur["verdict"] = "vulnerable"
+            cur["reason"] = row.get("reason")   # verdict 换行 reason 随行（不混用 safe 依据）
+        elif not cur.get("reason") and rv == cv and row.get("reason"):
+            cur["reason"] = row.get("reason")   # 同 verdict 借非空 reason
+    return [merged[k] for k in order]
 
 
 def _build_taint_trees(
@@ -474,6 +556,7 @@ def _build_taint_trees(
             "vuln_class": vc,
             "sink": {
                 "label": _sink_label(meta, sink_id),
+                "note": None,
                 "file": file_,
                 "line": line,
                 "rule_id": meta.get("rule_id"),
@@ -503,24 +586,21 @@ def _build_taint_trees(
             loc_key_index.setdefault((_basename(loc.get("file")), key[1]), tree)
 
     # --- GitNexus 枝：chain_verdicts（safe 链也进） ---
-    seen_rows: set[tuple] = set()
-    for row in verdict_rows:
+    # 同 (flow_id, sink) 多行先合并（保守 vulnerable 优先）——旧三元组 dedup
+    # 挡不住 verdict 冲突行 → 同一数据流画成多条重复枝（2026-08-27 修复）。
+    for row_idx, row in enumerate(_merge_verdict_rows(verdict_rows, flows)):
         flow_id = row.get("flow_id") or ""
         sink_id = (row.get("sink_call_site_id")
                    or (flows.get(flow_id) or {}).get("sink_call_site_id") or "")
         if not sink_id:
             logger.debug("dataflow_view: verdict 行缺 sink 锚点，跳过（vc=%s flow=%s）", vc, flow_id)
             continue
-        dedup = (flow_id, row.get("verdict"), row.get("reason"))
-        if dedup in seen_rows:
-            continue
-        seen_rows.add(dedup)
         verdict = _normalize_verdict(row.get("verdict"))
         flow = flows.get(flow_id) if flow_id else None
         tree = _ensure_tree(sink_id)
         annotations = row.get("sanitizer_annotations") or []
         branch = {
-            "branch_id": flow_id or f"{sink_id}#{len(seen_rows)}",
+            "branch_id": flow_id or f"{sink_id}#{row_idx}",
             "track": "gitnexus",
             "verdict": verdict,
             "verdict_reason": row.get("reason") or None,
@@ -596,18 +676,21 @@ def _build_taint_trees(
             tree["branches"].append(_llm_branch(f, steps, keep_terminal=True))
             tree["findings"].append(_finding_view(f))
         else:
-            # 自立 track=llm 树：sink 只有位置无 rule_id（spec §3 规则 2）
+            # 自立 track=llm 树：sink 只有位置无 rule_id（spec §3 规则 2）；
+            # label 同样归一（叙事句 → 短标识符 + note 原句）
             if sink_step is not None:
                 s_file, s_line = sink_step.get("file"), sink_step.get("line")
-                s_label = sink_step.get("label")
+                raw_label = sink_step.get("label")
             else:
                 s_file, s_line = _parse_loc(f.get("vulnerable_code_location"))
-                s_label = None
+                raw_label = f.get("sink_call") or f.get("sink_function")
+            s_label, s_note = _short_label(raw_label, s_file, s_line)
             tree = {
                 "tree_id": f"llm:{f.get('ID') or len(trees) + 1}",
                 "vuln_class": vc,
                 "sink": {
-                    "label": s_label or f.get("sink_call") or f.get("sink_function"),
+                    "label": s_label,
+                    "note": s_note,
                     "file": s_file,
                     "line": s_line,
                     "rule_id": None,
@@ -655,7 +738,7 @@ def _attach_safe_vectors(trees: list[dict], sv_payload: dict, vc: str) -> list[d
             "track": "llm",
             "verdict": "safe",
             "verdict_reason": v.get("defense_mechanism"),
-            "source": {"label": v.get("subject"), "type": None, "entry": None,
+            "source": {"label": v.get("subject"), "note": None, "type": None, "entry": None,
                        "file": vf, "line": vl},
             "nodes": [],
             "sanitizers": [{

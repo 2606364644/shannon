@@ -320,6 +320,56 @@ describe("PruningTreeFig — SVG 剪枝树（spec §5 视觉语言）", () => {
     const meta = container.querySelector(".source-meta-txt");
     expect(meta?.textContent ?? "").not.toContain("storage");
   });
+
+  // —— 2026-08-27 label 归一配套：LLM 叙事句在组装层拆 func（短标识符）+ note（原句）——
+
+  it("LLM 枝 note：节点短标识符直显 + 叙事原句进 <title>（长句不再撑爆列宽）", () => {
+    const llmTree: DataflowTree = {
+      ...vulnerableTree,
+      tree_id: "T-LLM-NOTE",
+      sink: { ...vulnerableTree.sink, label: "v-html", note: "v-html 渲染 tip.value 为原始 HTML" },
+      branches: [
+        {
+          ...vulnerableTree.branches[0],
+          track: "llm",
+          source: {
+            label: "crmApi.getAuditTip",
+            note: "调用 crmApi.getAuditTip 取服务器审核提示",
+            type: null,
+            entry: null,
+            file: "a.ts",
+            line: 10,
+          },
+          nodes: [
+            {
+              func: "processAuditTips",
+              note: "processAuditTips 将服务器 value 拼接进含 <strong> 的 HTML 模板或原样透传",
+              file: "use-task-detail.ts",
+              line: 59,
+              transformation: null,
+              intermediate_vars: [],
+              code: null,
+              has_code: false,
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<PruningTreeFig trees={[llmTree]} />);
+    // 节点主标签 = 短标识符全文（无「…」截断——短标识符装得进列宽）
+    const label = container.querySelector('[data-node="1"] [data-node-label]');
+    expect(label?.textContent ?? "").toContain("processAuditTips");
+    expect(label?.textContent ?? "").not.toContain("…");
+    // 叙事原句全句进节点 <title>
+    const nodeTitle = container.querySelector('[data-node="1"] title')?.textContent ?? "";
+    expect(nodeTitle).toContain("processAuditTips 将服务器 value 拼接进含");
+    // source tooltip = 叙事原句
+    const srcTitle = container.querySelector("[data-source] title")?.textContent ?? "";
+    expect(srcTitle).toContain("调用 crmApi.getAuditTip 取服务器审核提示");
+    // sink tooltip = 叙事原句
+    const sinkTitle = container.querySelector('[data-sink-target] title')?.textContent ?? "";
+    expect(sinkTitle).toContain("v-html 渲染 tip.value 为原始 HTML");
+  });
 });
 
 describe("BranchRow — 枝条明细 + 代码展开", () => {
@@ -398,6 +448,21 @@ describe("BranchRow — 枝条明细 + 代码展开", () => {
     expect(reason).toBeTruthy();
     expect(reason?.className).toContain("line-clamp-2");
     expect(reason?.getAttribute("title") ?? "").toBe(LONG_REASON);
+  });
+
+  it("节点按钮 title 拼 note 叙事原句（label 归一配套：位置 + 原句同现）", () => {
+    const NOTE = "processAuditTips 将服务器 value 拼接进含 <strong> 的 HTML 模板或原样透传";
+    const branch: DataflowBranch = {
+      ...vulnerableTree.branches[0],
+      nodes: [
+        { ...vulnerableTree.branches[0].nodes[0], func: "processAuditTips", note: NOTE },
+      ],
+    };
+    const { container } = render(<BranchRow branch={branch} />);
+    const btn = container.querySelector('[data-node-key="n0"]');
+    const title = btn?.getAttribute("title") ?? "";
+    expect(title).toContain(NOTE);
+    expect(title).toContain("app/controllers/user.ts:25");
   });
 });
 
