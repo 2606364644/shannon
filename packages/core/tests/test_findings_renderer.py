@@ -1035,21 +1035,13 @@ def test_gn_only_meta_line_no_duplicate_pending_review(monkeypatch):
 # --- 七节基准结构（spec 2026-08-26-vuln-card-seven-sections §4.3）---
 # 节序：成因 → 漏洞危害 → 问题点 → 相关接口 → POC → 漏洞细节 → 修复建议；
 # 前移假设：渲染时 report_poc / report_problem_points 已写回（时序前移由
-# write_structured_poc activity 保证，见 whitebox workflow 测试）。
+# write_agent_poc activity 保证，见 whitebox workflow 测试）。
 
 REPORT_POC = {
-    "request": {
-        "method": "POST",
-        "url": "http://TARGET:3000/contributions",
-        "headers": {"Content-Type": "application/json"},
-        "body": '{"preTax": "1;require(\'child_process\')"}',
-    },
+    # spec 2026-08-27-poc-agent-direct-design：poc-agent 直产文本 schema
     "preconditions": "已登录普通用户（会话 Cookie 有效）",
-    "expected_response": {
-        "indicator": "响应体包含命令执行输出",
-        "success_criteria": "HTTP 200 且 body 含 uid=",
-    },
-    "witness_payload": "1;require('child_process')",
+    "expected_response": "响应体包含命令执行输出（HTTP 200 且 body 含 uid=）",
+    "self_check": "pass",
     "curl": ("curl -X POST 'http://TARGET:3000/contributions' "
              "-H 'Content-Type: application/json' "
              "--data '{\"preTax\": \"1;require(\'child_process\')\"}'"),
@@ -1177,7 +1169,6 @@ def test_poc_section_double_fenced_blocks(monkeypatch):
     poc = card.split("**POC**", 1)[1].split("#### 漏洞细节", 1)[0]
     assert "- **前置条件:** 已登录普通用户（会话 Cookie 有效）" in poc
     assert "- **预期响应:** 响应体包含命令执行输出（HTTP 200 且 body 含 uid=）" in poc
-    assert "- **Witness:** 1;require('child_process')" in poc
     assert "```bash" in poc
     assert REPORT_POC["curl"] in poc
     assert "```http" in poc
@@ -1190,7 +1181,7 @@ def test_poc_section_omits_missing_fenced_blocks(monkeypatch):
     """curl/raw_http 缺则对应 fenced block 省（不造空 block）。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
     poc = {k: REPORT_POC[k] for k in
-           ("preconditions", "expected_response", "witness_payload", "curl")}
+           ("preconditions", "expected_response", "self_check", "curl")}
     card = render_vuln_card(_vuln(report_poc=poc), "injection", None)
     assert "```bash" in card
     assert "```http" not in card

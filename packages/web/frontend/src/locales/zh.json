@@ -1070,6 +1070,8 @@
     "preconditions": "前置条件",
     "expectedResponse": "预期响应",
     "copyCurl": "复制 curl",
+    "verifySteps": "验证步骤",
+    "copyStepCommand": "复制命令",
     "dataflowSteps": "数据流路径",
     "stepProtection": "防护",
     "evidence": "验证证据",
@@ -1097,7 +1099,8 @@
       "params_present": "缺参数",
       "narrative_complete": "叙事缺段（成因/危害/修复建议）",
       "endpoint_rows_have_locations": "接口缺行号链"
-    }
+    },
+    "pocSelfCheckFail": "PoC 正确性自检未通过（agent 自报，复现前请人工核对）"
   },
   "theme": {
     "toggleAria": "切换主题",

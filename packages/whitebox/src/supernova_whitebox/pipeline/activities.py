@@ -1869,7 +1869,7 @@ async def generate_poc_report(input: ActivityInput) -> None:
     原职责：报告增强：生成 curl/Burp PoC md 文档。失败不阻塞主报告（吞异常）。
 
     §4.2（spec 2026-08-26-vuln-card-seven-sections）：结构化 POC 写回已拆到
-    独立 activity write_structured_poc（render_findings 之前执行），本 activity
+    独立 activity write_agent_poc（render_findings 之前执行），本 activity
     只保留 PoC md 生成（继续消费写回后的 report_poc）。
     """
     import logging
@@ -1893,39 +1893,46 @@ async def generate_poc_report(input: ActivityInput) -> None:
 
 
 @activity.defn
-async def write_structured_poc(input: ActivityInput) -> None:
-    """T4 结构化 POC 写回 queue（§4.2 时序前移：render_findings 之前）。
+async def write_agent_poc(input: ActivityInput) -> None:
+    """poc-agent 产出写回 queue（spec 2026-08-27-poc-agent-direct-design）。
 
-    T4（spec 2026-08-26-report-generation-agent §5.3）：per-vuln 结构化 POC
-    （完整 request/preconditions/expected_response），写回 queue 的 report_poc；
-    LLM 失败 per-vuln 降级（只含确定性 request/witness）。写回失败 non-fatal
-    （md 卡 POC 节缺省），语义与拆出前（generate_poc_report 内）一致。
+    每 vuln_class 一次多轮 agent（回读源码验证端点形态）→ validate_pocs 校验 →
+    report_poc 文本 schema 写回（curl/raw_http/steps 透传）。agent 失败诚实缺失
+    （不写回、不降级到确定性拼装——已退役）。写回失败 non-fatal（md 卡 POC 节
+    缺省），语义与拆出前一致。
     """
     import logging
     log = logging.getLogger(__name__)
     try:
+        await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等)
         _, deliverables, _ = _get_paths(input)
-        await _write_structured_pocs(input, deliverables)
+        await _write_agent_pocs(input, deliverables)
     except Exception as exc:  # noqa: BLE001 — 写回失败绝不阻塞主流程
-        log.warning("poc: whitebox write_structured_poc failed (non-blocking): %s", exc)
+        log.warning("poc: whitebox write_agent_poc failed (non-blocking): %s", exc)
 
 
-async def _write_structured_pocs(
+async def _write_agent_pocs(
     input: ActivityInput, deliverables: Path,
     only_ids: set[str] | None = None,
 ) -> list[str]:
-    """T4 接线：每类 queue 逐卡并行 build_structured_poc → report_poc 写回。
+    """poc-agent 接线（spec 2026-08-27-poc-agent-direct-design §3）：每类 queue
+    一次 run_gitnexus_verdict_agent（多轮可 grep/read 回读源码验证端点形态）→
+    validate_pocs L0-L3 校验 → report_poc 写回（agent 直产 curl/raw_http/steps
+    文本，透传不改写）。取代确定性拼装（build_structured_poc 退役）。
 
-    ``only_ids``（§6 回炉用）：非空时只补这些卡（POC 回炉不重打全量 LLM、
-    不覆写已有 report_poc）。返回写了 report_poc 的卡 ID 列表。"""
-    from supernova_core.models.queue_schemas import VulnerabilityQueue
-    from supernova_core.services.poc_structured import (
-        _coerce_expected_response,
-        apply_structured_poc,
-        build_expected_response_prompt,
-        build_structured_poc,
+    - 诚实缺失：agent 失败/空产出 → 该类卡不写回（queue 原样），warning 记账；
+    - 写回即 checkpoint：已有 report_poc 的卡默认跳过（不重打、不覆写）；
+    - ``only_ids``（回炉）：额外过滤，只处理指定且尚无 report_poc 的卡。
+    """
+    from supernova_core.collectors.poc import (
+        POC_AGENT_OUTPUT_SCHEMA, validate_pocs,
     )
-    base_url = input.web_url or "http://TARGET"
+    from supernova_core.models.queue_schemas import VulnerabilityQueue
+    from supernova_whitebox.audit.session_registry import get_audit_session
+
+    prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
+    prompt_manager = PromptManager(prompts_dir)
+    max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "30"))
     written: list[str] = []
 
     for vuln_class in (input.vuln_classes or list(ALL_VULN_CLASSES)):
@@ -1938,44 +1945,59 @@ async def _write_structured_pocs(
         parsed = VulnerabilityQueue.parse_lenient(
             queue_path.read_text(encoding="utf-8"), vuln_class=vuln_class)
         findings = list(parsed.queue.vulnerabilities)
-        if not findings:
+        # 目标卡：尚无 report_poc（写回即 checkpoint，不覆写）且回炉过滤命中
+        targets = [f for f in findings
+                   if not getattr(f, "report_poc", None)
+                   and (only_ids is None or f.ID in only_ids)]
+        if not targets:
             continue
-        entries: list[dict] = []
-        changed = False
-        for f in findings:
-            entry = f.model_dump()
+        try:
+            prompt = prompt_manager.load_sync(
+                "poc-agent",
+                variables={
+                    "web_url": input.web_url or "http://TARGET",
+                    "vuln_class": vuln_class,
+                    "vuln_queue": json.dumps(
+                        [f.model_dump() for f in targets],
+                        ensure_ascii=False, indent=2),
+                })
+            result = await run_gitnexus_verdict_agent(
+                prompt=prompt,
+                repo_path=input.repo_path,
+                structured_output_schema=POC_AGENT_OUTPUT_SCHEMA,
+                audit_session=get_audit_session(),
+                provider_config=input.provider_config,
+                max_turns=max_turns,
+                agent_name=f"poc-agent-{vuln_class}",
+            )
+        except Exception as exc:  # noqa: BLE001 — 诚实缺失：不写回，不阻塞报告
+            logger.warning("poc-agent: %s failed (cards left without PoC): %s",
+                           vuln_class, exc)
+            continue
+        raw = result.structured_output
+        if raw is None and getattr(result, "text", None):
             try:
-                if (only_ids is not None and f.ID not in only_ids):
-                    entries.append(entry)
-                    continue
-                # build_structured_poc 同步契约（llm_fn sync）——确定性部分直调，
-                # expected_response 由 activity 层异步补（run_claude_prompt 是 async）
-                poc = build_structured_poc(f, base_url=base_url)
-                if poc and poc.get("request"):
-                    try:
-                        prompt = build_expected_response_prompt(f, poc["request"])
-                        result = await run_claude_prompt(
-                            prompt=prompt, repo_path=input.repo_path,
-                            model_tier="small",
-                            provider_config=input.provider_config)
-                        raw = (result.structured_output
-                               if result.structured_output is not None
-                               else result.text)
-                        expected = _coerce_expected_response(raw)
-                        if expected:
-                            poc["expected_response"] = expected
-                    except Exception as exc:  # noqa: BLE001 — LLM 失败降级
-                        logger.warning("structured poc expected_response %s "
-                                       "failed (deterministic only): %s", f.ID, exc)
-                    entry = apply_structured_poc(entry, poc)
-                    changed = True
-                    written.append(f.ID)
-            except Exception as exc:  # noqa: BLE001 — 单卡失败保确定性
-                logger.warning("structured poc %s failed (keep deterministic): %s",
-                               f.ID, exc)
-            entries.append(entry)
-        if changed:
-            atomic_write_json(queue_path, {"vulnerabilities": entries})
+                raw = json.loads(result.text)
+            except (json.JSONDecodeError, ValueError):
+                raw = None
+        items = raw.get("pocs") if isinstance(raw, dict) else None
+        if not items:
+            logger.warning("poc-agent: %s returned no pocs (cards left "
+                           "without PoC)", vuln_class)
+            continue
+        res = validate_pocs(items, valid_ids={f.ID for f in targets})
+        for _rej, reason in res.rejected:
+            logger.warning("poc-agent: %s verdict rejected: %s", vuln_class, reason)
+        if not res.accepted:
+            continue
+        by_id = {v["vulnerability_id"]: v for v in res.accepted}
+        entries = [f.model_dump() for f in findings]
+        for entry in entries:
+            poc = by_id.get(entry.get("ID"))
+            if poc is not None:
+                entry["report_poc"] = poc
+                written.append(entry["ID"])
+        atomic_write_json(queue_path, {"vulnerabilities": entries})
     return written
 
 
@@ -2106,7 +2128,7 @@ async def run_report_polish(input: ActivityInput) -> dict:
         # qa.passed=false 显式呈现。
         def _poc_incomplete(v) -> bool:
             p = v.poc
-            return p is None or not (p.curl or p.raw_http or p.request is not None)
+            return p is None or not (p.curl or p.raw_http or p.steps)
 
         def _params_missing(v) -> bool:
             return (v.type in _TAINT_CLASSES and v.endpoints
@@ -2263,10 +2285,10 @@ def _dedupe_by_id(cards) -> list:
 async def _rework_missing_pocs(
     input: ActivityInput, deliverables: Path, missing_ids: list[str],
 ) -> list[str]:
-    """§6 回炉：缺 POC 的卡走结构化 POC 写回（复用 write_structured_poc 路径，
+    """§6 回炉：缺 POC 的卡走结构化 POC 写回（复用 write_agent_poc 路径，
     only_ids 只补缺失卡——不重打全量 LLM、不覆写已有 report_poc）。"""
     try:
-        return await _write_structured_pocs(input, deliverables,
+        return await _write_agent_pocs(input, deliverables,
                                             only_ids=set(missing_ids))
     except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
         logger.warning("report-polish: poc rework failed: %s", exc)

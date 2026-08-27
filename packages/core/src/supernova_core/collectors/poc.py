@@ -111,6 +111,16 @@ def make_poc_collector() -> CollectorBase:
     return CollectorBase([POC_SECTION])
 
 
+# run_gitnexus_verdict_agent 的顶层 output schema（宽松 items——GLM 对深层嵌套
+# schema 的结构化输出不可靠，具体字段由 validate_pocs L0-L3 兜底，对齐
+# endpoint_enrichment 的 {"vulnerabilities": {"type": "array"}} 模式）。
+POC_AGENT_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {"pocs": {"type": "array"}},
+    "required": ["pocs"],
+}
+
+
 # ── verdict 校验（L0-L3，对齐 validate_exploit_verdicts 分层哲学）──
 
 # 输出契约字段（未知键剥离——防 agent 幻觉垃圾字段进报告卡）

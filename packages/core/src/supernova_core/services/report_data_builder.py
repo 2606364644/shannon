@@ -155,17 +155,14 @@ def _endpoint_entries(vuln) -> list[EndpointEntry]:
 
 
 def _poc_block(vuln) -> PocBlock | None:
-    """POC（确定性部分）：report_poc（③富化写回）优先 → witness_payload 族。"""
+    """POC：report_poc（poc-agent 写回）透传；畸形/缺失 → None（诚实缺失，
+    spec 2026-08-27-poc-agent-direct-design——witness_payload 降级路径已退役）。"""
     structured = getattr(vuln, "report_poc", None)
     if isinstance(structured, dict):
         try:
             return PocBlock.model_validate(structured)
         except Exception:  # noqa: BLE001
-            logger.warning("report_poc 畸形，回退 witness_payload")
-    witness = (getattr(vuln, "witness_payload", None)
-               or getattr(vuln, "minimal_witness", None))
-    if witness:
-        return PocBlock(witness_payload=str(witness))
+            logger.warning("report_poc 畸形，POC 节缺省")
     return None
 
 

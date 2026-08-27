@@ -4,7 +4,7 @@
 覆盖：polish 重建 report_data（吃全部富化字段）/ ④摘要 LLM 产物与确定性
 兜底 / ⑤QA 必填校验（taint 卡 endpoints≥1）与回炉一次 / §4.2（spec
 2026-08-26-vuln-card-seven-sections）POC 写回时序前移——generate_poc_report
-不再触发写回、write_structured_poc 独立 activity 写回 report_poc、
+不再触发写回、write_agent_poc 独立 activity 写回 report_poc、
 两处 worker 注册表含新 activity。
 """
 import json
@@ -66,9 +66,9 @@ async def test_polish_rebuilds_with_enrichments_and_llm_summary(tmp_path, monkey
         "report_problem_points": [{"location": "app/views/memos.html:31",
                                    "description": "未消毒渲染",
                                    "snippet": "<%- memo %>"}],
-        "report_poc": {"witness_payload": "<img src=x>",
-                       "curl": "curl -X POST http://t/memos",
-                       "request": {"method": "POST", "url": "http://t/memos"}},
+        "report_poc": {"curl": "curl -X POST http://t/memos",
+                       "steps": ["plant", "trigger"],
+                       "self_check": "pass"},
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
@@ -90,7 +90,7 @@ async def test_polish_rebuilds_with_enrichments_and_llm_summary(tmp_path, monkey
     assert data["executive_summary"]["top_risks"][0]["vuln_id"] == "XSS-VULN-01"
     v = data["vulnerabilities"][0]
     assert v["endpoints"][0]["route_registered_at"] == "app/routes/index.js:66"
-    assert v["poc"]["request"]["method"] == "POST"
+    assert v["poc"]["curl"].startswith("curl -X POST")
     assert data["qa"]["passed"] is True
 
 
@@ -109,7 +109,7 @@ async def test_polish_summary_deterministic_fallback(tmp_path, monkeypatch):
                                    "description": "未消毒渲染",
                                    "snippet": "<%- memo %>"}],
         "report_poc": {"curl": "curl -X POST http://t/memos",
-                       "request": {"method": "POST", "url": "http://t/memos"}},
+                       "self_check": "pass"},
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
@@ -162,7 +162,16 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
         _agent_side_effect.calls.append(kw.get("agent_name"))
         payload = _agent_side_effect.payloads.pop(0)
         return SimpleNamespace(structured_output=payload, text=None)
-    _agent_side_effect.payloads = [ep_payload, narr_payload]
+    poc_payload = {"pocs": [{
+        "vulnerability_id": "XSS-GN-01",
+        "curl": "curl -i 'http://TARGET/contributions?preTax=<img>'",
+        "raw_http": "GET /contributions?preTax=<img> HTTP/1.1\nHost: TARGET",
+        "preconditions": "无需登录", "expected_response": "payload 反射",
+        "self_check": "pass"}]}
+    # payloads 顺序 = 回炉调用顺序：接口富化 → POC 补写（poc-agent，spec
+    # 2026-08-27-poc-agent-direct-design——QA 回炉缺 POC 的卡也走 poc-agent）
+    # → narrative 富化
+    _agent_side_effect.payloads = [ep_payload, poc_payload, narr_payload]
     _agent_side_effect.calls = []
 
     with patch.object(activities, "run_claude_prompt",
@@ -177,10 +186,10 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
         result = await activities.run_report_polish(_FakeInput(tmp_path))
 
     assert result["reworked"] == ["XSS-GN-01"]  # 多路回炉去重（同一卡只记一次）
-    # 回炉 agent 记账唯一名（防 metrics.agents 同名覆盖）：接口富化/narrative
-    # 富化各带 vuln_class 后缀，与主富化（endpoint-enrich-*/gn-enrich-*）分流。
+    # 回炉 agent 记账唯一名（防 metrics.agents 同名覆盖）：接口富化/POC 补写/
+    # narrative 富化各带 vuln_class 后缀，与主富化（endpoint-enrich-*/gn-enrich-*）分流。
     assert _agent_side_effect.calls == [
-        "endpoint-enrich-rework-xss", "gn-enrich-rework-xss"]
+        "endpoint-enrich-rework-xss", "poc-agent-xss", "gn-enrich-rework-xss"]
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     assert data["qa"]["passed"] is True
     assert data["qa"]["reworked_ids"] == ["XSS-GN-01"]
@@ -225,9 +234,8 @@ async def test_polish_qa_seven_section_checks(tmp_path, monkeypatch):
     """§6：七节覆盖率逐卡 checks——缺 problem_points/poc/params/narrative/
     行号链各记 failed_ids（显式呈现，不静默）。
 
-    poc_complete 检出用无锚点卡（XSS-GN-09）演示；有 report_endpoints 路由的卡
-    （XSS-VULN-01）修复后必有结构化 POC（poc_structured 读 report_endpoints），
-    不再进 failed_ids——此处显式断言锁定该行为。"""
+    新世界观（spec 2026-08-27-poc-agent-direct-design）：POC 由 poc-agent 产，
+    agent down → 全部卡缺 POC（诚实缺失，无确定性兜底）——两卡都进 failed_ids。"""
     d = _wb(tmp_path)
     _write_queue(d, [{
         # taint 卡：接口有（report_endpoints）但无参数/无行号链，
@@ -260,7 +268,7 @@ async def test_polish_qa_seven_section_checks(tmp_path, monkeypatch):
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
     assert checks["problem_points_present"] == ["XSS-VULN-01", "XSS-GN-09"]
-    assert checks["poc_complete"] == ["XSS-GN-09"]
+    assert checks["poc_complete"] == ["XSS-VULN-01", "XSS-GN-09"]
     assert checks["params_present"] == ["XSS-VULN-01"]
     assert checks["narrative_complete"] == ["XSS-VULN-01", "XSS-GN-09"]
     assert checks["endpoint_rows_have_locations"] == ["XSS-VULN-01"]
@@ -282,8 +290,7 @@ async def test_polish_qa_seven_section_checks_scoping(tmp_path, monkeypatch):
                               "sink_location": "app.js:9"}],
         "report_problem_points": [{"location": "app.js:9",
                                    "description": "d", "snippet": "s"}],
-        "report_poc": {"curl": "curl http://t",
-                       "request": {"method": "GET", "url": "http://t"}},
+        "report_poc": {"curl": "curl http://t", "self_check": "pass"},
     }], name="xss_exploitation_queue.json")
     _write_queue(d, [{
         # auth 卡：无 endpoints/problem_points（非 taint，不查）；缺 narrative/POC
@@ -316,7 +323,7 @@ async def test_polish_qa_seven_section_checks_scoping(tmp_path, monkeypatch):
 
 
 async def test_polish_reworks_missing_pocs(tmp_path, monkeypatch):
-    """§6 回炉：缺 POC 的卡走结构化 POC 写回路径（复用 write_structured_poc
+    """§6 回炉：缺 POC 的卡走结构化 POC 写回路径（复用 write_agent_poc
     逻辑，仅补缺失卡）→ queue 写回 report_poc → 重建后 poc_complete 过。"""
     d = _wb(tmp_path)
     _write_queue(d, [{
@@ -334,6 +341,15 @@ async def test_polish_reworks_missing_pocs(tmp_path, monkeypatch):
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
+    poc_payload = {"pocs": [{
+        "vulnerability_id": "XSS-VULN-01",
+        "curl": "curl -i -X POST 'http://TARGET/memos' --data 'memo=<img src=x>'",
+        "raw_http": "POST /memos HTTP/1.1\nHost: TARGET",
+        "steps": ["plant via POST /memos", "victim opens /memos"],
+        "preconditions": "需登录", "expected_response": "alert 触发",
+        "self_check": "pass"}]}
+    async def _poc_agent(**kw):
+        return SimpleNamespace(structured_output=poc_payload, text=None)
     with patch.object(activities, "run_claude_prompt",
                       return_value=SimpleNamespace(
                           structured_output={"narrative": "s",
@@ -342,13 +358,15 @@ async def test_polish_reworks_missing_pocs(tmp_path, monkeypatch):
                                              "remediation_order": None},
                           text=None)), \
          patch.object(activities, "run_gitnexus_verdict_agent",
-                      side_effect=RuntimeError("no enrichment needed")):
+                      side_effect=_poc_agent):
         result = await activities.run_report_polish(_FakeInput(tmp_path))
 
     assert "XSS-VULN-01" in result["reworked"]
     queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
                        .read_text(encoding="utf-8"))
-    assert queue["vulnerabilities"][0]["report_poc"]["request"]["method"] == "POST"
+    poc = queue["vulnerabilities"][0]["report_poc"]
+    assert poc["curl"].startswith("curl -i -X POST")
+    assert poc["steps"] == ["plant via POST /memos", "victim opens /memos"]
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
     assert checks["poc_complete"] == []
@@ -368,8 +386,7 @@ async def test_polish_reworks_missing_narratives(tmp_path, monkeypatch):
                               "sink_location": "app.js:9"}],
         "report_problem_points": [{"location": "app.js:9",
                                    "description": "d", "snippet": "s"}],
-        "report_poc": {"curl": "curl http://t",
-                       "request": {"method": "GET", "url": "http://t"}},
+        "report_poc": {"curl": "curl http://t", "self_check": "pass"},
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
@@ -417,7 +434,7 @@ _POC_QUEUE_VULN = {
 
 async def test_generate_poc_report_no_longer_writes_report_poc(tmp_path, monkeypatch):
     """§4.2：generate_poc_report 只保留 PoC md 生成，不再触发结构化写回
-    （写回拆到 write_structured_poc，前移到 render_findings 之前）。"""
+    （写回拆到 write_agent_poc，前移到 render_findings 之前）。"""
     d = _wb(tmp_path)
     _write_queue(d, [_POC_QUEUE_VULN])
     monkeypatch.setattr(activities, "_get_paths",
@@ -434,28 +451,36 @@ async def test_generate_poc_report_no_longer_writes_report_poc(tmp_path, monkeyp
     assert "report_poc" not in queue["vulnerabilities"][0]
 
 
-async def test_write_structured_poc_activity_writes_report_poc(tmp_path, monkeypatch):
-    """§4.2：write_structured_poc 独立 activity 可跑，写回 report_poc。"""
+async def test_write_agent_poc_activity_writes_report_poc(tmp_path, monkeypatch):
+    """§4.2 + spec 2026-08-27-poc-agent-direct-design：write_agent_poc 独立
+    activity 可跑，经 poc-agent 产出写回 report_poc（新文本 schema，透传）。"""
     d = _wb(tmp_path)
     _write_queue(d, [_POC_QUEUE_VULN])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
-    expected = {"indicator": "响应含未转义 payload", "success_criteria": "alert 触发"}
-    with patch.object(activities, "run_claude_prompt",
+    payload = {"pocs": [{
+        "vulnerability_id": "XSS-VULN-01",
+        "curl": "curl -i -X POST 'http://TARGET/memos' --data 'memo=<img src=x>'",
+        "raw_http": "POST /memos HTTP/1.1\nHost: TARGET",
+        "steps": ["plant via POST /memos", "victim opens /memos"],
+        "preconditions": "需登录",
+        "expected_response": "alert 触发",
+        "self_check": "pass"}]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
                       return_value=SimpleNamespace(
-                          structured_output=expected, text=None)):
-        await activities.write_structured_poc(_FakeInput(tmp_path))
+                          structured_output=payload, text=None, success=True)):
+        await activities.write_agent_poc(_FakeInput(tmp_path))
 
     queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
                        .read_text(encoding="utf-8"))
     poc = queue["vulnerabilities"][0]["report_poc"]
-    assert poc["request"]["method"] == "POST"
-    assert poc["request"]["url"].endswith("/memos")
-    assert poc["expected_response"]["indicator"] == "响应含未转义 payload"
-    assert "curl" in poc and poc["curl"]
+    assert poc["curl"].startswith("curl -i -X POST")   # agent 文本透传
+    assert poc["steps"] == ["plant via POST /memos", "victim opens /memos"]
+    assert poc["self_check"] == "pass"
+    assert "request" not in poc                         # 旧确定性 schema 已退役
 
 
-def test_write_structured_poc_registered_on_workers():
+def test_write_agent_poc_registered_on_workers():
     """b51eb9a4 教训：新 activity 两处 worker 注册表（CLI worker.py + web
     runner.py）都必须 import + 列入 activities，漏注册会 fail-fast/静默不跑。"""
     from pathlib import Path
@@ -463,8 +488,8 @@ def test_write_structured_poc_registered_on_workers():
     for rel in ("packages/whitebox/src/supernova_whitebox/worker.py",
                 "packages/worker/src/supernova_worker/runner.py"):
         src = (root / rel).read_text(encoding="utf-8")
-        count = src.count("write_structured_poc")
+        count = src.count("write_agent_poc")
         assert count >= 2, (
-            f"write_structured_poc 在 {rel} 仅出现 {count} 次，"
+            f"write_agent_poc 在 {rel} 仅出现 {count} 次，"
             f"预期 >= 2（import + activities 列表）"
         )

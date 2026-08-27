@@ -340,15 +340,20 @@ export interface PocExpectedResponse {
   success_criteria?: string | null;
 }
 
-/** POC 块：request + 前置条件 + 预期响应 + witness payload；curl/raw_http 由
- *  request 确定性生成（复制/导出用）。 */
+/** POC 块——双轨共用（白盒 poc-agent 直产文本 / 黑盒重放证据转录）。
+ *  白盒（2026-08-27-poc-agent-direct-design）：curl/raw_http/steps 是 agent 原文
+ *  透传；self_check 为正确性自检结论（pass|fail）；expected_response 为 string。
+ *  黑盒：request 对象 + expected_response 对象（PocExpectedResponse）+ curl/
+ *  raw_http 由 request 确定性导出（复制/导出用）。 */
 export interface PocBlock {
-  witness_payload?: string | null;
-  request?: PocRequest | null;
-  preconditions?: string | null;
-  expected_response?: PocExpectedResponse | null;
   curl?: string | null;
   raw_http?: string | null;
+  steps?: string[];
+  preconditions?: string | null;
+  self_check?: string | null;
+  notes?: string | null;
+  request?: PocRequest | null;
+  expected_response?: string | PocExpectedResponse | null;
 }
 
 /** 卡片叙事三段（cause=成因/impact=危害/remediation=修复建议，md 文本）。 */
@@ -366,10 +371,19 @@ export interface ProblemPoint {
   snippet?: string | null;
 }
 
+/** 黑盒验证单步（生成层结构化）：action + command（可复制人工复验）+ result。 */
+export interface VerifyStep {
+  action: string;
+  command?: string | null;
+  result?: string | null;
+}
+
 /** 验证证据：verification=dynamic 时 dynamic_evidence 为黑盒实测输出（突出显示）。 */
 export interface VulnEvidence {
   verification: "static" | "dynamic";
   dynamic_evidence?: string | null;
+  /** 黑盒验证步骤（新采集结构化 / 旧落盘归一化）；白盒 static 轨为空。 */
+  steps?: VerifyStep[];
   verdict?: string | null;
   code_snippet?: string | null;
   notes?: string | null;

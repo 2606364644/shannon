@@ -652,7 +652,7 @@ class WhiteboxScanWorkflow:
             self._state.current_agent = "write-structured-poc"
             try:
                 await workflow.execute_activity(
-                    activities.write_structured_poc, act_input,
+                    activities.write_agent_poc, act_input,
                     start_to_close_timeout=timedelta(minutes=20),
                     retry_policy=retry_for("poc"),
                 )

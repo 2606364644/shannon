@@ -9,6 +9,7 @@ md 是 report_data.json 的确定性导出（下载/存档），与前端同源�
 三条 md 链路在此收编为单点导出）。
 """
 import logging
+import re
 
 from supernova_core.i18n import Messages, current_lang
 from supernova_core.models.report_data import ReportData, ReportVulnerability
@@ -64,6 +65,10 @@ _M = Messages({
                        "en": "**Burp Repeater (raw):**"},
     "poc_preconditions": {"zh": "前置条件", "en": "Preconditions"},
     "poc_expected": {"zh": "预期响应", "en": "Expected Response"},
+    "poc_self_check_fail": {
+        "zh": "PoC 正确性自检未通过（agent 自报，复现前请人工核对）",
+        "en": "PoC correctness self-check FAILED (agent-reported; verify manually before replaying)",
+    },
     "poc_witness": {"zh": "Witness", "en": "Witness"},
     "poc_auth_unknown": {"zh": "未知", "en": "unknown"},
     "poc_conf_unknown": {"zh": "待复核", "en": "Pending Review"},
@@ -136,6 +141,12 @@ class _VulnView:
             return _VERIFICATION_TO_QUEUE.get(rv.evidence.verification)
         if name == "verdict":
             return rv.evidence.verdict if rv.evidence else None
+        if name == "verification_steps":
+            # 验证步骤（黑盒实测过程，2026-08-27）：steps 非空才暴露（白盒卡 None
+            # → render_vuln_card 整节省略，存量白盒 md 零变化）。
+            if rv.evidence is None or not rv.evidence.steps:
+                return None
+            return [s.model_dump(exclude_none=True) for s in rv.evidence.steps]
         simple = {
             "title": rv.title, "severity": rv.severity,
             "confidence": rv.confidence, "cwe_id": rv.cwe_id,
@@ -314,14 +325,16 @@ def _conf_display(conf: str | None) -> str:
 
 
 def _primary_endpoint(rv: ReportVulnerability) -> tuple[str, str]:
-    """(method, path)：首接口 → poc.request 兜底。"""
+    """(method, path)：首接口；无接口时 curl 文本首行启发（agent 直产文本里
+    提 method+path，提不出落 "-"——不编造）。"""
     if rv.endpoints:
         e = rv.endpoints[0]
         return (e.method or "-", e.path)
-    if rv.poc is not None and rv.poc.request is not None:
-        req = rv.poc.request
-        path = req.url.split("://", 1)[-1].split("/", 1)
-        return (req.method, "/" + path[1] if len(path) > 1 else "/")
+    if rv.poc is not None and rv.poc.curl:
+        m = re.match(r"curl\s+(?:-\w+\s+)*-X\s+(\w+)\s+'?https?://[^\s/]+(/[^\s'?]*)",
+                     rv.poc.curl)
+        if m:
+            return (m.group(1), m.group(2) or "/")
     return ("-", "-")
 
 
@@ -362,20 +375,24 @@ def export_poc_collection(report_data: ReportData) -> str:
         meta: list[str] = []
         if poc.preconditions:
             meta.append(f"{_M.get('poc_preconditions')}：{poc.preconditions}")
-        if poc.expected_response and poc.expected_response.indicator:
-            meta.append(
-                f"{_M.get('poc_expected')}：{poc.expected_response.indicator}")
-        if poc.witness_payload:
-            meta.append(f"{_M.get('poc_witness')}：{poc.witness_payload}")
+        # 双轨兼容：白盒 str（agent 直产）｜黑盒 PocExpectedResponse（取 indicator）
+        expected = poc.expected_response
+        if isinstance(expected, str) and expected.strip():
+            meta.append(f"{_M.get('poc_expected')}：{expected.strip()}")
+        elif expected is not None and getattr(expected, "indicator", None):
+            meta.append(f"{_M.get('poc_expected')}：{expected.indicator}")
+        if (poc.self_check or "").strip().lower() == "fail":
+            meta.append(f"⚠ {_M.get('poc_self_check_fail')}")
+        if poc.notes:
+            meta.append(f"{poc.notes}")
         if meta:
             detail.extend((" ｜ ".join(meta), ""))
+        for i, s in enumerate(poc.steps, 1):
+            detail.append(f"{i}. {s}")
+        if poc.steps:
+            detail.append("")
         curl = poc.curl
         raw_http = poc.raw_http
-        if not raw_http and poc.request is not None:
-            req = poc.request
-            head = f"{req.method} {req.url} HTTP/1.1"
-            headers = "".join(f"{k}: {v}\r\n" for k, v in req.headers.items())
-            raw_http = head + "\r\n" + headers + ("\r\n" + (req.body or ""))
         if curl:
             detail.extend((_M.get("poc_curl_label"), "```bash", curl, "```", ""))
         if raw_http:

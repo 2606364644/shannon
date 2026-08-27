@@ -123,6 +123,11 @@ _M = Messages({
     "sec_code": {"zh": "**问题点**", "en": "**Problem Points**"},
     "sec_endpoints": {"zh": "**相关接口**", "en": "**Related Endpoints**"},
     "sec_poc": {"zh": "**POC**", "en": "**POC**"},
+    # 验证步骤节（2026-08-27 验证证据展示优化）：黑盒/融合卡的实测过程分步骤
+    # 展示（白盒卡 steps 空 → 整节省略）。生成层结构化（VerifyStep），命令直进
+    # ```bash 围栏可复制人工复验，无需启发式从散文拆。
+    "sec_verify_steps": {"zh": "**验证步骤（黑盒实测）**",
+                         "en": "**Verification Steps (live-tested)**"},
     "sec_remediation": {"zh": "**修复建议**", "en": "**Remediation**"},
     "sec_tech_detail": {"zh": "#### 漏洞细节", "en": "#### Vulnerability Details"},
     # POC 独立节（§3 节 5，从漏洞细节区拆出）
@@ -130,6 +135,10 @@ _M = Messages({
     "poc_expected": {"zh": "预期响应", "en": "Expected Response"},
     "poc_expected_full": {"zh": "{indicator}（{criteria}）", "en": "{indicator} ({criteria})"},
     "poc_witness": {"zh": "Witness", "en": "Witness"},
+    "poc_self_check_fail": {
+        "zh": "PoC 正确性自检未通过（agent 自报，复现前请人工核对）",
+        "en": "PoC correctness self-check FAILED (agent-reported; verify manually before replaying)",
+    },
     "det_into": {"zh": "传入", "en": "flows into"},
     "det_unfiltered_into": {
         "zh": "{param} 未经过滤传入 {sink}",
@@ -579,10 +588,10 @@ def _dataflow_item_lines(vuln) -> list[str]:
 
 
 def _poc_section_lines(vuln) -> list[str]:
-    """POC 独立节（§3 节 5，从漏洞细节区拆出）：读 report_poc（写回时序前移
-    后渲染时已可用）——前置条件/预期响应/Witness 行 + curl（```bash）与
-    raw_http（```http，Burp 原始报文）双 fenced block，缺则对应 block 省。
-    无 report_poc 或无可渲染内容 → 整节省略。"""
+    """POC 独立节（§3 节 5；spec 2026-08-27-poc-agent-direct-design：agent 直产
+    文本透传）——前置条件/预期响应/自检标注行 + steps 有序步骤 + curl（```bash）
+    与 raw_http（```http）双 fenced block，缺则对应行/块省。self_check=fail 带 ⚠
+    （agent 自报不通过好过静默错）。无 report_poc 或无可渲染内容 → 整节省略。"""
     poc = getattr(vuln, "report_poc", None)
     if not isinstance(poc, dict):
         return []
@@ -590,19 +599,18 @@ def _poc_section_lines(vuln) -> list[str]:
     preconditions = str(poc.get("preconditions") or "").strip()
     if preconditions:
         lines.append(f"{_label('poc_preconditions')} {preconditions}")
-    expected = poc.get("expected_response")
-    if isinstance(expected, dict):
-        indicator = str(expected.get("indicator") or "").strip()
-        criteria = str(expected.get("success_criteria") or "").strip()
-        if indicator and criteria:
-            text = _M.get("poc_expected_full", indicator=indicator, criteria=criteria)
-        else:
-            text = indicator or criteria
-        if text:
-            lines.append(f"{_label('poc_expected')} {text}")
-    witness = str(poc.get("witness_payload") or "").strip()
-    if witness:
-        lines.append(f"{_label('poc_witness')} {witness}")
+    expected = str(poc.get("expected_response") or "").strip()
+    if expected:
+        lines.append(f"{_label('poc_expected')} {expected}")
+    self_check = str(poc.get("self_check") or "").strip().lower()
+    if self_check == "fail":
+        lines.append(f"> ⚠ {_M.get('poc_self_check_fail')}")
+    notes = str(poc.get("notes") or "").strip()
+    if notes:
+        lines.append(f"> {notes}")
+    steps = [s for s in (poc.get("steps") or []) if str(s).strip()]
+    for i, s in enumerate(steps, 1):
+        lines.append(f"{i}. {str(s).strip()}")
     curl = str(poc.get("curl") or "").strip()
     if curl:
         lines.extend(("```bash", curl, "```"))
@@ -650,6 +658,38 @@ def _tech_detail_lines(vuln) -> list[str]:
     add("side_effect", getattr(vuln, "side_effect", None))
     add("reason", getattr(vuln, "reason", None))
     add("minimal_witness", getattr(vuln, "minimal_witness", None))
+    return lines
+
+
+def _verify_steps_section_lines(vuln) -> list[str]:
+    """验证步骤节（黑盒实测过程）：``verification_steps``（_VulnView 从
+    ``evidence.steps`` 暴露）→ 有序列表，command 嵌套 ```bash 围栏、result 以
+    ``→ `` 观察行跟随（对齐 renderers/exploit 的结构化步骤渲染形态）。缺字段
+    整节省略。"""
+    steps = getattr(vuln, "verification_steps", None)
+    if not steps:
+        return []
+    lines = [_M.get("sec_verify_steps")]
+    for i, s in enumerate(steps, start=1):
+        action = str(s.get("action") or "").strip()
+        command = s.get("command")
+        result = s.get("result")
+        if not action and not command:
+            continue
+        marker = f"{i}. "
+        indent = " " * len(marker)
+        if command:
+            lines.append(f"{marker}{action}" if action
+                         else f"{marker}```bash")
+            if action:
+                lines.append(f"{indent}```bash")
+            lines.append(str(command))
+            lines.append(f"{indent}```")
+            if result:
+                lines.append(f"{indent}→ {result}")
+        else:
+            tail = f" → {result}" if result else ""
+            lines.append(f"{marker}{action}{tail}")
     return lines
 
 
@@ -742,6 +782,13 @@ def render_vuln_card(vuln, vuln_class: str, snippet: str | None = None) -> str:
     poc_lines = _poc_section_lines(vuln)
     if poc_lines:
         lines.extend(poc_lines)
+        lines.append("")
+
+    # 验证步骤（黑盒实测过程，2026-08-27）：steps 非空才出（黑盒/融合卡），
+    # 紧随 POC——复现请求之上的实测过程分步骤记录，命令可复制人工复验。
+    vsteps_lines = _verify_steps_section_lines(vuln)
+    if vsteps_lines:
+        lines.extend(vsteps_lines)
         lines.append("")
 
     # 漏洞细节（§3 节 6，折叠附录区；PoC 行已升独立节）

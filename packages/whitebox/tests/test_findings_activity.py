@@ -43,5 +43,5 @@ async def test_render_findings_activity_generates_findings(tmp_path):
 # ---------- §4.2（spec 2026-08-26-vuln-card-seven-sections）POC 写回时序前移 ----------
 # render_findings 已退役（spec 2026-08-26-report-single-source-rendering §3：
 # 逻辑并入 assemble_report，findings.md 从 report_data 单点渲染）——时序锚点
-# 改为 write_structured_poc 先于 assemble_report（rd 组装吃写回后的 report_poc），
+# 改为 write_agent_poc 先于 assemble_report（rd 组装吃写回后的 report_poc），
 # 断言移至 test_reporting_workflow.py 统一维护。

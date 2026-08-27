@@ -1070,6 +1070,8 @@
     "preconditions": "Preconditions",
     "expectedResponse": "Expected response",
     "copyCurl": "Copy curl",
+    "verifySteps": "Verification Steps",
+    "copyStepCommand": "Copy command",
     "dataflowSteps": "Data flow steps",
     "stepProtection": "Protection",
     "evidence": "Evidence",
@@ -1097,7 +1099,8 @@
       "params_present": "Missing params",
       "narrative_complete": "Incomplete narrative (cause/impact/remediation)",
       "endpoint_rows_have_locations": "Endpoints missing file:line chain"
-    }
+    },
+    "pocSelfCheckFail": "PoC correctness self-check FAILED (agent-reported; verify manually before replaying)"
   },
   "theme": {
     "toggleAria": "Toggle theme",

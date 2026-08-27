@@ -66,13 +66,26 @@ class PocExpectedResponse(BaseModel):
 
 
 class PocBlock(BaseModel):
-    witness_payload: str | None = None
-    request: PocRequest | None = None
-    preconditions: str | None = None
-    expected_response: PocExpectedResponse | None = None
-    # curl/raw_http 由 request 确定性生成（导出/复制用）
+    """POC 块——双轨共用模型（ReportVulnerability.poc 单一字段类型）。
+
+    白盒（spec 2026-08-27-poc-agent-direct-design）：poc-agent 直产文本透传——
+    curl/raw_http/steps/self_check("pass"|"fail")/notes 全是 agent 原文，渲染层
+    不改写不重排版；expected_response 为 str。
+
+    黑盒（重放证据转录，spec 非目标不动）：request 对象 + expected_response
+    对象（PocExpectedResponse）+ curl/raw_http 由 request 确定性渲染。
+    两轨字段互不填充；渲染端对 expected_response 兼容 str | PocExpectedResponse
+    （对象取 .indicator）。白盒旧字段（witness_payload）已随确定性拼装退役。
+    """
     curl: str | None = None
     raw_http: str | None = None
+    steps: list[str] = Field(default_factory=list)
+    preconditions: str | None = None
+    self_check: str | None = None
+    notes: str | None = None
+    # 黑盒专属（白盒不产）
+    request: PocRequest | None = None
+    expected_response: "str | PocExpectedResponse | None" = None
 
 
 class VulnNarrative(BaseModel):
@@ -93,9 +106,24 @@ class ProblemPoint(BaseModel):
     snippet: str | None = None
 
 
+class VerifyStep(BaseModel):
+    """黑盒验证单步（验证证据展示优化，2026-08-27）：生成层结构化。
+
+    黑盒 exploit verdict 的 ``exploitation_steps`` 逐字映射——报告（黑盒 + 融合）
+    天然分步骤；``command`` 独立字段（实际执行的完整命令，可复制人工复验），
+    渲染层直取进代码块，不靠正则从散文反解。
+    """
+
+    action: str                            # 这步做了什么（短散文）
+    command: str | None = None             # 实际命令（含认证上下文，可重放）
+    result: str | None = None              # 观察到的结果
+
+
 class VulnEvidence(BaseModel):
     verification: Literal["static", "dynamic"] = "static"
     dynamic_evidence: str | None = None    # 黑盒实测输出；白盒为 None
+    # 黑盒验证步骤（新采集结构化 / 旧落盘归一化）；白盒 static 轨为空列表。
+    steps: list[VerifyStep] = Field(default_factory=list)
     verdict: str | None = None
     code_snippet: str | None = None
     notes: str | None = None

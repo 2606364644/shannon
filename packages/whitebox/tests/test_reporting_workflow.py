@@ -3,7 +3,7 @@
 reporting 真实执行依赖 temporalio worker + LLM,无法在 CI 单元测试;
 此处用静态分析断言 workflow 串起新时序:
 
-    write_structured_poc → assemble_report（rd 初版+分项单点渲染,不产 md）
+    write_agent_poc → assemble_report（rd 初版+分项单点渲染,不产 md）
     → run_report_polish（摘要+QA 七节覆盖率+回炉）
     → export_report_markdown_files（rd → comprehensive md + poc_collection）
 
@@ -53,12 +53,12 @@ def test_reporting_phase_export_after_polish():
     )
 
 
-def test_reporting_phase_write_structured_poc_before_assemble():
+def test_reporting_phase_write_agent_poc_before_assemble():
     src = _workflow_src()
-    i_poc = src.find("activities.write_structured_poc")
+    i_poc = src.find("activities.write_agent_poc")
     i_assemble = src.find("activities.assemble_report")
     assert i_poc != -1 and i_assemble != -1
-    assert i_poc < i_assemble, "write_structured_poc 必须先于 assemble_report"
+    assert i_poc < i_assemble, "write_agent_poc 必须先于 assemble_report"
 
 
 def test_reporting_phase_retired_md_activities_not_scheduled():

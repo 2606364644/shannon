@@ -79,7 +79,7 @@ def test_export_poc_collection_double_fence(tmp_path=None):
         export_poc_collection,
     )
     from supernova_core.models.report_data import (
-        PocBlock, PocRequest, ReportData, ReportVulnerability, ScanMeta,
+        PocBlock, ReportData, ReportVulnerability, ScanMeta,
     )
 
     rd = ReportData(
@@ -90,7 +90,8 @@ def test_export_poc_collection_double_fence(tmp_path=None):
                 poc=PocBlock(
                     curl="curl -X POST http://t/memos -d 'memo=<img>'",
                     raw_http="POST /memos HTTP/1.1\r\nHost: t\r\n\r\nmemo=<img>",
-                    request=PocRequest(method="POST", url="http://t/memos"),
+                    steps=["plant via POST /memos", "victim opens /memos"],
+                    self_check="pass",
                 )),
             ReportVulnerability(id="AUTH-VULN-01", type="auth"),  # 无 POC 卡
         ])
@@ -309,3 +310,48 @@ def test_export_poc_collection_structure():
     assert "```bash" in md and "```http" in md
     # XSS-VULN-01 无 poc → 不出现
     assert "XSS-VULN-01" not in md
+
+
+def test_export_report_markdown_verification_steps_section():
+    """验证步骤节（2026-08-27 验证证据展示优化）：evidence.steps 非空的卡（黑盒/
+    融合）→ md 卡渲染「验证步骤」有序列表，command 直进 ```bash 围栏（可复制人工
+    复验）；白盒卡（steps 空）整节省略——白盒 md 报告零变化。"""
+    from supernova_core.services.report_markdown_exporter import (
+        export_report_markdown,
+    )
+    from supernova_core.models.report_data import (
+        ReportData, ReportVulnerability, ScanMeta, VulnEvidence,
+    )
+    rd = ReportData(
+        scan=ScanMeta(id="s1", track="combined"),
+        vulnerabilities=[
+            ReportVulnerability(
+                id="XSS-VULN-01", type="xss", severity="high", title="存储型 XSS",
+                evidence=VulnEvidence(
+                    verification="dynamic", dynamic_evidence="回显成功",
+                    steps=[
+                        {"action": "Login and capture session cookie",
+                         "command": "curl -s -c jar http://t/login -d 'user=a'",
+                         "result": "302 Set-Cookie"},
+                        {"action": "Post memo with witness",
+                         "command": None, "result": "reflected unencoded"},
+                    ],
+                ),
+            ),
+        ],
+    )
+    md = export_report_markdown(rd)
+    assert "验证步骤" in md
+    assert "1. Login and capture session cookie" in md
+    assert "```bash" in md
+    assert "curl -s -c jar http://t/login -d 'user=a'" in md
+    # 无 command 的步骤：action + result 内联，不出空围栏
+    assert "2. Post memo with witness → reflected unencoded" in md
+
+    # 白盒卡（无 steps）不出节——存量白盒 md 报告零变化
+    wb = ReportData(
+        scan=ScanMeta(id="s2", track="whitebox"),
+        vulnerabilities=[ReportVulnerability(
+            id="INJ-1", type="injection", severity="high", title="SQLi")],
+    )
+    assert "验证步骤" not in export_report_markdown(wb)
