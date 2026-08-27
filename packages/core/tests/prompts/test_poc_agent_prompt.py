@@ -46,8 +46,9 @@ def test_prompt_requires_code_grounded_consumption_check():
     # 消费点从代码读，不信 finding 注记（实证第 3 层错误：auditTaskId (body) 注记错）
     text = _prompt()
     assert "annotation" in text.lower() or "annotated" in text.lower()
-    assert "read the code" in text.lower() or "from the code" in text.lower() \
-        or "grep" in text.lower()
+    lowered = text.lower()
+    assert ("read the" in lowered and "code" in lowered) \
+        or "grep" in lowered
 
 
 def test_prompt_requires_delivery_model_per_vuln_type():
@@ -60,14 +61,15 @@ def test_prompt_requires_delivery_model_per_vuln_type():
     assert "DOM" in text
 
 
-def test_prompt_requires_auth_form_from_code():
-    # 认证形态查代码（不默认 Bearer——实证 Bearer 是拼装器默认值）
+def test_prompt_auth_form_trusts_finding_annotations():
+    # 认证形态不查码（2026-08-27 用户裁剪第 4 项强制验证）：信 finding 的
+    # authentication_required/accessible_routes 注记，session 型 middleware →
+    # <SESSION_COOKIE>，否则 <AUTH_TOKEN>；两字段皆缺才在 notes 标注未证实
     text = _prompt()
-    assert "Bearer" in text
-    assert "Cookie" in text
+    assert "SESSION_COOKIE" in text and "AUTH_TOKEN" in text
     lowered = text.lower()
-    assert "do not assume" in lowered or "don't assume" in lowered \
-        or "never assume" in lowered
+    assert "do not read code for this" in lowered   # 显式不查码指令
+    assert "accessible_routes" in text              # 信任注记的来源字段
 
 
 def test_self_check_correctness_primary_format_secondary():

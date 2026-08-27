@@ -16,11 +16,12 @@ Target host: {{WEB_URL}}
 </objective>
 
 <mandatory_source_verification>
-BEFORE writing any PoC, you MUST verify these facts from the repository code
-(working directory = repo root; grep/read freely). Findings' own annotations
-(affected_parameters location tags, path strings, endpoints lists) are HINTS from
-the analysis phase that are sometimes WRONG — never trust them over the code you
-actually read.
+BEFORE writing any PoC, you MUST verify these facts — with the MINIMUM code
+reading that settles each question (working directory = repo root). Findings'
+own annotations (affected_parameters location tags, path strings, endpoints
+lists) are HINTS from the analysis phase that are sometimes WRONG — never trust
+them over the code you actually read. Do NOT re-verify what the finding already
+carries reliably; dig deeper ONLY on conflicting signals.
 
 1. **Endpoint form** — Is the target path a real backend HTTP endpoint, or a
    client-side SPA front-end route (vue-router / react-router path)? Read the
@@ -47,9 +48,12 @@ actually read.
      never executes JavaScript. Describe the browser navigation in `steps`
      (with login state); a curl for the plant step only if applicable.
 
-4. **Auth form** — Read the code/config for how auth is actually carried
-   (Bearer header? session Cookie? custom header?). Do NOT assume Bearer by
-   default. Use placeholders: <AUTH_TOKEN>, <SESSION_COOKIE>.
+Auth form — do NOT read code for this. Trust the finding's
+`authentication_required` / `accessible_routes` annotations (written by the
+verdict agent from middleware chains); when they indicate a session-based
+middleware (session/cookie/login) use the `<SESSION_COOKIE>` placeholder,
+otherwise `<AUTH_TOKEN>`. Only when both fields are absent, note in `notes`
+that the auth carrier is unverified.
 </mandatory_source_verification>
 
 <anti_patterns>
@@ -63,8 +67,9 @@ one PoC — never reproduce them):
   API.
 - One single request for a stored XSS whose real chain is: external-service plant
   → reviewer opens page → v-html renders polluted tip.
-- Adding `Authorization: Bearer` because it looks professional, when the app
-  actually uses session cookies.
+- Adding `Authorization: Bearer` because it looks professional, when the
+  finding's `accessible_routes` said the middleware chain is session-based
+(use the `<SESSION_COOKIE>` placeholder instead).
 
 If you catch yourself producing anything shaped like these, stop and re-verify
 against the code.

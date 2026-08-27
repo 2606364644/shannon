@@ -1901,15 +1901,14 @@ async def _write_agent_pocs(
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
     max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "30"))
-    written: list[str] = []
+    classes = [vc for vc in (input.vuln_classes or list(ALL_VULN_CLASSES))
+               if vc in _QUEUE_FILES]
 
-    for vuln_class in (input.vuln_classes or list(ALL_VULN_CLASSES)):
-        cfg = _QUEUE_FILES.get(vuln_class)
-        if cfg is None:
-            continue
-        queue_path = resolve_intermediate(deliverables, cfg)
+    async def _one_class(vuln_class: str) -> list[str]:
+        """单类：agent 会话 → 校验 → 写回自己的 queue 文件（类间无共享状态）。"""
+        queue_path = resolve_intermediate(deliverables, _QUEUE_FILES[vuln_class])
         if queue_path is None or not queue_path.exists():
-            continue
+            return []
         parsed = VulnerabilityQueue.parse_lenient(
             queue_path.read_text(encoding="utf-8"), vuln_class=vuln_class)
         findings = list(parsed.queue.vulnerabilities)
@@ -1918,7 +1917,7 @@ async def _write_agent_pocs(
                    if not getattr(f, "report_poc", None)
                    and (only_ids is None or f.ID in only_ids)]
         if not targets:
-            continue
+            return []
         try:
             prompt = prompt_manager.load_sync(
                 "poc-agent",
@@ -1941,7 +1940,7 @@ async def _write_agent_pocs(
         except Exception as exc:  # noqa: BLE001 — 诚实缺失：不写回，不阻塞报告
             logger.warning("poc-agent: %s failed (cards left without PoC): %s",
                            vuln_class, exc)
-            continue
+            return []
         raw = result.structured_output
         if raw is None and getattr(result, "text", None):
             try:
@@ -1952,21 +1951,28 @@ async def _write_agent_pocs(
         if not items:
             logger.warning("poc-agent: %s returned no pocs (cards left "
                            "without PoC)", vuln_class)
-            continue
+            return []
         res = validate_pocs(items, valid_ids={f.ID for f in targets})
         for _rej, reason in res.rejected:
             logger.warning("poc-agent: %s verdict rejected: %s", vuln_class, reason)
         if not res.accepted:
-            continue
+            return []
         by_id = {v["vulnerability_id"]: v for v in res.accepted}
         entries = [f.model_dump() for f in findings]
+        wrote: list[str] = []
         for entry in entries:
             poc = by_id.get(entry.get("ID"))
             if poc is not None:
                 entry["report_poc"] = poc
-                written.append(entry["ID"])
+                wrote.append(entry["ID"])
         atomic_write_json(queue_path, {"vulnerabilities": entries})
-    return written
+        return wrote
+
+    # 类间并行（对齐 endpoint_enrichment per-class 并行模式）：各类写各自的
+    # queue 文件无共享状态，agent_name 带 vc 后缀记账不互相覆盖；单类失败不阻塞
+    # 其余（_one_class 内部全捕获）。结果按类序拼接（稳定输出序）。
+    results = await asyncio.gather(*(_one_class(vc) for vc in classes))
+    return [vid for r in results for vid in r]
 
 
 @activity.defn
