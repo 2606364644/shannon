@@ -311,6 +311,10 @@ function renderError(e: ApiError, t: TFunction): string {
   if (e.status === 409) return t("scan.errors.concurrent");
   if (e.status === 422) {
     const detail = (e.body as { detail?: unknown })?.detail;
+    // string detail = 后端 ValueError 族原文（scan API except ValueError 转来：仓库未就绪 /
+    // 认证档案不存在 / 黑盒复用缺失等，全是面向用户的中文）——直接透传展示。
+    // 不套「yaml 校验失败」：白盒扫描根本没有 yaml，误导排查（2026-08-27 仓库 pull 失败事故）。
+    if (typeof detail === "string" && detail) return detail;
     // 工作区缺 LLM 凭据（后端 ProviderConfigIncomplete）→ 结构化错误 code=provider_incomplete。
     // 友好提示去工作区设置补全凭据，不误报「yaml 校验失败」（detail 是 dict 而非 array）。
     if (detail && typeof detail === "object" && !Array.isArray(detail)

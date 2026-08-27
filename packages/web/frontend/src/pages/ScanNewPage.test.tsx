@@ -191,6 +191,29 @@ describe("ScanNewPage", () => {
     expect(arg).not.toContain("{");
   });
 
+  // 2026-08-27 事故：仓库 pull 失败 → 后端 ValueError("仓库未就绪（state=failed）…") →
+  // scan API 422 + string detail。旧 renderError 不认 string → 兜底「yaml 校验失败」，
+  // 用户看着「yaml 校验失败」完全无从排查（白盒扫描根本没有 yaml）。string detail 是
+  // 后端 ValueError 族的友好中文原文，必须直接透传展示。
+  it("422 + string detail（后端 ValueError 原文，如仓库未就绪）→ toast 显示原文，不误报 yaml 校验失败", async () => {
+    server.use(
+      http.post("/api/scan", () =>
+        HttpResponse.json(
+          { detail: "仓库未就绪（state=failed），请先在 ws 内完成 clone" },
+          { status: 422 },
+        ),
+      ),
+    );
+    const spy = vi.spyOn(toast, "error");
+    renderPage();
+    await fillValidRepo();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const arg = (spy.mock.calls[0] as string[])[0];
+    expect(arg).toContain("仓库未就绪");
+    expect(arg).not.toContain("yaml 校验失败");
+  });
+
   it("提交 422 provider_incomplete → toast 提示工作区需配置 LLM 凭据（非 yaml 校验失败）", async () => {
     server.use(
       http.post("/api/scan", () =>
