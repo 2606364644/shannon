@@ -43,6 +43,49 @@ const detail: CorrelationDetail = {
       evidence: "入口参数未过滤透传到后端拼接 SQL",
     },
   ],
+  multi_hop_chains: [
+    {
+      path: ["frontend", "order-svc", "payment-svc"],
+      basis: "edge-adjacency",
+      confidence: "structural",
+    },
+  ],
+  adjudication: {
+    cards: [
+      {
+        direction: "upgrade",
+        finding_ref: { service: "order-svc", vuln_id: "INJ-09", origin: "dismissed" },
+        conclusion: "vulnerable",
+        cross_service_context: "经 frontend POST /orders → order.CreateOrder 可达",
+        analysis_process: ["① dismissed 理由=internal 不可达", "② topology 显示可达"],
+        verification_evidence: [
+          { repo: "order-svc", location: "db.py:10", snippet: "query(sql)", note: "拼接 SQL" },
+        ],
+        reasoning: "跨仓可达,翻案候选",
+        confidence: "high",
+      },
+      {
+        direction: "confirm",
+        finding_ref: { service: "order-svc", vuln_id: "INJ-VULN-01", origin: "queue" },
+        conclusion: "vulnerable",
+        cross_service_context: "via frontend",
+        analysis_process: ["s1"],
+        verification_evidence: [],
+        reasoning: "确认",
+        confidence: "high",
+      },
+      {
+        direction: "error",
+        finding_ref: { service: "frontend", vuln_id: "INJ-VULN-02", origin: "queue" },
+        conclusion: "needs-review",
+        cross_service_context: "",
+        analysis_process: [],
+        verification_evidence: [],
+        reasoning: "adjudication batch failed: llm down",
+        confidence: "low",
+      },
+    ],
+  },
   merged_vulns: {
     injection: [
       {
@@ -188,6 +231,36 @@ describe("CorrelationTab", () => {
     expect(within(children).getByText("新扫")).toBeInTheDocument();
     // 占位态不渲染结果区块
     expect(screen.queryByTestId("corr-topology")).not.toBeInTheDocument();
+  });
+
+  it("跨仓裁决区:三向分组卡片(vuln_id/direction/error 卡留证)", async () => {
+    await renderWithDetail(detail, "corr-adjudication");
+    const section = screen.getByTestId("corr-adjudication");
+    // within 限定裁决区(分组漏洞区 VulnCard 也渲染 vuln_id,全文查询会撞多匹配)
+    expect(within(section).getByText("INJ-09")).toBeInTheDocument();
+    expect(within(section).getAllByText(/INJ-VULN-02/).length).toBeGreaterThan(0);
+    // 翻案论证留证
+    expect(within(section).getByText(/跨仓可达,翻案候选/)).toBeInTheDocument();
+    // 分析过程与证据可见
+    expect(within(section).getByText(/dismissed 理由=internal 不可达/)).toBeInTheDocument();
+    expect(within(section).getByText(/db.py:10/)).toBeInTheDocument();
+  });
+
+  it("多跳链展示(path 链)", async () => {
+    await renderWithDetail(detail, "corr-adjudication");
+    expect(
+      screen.getByText(/frontend → order-svc → payment-svc/),
+    ).toBeInTheDocument();
+  });
+
+  it("adjudication 为 null 时不渲染裁决区(multihop 空态提示保留)", async () => {
+    await renderWithDetail(
+      { ...detail, adjudication: null, multi_hop_chains: [] },
+      "corr-topology",
+    );
+    expect(screen.queryByTestId("corr-adjudication")).not.toBeInTheDocument();
+    // multihop 区无条件渲染(同 flows 区),空时显示空态提示
+    expect(screen.getByTestId("corr-multihop")).toBeInTheDocument();
   });
 
   it("加载中显示 Skeleton 占位", async () => {

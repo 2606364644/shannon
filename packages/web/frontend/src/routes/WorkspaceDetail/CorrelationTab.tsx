@@ -1,7 +1,7 @@
 import useSWR from "swr";
 import { useTranslation } from "react-i18next";
 import { ApiError, getCorrelationDetail } from "@/api/client";
-import type { CorrVuln, Vulnerability } from "@/api/types";
+import type { AdjudicationCard, CorrVuln, Vulnerability } from "@/api/types";
 import { Empty } from "@/components/Empty";
 import { ErrorState } from "@/components/ErrorState";
 import { MarkdownView } from "@/components/MarkdownView";
@@ -108,6 +108,51 @@ export function CorrelationTab({ ws, scanId }: { ws: string; scanId: string }) {
           )}
         </div>
       </section>
+      <section data-testid="corr-multihop">
+        <h3 className="font-medium">{t("scan.correlation.multihopTitle")}</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {t("scan.correlation.multihopIntro")}
+        </p>
+        <div className="mt-2 space-y-1">
+          {data.multi_hop_chains.length ? (
+            data.multi_hop_chains.map((c, i) => (
+              <div key={i} className="font-mono text-sm" data-testid="corr-multihop-chain">
+                {c.path.join(" → ")}{" "}
+                <Badge variant="outline" className="ml-1 font-sans text-[10px]">
+                  {c.basis} · {c.confidence}
+                </Badge>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {t("scan.correlation.multihopEmpty")}
+            </p>
+          )}
+        </div>
+      </section>
+      {data.adjudication && (
+        <section data-testid="corr-adjudication">
+          <h3 className="font-medium">{t("scan.correlation.adjudicationTitle")}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t("scan.correlation.adjudicationIntro")}
+          </p>
+          {data.adjudication.error ? (
+            <p data-testid="corr-adjudication-error" className="mt-2 text-sm text-red-500">
+              {data.adjudication.error}
+            </p>
+          ) : (data.adjudication.cards ?? []).length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {t("scan.correlation.adjudicationEmpty")}
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {(data.adjudication.cards ?? []).map((c, i) => (
+                <AdjudicationCardView key={i} card={c} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       <section data-testid="corr-vulns">
         <h3 className="font-medium">{t("scan.correlation.vulnsTitle")}</h3>
         <div className="mt-2 space-y-3">
@@ -230,4 +275,82 @@ export function groupByService(
       return ra - rb || a[0].localeCompare(b[0]);
     })
     .map(([service, vulns]) => ({ service, vulns }));
+}
+
+/** 裁决方向 → i18n key（spec 2026-08-27 §7.3 五向 + error 占位）。 */
+const ADJ_DIRECTION_KEY: Record<string, string> = {
+  upgrade: "scan.correlation.adjUpgrade",
+  downgrade: "scan.correlation.adjDowngrade",
+  confirm: "scan.correlation.adjConfirm",
+  maintain: "scan.correlation.adjMaintain",
+  error: "scan.correlation.adjError",
+};
+
+/** 单张裁决卡（spec 2026-08-27 §9）：正反结论同构——direction/conclusion 徽标 +
+ *  跨仓上下文 + 分析过程（有序列表）+ 验证证据（file:line）+ 论证。 */
+export function AdjudicationCardView({ card }: { card: AdjudicationCard }) {
+  const { t } = useTranslation();
+  const dirKey = ADJ_DIRECTION_KEY[card.direction] ?? card.direction;
+  const isError = card.direction === "error";
+  const isUpgrade = card.direction === "upgrade";
+  const frame = isError
+    ? "border-red-500/40 bg-red-500/5"
+    : isUpgrade
+      ? "border-amber-500/40 bg-amber-500/5"
+      : "border-border";
+  return (
+    <div data-testid="corr-adj-card" className={`rounded-md border p-3 text-sm ${frame}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline" className={isError ? "text-red-500" : undefined}>
+          {t(dirKey, { defaultValue: card.direction })}
+        </Badge>
+        <span className="font-mono font-medium">{card.finding_ref.vuln_id || "?"}</span>
+        <span className="text-xs text-muted-foreground">
+          {card.finding_ref.service} · {card.finding_ref.origin}
+        </span>
+        <Badge variant="secondary">{card.conclusion}</Badge>
+        <span className="text-xs text-muted-foreground">
+          confidence: {card.confidence}
+        </span>
+      </div>
+      {card.cross_service_context && (
+        <div className="mt-1 text-xs">
+          <span className="text-muted-foreground">
+            {t("scan.correlation.adjContext")}:
+          </span>{" "}
+          {card.cross_service_context}
+        </div>
+      )}
+      {card.analysis_process.length > 0 && (
+        <div className="mt-1 text-xs">
+          <div className="text-muted-foreground">
+            {t("scan.correlation.adjProcess")}
+          </div>
+          <ol className="list-decimal pl-5">
+            {card.analysis_process.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {card.verification_evidence.length > 0 && (
+        <div className="mt-1 text-xs">
+          <div className="text-muted-foreground">
+            {t("scan.correlation.adjEvidence")}
+          </div>
+          <ul className="list-disc pl-5">
+            {card.verification_evidence.map((ev, i) => (
+              <li key={i}>
+                <span className="font-mono">{ev.location}</span>
+                {ev.note ? ` — ${ev.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {card.reasoning && (
+        <p className="mt-1 text-xs">{card.reasoning}</p>
+      )}
+    </div>
+  );
 }

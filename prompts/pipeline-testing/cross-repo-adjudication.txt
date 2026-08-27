@@ -1,0 +1,7 @@
+Adjudication (pipeline-testing mode). Read the repos with read_file/grep/glob.
+Output ONE JSON object:
+{"cards":[{"direction":"confirm",
+ "finding_ref":{"service":"order-svc","vuln_id":"FIXTURE-1","origin":"queue"},
+ "conclusion":"vulnerable","cross_service_context":"fixture",
+ "analysis_process":["fixture"],"verification_evidence":[],
+ "reasoning":"fixture","confidence":"low"}]}

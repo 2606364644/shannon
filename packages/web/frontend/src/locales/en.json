@@ -543,7 +543,22 @@
         "undeclaredService": "relations references an undeclared service: {{name}}",
         "yamlSyntax": "YAML syntax error: {{msg}}",
         "missingRepos": "Missing repos section"
-      }
+      },
+      "multihopTitle": "Multi-hop candidate chains",
+      "multihopIntro": "Edge-adjacency heuristic assembly (structural confidence) — review before acting",
+      "multihopEmpty": "No multi-hop candidate chains",
+      "adjudicationTitle": "Cross-Repo Adjudication",
+      "adjudicationIntro": "Phase-B two-way evidence — vulnerable and not-vulnerable conclusions are equally first-class",
+      "adjudicationEmpty": "No adjudication cards",
+      "adjUpgrade": "Upgrade candidate",
+      "adjDowngrade": "Downgrade / falsified",
+      "adjConfirm": "Confirmed",
+      "adjMaintain": "Maintained not-vulnerable",
+      "adjError": "Adjudication failed",
+      "adjContext": "Cross-service context",
+      "adjProcess": "Analysis process",
+      "adjEvidence": "Verification evidence",
+      "adjReasoning": "Reasoning"
     }
   },
   "dashboard": {

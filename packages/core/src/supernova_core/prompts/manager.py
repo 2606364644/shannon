@@ -134,6 +134,8 @@ class PromptManager:
         result = result.replace("{{WEB_URL}}", variables.get("web_url", ""))
         result = result.replace("{{REPO_PATH}}", variables.get("repo_path", ""))
         result = result.replace("{{DELIVERABLES_PATH}}", variables.get("deliverables_path", ""))
+        # 跨仓两阶段(spec 2026-08-27 §5.1/§7.2):per-edge/裁决 prompt 的产物目录导读
+        result = result.replace("{{ARTIFACTS_GUIDE}}", variables.get("artifacts_guide", ""))
         result = result.replace("{{SCRATCHPAD_PATH}}", variables.get("scratchpad_path", ""))
 
         # 子项目2 T7: 多身份越权对比 context。executor 在 prompt_variables 里注入

@@ -17,6 +17,8 @@ const detail: CorrelationDetail = {
   topology: null,
   boundaries: [],
   flows: [],
+  multi_hop_chains: [],
+  adjudication: null,
   merged_vulns: {},
   drift_warnings: [],
   corr_children: [

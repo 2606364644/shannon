@@ -613,9 +613,33 @@ export interface CorrFlow {
   entry: string;
   method: string;
   call_site: { file: string; line: number; snippet: string };
-  vuln_refs: { service: string; title: string; severity: string; location: string }[];
+  vuln_refs: { vuln_id?: string; service: string; title: string;
+               severity: string; location: string;
+               source?: string; invalid_ref?: boolean }[];
   confidence: string;
   evidence: string;
+}
+/** 多跳候选链（spec 2026-08-27 §6.2）：边邻接启发拼装，basis/confidence 显式标注。 */
+export interface CorrMultiHopChain {
+  path: string[];
+  basis: string;
+  confidence: string;
+}
+/** 裁决卡（spec 2026-08-27 §7.3）：双向留证——正反结论同构带完整证据链。 */
+export interface AdjudicationCard {
+  direction: "upgrade" | "downgrade" | "confirm" | "maintain" | "error" | string;
+  finding_ref: { service: string; vuln_id: string; origin: string };
+  conclusion: string;
+  cross_service_context: string;
+  analysis_process: string[];
+  verification_evidence: { repo: string; location: string;
+                           snippet: string; note: string }[];
+  reasoning: string;
+  confidence: string;
+}
+export interface AdjudicationLog {
+  cards?: AdjudicationCard[];
+  error?: string;
 }
 /** merged_vulns 单项：{vc}_exploitation_queue.json 的 vulnerabilities 元素（宽松 dict）。 */
 export interface CorrVuln {
@@ -633,6 +657,8 @@ export interface CorrelationDetail {
   boundaries: { service: string; method: string; exposure: string;
                 reachable_from: string[]; reason: string; confidence: string }[];
   flows: CorrFlow[];
+  multi_hop_chains: CorrMultiHopChain[];
+  adjudication: AdjudicationLog | null;
   merged_vulns: Record<string, CorrVuln[]>;
   // 首版保守恒 []（后端不解析 correlation-report.md；后续版本从事件/report 提取）。
   drift_warnings: unknown[];

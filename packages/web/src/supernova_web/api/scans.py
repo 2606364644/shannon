@@ -537,12 +537,22 @@ def assemble_correlation_detail(scan_dir: Path) -> dict:
             merged_vulns[q.name[: -len("_exploitation_queue.json")]] = data["vulnerabilities"]
 
     boundaries = _read_json("trust-boundaries.json")
-    flows = _read_json("cross-service-flows.json")
+    flows_raw = _read_json("cross-service-flows.json")
+    # spec 2026-08-27 §8/§9:flows json 对象形态 {"flows": [...], "multi_hop_chains": [...]}
+    # 旧产物(2026-08-27 前)是 list 形态 —— flows 透传、multi_hop_chains 兜空。
+    if isinstance(flows_raw, dict):
+        flows = flows_raw.get("flows")
+        multi_hop_chains = flows_raw.get("multi_hop_chains")
+    else:
+        flows, multi_hop_chains = flows_raw, None
+    adjudication = _read_json("adjudication-log.json")
     session = SessionManager(scan_dir.parent).get_session_data(scan_dir)
     return {
         "topology": _read_json("cross-service-topology.json"),
         "boundaries": boundaries if isinstance(boundaries, list) else [],
         "flows": flows if isinstance(flows, list) else [],
+        "multi_hop_chains": multi_hop_chains if isinstance(multi_hop_chains, list) else [],
+        "adjudication": adjudication if isinstance(adjudication, dict) else None,
         "merged_vulns": merged_vulns,
         "drift_warnings": [],
         "corr_children": session.get("corr_children") or [],

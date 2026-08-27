@@ -43,7 +43,16 @@ from supernova_core.correlation.schemas import (  # noqa: E402
 )
 from supernova_core.correlation.queue_merge import merge_exploitation_queues  # noqa: E402
 from supernova_core.correlation.drift import detect_drift  # noqa: E402
-from supernova_core.utils.paths import INTERMEDIATE_SUBDIR, WHITEBOX_SUBDIR  # noqa: E402
+from supernova_core.correlation.artifacts_guide import (  # noqa: E402
+    ServiceArtifacts, build_artifacts_guide,
+)
+from supernova_core.correlation.merge_validation import (  # noqa: E402
+    assemble_multi_hop_chains, validate_vuln_refs,
+)
+from supernova_core.correlation.adjudication import build_adjudication_batches  # noqa: E402
+from supernova_core.utils.paths import (  # noqa: E402
+    INTERMEDIATE_SUBDIR, WHITEBOX_SUBDIR, resolve_track_deliverable,
+)
 from supernova_core.runtime.heartbeat import HeartbeatManager, mark_owner_if_unset  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -111,8 +120,14 @@ async def run_correlation_phase(
 
     corr_writer = CorrelationEventWriter(event_file)
 
-    # 1. 收集各仓 exploitation queue(spec §7 合并, B1)—— 由 repo_workspace_paths 驱动
+    # 1. 收集各仓 exploitation queue(spec §7 合并, B1)—— 由 repo_workspace_paths 驱动。
+    #    spec 2026-08-27:顺手探测 entry_points/dismissed 产物建 ServiceArtifacts
+    #    (artifacts-guide 素材) + 阶段 B 批组织输入 + vuln_id 校验集。
     per_repo_queue: dict[str, list[dict]] = {}
+    findings_by_service: dict[str, dict[str, list[dict]]] = {}
+    dismissed_by_service: dict[str, list[dict]] = {}
+    artifacts_by_service: dict[str, ServiceArtifacts] = {}
+    per_service_id_sets: dict[str, set[str]] = {}
     drift_warnings: list[str] = []
     for service, ws_path in repo_workspace_paths.items():
         dlv = deliverables_dir_for_workspace(ws_path)
@@ -147,6 +162,28 @@ async def run_correlation_phase(
                 entries = []
             per_repo_queue.setdefault(vc, []).extend(
                 [{"__service": service, **e} for e in entries])
+            findings_by_service.setdefault(service, {}).setdefault(vc, []).extend(entries)
+            per_service_id_sets.setdefault(service, set()).update(
+                e.get("ID") for e in entries
+                if isinstance(e, dict) and e.get("ID"))
+        # entry_points / dismissed 探测(读侧三级回落链,与 queue 同源)
+        ep_path = resolve_track_deliverable(dlv, WHITEBOX_SUBDIR, "entry_points.json")
+        dm_path = resolve_track_deliverable(dlv, WHITEBOX_SUBDIR, "dismissed_findings.json")
+        dm_entries: list[dict] = []
+        if dm_path.exists():
+            try:
+                data = json.loads(dm_path.read_text(encoding="utf-8"))
+                dm_entries = data.get("dismissed", []) if isinstance(data, dict) else []
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("跳过损坏的 dismissed 档案 %s: %s", dm_path, e)
+        dismissed_by_service[service] = dm_entries
+        artifacts_by_service[service] = ServiceArtifacts(
+            service=service, role=spec.role if spec else "backend",
+            repo_path=spec.path if spec else None, deliverables=dlv,
+            queue_files=list(queue_files.values()),
+            entry_points=ep_path if ep_path.exists() else None,
+            dismissed=dm_path if (dm_path.exists() and dm_entries) else None,
+            proto_roots=list(spec.proto_roots) if spec else [])
 
     # 2. 关联 workspace —— 无归属 repo,SessionManager(out_ws_dir.parent) 幂等
     # (目录已存在不报错;web 已建主行不覆盖 session.json;CLI 传入
@@ -194,6 +231,15 @@ async def run_correlation_phase(
                 "role_map": json.dumps(role_map),
                 "repo_paths": json.dumps({f: repo_paths.get(f), t: repo_paths.get(t)}),
                 "deliverables_path": str(out_dlv),
+                # spec 2026-08-27 §5.1:产物目录导读(修 P1——不再让 Agent 读空的
+                # 关联 out_dlv,引导读两仓真实扫描产物)
+                "artifacts_guide": build_artifacts_guide(
+                    artifacts_by_service.get(f) or ServiceArtifacts(
+                        service=f, role=role_map.get(f, "backend"),
+                        repo_path=repo_paths.get(f), deliverables=None),
+                    artifacts_by_service.get(t) or ServiceArtifacts(
+                        service=t, role=role_map.get(t, "backend"),
+                        repo_path=repo_paths.get(t), deliverables=None)),
             }
             metrics = await executor.execute(
                 agent_name=AgentName.CROSS_REPO_CORRELATION,
@@ -220,6 +266,10 @@ async def run_correlation_phase(
     for er in edge_results:
         await corr_writer.edge(f"{er['from']}->{er['to']}", er.get("status", "ok"))
     merged = _merge_edge_results(edge_results)
+    # spec 2026-08-27 §6:确定性校验(幻觉 vuln_id 标 invalid_ref) + 多跳边邻接
+    # 拼装 —— 零推断,纯防幻觉与结构性拼装。
+    validated_edges = validate_vuln_refs(merged["edges"], per_service_id_sets)
+    multi_hop_chains = assemble_multi_hop_chains(validated_edges)
 
     # 4. 组装 topology + boundaries
     topology = CrossServiceTopology(
@@ -231,7 +281,7 @@ async def run_correlation_phase(
                                         confidence=c["confidence"], evidence=c["evidence"])
                                    for c in e.get("calls", [])],
                             status=e["status"], error=e.get("error"))
-               for e in merged["edges"]])
+               for e in validated_edges])
     boundaries = [TrustBoundary(**b) for b in merged["boundaries"]]
 
     # 5. 合并 queue(B1 四字段)+ 组装 flows(A2 透传)+ 落盘
@@ -243,10 +293,48 @@ async def run_correlation_phase(
                               vuln_refs=f.get("vuln_refs", []),
                               confidence=f.get("confidence", "low"),
                               evidence=f.get("evidence", ""))
-             for e in merged["edges"] for f in e.get("flows", [])]
+             for e in validated_edges for f in e.get("flows", [])]
     report_md = _render_report(topology, boundaries, merged_queues, drift_warnings)
     write_correlation_deliverables(out_dlv, topology, boundaries, merged_queues,
-                                   report_md, flows=flows)
+                                   report_md, flows=flows,
+                                   multi_hop_chains=multi_hop_chains)
+
+    # 6. 阶段 B 跨仓裁决(spec §7)——发现驱动,跑在阶段 A 产物落盘之后。
+    #    批级容错在 run_adjudication_phase 内(error 占位卡);此处整体异常
+    #    隔离:阶段 A 产物照常交付,scan 终态不受影响(spec §10)。
+    adjudication_cards: list[dict] = []
+    try:
+        batches = build_adjudication_batches(findings_by_service,
+                                             dismissed_by_service)
+        if batches:
+            await corr_writer.phase("adjudication", "started")
+            from supernova_multi.adjudication_phase import run_adjudication_phase
+            adjudication_cards = await run_adjudication_phase(
+                batches=batches,
+                artifacts_by_service=artifacts_by_service,
+                correlation_context={
+                    "edges": [{"from": e["from"], "to": e["to"],
+                               "protocol": e.get("protocol", "grpc"),
+                               "status": e.get("status", "ok")}
+                              for e in validated_edges],
+                    "flows": [f for e in validated_edges
+                              for f in e.get("flows", [])],
+                    "multi_hop_chains": multi_hop_chains},
+                executor=executor, sem=sem,
+                repo_path=str(out_ws), deliverables_path=str(out_dlv),
+                pipeline_testing=pipeline_testing,
+                provider_config=provider_config)
+            await corr_writer.phase("adjudication", "completed")
+    except Exception as e:  # noqa: BLE001 —— 阶段 B 整体异常:留痕不阻断
+        logger.warning("adjudication phase failed (phase A deliverables kept): %s", e)
+        await corr_writer.phase("adjudication", "failed")
+        (out_dlv / "adjudication-log.json").write_text(
+            json.dumps({"error": str(e)}, ensure_ascii=False), encoding="utf-8")
+    if adjudication_cards:
+        from supernova_core.correlation.report import write_adjudication_deliverables
+        report_md = _render_report(topology, boundaries, merged_queues,
+                                   drift_warnings, cards=adjudication_cards)
+        write_adjudication_deliverables(out_dlv, adjudication_cards, report_md)
 
     # 扫描失败不上探到本函数(现扫异常在 run_cross_repo 已 raise),scan_end 恒 completed;
     # write_scan_end=False 时收尾事件交由调用方写(web 编排收尾)。heartbeat 两分支都清理。
@@ -323,7 +411,8 @@ def _group_by_service(entries: list[dict]) -> dict[str, list[dict]]:
     return g
 
 
-def _render_report(topology, boundaries, merged_queues, drift_warnings) -> str:
+def _render_report(topology, boundaries, merged_queues, drift_warnings,
+                   cards: list[dict] | None = None) -> str:
     lines = ["# Cross-Repo Correlation Report", "",
              "## 服务拓扑", ""]
     for e in topology.edges:
@@ -335,4 +424,33 @@ def _render_report(topology, boundaries, merged_queues, drift_warnings) -> str:
     if drift_warnings:
         lines += ["", "## 版本漂移警告(A2)", ""]
         lines += [f"- {w}" for w in drift_warnings]
+    if cards:
+        # spec 2026-08-27 §8:跨仓裁决章节——漏洞与非漏洞同表留证(分析过程+证据+论证)
+        lines += ["", "## 跨仓裁决(阶段 B)", ""]
+        groups = [("upgrade", "翻案候选(非漏洞→跨仓可达,待人工复核)"),
+                  ("downgrade", "降级/证伪(跨仓防护)"),
+                  ("confirm", "确认(跨仓可达性留证)"),
+                  ("maintain", "维持(非漏洞维持)"),
+                  ("error", "裁决失败(占位留档)")]
+        for direction, title in groups:
+            dc = [c for c in cards if c.get("direction") == direction]
+            if not dc:
+                continue
+            lines += [f"### {title}", ""]
+            for c in dc:
+                ref = c.get("finding_ref", {})
+                lines.append(
+                    f"- [{ref.get('vuln_id', '?')}] {ref.get('service', '?')}"
+                    f"({ref.get('origin', '?')}) → {c.get('conclusion', '?')}"
+                    f"(confidence: {c.get('confidence', '?')})")
+                if c.get("cross_service_context"):
+                    lines.append(f"  - 跨仓上下文: {c['cross_service_context']}")
+                for step in c.get("analysis_process", [])[:5]:
+                    lines.append(f"  - 过程: {step}")
+                for ev in c.get("verification_evidence", [])[:5]:
+                    lines.append(f"  - 证据: {ev.get('location', '?')}"
+                                 f" — {ev.get('note', '')}")
+                if c.get("reasoning"):
+                    lines.append(f"  - 论证: {c['reasoning']}")
+            lines.append("")
     return "\n".join(lines)

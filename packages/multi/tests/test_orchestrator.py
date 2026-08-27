@@ -151,8 +151,11 @@ async def test_run_correlation_phase_writes_flows_and_respects_paths(tmp_path, m
         write_scan_end=False)
 
     dlv = out_ws / "deliverables"
-    flows = _json.loads((dlv / "cross-service-flows.json").read_text(encoding="utf-8"))
-    assert flows[0]["method"] == "order.v1.OrderService/CreateOrder"
+    flows_obj = _json.loads(
+        (dlv / "cross-service-flows.json").read_text(encoding="utf-8"))
+    # spec 2026-08-27 §8:flows json 对象形态(含 multi_hop_chains)
+    assert flows_obj["flows"][0]["method"] == "order.v1.OrderService/CreateOrder"
+    assert flows_obj["multi_hop_chains"] == []
     merged = _json.loads((dlv / "injection_exploitation_queue.json").read_text(encoding="utf-8"))
     assert merged["vulnerabilities"][0]["service"] == "order-svc"
     events = [_json.loads(l) for l in event_file.read_text(encoding="utf-8").splitlines() if l]
@@ -177,3 +180,166 @@ async def test_run_correlation_phase_write_scan_end_true(tmp_path, monkeypatch):
                                 write_scan_end=True)
     events = [_json.loads(l) for l in event_file.read_text(encoding="utf-8").splitlines() if l]
     assert any(e["type"] == "scan_end" and e["status"] == "completed" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# spec 2026-08-27: 两阶段化——阶段 A(关联,guide+ID 引用) + 合并层校验 + 阶段 B(裁决)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_run_correlation_phase_two_stage(tmp_path, monkeypatch):
+    """端到端（stub Agent）：guide 注入 / vuln_id 校验 / flows 对象形态 /
+    adjudication-log 落盘 / 报告裁决章节 / adjudication phase 事件。"""
+    import json as _json
+    from supernova_multi.orchestrator import run_correlation_phase
+
+    gw_ws, be_ws = tmp_path / "gw-scan", tmp_path / "be-scan"
+    for w in (gw_ws, be_ws):
+        (w / "deliverables").mkdir(parents=True)
+    (be_ws / "deliverables" / "injection_exploitation_queue.json").write_text(
+        _json.dumps({"vulnerabilities": [
+            {"ID": "INJ-001", "title": "SQLi", "description": "d",
+             "severity": "high", "location": "dao.go:8"}]}), encoding="utf-8")
+    (be_ws / "deliverables" / "dismissed_findings.json").write_text(
+        _json.dumps({"dismissed": [
+            {"ID": "INJ-D1", "vuln_class": "injection",
+             "dismiss_reason": "internal not reachable from entrypoint"}]}),
+        encoding="utf-8")
+    (gw_ws / "deliverables" / "entry_points.json").write_text(
+        _json.dumps({"endpoints": []}), encoding="utf-8")
+
+    out_ws = tmp_path / "corr-scan"
+    out_ws.mkdir()
+    event_file = out_ws / "events.ndjson"
+    cfg = MultiRepoConfig(
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+               "order-svc": RepoSpec(path="/r/be", role="backend")},
+        relations=[Relation(**{"from": "gateway", "to": "order-svc"})],
+        correlation=CorrelationConfig(out_workspace="corr-scan"))
+
+    async def fake_execute(self, agent_name=None, **kw):
+        name = getattr(agent_name, "value", agent_name)
+
+        class _R:
+            def __init__(self, payload):
+                self.structured_output = payload
+
+        if name == "cross-repo-adjudication":
+            bj = kw["prompt_variables"]["batch_json"]
+            if "INJ-D1" in bj:
+                return _R({"cards": [{
+                    "direction": "upgrade",
+                    "finding_ref": {"service": "order-svc", "vuln_id": "INJ-D1",
+                                    "origin": "dismissed"},
+                    "conclusion": "vulnerable",
+                    "cross_service_context": "via gateway",
+                    "analysis_process": ["s1"], "verification_evidence": [],
+                    "reasoning": "reachable now", "confidence": "high"}]})
+            return _R({"cards": [{
+                "direction": "confirm",
+                "finding_ref": {"service": "order-svc", "vuln_id": "INJ-001",
+                                "origin": "queue"},
+                "conclusion": "vulnerable",
+                "cross_service_context": "via gateway",
+                "analysis_process": ["s1"], "verification_evidence": [],
+                "reasoning": "confirmed", "confidence": "high"}]})
+        # 阶段 A：edge payload,含一个有效 ID + 一个幻觉 ID
+        kw_edge = kw
+        assert "artifacts_guide" in kw_edge["prompt_variables"], (
+            "阶段 A prompt_vars 须注入 artifacts_guide")
+        return _R({"from": "gateway", "to": "order-svc", "protocol": "grpc",
+                   "calls": [], "status": "ok", "boundaries": [],
+                   "flows": [{"entry": "POST /orders",
+                              "method": "order.v1.OrderService/CreateOrder",
+                              "call_site": {"file": "c.ts", "line": 1, "snippet": "x"},
+                              "vuln_refs": [
+                                  {"vuln_id": "INJ-001", "service": "order-svc",
+                                   "source": "queue"},
+                                  {"vuln_id": "INJ-BAD", "service": "order-svc",
+                                   "source": "queue"}],
+                              "confidence": "high", "evidence": "e"}]})
+
+    import supernova_core.agents.executor as executor_mod
+    monkeypatch.setattr(executor_mod.AgentExecutor, "execute", fake_execute)
+
+    result = await run_correlation_phase(
+        cfg, {"gateway": gw_ws, "order-svc": be_ws}, out_ws, event_file,
+        write_scan_end=False)
+
+    dlv = out_ws / "deliverables"
+    # 1) flows 对象形态 + 幻觉 ID 标注
+    flows_obj = _json.loads(
+        (dlv / "cross-service-flows.json").read_text(encoding="utf-8"))
+    assert set(flows_obj) == {"flows", "multi_hop_chains"}
+    refs = flows_obj["flows"][0]["vuln_refs"]
+    by_id = {r["vuln_id"]: r for r in refs}
+    assert "invalid_ref" not in by_id["INJ-001"]
+    assert by_id["INJ-BAD"]["invalid_ref"] is True
+    # 2) adjudication-log：queue confirm + dismissed upgrade 都有卡
+    log = _json.loads(
+        (dlv / "adjudication-log.json").read_text(encoding="utf-8"))
+    cards = log["cards"] if isinstance(log, dict) else log
+    by_vid = {c["finding_ref"]["vuln_id"]: c for c in cards}
+    assert by_vid["INJ-001"]["direction"] == "confirm"
+    assert by_vid["INJ-D1"]["direction"] == "upgrade"
+    # 3) 报告裁决章节（非漏洞与漏洞同表留证）
+    report = (dlv / "correlation-report.md").read_text(encoding="utf-8")
+    assert "跨仓裁决" in report
+    assert "INJ-D1" in report          # dismissed 项（翻案候选）进报告
+    # 4) adjudication phase 事件(对齐 CorrelationEventWriter schema:
+    #    type=correlation_progress, node=phase, name=adjudication)
+    events = [_json.loads(l) for l in
+              event_file.read_text(encoding="utf-8").splitlines() if l]
+
+    def _phase_evts(name_status: str):
+        return [e for e in events
+                if e.get("type") == "correlation_progress"
+                and e.get("node") == "phase" and e.get("name") == "adjudication"
+                and e.get("status") == name_status]
+    assert _phase_evts("started")
+    assert _phase_evts("completed")
+    # 5) 合并 queue 不变（决策 #5：裁决不回写）
+    merged = _json.loads(
+        (dlv / "injection_exploitation_queue.json").read_text(encoding="utf-8"))
+    assert merged["vulnerabilities"][0]["service"] == "order-svc"
+    assert result["edge_statuses"] == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_adjudication_failure_does_not_break_phase_a(tmp_path, monkeypatch):
+    """阶段 B 整体异常 → 阶段 A 产物照常交付,scan 终态不受影响。"""
+    import json as _json
+    from supernova_multi.orchestrator import run_correlation_phase
+
+    be_ws = tmp_path / "be-scan"
+    (be_ws / "deliverables").mkdir(parents=True)
+    (be_ws / "deliverables" / "injection_exploitation_queue.json").write_text(
+        _json.dumps({"vulnerabilities": [
+            {"ID": "INJ-001", "title": "t", "description": "d",
+             "severity": "high", "location": "f:1"}]}), encoding="utf-8")
+    gw_ws = tmp_path / "gw-scan"
+    (gw_ws / "deliverables").mkdir(parents=True)
+    out_ws = tmp_path / "corr-scan"
+    out_ws.mkdir()
+    event_file = out_ws / "events.ndjson"
+    cfg = MultiRepoConfig(
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+               "order-svc": RepoSpec(path="/r/be", role="backend")},
+        relations=[],
+        correlation=CorrelationConfig(out_workspace="corr-scan"))
+
+    async def fake_execute(self, **kw):
+        raise RuntimeError("adjudication infra down")
+
+    import supernova_core.agents.executor as executor_mod
+    monkeypatch.setattr(executor_mod.AgentExecutor, "execute", fake_execute)
+
+    result = await run_correlation_phase(
+        cfg, {"gateway": gw_ws, "order-svc": be_ws}, out_ws, event_file,
+        write_scan_end=True)
+    dlv = out_ws / "deliverables"
+    assert (dlv / "injection_exploitation_queue.json").exists()   # A 产物在
+    assert (dlv / "adjudication-log.json").exists()               # error 留档在
+    log = _json.loads((dlv / "adjudication-log.json").read_text(encoding="utf-8"))
+    cards = log["cards"] if isinstance(log, dict) else log
+    assert cards and cards[0]["direction"] == "error"
+    assert result["edge_statuses"] == []                          # 无边,不抛

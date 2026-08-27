@@ -543,7 +543,22 @@
         "undeclaredService": "relations 引用未声明服务: {{name}}",
         "yamlSyntax": "YAML 语法错误: {{msg}}",
         "missingRepos": "缺少 repos 段"
-      }
+      },
+      "multihopTitle": "多跳候选链",
+      "multihopIntro": "边邻接启发拼装（structural 置信），供人工复核",
+      "multihopEmpty": "未发现多跳候选链",
+      "adjudicationTitle": "跨仓裁决",
+      "adjudicationIntro": "阶段 B 双向留证——漏洞与非漏洞结论同表呈现，均带完整证据链",
+      "adjudicationEmpty": "无裁决卡",
+      "adjUpgrade": "翻案候选",
+      "adjDowngrade": "降级/证伪",
+      "adjConfirm": "确认",
+      "adjMaintain": "维持非漏洞",
+      "adjError": "裁决失败",
+      "adjContext": "跨仓上下文",
+      "adjProcess": "分析过程",
+      "adjEvidence": "验证证据",
+      "adjReasoning": "论证"
     }
   },
   "dashboard": {

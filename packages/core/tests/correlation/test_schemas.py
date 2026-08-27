@@ -82,4 +82,6 @@ def test_flows_file_written(tmp_path):
                                confidence="low", evidence="e")]
     write_correlation_deliverables(tmp_path, topo, [], {}, "# r", flows=flows)
     data = json.loads((tmp_path / "cross-service-flows.json").read_text(encoding="utf-8"))
-    assert data[0]["method"] == "m"
+    # spec 2026-08-27 §8:flows json 对象形态 {"flows": [...], "multi_hop_chains": [...]}
+    assert data["flows"][0]["method"] == "m"
+    assert data["multi_hop_chains"] == []
