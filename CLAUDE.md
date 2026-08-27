@@ -8,7 +8,7 @@
 
 supernova 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自独立、只在合并器（verdict OR）交汇**：
 
-- **GitNexus 轨**：确定性层产物（`parameter_graph.json` / `SinkCallSite`）→ `vuln_chain_builders/*_builder.py` 提候选链 → `chain_verdict.py` 跑**轻量 LLM 判定**（`run_claude_prompt` 单次结构化输出，**非 agent**；仅 inj/xss/ssrf）→ `<vuln>_gitnexus_queue.json`。**这条轨的产物由 LLM 分析。** authz 不走此轻量路径（走深度 agent），见本节末「auth/authz 特殊」段。
+- **GitNexus 轨**：确定性层产物（`parameter_graph.json` / `SinkCallSite`）→ `vuln_chain_builders/*_builder.py` 提候选链 → `chain_verdict.py` 跑**多轮 verdict agent 深判**（`run_gitnexus_verdict_agent`：agent 自主 grep/read 验证链快照，`max_turns=30`（`SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS`），护栏 `SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS=200`；仅 inj/xss/ssrf；2026-08-27 `7b9b64a2` 从轻量单次判定升级，llm_client 单次路径仅留测试/降级）→ `<vuln>_gitnexus_queue.json`。**这条轨的产物由 LLM 分析。** authz 走独立的 `run_authz_gitnexus_judge`（同为多轮 agent，30min 活动窗口），见本节末「auth/authz 特殊」段。**容量铁律（2026-08-27 NodeGoat 首扫事故）**：多轮深判单链 10-60s，`run_gitnexus_chain_verdict` 的 `start_to_close_timeout` 必须按 `链数 ÷ 并发 × 单链耗时` 重估（27 条串行需 15-20min，曾超 15min 旧窗口致 3 次重试全爆、白盒 failed）；改判定形态/并发度时同步调窗口，且重试无检查点会从头重跑全部链。
 - **LLM 轨**：`vuln-*.txt` agent，**纯 LLM 分析**——读 recon + 自己 grep + 自己追链，**保持与原始项目 `/root/shannon` 一致**（TS 无确定性层，100% 自给自足）。→ `<vuln>_exploitation_queue.json`（LLM 产物）。
 
 **铁律（易踩，反复强调）：**
