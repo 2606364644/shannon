@@ -28,7 +28,9 @@ from supernova_core.logging.log_bus import LogBus
 from supernova_core.agents.executor import AgentExecutor
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.recon_context_summarizer import summarize_recon_context
-from supernova_core.config.concurrency import gn_enrich_mode, is_gitnexus_llm_enabled
+from supernova_core.config.concurrency import (
+    get_chain_verdict_concurrency, gn_enrich_mode, is_gitnexus_llm_enabled,
+)
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
 from supernova_whitebox.audit.session import AuditSession
@@ -2841,18 +2843,28 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             else:
                 llm = _make_verdict_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
+            # 类间并发共享预算：三类单跳 builder + second_order 并发跑、共用
+            # 同一信号量——总并发恒为 SUPERNOVA_CHAIN_VERDICT_CONCURRENCY
+            # （而非 并发数×builder 数 乘法爆炸）；类间无依赖（各自独立提取
+            # 候选/判定/落盘），并发只消除段间空转（前类尾部单链在飞时后类
+            # 立即填补并发槽）。
+            _verdict_sem = asyncio.Semaphore(get_chain_verdict_concurrency())
 
             # Second-order storage-taint findings (子项⑤): compute once, group
             # by vuln class, then merge into the per-class queue inside the
             # builder loop. Guarded on ``index`` being defined (only set when
             # code_index.json parsed successfully above) — absent/invalid
             # code_index.json ⇒ no second-order findings, no crash.
+            # 与三类单跳 builder 并发跑（共享 _verdict_sem）；失败不挡三类（原语义）。
             second_order_by_vc: dict[str, list] = {}
-            try:
-                storage_writes = list(index.storage_write_points)
-                reads_by_id = {s.param_name: s for s in index.source_points
-                               if s.source_type.value == "storage"}
-                if storage_writes and reads_by_id:
+
+            async def _run_second_order():
+                try:
+                    storage_writes = list(index.storage_write_points)
+                    reads_by_id = {s.param_name: s for s in index.source_points
+                                   if s.source_type.value == "storage"}
+                    if not (storage_writes and reads_by_id):
+                        return []
                     from supernova_core.code_index.vuln_chain_builders.second_order_builder import (
                         build_second_order_findings,
                     )
@@ -2867,22 +2879,21 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                         except (FileNotFoundError, OSError, IsADirectoryError):
                             return None
 
-                    second_order = await build_second_order_findings(
+                    return await build_second_order_findings(
                         storage_writes, pgraph, llm_client=llm,
                         verdict_agent=_verdict_agent,
                         sink_call_sites=sink_call_sites, reads_by_id=reads_by_id,
                         source_provider=_second_order_source_provider,
                         progress_cb=_chain_cb,
+                        semaphore=_verdict_sem,
                     )
-                    for f in second_order:
-                        vc2 = f.vulnerability_type.replace("second_order_", "")
-                        second_order_by_vc.setdefault(vc2, []).append(f)
-            except NameError:
-                # index undefined — code_index.json absent/failed to parse.
-                pass
-            except Exception as exc:
-                logger.warning(
-                    "gitnexus chain-verdict: second-order builder failed (%s)", exc)
+                except NameError:
+                    # index undefined — code_index.json absent/failed to parse.
+                    return []
+                except Exception as exc:
+                    logger.warning(
+                        "gitnexus chain-verdict: second-order builder failed (%s)", exc)
+                    return []
 
             # P3 (spec 2026-08-21 safe-branch-recall): presumed-safe 来源候选
             # (chain_propagator 对 intra 否定 sink 的表达式兜底,notes='presumed-safe')
@@ -2894,22 +2905,38 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 if getattr(f, "notes", "") == "presumed-safe"
             }
 
-            for vc, builder in (
-                ("injection", build_injection_findings),
-                ("xss", build_xss_findings),
-                ("ssrf", build_ssrf_findings),
-            ):
+            # 三类单跳 builder 并发跑（共享 _verdict_sem；类间无依赖）；
+            # one vuln class failing must not block the others（原语义，异常
+            # 收进结果元组，gather 后逐类分流）。
+            async def _run_builder(vc, builder):
                 try:
                     findings = await builder(pgraph, llm_client=llm,
                                              verdict_agent=_verdict_agent,
                                              sink_call_sites=sink_call_sites,
                                              entry_points=entry_point_map,
-                                             progress_cb=_chain_cb)
+                                             progress_cb=_chain_cb,
+                                             semaphore=_verdict_sem)
+                    return vc, findings, None
                 except Exception as exc:
-                    # one vuln class failing must not block the others
+                    return vc, None, exc
+
+            _second_order_task = asyncio.create_task(_run_second_order())
+            _builder_results = await asyncio.gather(*[
+                _run_builder(vc, builder)
+                for vc, builder in (
+                    ("injection", build_injection_findings),
+                    ("xss", build_xss_findings),
+                    ("ssrf", build_ssrf_findings),
+                )])
+            for f in await _second_order_task or []:
+                vc2 = f.vulnerability_type.replace("second_order_", "")
+                second_order_by_vc.setdefault(vc2, []).append(f)
+
+            for vc, findings, _exc in _builder_results:
+                if _exc is not None:
                     failed_classes.append(vc)
-                    fail_reasons[vc] = f"builder raised: {exc}"
-                    logger.warning("gitnexus chain-verdict %s failed: %s", vc, exc)
+                    fail_reasons[vc] = f"builder raised: {_exc}"
+                    logger.warning("gitnexus chain-verdict %s failed: %s", vc, _exc)
                     continue
                 # Merge second-order findings into this vc's queue so they
                 # get written + counted alongside the single-hop ones.

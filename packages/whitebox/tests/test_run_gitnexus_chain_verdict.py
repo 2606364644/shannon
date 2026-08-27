@@ -486,3 +486,87 @@ async def test_activity_uses_agent_path_when_enabled(tmp_path, monkeypatch):
     q = json.loads(
         (deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
     assert q["vulnerabilities"][0]["verdict"] == "vulnerable"
+
+
+@pytest.mark.asyncio
+async def test_three_builders_run_concurrently(tmp_path, monkeypatch):
+    """inj/xss/ssrf 三类 builder 并发跑：各 1 条候选链时 3 个判定同时在飞
+    （三类串行则 max_seen 恒为 1）。"""
+    import asyncio
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    xss_sid = "app.py:h:innerHTML:5:0"
+    _write_pgraph(deliverables, [
+        _flow("sql_value", source="q", sink_id="app.py:h:db.execute:5:0"),   # injection
+        _flow("generic", source="u", sink_id=xss_sid),                       # xss
+        _flow("url", source="v", sink_id="app.py:h:fetch:6:0"),              # ssrf
+    ])
+    _write_sink(deliverables, xss_sid, "xss", "xss_innerhtml")
+
+    state = {"in_flight": 0, "max_seen": 0}
+
+    async def fake_llm(prompt, **kw):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        await asyncio.sleep(0.03)
+        state["in_flight"] -= 1
+        return ('{"verdict":"safe","witness_payload":"","evidence_chain":"s->k",'
+                '"mismatch_reason":"","confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert state["max_seen"] > 1
+    assert result["failed_classes"] == []
+
+
+@pytest.mark.asyncio
+async def test_builders_run_concurrently_shared_budget(tmp_path, monkeypatch):
+    """三类 builder 并发跑（共享一个并发预算）：跨类的 verdict agent 同时
+    in-flight——串行分段时峰值=单类链数，并发共享预算时跨类同飞。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: True)
+    state = {"in_flight": 0, "max_seen": 0, "names": []}
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        await asyncio.sleep(0.08)
+        state["in_flight"] -= 1
+        state["names"].append(agent_name)
+        return SimpleNamespace(structured_output={
+            "verdict": "safe", "witness_payload": None,
+            "evidence_chain": "q -> sink", "title": "t"}, text="")
+
+    monkeypatch.setattr(
+        activities, "_make_verdict_agent_runner",
+        lambda *a, **kw: fake_agent)
+
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    # inj 2 链（sql_value）+ ssrf 2 链（url）：类内并行下串行分段峰值=2，
+    # 三类并发共享预算（默认 4）时跨类同飞 → 峰值 ≥3。
+    _write_pgraph(deliverables, [
+        _flow("sql_value", source="q1"), _flow("sql_value", source="q2"),
+        _flow("url", source="u1"), _flow("url", source="u2"),
+    ])
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    session = _RecordingSession()
+    set_audit_session(session)
+    try:
+        await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert state["max_seen"] >= 3
+    assert sorted(state["names"]) == [
+        "chain-verdict-injection-01", "chain-verdict-injection-02",
+        "chain-verdict-ssrf-01", "chain-verdict-ssrf-02"]

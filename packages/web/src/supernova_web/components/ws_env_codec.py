@@ -59,6 +59,7 @@ SCAN_ENV_KEYS: frozenset[str] = frozenset({
     "SUPERNOVA_CHUNK_MAX_CALLS",
     "SUPERNOVA_MODEL_CONTEXT_OVERRIDE",
     "SUPERNOVA_CHUNK_TOKEN_THRESHOLD",
+    "SUPERNOVA_CHAIN_VERDICT_CONCURRENCY",
 })
 
 # 启动期配置（worker main() 启动时读一次，ws 覆盖不生效）→ 警告不阻塞，不进 fields/env。

@@ -161,7 +161,9 @@ async def test_build_xss_findings_reports_chain_progress(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "supernova_core.code_index.vuln_chain_builders.xss_builder.judge_chain_verdict",
+        # 判定经 gather_verdicts_concurrently 内联调用（chain_verdict 模块内），
+        # patch 该模块的 judge_chain_verdict 生效。
+        "supernova_core.code_index.chain_verdict.judge_chain_verdict",
         fake_judge,
     )
 
@@ -271,3 +273,36 @@ async def test_build_xss_entry_points_prefixes_path_with_route():
     findings = await build_xss_findings(
         pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
     assert findings[0].path == "q->innerHTML"
+
+
+@pytest.mark.asyncio
+async def test_build_xss_findings_judges_concurrently():
+    """builder 逐链并行研判（in-flight 峰值 >1），findings 仍按链序（ID 语义不变）。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    sids = [f"app.py:h:innerHTML:{5 + k}:0" for k in range(4)]
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[
+            _flow("generic", source=f"q{k}", sink_id=sid)
+            for k, sid in enumerate(sids, start=1)],
+        language_coverage=["typescript"],
+    )
+    state = {"in_flight": 0, "max_seen": 0}
+
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return SimpleNamespace(structured_output={
+            "verdict": "vulnerable", "witness_payload": "x",
+            "evidence_chain": "q -> innerHTML", "title": "t",
+        }, text="")
+
+    findings = await build_xss_findings(
+        pgraph, verdict_agent=agent,
+        sink_call_sites={sid: _xss_sink(sid) for sid in sids})
+    assert len(findings) == 4
+    assert state["max_seen"] > 1                      # 并行真实发生
+    assert [f.ID for f in findings] == [f"XSS-GN-0{k}" for k in range(1, 5)]

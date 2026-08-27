@@ -99,7 +99,7 @@ async def test_build_ssrf_findings_reports_chain_progress(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "supernova_core.code_index.vuln_chain_builders.ssrf_builder.judge_chain_verdict",
+        "supernova_core.code_index.chain_verdict.judge_chain_verdict",
         fake_judge,
     )
 

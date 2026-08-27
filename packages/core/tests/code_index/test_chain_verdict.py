@@ -673,3 +673,213 @@ async def test_judge_chain_verdict_agent_failure_conservative():
     verdict = await judge_chain_verdict(_agent_chain(), verdict_agent=failing_agent)
     assert verdict.confidence == "unadjudicated"
     assert verdict.verdict == "vulnerable"
+
+
+# ---------- gather_verdicts_concurrently（逐链并行研判，spec 并行化） ----------
+
+import asyncio
+from types import SimpleNamespace
+
+
+def _cand(i: int, vc: str = "xss") -> CandidateChain:
+    return CandidateChain(
+        vuln_class=vc, flow_id=f"flow#{i}", entry_point_id="app.py:handler:1",
+        source_param=f"p{i}", source_type="query_param",
+        sink_call_site_id=f"sink:{i}", sink_slot="generic",
+        propagation_steps=[], sanitizer_annotations=[],
+        direction_hint="backward", post_sanitize_concat=False,
+    )
+
+
+def _vuln_result(i: int):
+    """fake verdict agent 返回：title 带链序号，供保序断言。"""
+    return SimpleNamespace(structured_output={
+        "verdict": "vulnerable", "confidence": "high",
+        "evidence_chain": f"p{i} -> sink:{i}", "title": f"t{i:02d}",
+    }, text="")
+
+
+def _tracking_agent(state, delay=0.02):
+    """fake verdict_agent：记录 in-flight 峰值；delay 让重叠可见。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        state["names"].append(agent_name)
+        await asyncio.sleep(delay)
+        state["in_flight"] -= 1
+        state["calls"] += 1
+        return _vuln_result(int(prompt.split("source: p")[1].split()[0]))
+    return agent
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_concurrency_capped():
+    """并发上限生效：8 链并发 4 → 同时 in-flight 峰值恰为 4（不多不少）。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    state = {"in_flight": 0, "max_seen": 0, "calls": 0, "names": []}
+    verdicts = await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 9)], vc="xss",
+        verdict_agent=_tracking_agent(state),
+        max_agents=100, concurrency=4)
+    assert len(verdicts) == 8
+    assert state["max_seen"] == 4
+    assert state["calls"] == 8
+    # agent_name 唯一记账（chain-verdict-{vc}-{i:02d}）
+    assert len(set(state["names"])) == 8
+    assert "chain-verdict-xss-09" not in state["names"]
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_preserves_order():
+    """完成乱序（后发链先完成）→ 返回仍按候选顺序（gather 保序，ID 语义不变）。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        i = int(prompt.split("source: p")[1].split()[0])
+        await asyncio.sleep((6 - i) * 0.02)   # 链 5 最先完成、链 1 最后
+        return _vuln_result(i)
+
+    verdicts = await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 6)], vc="xss",
+        verdict_agent=agent, max_agents=100, concurrency=5)
+    assert [v.title for v in verdicts] == [f"t{i:02d}" for i in range(1, 6)]
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_budget_overflow_unadjudicated():
+    """超预算链不跑 agent → unadjudicated 保守；预算内照常并行；tick 全量计数。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+    from supernova_core.code_index.progress import ProgressEmitter
+
+    ticks = []
+
+    async def cb(sample):
+        ticks.append(sample)
+
+    state = {"in_flight": 0, "max_seen": 0, "calls": 0, "names": []}
+    emitter = ProgressEmitter("chain-verdict", 5, cb)
+    verdicts = await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 6)], vc="xss",
+        verdict_agent=_tracking_agent(state),
+        emitter=emitter, max_agents=3, concurrency=2)
+    assert state["calls"] == 3                       # 只预算内 3 条跑了 agent
+    assert len(verdicts) == 5
+    for v in verdicts[:3]:
+        assert v.verdict == "vulnerable"
+    for v in verdicts[3:]:
+        assert v.confidence == "unadjudicated"
+        assert "beyond verdict budget" in (v.mismatch_reason or "")
+    # tick：5 条全计数（含超预算 2 条）；未传 detail_of → detail 恒 None，
+    # hits 按 vulnerable 口径（3 判定 + 2 unadjudicated 保守条，对齐原 for 循环）。
+    assert ticks[-1].done == 5
+    assert len(ticks) == 5
+    assert all(t.detail is None for t in ticks)
+    assert sum(t.hits for t in [ticks[-1]]) == 5
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_detail_drives_hits():
+    """detail_of 返回 str → hit（hits_delta=1）；None → 非命中（second_order 的
+    write_tainted 语义由闭包表达）。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+    from supernova_core.code_index.progress import ProgressEmitter
+
+    samples = []
+
+    async def cb(sample):
+        samples.append(sample)
+
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        i = int(prompt.split("source: p")[1].split()[0])
+        so = {"verdict": "vulnerable", "confidence": "high",
+              "evidence_chain": f"p{i} -> sink:{i}"}
+        if i == 2:   # 链 2 判 safe（detail_of 返回 None）
+            so["verdict"] = "safe"
+        return SimpleNamespace(structured_output=so, text="")
+
+    emitter = ProgressEmitter("chain-verdict", 3, cb)
+    verdicts = await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 4)], vc="xss",
+        verdict_agent=agent, emitter=emitter,
+        max_agents=10, concurrency=3,
+        detail_of=lambda i, item, v: (
+            f"XSS-GN-{i:02d} vulnerable: p{i}" if v.verdict == "vulnerable" else None))
+    assert [v.verdict for v in verdicts] == ["vulnerable", "safe", "vulnerable"]
+    assert emitter._hits == 2
+    assert [s.detail for s in samples if s.detail] == [
+        "XSS-GN-01 vulnerable: p1", "XSS-GN-03 vulnerable: p3"]
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_default_concurrency_from_env(monkeypatch):
+    """concurrency 缺省 → 读 SUPERNOVA_CHAIN_VERDICT_CONCURRENCY。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", "2")
+    state = {"in_flight": 0, "max_seen": 0, "calls": 0, "names": []}
+    await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 7)], vc="xss",
+        verdict_agent=_tracking_agent(state), max_agents=100)
+    assert state["max_seen"] == 2
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_chain_of_for_second_order():
+    """chain_of 提取判定链（second_order 判 read_side_chain）+ vc 前缀进 agent_name。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    state = {"in_flight": 0, "max_seen": 0, "calls": 0, "names": []}
+    verdicts = await gather_verdicts_concurrently(
+        [SimpleNamespace(read_side_chain=_cand(i)) for i in range(1, 3)],
+        vc="2nd", verdict_agent=_tracking_agent(state),
+        chain_of=lambda item: item.read_side_chain,
+        max_agents=10, concurrency=2)
+    assert len(verdicts) == 2
+    assert all(n.startswith("chain-verdict-2nd-") for n in state["names"])
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_shared_semaphore_caps_total():
+    """共享 semaphore：两类（inj/xss）并发各判 4 链，总 in-flight ≤ 4——
+    activity 层三类 builder 共享并发预算的基石。"""
+    import asyncio
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    state = {"in_flight": 0, "max_seen": 0}
+
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return _vuln_result(int(prompt.split("source: p")[1].split()[0]))
+
+    shared = asyncio.Semaphore(4)
+    await asyncio.gather(
+        gather_verdicts_concurrently(
+            [_cand(i, vc="injection") for i in range(1, 5)], vc="injection",
+            verdict_agent=agent, semaphore=shared),
+        gather_verdicts_concurrently(
+            [_cand(i, vc="xss") for i in range(1, 5)], vc="xss",
+            verdict_agent=agent, semaphore=shared),
+    )
+    assert state["max_seen"] <= 4
+    assert state["max_seen"] == 4   # 预算被两批竞争填满（非各自为政 ×4）
+
+
+@pytest.mark.asyncio
+async def test_gather_verdicts_shared_semaphore():
+    """外部共享 semaphore：类间并发共用一个预算（concurrency 参数不再各自建闸），
+    防三类 builder 并发时并发数乘法爆炸。"""
+    from supernova_core.code_index.chain_verdict import gather_verdicts_concurrently
+
+    sem = asyncio.Semaphore(2)
+    state = {"in_flight": 0, "max_seen": 0, "calls": 0, "names": []}
+    # concurrency=10 但共享 sem=2 → 实际同时 in-flight 峰值 = 2
+    verdicts = await gather_verdicts_concurrently(
+        [_cand(i) for i in range(1, 7)], vc="xss",
+        verdict_agent=_tracking_agent(state),
+        semaphore=sem, max_agents=100, concurrency=10)
+    assert len(verdicts) == 6
+    assert state["max_seen"] == 2

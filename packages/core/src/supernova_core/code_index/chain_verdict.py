@@ -24,6 +24,7 @@ sink_call_sites, xss extraction yields no reflected candidates (Stored
 synthesis in xss_builder still works off TaintFlow source_type/slot).
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -616,3 +617,86 @@ async def judge_chain_verdict(
         title=str(title).strip() if isinstance(title, str) and title.strip() else None,
         source_param_location=_norm_location(data.get("source_param_location")),
     )
+
+
+async def gather_verdicts_concurrently(
+    candidates: list,
+    *,
+    vc: str,
+    llm_client: Callable[..., Awaitable[str]] | None = None,
+    verdict_agent: Callable[..., Awaitable] | None = None,
+    emitter=None,
+    chain_of: Callable[[object], "CandidateChain"] | None = None,
+    detail_of: Callable[[int, object, "ChainVerdict"], str | None] | None = None,
+    max_agents: int | None = None,
+    concurrency: int | None = None,
+    semaphore: "asyncio.Semaphore | None" = None,
+) -> list["ChainVerdict"]:
+    """逐链并行研判（builder 串行 for 循环的并行替换，四 builder 共用）。
+
+    - 前述 ``max_agents``（默认 :func:`get_chain_verdict_max_agents`）条候选经
+      ``Semaphore(concurrency)`` + ``gather`` 并行判定；超预算条照旧
+      :func:`unadjudicated_verdict` 保守分流（预算护栏语义不变）。
+    - ``concurrency`` 默认 :func:`get_chain_verdict_concurrency`
+      （SUPERNOVA_CHAIN_VERDICT_CONCURRENCY，默认 4，ws_getenv per-workspace）。
+    - ``semaphore``：外部共享并发闸——多个 builder 并发跑时传同一个实例，
+      总并发恒为该信号量而非 ``并发数 × builder 数``。
+    - ``chain_of``：候选 → 判定链的提取器（second_order 传
+      ``lambda cand: cand.read_side_chain``；单跳 builder 缺省 identity）。
+    - ``detail_of``：``(i, item, verdict) -> str | None`` hit 行生成器——返回
+      str 即命中（hits_delta=1），None 即非命中；second_order 的
+      ``write_tainted and vulnerable`` 语义由闭包表达。
+    - 返回按候选顺序的 verdict 列表（gather 保序，``XSS-GN-NN`` 等 ID 语义
+      不变）；每链完成即 ``emitter.tick``（乱序触发，done/total/hits 计数正确
+      ——ProgressEmitter 计数在 await 前自增，asyncio 单线程原子）。
+
+    agent_name 逐链唯一（``chain-verdict-{vc}-{i:02d}``），end_agent 记账有锁，
+    并行无共享可变状态。
+    """
+    from supernova_core.config.concurrency import (
+        get_chain_verdict_concurrency,
+        get_chain_verdict_max_agents,
+    )
+
+    if max_agents is None:
+        max_agents = get_chain_verdict_max_agents()
+    if concurrency is None:
+        concurrency = get_chain_verdict_concurrency()
+    # 外部 semaphore（类间并发共用一个预算，防三类 builder 并发时乘法爆炸）；
+    # 缺省按 concurrency 自建。
+    sem = semaphore if semaphore is not None else asyncio.Semaphore(concurrency)
+
+    def _chain(item) -> "CandidateChain":
+        return chain_of(item) if chain_of is not None else item
+
+    async def _judge(i: int, chain: "CandidateChain") -> "ChainVerdict":
+        async with sem:
+            return await judge_chain_verdict(
+                chain, llm_client=llm_client, verdict_agent=verdict_agent,
+                agent_name=f"chain-verdict-{vc}-{i:02d}")
+
+    async def _one(i: int, item) -> "ChainVerdict":
+        chain = _chain(item)
+        if i > max_agents:
+            logger.warning(
+                "chain-verdict budget exceeded (%d); candidate %d of %d "
+                "left unadjudicated (conservative, in queue)",
+                max_agents, i, len(candidates))
+            verdict = unadjudicated_verdict(
+                chain, f"candidate chain beyond verdict budget ({max_agents}); "
+                       f"left unadjudicated for human review")
+        else:
+            verdict = await _judge(i, chain)
+        if emitter is not None:
+            detail = (detail_of(i, item, verdict)
+                      if detail_of is not None else None)
+            # detail_of 给定时 hit⟺detail（second_order 的 write_tainted 语义
+            # 由闭包表达）；缺省按单跳 builder 现语义 hits⟺vulnerable（含
+            # unadjudicated 保守条——对齐原 for 循环的 hits_delta 口径）。
+            hit = ((detail is not None) if detail_of is not None
+                   else verdict.verdict == "vulnerable")
+            await emitter.tick(detail=detail, hits_delta=1 if hit else 0)
+        return verdict
+
+    return list(await asyncio.gather(*[
+        _one(i, item) for i, item in enumerate(candidates, start=1)]))

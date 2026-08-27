@@ -5,17 +5,16 @@ Takes candidate chains (Task 3, forward direction) for injection sinks
 pass, and emits InjectionVulnerability records for the GitNexus-track queue.
 """
 
+import asyncio
 import logging
 from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
+    gather_verdicts_concurrently,
     http_route_label,
-    judge_chain_verdict,
     placement_noted_params,
-    unadjudicated_verdict,
 )
-from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
@@ -47,6 +46,7 @@ async def build_injection_findings(
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
+    semaphore: "asyncio.Semaphore | None" = None,
 ) -> list[InjectionVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="injection", sink_call_sites=sink_call_sites,
@@ -57,32 +57,21 @@ async def build_injection_findings(
     candidates = [c for c in candidates
                   if c.source_type != ParameterSource.STORAGE.value]
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
-    # 护栏（spec 2026-08-27 §3）：逐条多轮深判的链数上限——超限链不再跑
-    # agent，unadjudicated 保守进 findings（不烧 token、不静默丢）。
-    max_agents = get_chain_verdict_max_agents()
+
+    def _detail(i, chain, verdict):
+        if verdict.verdict == "vulnerable":
+            return (f"INJ-GN-{i:02d} vulnerable: source={_source_text(chain)} "
+                    f"→ sink={chain.sink_call_site_id}")
+        return None
+
+    # 逐链并行研判（Semaphore 并发 + gather 保序；预算/agent_name/tick 语义不变）。
+    # 护栏（spec 2026-08-27 §3）：超限链 unadjudicated 保守进 findings（helper 内）。
+    verdicts = await gather_verdicts_concurrently(
+        candidates, vc="injection", llm_client=llm_client,
+        verdict_agent=verdict_agent, emitter=emitter, detail_of=_detail,
+        semaphore=semaphore)
     findings: list[InjectionVulnerability] = []
-    for i, chain in enumerate(candidates, start=1):
-        if i > max_agents:
-            logger.warning(
-                "chain-verdict budget exceeded (%d); candidate %d of %d "
-                "left unadjudicated (conservative, in queue)",
-                max_agents, i, len(candidates))
-            verdict = unadjudicated_verdict(
-                chain, f"candidate chain beyond verdict budget ({max_agents}); "
-                       f"left unadjudicated for human review")
-        else:
-            verdict = await judge_chain_verdict(
-                chain,
-                llm_client=llm_client,
-                verdict_agent=verdict_agent,
-                agent_name=f"chain-verdict-injection-{i:02d}",
-            )
-        is_vuln = (verdict.verdict == "vulnerable")
-        detail = None
-        if is_vuln:
-            detail = (f"INJ-GN-{i:02d} vulnerable: source={_source_text(chain)} "
-                      f"→ sink={chain.sink_call_site_id}")
-        await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
+    for i, (chain, verdict) in enumerate(zip(candidates, verdicts), start=1):
         concat_note = ""
         if chain.post_sanitize_concat:
             concat_note = "⚠️ post-sanitize concat detected — sanitizer considered ineffective"

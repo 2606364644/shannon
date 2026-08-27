@@ -5,20 +5,19 @@ verdict = (write tainted) ∧ (read single-hop vulnerable).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
-    judge_chain_verdict,
-    unadjudicated_verdict,
+    gather_verdicts_concurrently,
 )
 from supernova_core.code_index.second_order_join import (
     extract_second_order_candidates,
 )
 from supernova_core.code_index.storage_models import StorageWritePoint
-from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.models.queue_schemas import InjectionVulnerability
 
@@ -74,6 +73,7 @@ async def build_second_order_findings(
     reads_by_id: dict,
     source_provider: "Callable[[StorageWritePoint], bytes | None] | None" = None,
     progress_cb: ProgressCb = None,
+    semaphore: "asyncio.Semaphore | None" = None,
 ) -> list[InjectionVulnerability]:
     """Emit second-order findings for storage taint pairs.
 
@@ -115,33 +115,28 @@ async def build_second_order_findings(
     )
 
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
+
+    def _detail(i, cand, read_verdict):
+        """hit 行 = write_tainted AND read vulnerable（second_order 的合取语义）。"""
+        if (_looks_user_tainted(cand.write.written_expr)
+                and read_verdict.verdict == "vulnerable"):
+            return (f"2ND-GN-{i:02d} vulnerable: "
+                    f"write={cand.write.file_path}:{cand.write.line} "
+                    f"({cand.write.storage_token}) -> "
+                    f"read={cand.read.file_path}:{cand.read.line} "
+                    f"-> sink={cand.read_side_chain.sink_call_site_id}")
+        return None
+
+    # 逐链并行研判（chain_of 提取 read_side_chain；预算/agent_name/tick 语义不变）
+    verdicts = await gather_verdicts_concurrently(
+        candidates, vc="2nd", llm_client=llm_client,
+        verdict_agent=verdict_agent, emitter=emitter, detail_of=_detail,
+        chain_of=lambda cand: cand.read_side_chain, semaphore=semaphore)
     findings: list[InjectionVulnerability] = []
 
-    max_agents = get_chain_verdict_max_agents()
-    for i, cand in enumerate(candidates, start=1):
-        if i > max_agents:
-            read_verdict = unadjudicated_verdict(
-                cand.read_side_chain,
-                f"candidate chain beyond verdict budget ({max_agents}); "
-                f"left unadjudicated for human review")
-        else:
-            read_verdict = await judge_chain_verdict(
-                cand.read_side_chain, llm_client=llm_client,
-                verdict_agent=verdict_agent,
-                agent_name=f"chain-verdict-2nd-{i:02d}",
-            )
+    for i, (cand, read_verdict) in enumerate(zip(candidates, verdicts), start=1):
         write_tainted = _looks_user_tainted(cand.write.written_expr)
         is_vuln = write_tainted and (read_verdict.verdict == "vulnerable")
-
-        detail = (
-            f"2ND-GN-{i:02d} vulnerable: "
-            f"write={cand.write.file_path}:{cand.write.line} "
-            f"({cand.write.storage_token}) -> "
-            f"read={cand.read.file_path}:{cand.read.line} "
-            f"-> sink={cand.read_side_chain.sink_call_site_id}"
-            if is_vuln else None
-        )
-        await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
 
         if not is_vuln:
             continue

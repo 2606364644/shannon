@@ -184,6 +184,36 @@ def get_chain_verdict_max_agents() -> int:
     return val
 
 
+_CHAIN_VERDICT_CONCURRENCY_DEFAULT = 4
+
+
+def get_chain_verdict_concurrency() -> int:
+    """SUPERNOVA_CHAIN_VERDICT_CONCURRENCY（默认 4，经 ws_getenv 支持 per-workspace）：
+
+    chain-verdict 逐链并行研判的并发上限——builder 内候选链经
+    Semaphore+gather 并行判定（原本逐链串行，链多时拖慢 activity 且顶
+    15 分钟窗口）。每链一个多轮 verdict agent（CLI 子进程），默认 4 与
+    vuln agents 并行量级相当；链间无共享可变状态（agent_name 唯一 /
+    end_agent 锁内记账 / gather 保序），并发安全。
+
+    返回 env 值(int>=1)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY")
+    if raw is None:
+        return _CHAIN_VERDICT_CONCURRENCY_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY=%r not an int; "
+                     "falling back to %d", raw, _CHAIN_VERDICT_CONCURRENCY_DEFAULT)
+        return _CHAIN_VERDICT_CONCURRENCY_DEFAULT
+    if val < 1:
+        _log.warning("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY=%d must be >=1; "
+                     "falling back to %d", val, _CHAIN_VERDICT_CONCURRENCY_DEFAULT)
+        return _CHAIN_VERDICT_CONCURRENCY_DEFAULT
+    return val
+
+
 _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT = 300.0
 
 

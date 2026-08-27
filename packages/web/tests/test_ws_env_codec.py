@@ -256,3 +256,11 @@ def test_mask_credentials_preserves_layout_verbatim():
 
 def test_mask_credentials_ignores_empty_credential_values():
     assert mask_credentials("SUPERNOVA_OPENAI_API_KEY=\n") == "SUPERNOVA_OPENAI_API_KEY=\n"
+
+
+def test_parse_chain_verdict_concurrency_to_env_section():
+    """chain-verdict 并发数是扫描期键 → 进 env 段（工作区独立配置的准入）。"""
+    parsed = parse_env_text("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY=6\n")
+    assert parsed.env == {"SUPERNOVA_CHAIN_VERDICT_CONCURRENCY": "6"}
+    assert parsed.unknown == []
+    assert parsed.ineffective == []

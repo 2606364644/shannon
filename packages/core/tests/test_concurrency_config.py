@@ -3,6 +3,7 @@
 import logging
 
 from supernova_core.config.concurrency import (
+    get_chain_verdict_concurrency,
     get_chunk_max_calls,
     get_max_concurrent,
     get_per_call_timeout,
@@ -135,3 +136,44 @@ def test_chunk_max_calls_negative_falls_back(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert get_chunk_max_calls() == 100
     assert "must be >=1" in caplog.text
+
+
+def test_chain_verdict_concurrency_default_when_unset(monkeypatch):
+    """未设 → 默认 4（并行研判的保守起点，对齐 vuln agents 并行量级）。"""
+    monkeypatch.delenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", raising=False)
+    assert get_chain_verdict_concurrency() == 4
+
+
+def test_chain_verdict_concurrency_valid(monkeypatch):
+    """合法 int → 生效（ws 页 / 进程 env 均可调）。"""
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", "8")
+    assert get_chain_verdict_concurrency() == 8
+
+
+def test_chain_verdict_concurrency_non_int_falls_back(monkeypatch, caplog):
+    """非 int → 回落 4 + warning，不崩 scan（容错契约对齐 max_agents）。"""
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", "abc")
+    with caplog.at_level(logging.WARNING):
+        assert get_chain_verdict_concurrency() == 4
+    assert "not an int" in caplog.text
+
+
+def test_chain_verdict_concurrency_zero_falls_back(monkeypatch, caplog):
+    """0 → 回落 4 + warning（并发必须 >=1）。"""
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", "0")
+    with caplog.at_level(logging.WARNING):
+        assert get_chain_verdict_concurrency() == 4
+    assert "must be >=1" in caplog.text
+
+
+def test_chain_verdict_concurrency_ws_override(monkeypatch):
+    """读取点走 ws_getenv：工作区覆盖层优先于进程 env（per-workspace 不串台）。"""
+    from supernova_core.config import scan_env
+
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", "2")
+    scan_env.set_scan_env({"SUPERNOVA_CHAIN_VERDICT_CONCURRENCY": "9"})
+    try:
+        assert get_chain_verdict_concurrency() == 9
+    finally:
+        scan_env.clear_scan_env()
+    assert get_chain_verdict_concurrency() == 2  # 覆盖层清掉 → 回落进程 env

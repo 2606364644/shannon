@@ -359,3 +359,59 @@ async def test_second_order_injection_via_stored_sql_read():
     f = findings[0]
     assert f.ID.startswith("2ND-GN-")
     assert f.vulnerability_type == "second_order_injection"
+
+
+@pytest.mark.asyncio
+async def test_second_order_judges_concurrently():
+    """second_order 逐链并行研判（chain_of 提取 read_side_chain），ID 仍按链序。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    tokens = ["users", "orders", "sessions"]
+    flows, reads, writes, sinks = [], {}, [], {}
+    for k, tok in enumerate(tokens, start=1):
+        sid = f"C.java:P{k}:innerHTML:{5 + k}:0"
+        flows.append(TaintFlow(
+            flow_id=f"ep#{sid}", entry_point_id=f"C.java:P{k}:1",
+            source_param=tok, source_type=ParameterSource.STORAGE,
+            sink_call_site_id=sid, propagation_steps=[],
+        ))
+        reads[tok] = SourcePoint(
+            id=f"C.java:P{k}:1::{tok}::3", entry_point_id=f"C.java:P{k}:1",
+            param_name=tok, source_type=ParameterSource.STORAGE,
+            expression=f'"{tok}"', file_path="C.java", line=3,
+            rule_id="storage-read",
+        )
+        writes.append(StorageWritePoint(
+            id=f"w{k}", caller_id=f"C.java:W{k}:1", callee_name="save",
+            medium=StorageMedium.DB, storage_token=tok,
+            written_expr="row.bio", file_path="C.java", line=3 + k,
+            rule_id="java-orm-save",
+        ))
+        sinks[sid] = SinkCallSite(
+            id=sid, caller_id=f"C.java:P{k}", callee_name="innerHTML",
+            callee_receiver="el", category=SinkCategory.XSS,
+            sink_subtype="xss_innerhtml", file_path="C.java", line=5 + k,
+            column=10, dangerous_slots=[], rule_id="xss-innerhtml",
+        )
+    pgraph = ParameterPropagationGraph(taint_flows=flows, language_coverage=["java"])
+
+    state = {"in_flight": 0, "max_seen": 0}
+
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        state["in_flight"] += 1
+        state["max_seen"] = max(state["max_seen"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return SimpleNamespace(structured_output={
+            "verdict": "vulnerable", "witness_payload": "<svg>x</svg>",
+            "evidence_chain": "storage -> innerHTML", "title": "t",
+        }, text="")
+
+    findings = await build_second_order_findings(
+        writes, pgraph, verdict_agent=agent,
+        sink_call_sites=sinks, reads_by_id=reads,
+    )
+    assert len(findings) == 3
+    assert state["max_seen"] > 1
+    assert [f.ID for f in findings] == [f"2ND-GN-0{k}" for k in range(1, 4)]

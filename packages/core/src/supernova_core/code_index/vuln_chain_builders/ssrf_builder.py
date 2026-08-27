@@ -7,18 +7,17 @@ candidate chains and emits SsrfVulnerability records (with the path/verdict/
 witness_payload fields added in Task 2) for the merger.
 """
 
+import asyncio
 import logging
 from typing import Awaitable, Callable
 
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
+    gather_verdicts_concurrently,
     http_route_label,
-    judge_chain_verdict,
-    unadjudicated_verdict,
     placement_noted_params,
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
-from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     SinkCallSite,
@@ -38,6 +37,7 @@ async def build_ssrf_findings(
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
+    semaphore: "asyncio.Semaphore | None" = None,
 ) -> list[SsrfVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="ssrf", sink_call_sites=sink_call_sites,
@@ -53,27 +53,23 @@ async def build_ssrf_findings(
     # NodeGoat /learn 漏报)。vuln-ssrf.txt §8/枚举本就含 Open_Redirect(URL 大类),
     # GitNexus 产同枚举后 merger _finding_key(含 vulnerability_type)天然对齐。
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
+
+    def _detail(i, chain, verdict):
+        if verdict.verdict == "vulnerable":
+            return (f"SSRF-GN-{i:02d} vulnerable: source={chain.source_param} "
+                    f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
+        return None
+
+    # 逐链并行研判（Semaphore 并发 + gather 保序；预算/agent_name/tick 语义不变）
+    verdicts = await gather_verdicts_concurrently(
+        candidates, vc="ssrf", llm_client=llm_client, verdict_agent=verdict_agent,
+        emitter=emitter, detail_of=_detail, semaphore=semaphore)
     findings: list[SsrfVulnerability] = []
-    max_agents = get_chain_verdict_max_agents()
-    for i, chain in enumerate(candidates, start=1):
-        if i > max_agents:
-            verdict = unadjudicated_verdict(
-                chain, f"candidate chain beyond verdict budget ({max_agents}); "
-                       f"left unadjudicated for human review")
-        else:
-            verdict = await judge_chain_verdict(
-                chain, llm_client=llm_client, verdict_agent=verdict_agent,
-                agent_name=f"chain-verdict-ssrf-{i:02d}")
-        is_vuln = (verdict.verdict == "vulnerable")
+    for i, (chain, verdict) in enumerate(zip(candidates, verdicts), start=1):
         scs = (sink_call_sites or {}).get(chain.sink_call_site_id)
         vtype = ("Open_Redirect"
                  if scs is not None and scs.category == SinkCategory.REDIRECT
                  else "URL_Manipulation")
-        detail = None
-        if is_vuln:
-            detail = (f"SSRF-GN-{i:02d} vulnerable: source={chain.source_param} "
-                      f"({chain.entry_point_id}) → sink={chain.sink_call_site_id}")
-        await emitter.tick(detail=detail, hits_delta=1 if is_vuln else 0)
         # O2 前半：join entry_point 路由。source_endpoint 优先写 "METHOD /path"
         #（原来是 FuncBlock id 占位，对 PoC 层无路由价值）；join miss → 保持占位。
         route_label = http_route_label(chain.entry_point_id, entry_points)
