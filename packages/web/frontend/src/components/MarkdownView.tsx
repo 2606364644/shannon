@@ -20,6 +20,8 @@ import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { copyToClipboard } from "@/lib/clipboard";
 import { ChevronDown, ChevronRight, ListCollapse, List, LayoutPanelTop, LayoutGrid } from "lucide-react";
 import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
@@ -373,9 +375,14 @@ function makeProseComponents(t: TFunction) {
             variant="ghost"
             data-testid="copy-btn"
             className="copy-btn h-6 px-2 text-xs opacity-50 transition-opacity group-hover:opacity-100"
-            onClick={(e) => {
-              navigator.clipboard?.writeText(text);
-              e.currentTarget.textContent = "✓";
+            onClick={async (e) => {
+              // copyToClipboard：Clipboard API 不可用（http://IP 非安全上下文）时 fallback
+              // execCommand；旧 `clipboard?.writeText` 静默无操作还把按钮改成 ✓（假成功）。
+              // currentTarget 须 await 前捕获（React 合成事件传播结束后置 null）。
+              const btn = e.currentTarget;
+              const ok = await copyToClipboard(text);
+              if (ok) btn.textContent = "✓";
+              else toast.error(t("common.copyFailed"));
             }}
           >
             {t("markdown.copy")}

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const FEEDBACK_MS = 1200;
 
@@ -20,11 +21,14 @@ export function CopyButton({ value, className, ariaLabel, testId }: {
   const Icon = done ? Check : Copy;
 
   async function onCopy() {
-    try {
-      await navigator.clipboard?.writeText(value);
+    // copyToClipboard：Clipboard API 不可用（http://IP 非安全上下文）时 fallback
+    // execCommand（见 lib/clipboard 注释）；旧实现 `clipboard?.writeText` 在该场景
+    // 静默无操作还切 Check 图标（假成功）。
+    const ok = await copyToClipboard(value);
+    if (ok) {
       setDone(true);
       setTimeout(() => setDone(false), FEEDBACK_MS);
-    } catch {
+    } else {
       toast.error(t("common.copyFailed"));
     }
   }

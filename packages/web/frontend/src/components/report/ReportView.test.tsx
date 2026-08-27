@@ -432,6 +432,31 @@ describe("VulnerabilityCard", () => {
     expect(copied).toContain("-H 'Cookie: connect.sid=abc'");
     expect(copied).toContain("memo=<img src=x onerror=alert(1)>");
   });
+
+  // 非安全上下文（http://内网IP:7878 部署访问）下 navigator.clipboard === undefined：
+  // 旧实现 `clipboard?.writeText` 静默无操作还切 Check 图标（假成功），用户报告
+  // 「复制不生效」真根因。守护 fallback 到 execCommand 路径。
+  it("非安全上下文：clipboard 不可用 → copy-curl 走 execCommand fallback 仍复制成功", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true, writable: true });
+    let captured = "";
+    const exec = vi.fn(() => {
+      captured = document.querySelector("textarea")?.value ?? "";
+      return true;
+    });
+    document.execCommand = exec as unknown as typeof document.execCommand;
+    try {
+      render(<VulnerabilityCard v={vuln} />);
+      fireEvent.click(screen.getByTestId("copy-curl"));
+      expect(exec).toHaveBeenCalledWith("copy");
+      expect(captured).toContain("curl -X POST 'http://t/memos'");
+      // 复制成功 → aria-label 切「已复制」（真实成功，非旧实现的假成功）
+      await waitFor(() =>
+        expect(screen.getByTestId("copy-curl")).toHaveAttribute("aria-label", "已复制"),
+      );
+    } finally {
+      delete (document as { execCommand?: unknown }).execCommand;
+    }
+  });
 });
 
 describe("buildRawHttp（Burp 格式确定性拼装，导出纯函数）", () => {

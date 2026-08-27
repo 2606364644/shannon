@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import i18n from "@/i18n";
 import { MarkdownView, extractVulnIds } from "./MarkdownView";
 
@@ -368,6 +368,29 @@ body.
     expect(pre).not.toBeNull();
     expect(pre?.querySelector(".copy-btn")).not.toBeNull();
     expect(container.querySelector('[data-testid="code-lang"]')?.textContent).toBe("bash");
+  });
+
+  // 非安全上下文（http://内网IP:7878 部署访问）下 navigator.clipboard === undefined：
+  // 旧实现 `clipboard?.writeText` 静默无操作还把按钮改成 ✓（假成功），用户报告
+  // 「复制不生效」真根因。守护 fallback 到 execCommand 路径。
+  it("非安全上下文：clipboard 不可用 → copy-btn 走 execCommand fallback 复制代码块文本", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true, writable: true });
+    let captured = "";
+    const exec = vi.fn(() => {
+      captured = document.querySelector("textarea")?.value ?? "";
+      return true;
+    });
+    document.execCommand = exec as unknown as typeof document.execCommand;
+    try {
+      const { container } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
+      fireEvent.click(container.querySelector(".copy-btn")!);
+      expect(exec).toHaveBeenCalledWith("copy");
+      expect(captured).toBe("exit 0\n");
+      // 复制成功 → 按钮文字切 ✓（真实成功）
+      await waitFor(() => expect(container.querySelector(".copy-btn")?.textContent).toBe("✓"));
+    } finally {
+      delete (document as { execCommand?: unknown }).execCommand;
+    }
   });
 
   it("语言角标与复制按钮并排同一工具栏（矮代码块不垂直重叠）", () => {
