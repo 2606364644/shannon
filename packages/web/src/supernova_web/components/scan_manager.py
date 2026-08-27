@@ -3101,10 +3101,26 @@ class ScanManager:
         成功路径黑盒 finalize 已写 scan_end → no-op（**不写第二条**，核心不变量）；
         异常/跳过/提交失败 → 补写 scan_end 防 _watch 永久 tail（_watch 纯 tail 认 scan_end 退出）。
         _watch 的 finally 兜底（"worker 未写 scan_end" 补写）仍作最后一道防线。
+
+        假完成保险丝（2026-08-27 NodeGoat-20260827-152204 事故）：combined 扫描
+        bb_phase 停在 precheck/pending + 零 completed_agents + 无白盒产物时，收口
+        completed 必为假（白盒从未启动；正常完成必有 agent/产物双信号）——降级
+        failed + bb_failure_detail 落盘。防任何新路径把「从未开始」标成「已完成」
+        （completed 不可续跑，resume spec 状态集排除 = 死局）。
         """
         if self._has_scan_end(scan_dir / "events.ndjson"):
             return
-        session_status = status if status in {"completed", "failed", "cancelled", "crashed", "timeout"} else None
+        if status == "completed":
+            fuse_reason = self._fake_combined_completion_reason(scan_dir)
+            if fuse_reason:
+                SessionManager(scan_dir.parent).update_session(scan_dir, {
+                    "bb_failure_point": "fake_completed",
+                    "bb_failure_detail": fuse_reason})
+                _log.warning(
+                    "fake-completion fuse tripped for %s: demoted scan_end to failed",
+                    scan_dir.name)
+                status = "failed"
+        session_status = status if status in {"completed", "failed", "cancelled", "crashed", "timeout", "interrupted"} else None
         tail = f"combined {status}"
         if status == "failed":
             # 失败详情透出（precheck 落的 bb_failure_detail / 编排器落的 bb_reason）：
@@ -3119,6 +3135,31 @@ class ScanManager:
         await self._write_scan_end(
             scan_dir / "events.ndjson", status, 0, tail,
             session_status=session_status, scan_dir=scan_dir)
+
+    def _fake_combined_completion_reason(self, scan_dir: Path) -> str | None:
+        """假完成保险丝判定（_ensure_scan_end 消费）：返降级原因 str（拦）或 None（放行）。
+
+        拦截条件（合取，任一不满足即放行）：combined + bb_phase∈{precheck,pending} 前置
+        阶段 + completed_agents 空 + deliverables/whitebox 产物不存在。零信号缺失容错：
+        session 读失败 → 放行（保险丝只兜「从未开始」，不赌「读不到」）。
+        已有 bb_failure_detail（上层已落过更具体原因，如 reconcile 的 authcheck 分流）
+        → 沿用之，不覆盖。
+        """
+        try:
+            data = SessionManager(scan_dir.parent).get_session_data(scan_dir)
+        except Exception:  # noqa: BLE001 - 读不到不拦（保守放行）
+            return None
+        if not data.get("combined"):
+            return None
+        if data.get("bb_phase") not in ("precheck", "pending"):
+            return None
+        if data.get("completed_agents"):
+            return None
+        if (scan_dir / "deliverables" / "whitebox").exists():
+            return None
+        return data.get("bb_failure_detail") or (
+            "收口校验：组合扫描被标记 completed 时零 agent 产出、无白盒产物"
+            f"（bb_phase={data.get('bb_phase')}）——白盒从未启动，判定为假完成并降级 failed")
 
     def _scan_row_is_correlation(self, scan_dir: Path) -> bool:
         """scan 行是否 correlation 主行（C3 fix ①：段③就绪门/进度分母按行类型分流）。
@@ -3291,6 +3332,10 @@ class ScanManager:
           （防 bb_runs 永久卡非终态，堵 delete/加 run 的状态门）。
         - 任意 bb_phase + workflow 仍 RUNNING → 不干预（让 temporal 自然完成）。
         - 任意 bb_phase + workflow 不活跃 + events 无 scan_end → _ensure_scan_end 补写。
+        - precheck/pending + 主 workflow 不存在（2026-08-27 假完成事故分流）→ 查
+          -authcheck workflow：RUNNING 不收口；FAILED → failed + 失败尾部透出；
+          其余 → interrupted（编排丢失）。绝不默认 completed——「主 workflow 不存在」
+          在这个阶段是「从未提交」不是「已完成」（completed 不可续跑 = 死局）。
 
         **非组合扫描立即返回（零回归）**——纯白盒/纯黑盒恢复路径不受影响。
 
@@ -3316,6 +3361,7 @@ class ScanManager:
 
         bb_runs = data.get("bb_runs") or []
         wf_active = False  # 白盒或某 run 的 workflow 仍 RUNNING → 跳过 scan_end 补写
+        final_status = "completed"  # precheck 分流改写（failed/interrupted）；其余维持默认
 
         try:
             # 白盒 workflow：仍 running → 不干预（让 temporal 自然完成写 scan_end）。
@@ -3323,6 +3369,32 @@ class ScanManager:
                 self._resolve_workflow_id(ws, scan_id))
             if wb_status == "running":
                 wf_active = True
+            elif data.get("bb_phase") in ("precheck", "pending"):
+                # 假完成事故分流（2026-08-27 NodeGoat-20260827-152204）：主 workflow
+                # 不在跑 + bb_phase 停在 precheck/pending →「主 workflow 不存在」的
+                # 语义是「白盒从未提交」（precheck 未过 / 提交瞬间编排丢失），不是
+                # 「已完成」。查 authcheck workflow（对账器此前不认识的 -authcheck
+                # 后缀，precheck 阶段唯一在跑的 workflow）定收口语义：
+                #   RUNNING → 不收口（worker 死了但 workflow 还在等 start_to_close
+                #             超时窗口，收口会早于终态；等下次 reconcile 再处理）；
+                #   FAILED  → failed + authcheck 失败尾部透出（stderr_tail，live 页
+                #             即刻可读，对症事故里 3 次 LLM 超时的 CancelledError）；
+                #   其余    → interrupted（编排丢失，留给 resume 续跑口——completed
+                #             是死局，resume spec 状态集排除 completed）。
+                ac_status = await self._query_workflow_status(
+                    f"{ws}-{scan_id}-authcheck")
+                if ac_status == "running":
+                    wf_active = True
+                elif ac_status == "failed":
+                    SessionManager(scan_dir.parent).update_session(scan_dir, {
+                        "bb_failure_point": "authcheck",
+                        "bb_failure_detail": self._authcheck_failure_tail(scan_dir)})
+                    final_status = "failed"
+                else:
+                    SessionManager(scan_dir.parent).update_session(scan_dir, {
+                        "bb_reason": "编排随 web 重启丢失于白盒提交前后"
+                                     "（authcheck 已结束，白盒未启动）"})
+                    final_status = "interrupted"
             # 版本化 run（spec §7.5）：逐 run 探测其 -bb-{K} workflow 状态兜底。
             for r in bb_runs:
                 run_id = r.get("run_id")
@@ -3355,10 +3427,25 @@ class ScanManager:
             # workflow 仍活跃（wf_active=True）→ 跳过（让 temporal 自然完成写 scan_end）。
             if not wf_active:
                 try:
-                    await self._ensure_scan_end(scan_dir)
+                    await self._ensure_scan_end(scan_dir, status=final_status)
                 except Exception:  # noqa: BLE001 - finally 内 best-effort
                     _log.exception(
                         "_ensure_scan_end failed in reconcile finally for %s", scan_dir)
+
+    @staticmethod
+    def _authcheck_failure_tail(scan_dir: Path) -> str:
+        """authcheck 失败原因尾部（.authcheck/activity_failures.log 末 2048 字节）。
+
+        事故形态：3 次 LLM 流挂死超时的 CancelledError 栈就落在这个 scratch 子目录
+        （orphan_reconciler._failure_tail 只读任务根的 activity_failures.log，读不到
+        authcheck 的）。供 _reconcile_combined_scan 的 authcheck-FAILED 分流落
+        bb_failure_detail → _ensure_scan_end(failed) 拼 stderr_tail → live 页可见。
+        """
+        f = scan_dir / ".authcheck" / "activity_failures.log"
+        if not f.exists():
+            return "authcheck workflow failed（无 activity_failures.log 可读）"
+        return ("认证预验证（authcheck）workflow 失败；日志尾部：\n"
+                + f.read_text("utf-8", errors="replace")[-2048:])
 
     def _kick_combined_reconcile(self, scan_dir: Path) -> None:
         """Fire-and-forget 组合扫描恢复（review fix #2：非阻塞，防 startup 阻塞）。

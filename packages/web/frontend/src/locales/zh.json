@@ -860,7 +860,11 @@
       "breakpointNotRun": "未跑到",
       "breakpointStepDone": "缓存命中",
       "breakpointStepStale": "已变化",
-      "breakpointStepMissing": "无缓存"
+      "breakpointStepMissing": "无缓存",
+      "fakeCompleted": {
+        "title": "扫描标记为已完成，但没有任何 agent 产出",
+        "hint": "白盒从未真正启动（{{done}}/{{total}} 个 agent 完成）——扫描可能在中途被异常收口成「已完成」，报告为空。建议重新提交扫描，或切到日志/事件页排查。"
+      }
     },
     "errorBoundary": {
       "title": "该模块加载出错",

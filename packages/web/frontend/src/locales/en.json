@@ -860,7 +860,11 @@
       "breakpointNotRun": "Not reached",
       "breakpointStepDone": "cached",
       "breakpointStepStale": "stale",
-      "breakpointStepMissing": "no cache"
+      "breakpointStepMissing": "no cache",
+      "fakeCompleted": {
+        "title": "Scan marked completed, but no agent produced results",
+        "hint": "Whitebox never actually started ({{done}}/{{total}} agents completed) — the scan may have been closed out as \"completed\" mid-flight, leaving the report empty. Consider resubmitting the scan or checking the logs/events tab."
+      }
     },
     "errorBoundary": {
       "title": "This section failed to load",

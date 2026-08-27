@@ -489,6 +489,25 @@ export default function ScanDetail() {
             detail={meta.bb_failure_detail} />
         </div>
       )}
+      {/* 假完成警告横幅（2026-08-27 NodeGoat 事故最后防线）：completed 但白盒从未
+          启动（期望 agent>0 且 0 完成）——收口异常把「从未开始」标成「已完成」，
+          报告全空且 completed 不可续跑。后端已有 reconcile 分流 + _ensure_scan_end
+          保险丝两道防线，此处兜历史数据/未来漏网路径。 */}
+      {!loading && status === "completed" && isCombined &&
+        (meta?.expected_agents?.whitebox ?? 0) > 0 &&
+        (meta?.completed_agents?.length ?? 0) === 0 && (
+        <div
+          role="alert"
+          data-testid="fake-completed-banner"
+          className={`rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400${isFlexLayout ? " shrink-0" : ""}`}
+        >
+          <div className="font-medium">{t("workspaceDetail.scans.fakeCompleted.title")}</div>
+          <div className="mt-0.5 text-xs opacity-90">
+            {t("workspaceDetail.scans.fakeCompleted.hint", {
+              done: 0, total: meta?.expected_agents?.whitebox ?? 0 })}
+          </div>
+        </div>
+      )}
       {/* 进度概览 + scan tabs 合成一个 sticky 块固定在 TopBar 下沿（top-12）：overview/report/
           deliverables 靠 window 滚动，固定后长内容滚动时当前阶段/步级/Agent 进度始终可见
           （spec 进度两层粒度 · 详情页细粒度；组合黑盒段自动读选中 run 的 events）。

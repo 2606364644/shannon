@@ -25,7 +25,8 @@ def mgr(tmp_path):
 def _make_combined(tmp_path, ws="ws", scan_id="scan-1", *, with_scan_end=False):
     """建组合 scan_dir（<tmp>/<ws>/scans/<scan_id>/）+ session.json + events.ndjson。
 
-    combined=True（run 状态由 ScanStore.create_blackbox_run 写 bb_runs[]）。
+    combined=True（run 状态由 ScanStore.create_blackbox_run 写 bb_runs[]）。session 无
+    bb_phase 字段（旧形态）→ reconcile 不走 precheck 分流，finally 默认 completed 收口。
     """
     scan_dir = tmp_path / ws / "scans" / scan_id
     scan_dir.mkdir(parents=True)
@@ -97,7 +98,7 @@ async def test_reconcile_ensures_scan_end_when_absent(mgr, tmp_path):
                       new=AsyncMock(return_value=None)), \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
         await mgr._reconcile_combined_scan(scan_dir)
-    ese.assert_awaited_once_with(scan_dir)
+    ese.assert_awaited_once_with(scan_dir, status="completed")
 
 
 # ── events 有 scan_end → 幂等 no-op ──────────────────────────────────────────
@@ -126,7 +127,7 @@ async def test_reconcile_report_raises_still_ensures_scan_end(mgr, tmp_path):
                       new=AsyncMock(side_effect=RuntimeError("report boom"))), \
          patch.object(mgr, "_ensure_scan_end", new=AsyncMock()) as ese:
         await mgr._reconcile_combined_scan(scan_dir)  # 不应 raise
-    ese.assert_awaited_once_with(scan_dir)
+    ese.assert_awaited_once_with(scan_dir, status="completed")
 
 
 # ── 逐 run：多 run 各自探测 ─────────────────────────────────────────────────
@@ -168,7 +169,7 @@ async def test_reconcile_not_found_run_marked_failed(mgr, tmp_path):
     runs = store.list_blackbox_runs("ws", "scan-1")
     assert runs[-1]["status"] == "failed"
     assert runs[-1].get("reason") == "编排中断（web 重启），run 未完成"
-    ese.assert_awaited_once_with(scan_dir)  # 无活跃 workflow → 补 scan_end
+    ese.assert_awaited_once_with(scan_dir, status="completed")  # 无活跃 workflow → 补 scan_end
 
 
 # ── orphan_reconciler 接入：reconcile_orphaned → kick 组合恢复 ──────────────

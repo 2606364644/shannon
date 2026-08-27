@@ -227,6 +227,11 @@ export interface SessionData {
   // 历史扫描无此键 -> null，横幅降级为只显示 reason 分类。
   bb_failure_point?: string | null;
   bb_failure_detail?: string | null;
+  // 进度分母/分子（_scan_detail 透传）：expected_agents.whitebox>0 且 completed_agents
+  // 空 + status=completed → 假完成警告横幅（2026-08-27 事故：白盒从未启动却被收口
+  // completed，报告全空用户无从排查）。旧后端/纯白盒可能缺 -> 可选。
+  expected_agents?: { whitebox?: number; blackbox?: number } | null;
+  completed_agents?: string[] | null;
   progress_pct?: number | null;
   // 重跑预填用（_scan_detail 补返）：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
   source_repo?: string | null;
