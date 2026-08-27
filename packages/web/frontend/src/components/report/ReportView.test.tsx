@@ -57,15 +57,11 @@ const vuln: ReportVulnerability = {
     { label: "落库", file: "app/models/memo.js", line: 8, protection: "无" },
   ],
   poc: {
-    witness_payload: '<img src=x onerror=alert(1)>',
-    request: {
-      method: "POST",
-      url: "http://t/memos",
-      headers: { Cookie: "connect.sid=abc" },
-      body: "memo=<img src=x onerror=alert(1)>",
-    },
+    // spec 2026-08-27-poc-agent-direct-design：poc-agent 直产文本 schema
     preconditions: "需登录（connect.sid）",
-    expected_response: { indicator: "响应含未转义 payload", success_criteria: "onerror 触发" },
+    expected_response: "响应含未转义 payload（onerror 触发）",
+    steps: ["plant via POST /memos", "victim opens /memos"],
+    self_check: "pass",
     curl: "curl -X POST 'http://t/memos' -d 'memo=<img src=x onerror=alert(1)>'",
     raw_http: null,
   },
@@ -343,16 +339,29 @@ describe("VulnerabilityCard", () => {
     fireEvent.click(within(poc).getByTestId("copy-curl"));
     expect(writeText).toHaveBeenCalledWith("curl -X POST 'http://t/memos' -d 'memo=<img src=x onerror=alert(1)>'");
     // 前置条件 / 预期响应 / witness 保留
-    expect(within(poc).getByTestId("poc-witness").textContent).toContain("<img src=x onerror=alert(1)>");
+    expect(within(poc).getByTestId("poc-steps").textContent).toContain("plant via POST /memos");
     expect(within(poc).getByText(/需登录/)).toBeInTheDocument();
     expect(within(poc).getByText(/响应含未转义 payload/)).toBeInTheDocument();
     expect(within(poc).getByText(/onerror 触发/)).toBeInTheDocument();
   });
 
+  // 黑盒形态 poc（request 对象、无 curl/raw_http 文本）——验证前端确定性拼兜底
+  // （黑盒重放证据仍走此路径，spec 2026-08-27-poc-agent-direct-design 非目标不动）
+  const blackboxPoc = {
+    request: {
+      method: "POST",
+      url: "http://t/memos",
+      headers: { Cookie: "connect.sid=abc" },
+      body: "memo=<img src=x onerror=alert(1)>",
+    },
+    preconditions: "需登录",
+    expected_response: { indicator: "响应含未转义 payload", success_criteria: null },
+  };
+
   it("POC Burp tab：raw_http 缺 → 由 request 确定性拼 raw HTTP（方法行 + Host + headers + body）", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
-    render(<VulnerabilityCard v={vuln} />);
+    render(<VulnerabilityCard v={{ ...vuln, poc: blackboxPoc }} />);
     const poc = screen.getByTestId("vuln-poc");
     fireEvent.click(within(poc).getByTestId("poc-tab-burp"));
     const burp = within(poc).getByTestId("poc-burp");
@@ -417,12 +426,52 @@ describe("VulnerabilityCard", () => {
     expect(screen.getByText(/动态实测|实测验证/)).toBeInTheDocument();
   });
 
+  it("验证步骤：steps 非空 → 分步骤时间线，每步 action + 命令代码块 + 复制按钮 + result 观察行", () => {
+    const v: ReportVulnerability = {
+      ...dynamicVuln,
+      evidence: {
+        verification: "dynamic",
+        dynamic_evidence: "HTTP/1.1 200 OK\n{\"uid\": 1000}",
+        verdict: "exploited",
+        steps: [
+          {
+            action: "Login and capture session cookie",
+            command: "curl -s -c jar http://t/login -d 'user=a'",
+            result: "302 Set-Cookie connect.sid",
+          },
+          { action: "Post memo with witness payload", result: "reflected unencoded" },
+        ],
+      },
+    };
+    render(<VulnerabilityCard v={v} />);
+    const sec = screen.getByTestId("vuln-evidence");
+    const items = within(sec).getAllByTestId("verify-step");
+    expect(items.length).toBe(2);
+    expect(items[0].textContent).toContain("Login and capture session cookie");
+    // 命令进独立代码块（可复制人工复验）
+    const cmds = within(sec).getAllByTestId("verify-step-command");
+    expect(cmds.length).toBe(1);
+    expect(cmds[0].textContent).toContain("curl -s -c jar http://t/login");
+    expect(within(sec).getByTestId("copy-step-command")).toBeInTheDocument();
+    // result 观察行跟随
+    expect(items[0].textContent).toContain("302 Set-Cookie connect.sid");
+    expect(items[1].textContent).toContain("reflected unencoded");
+    // 实测结论（dynamic_evidence）保留
+    expect(screen.getByTestId("dynamic-evidence").textContent).toContain("uid");
+  });
+
+  it("验证步骤：steps 空（白盒卡/旧数据）→ 无步骤时间线，evidence 节原样（零变化）", () => {
+    render(<VulnerabilityCard v={vuln} />);
+    const sec = screen.getByTestId("vuln-evidence");
+    expect(sec.querySelector('[data-testid="verify-step"]')).toBeNull();
+  });
+
   it("curl 缺失时由 request 确定性拼出复制内容（渲染层格式化，非推断）", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render(
       <VulnerabilityCard
-        v={{ ...vuln, poc: { ...vuln.poc!, curl: null } }}
+        v={{ ...vuln, poc: blackboxPoc }}
       />,
     );
     fireEvent.click(screen.getByTestId("copy-curl"));

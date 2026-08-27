@@ -98,7 +98,7 @@ Respond with a JSON object (no prose outside JSON):
 {
   "pocs": [
     {
-      "vulnerability_id": "XSS-VULN-01 (MUST be the original ID, unchanged)",
+      "vulnerability_id": "<original ID from the queue, unchanged>",
       "curl": "full copy-paste reproducible curl with auth placeholders; omit for browser-only delivery",
       "raw_http": "Burp Repeater raw request for the SAME request as curl; omit if no curl",
       "steps": ["ordered delivery steps (plant → trigger / browser navigation with login state)"],
