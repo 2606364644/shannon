@@ -7,9 +7,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Empty } from "@/components/Empty";
 import { CreateWorkspaceDialog } from "@/components/CreateWorkspaceDialog";
-import { listAllScans } from "@/api/client";
+import { listAllScans, scanEventsUrl } from "@/api/client";
 import type { ScanSummary } from "@/api/types";
 import { useWorkspaces } from "@/api/useWorkspaces";
+import { useEventSource } from "@/api/useEventSource";
+import { dashboardReducer, emptyState } from "@/state/dashboardReducer";
+import { liveScanPct } from "@/state/liveScanPct";
 import { fmtCost, currencySymbol } from "@/utils/currency";
 import { fmtTime, fmtElapsed } from "@/utils/format";
 import { scanSegmentLabel } from "@/routes/WorkspaceDetail/ScanProgressBadge";
@@ -356,6 +359,43 @@ function Sig({ value, label, live, warn }: { value: ReactNode; label: string; li
  *  运行进度条 fill 统一 cyan（运行=cyan 全局语义）；空态（0 发现）是正向时刻——绿色盾形
  *  对勾。meta 区图标统计与切换器抽屉同语言。整卡可点进工作区页；运行中 mini 行可点直达
  *  该扫描 live（stopPropagation）。totalVulns 由 tiles 分组层预算（横幅去向注记同源）。 */
+/** 磁贴运行中扫描 mini 行（2026-08-27 列表进度不动修复；2026-08-28 组合口径）：
+ *  SSE 归并流 fold 实时进度——liveScanPct 组合扫描按 src 源标记三阶段加权（白盒满格
+ *  =55% 而非 100%，黑盒段 55→100），纯白盒/correlation 当前 phase 直读（与 ScanList
+ *  同口径）；无实时数据回退 progress_pct。抽行组件：SSE 订阅/Fold 需要 hook，
+ *  不能留在 WsTile 的 map 内。 */
+function TileRunRow({ ws, scan }: { ws: string; scan: ScanSummary }) {
+  const { t } = useTranslation();
+  const sseUrl = scanEventsUrl(ws, scan.scan_id);
+  const { events } = useEventSource(sseUrl);
+  const liveState = useMemo(
+    () => events.reduce(dashboardReducer, emptyState()),
+    [events],
+  );
+  // 组合口径（2026-08-28）：liveScanPct 按 src 源标记套三阶段加权（白盒满格=55%
+  // 而非 100%，黑盒段 55→100）；纯白盒/correlation 保持当前 phase 直读。
+  // liveState 仍保留——current_phase 供段标签。
+  const livePct = useMemo(() => liveScanPct(events, scan), [events, scan]);
+  const pct = livePct ?? Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
+  return (
+    <Link
+      to={`/p/${ws}/scans/${scan.scan_id}/live`}
+      onClick={(e) => e.stopPropagation()}
+      className="grid gap-1 font-mono text-[11px]"
+    >
+      <span className="flex items-center justify-between gap-2.5">
+        <span className="truncate text-foreground transition-colors hover:text-primary">{scan.workflow_id ?? scan.scan_id}</span>
+        <span data-testid={`tile-run-meta-${scan.scan_id}`} className="shrink-0 text-muted-foreground">
+          <span>{pct}%</span> · {scanSegmentLabel(scan, liveState.current_phase, t)} · {fmtElapsed(scan.created_at)}
+        </span>
+      </span>
+      <span className="block h-[3px] overflow-hidden rounded-full bg-border">
+        <span className="block h-full rounded-full bg-cyan" style={{ width: `${pct}%` }} />
+      </span>
+    </Link>
+  );
+}
+
 function WsTile({ name, scans, latest, totalVulns }: {
   name: string; scans: ScanSummary[]; latest?: ScanSummary; totalVulns: number;
 }) {
@@ -426,30 +466,13 @@ function WsTile({ name, scans, latest, totalVulns }: {
         </div>
       )}
 
-      {/* 活动区：运行中扫描 mini 行（可点直达实时；进度 fill cyan=运行语义） */}
+      {/* 活动区：运行中扫描 mini 行（可点直达实时；进度 fill cyan=运行语义）。
+          TileRunRow 内建 SSE fold 实时进度（2026-08-27 修复），段标签同样吃实时 phase。 */}
       {running.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-border/70 px-4 pb-2.5 pt-2">
-          {running.map((s) => {
-            const pct = Math.max(0, Math.min(100, Math.round(s.progress_pct ?? 0)));
-            return (
-              <Link
-                key={s.scan_id}
-                to={`/p/${name}/scans/${s.scan_id}/live`}
-                onClick={(e) => e.stopPropagation()}
-                className="grid gap-1 font-mono text-[11px]"
-              >
-                <span className="flex items-center justify-between gap-2.5">
-                  <span className="truncate text-foreground transition-colors hover:text-primary">{s.workflow_id ?? s.scan_id}</span>
-                  <span data-testid={`tile-run-meta-${s.scan_id}`} className="shrink-0 text-muted-foreground">
-                    <span>{pct}%</span> · {scanSegmentLabel(s, null, t)} · {fmtElapsed(s.created_at)}
-                  </span>
-                </span>
-                <span className="block h-[3px] overflow-hidden rounded-full bg-border">
-                  <span className="block h-full rounded-full bg-cyan" style={{ width: `${pct}%` }} />
-                </span>
-              </Link>
-            );
-          })}
+          {running.map((s) => (
+            <TileRunRow key={s.scan_id} ws={name} scan={s} />
+          ))}
         </div>
       )}
 

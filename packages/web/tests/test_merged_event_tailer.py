@@ -297,6 +297,51 @@ async def test_resume_from_composite_last_event_id(tmp_path):
     assert c2.events[-1]["type"] == "scan_end"  # wb 终态照常扣发收尾
 
 
+# ---- 源标记注入（组合扫描列表进度三阶段加权判段，2026-08-28） ----
+
+@pytest.mark.asyncio
+async def test_events_carry_src_label(tmp_path):
+    """转发事件带 src 源标记（ac/wb/run-K）：组合扫描列表行走三阶段加权
+    （ac 0-5% / wb 5+50% / run-K 55+100%）需要判「当前段」，而 phase 名判据被
+    authcheck 撞破——独立 AuthValidationWorkflow（ac 源）与黑盒 run 的 auth-validation
+    段发同名 PhaseEvent(phase="auth-validation")，前端无从区分。源标记是 tailer
+    本就知道的可靠信号（run_end 改写/synthetic 合成/wb 扣发 scan_end 同样带）。
+    """
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    _append(scan / "authcheck-events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T13:29:41Z", "message": "ac-1"}))
+    _append(scan / "events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T13:36:46Z", "message": "wb-1"})
+            + _line({"type": "scan_end", "ts": "2026-08-17T15:31:56Z", "status": "failed"}))
+    _append(scan / "blackbox-runs/run-1/events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T15:41:00Z", "message": "bb-1"})
+            + _line({"type": "scan_end", "ts": "2026-08-17T16:04:21Z", "status": "completed"}))
+    c = await _collect(MergedEventTailer(scan))
+    by_msg = {e["message"]: e for e in c.events if e.get("message")}
+    assert by_msg["ac-1"]["src"] == "ac"
+    assert by_msg["wb-1"]["src"] == "wb"
+    assert by_msg["bb-1"]["src"] == "run-1"
+    # run 收尾改写（run_end）与 wb 终态扣发（scan_end）同样带源标记
+    run_end = next(e for e in c.events if e["type"] == "run_end")
+    assert run_end["src"] == "run-1"
+    assert c.events[-1]["type"] == "scan_end" and c.events[-1]["src"] == "wb"
+
+
+@pytest.mark.asyncio
+async def test_synthetic_run_end_carries_src_label(tmp_path):
+    """空闲兜底合成的 run_end 同样带 src 标记（前端判段不因合成事件断链）。"""
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    _append(scan / "events.ndjson",
+            _line({"type": "scan_end", "ts": "2026-08-17T15:31:56Z", "status": "cancelled"}))
+    _append(scan / "blackbox-runs/run-1/events.ndjson",
+            _line({"type": "InfoEvent", "ts": "2026-08-17T15:29:00Z", "message": "bb"}))
+    c = await _collect(MergedEventTailer(scan), run_idle_timeout=0.05)
+    syn = next(e for e in c.events if e.get("synthetic"))
+    assert syn["type"] == "run_end" and syn["src"] == "run-1"
+
+
 @pytest.mark.asyncio
 async def test_truncated_file_resets_and_replays(tmp_path):
     """源文件被截断/重建（run 删除重建）→ offset 归零重读，流仍能收尾。"""

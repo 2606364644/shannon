@@ -5,6 +5,10 @@
 - **源**：``ac``=authcheck-events.ndjson（认证预检）、``wb``=events.ndjson（任务根，
   组合扫描即白盒段，独立黑盒扫描即其本体）、``run-K``=blackbox-runs/run-K/events.ndjson。
   run 目录周期重扫，流开着时新增 run（rerun/add run）自动纳入。
+- **源标记**：转发的事件统一注入 ``src``（=源 label）。前端判「组合扫描当前段」不能靠
+  phase 名——authcheck（独立 AuthValidationWorkflow）与黑盒 run 的 auth-validation 段
+  发同名 PhaseEvent，无从区分；源标记是 tailer 本就知道的可靠信号（2026-08-28 组合
+  扫描列表进度三阶段加权判段）。
 - **SSE id = 全源 emit offset 快照**（``ac=0&wb=123&run-1=456``）：重连只需单个
   Last-Event-ID 即可恢复每源各自断点，无服务端会话状态；重放幂等（前端按 id 去重）。
   offset 全程按**字节**计（ndjson 含多字节 UTF-8，按字符计会漂移丢事件）。
@@ -175,7 +179,7 @@ class MergedEventTailer:
                             {"ts": datetime.now().isoformat(),
                              "category": "CONTROL", "type": "run_end",
                              "run": s.label, "status": "unknown",
-                             "synthetic": True},
+                             "synthetic": True, "src": s.label},
                             self._id_snapshot())
                 closable = (self._held_end is not None
                             and all(s.seen_end for s in runs))
@@ -183,7 +187,8 @@ class MergedEventTailer:
                 if closable_since is None:
                     closable_since = loop.time()
                 elif loop.time() - closable_since >= close_grace:
-                    await on_event(self._held_end, self._id_snapshot())
+                    await on_event(dict(self._held_end, src="wb"),
+                                   self._id_snapshot())
                     return
             else:
                 closable_since = None
@@ -251,11 +256,12 @@ class MergedEventTailer:
                     source.seen_end = True
                     continue
                 # run-K 收尾：改写 type 转发（对全量流非终态），标该 run 终态
-                await on_event(dict(data, type="run_end", run=source.label),
+                await on_event(dict(data, type="run_end", run=source.label,
+                                    src=source.label),
                                self._id_snapshot())
                 source.seen_end = True
                 emitted += 1
                 continue
-            await on_event(data, self._id_snapshot())
+            await on_event(dict(data, src=source.label), self._id_snapshot())
             emitted += 1
         return emitted

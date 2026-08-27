@@ -15,6 +15,17 @@ vi.mock("@/api/client", () => ({
   cancelScan: vi.fn(),
   createWorkspace: vi.fn(),
   apiGet: apiGetMock,
+  // TileRunRow（2026-08-27 SSE 实时进度）用；useEventSource 已 mock，此处仅拼 URL。
+  scanEventsUrl: (ws: string, scanId: string) => `/api/workspaces/${ws}/scans/${scanId}/events`,
+}));
+
+// SSE mock（2026-08-27 列表进度不动修复）：磁贴运行 mini 行进度由 events fold 实时
+// 驱动（与 ScanList/详情页同 dashboardReducer 口径）；默认空数组（等价现状）。
+const { sseState } = vi.hoisted(() => ({
+  sseState: { events: [] as unknown[] },
+}));
+vi.mock("@/api/useEventSource", () => ({
+  useEventSource: () => ({ events: sseState.events, status: "closed" as const }),
 }));
 
 const mockScans = [
@@ -37,6 +48,7 @@ describe("DashboardPage 态势大屏（v2 结构 + v3 横幅重组：横幅 + �
     vi.clearAllMocks();
     apiGetMock.mockResolvedValue([]);
     mockUseAuth.mockReturnValue({ user: userUser });
+    sseState.events = [];
     return i18n.changeLanguage("zh");
   });
   afterEach(() => cleanup());
@@ -93,6 +105,42 @@ describe("DashboardPage 态势大屏（v2 结构 + v3 横幅重组：横幅 + �
     // 工作区级别不显失败标志（成功/失败是任务级概念）：ws-b latest=failed 仍无状态字
     expect(screen.queryByText("失败")).not.toBeInTheDocument();
     expect(screen.queryByText("中断")).not.toBeInTheDocument();
+  });
+
+  it("磁贴运行 mini 行进度由 SSE 实时事件驱动（fold completed/total，非 progress_pct 恒定值）", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([mockScans[0]]);
+    sseState.events = [
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["step-a", "step-b"], step_intents: ["", ""] },
+      { type: "StepEvent", name: "step-a", phase: "recon", event: "complete" },
+    ];
+    renderPage();
+    // 2 步完成 1 步 -> 50%（progress_pct fixture 是 42，fold 优先）
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+    expect(screen.queryByText("42%")).not.toBeInTheDocument();
+  });
+
+  it("SSE 无事件回退 progress_pct（连接建立前）", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([mockScans[0]]);
+    sseState.events = [];
+    renderPage();
+    expect(await screen.findByText("42%")).toBeInTheDocument();
+  });
+
+  it("组合扫描白盒段满格 -> 55% 而非 100%（2026-08-28 三阶段加权，黑盒未跑不谎报完成）", async () => {
+    const { listAllScans } = await import("@/api/client");
+    (listAllScans as any).mockResolvedValue([
+      { ...mockScans[0], combined: true, bb_phase: "pending" },
+    ]);
+    sseState.events = [
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["a", "b"], step_intents: ["", ""], src: "wb" },
+      { type: "StepEvent", name: "a", phase: "recon", event: "complete", src: "wb" },
+      { type: "StepEvent", name: "b", phase: "recon", event: "complete", src: "wb" },
+    ];
+    renderPage();
+    expect(await screen.findByText("55%")).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
   });
 
   it("无扫描表格（明细与操作全部在工作区页，两页零结构重叠）", async () => {

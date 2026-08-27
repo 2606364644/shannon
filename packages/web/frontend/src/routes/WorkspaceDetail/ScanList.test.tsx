@@ -491,6 +491,46 @@ describe("ScanList 运行行实时进度（2026-08-27 修复：列表进度不�
     renderList();
     expect(await screen.findByText("5%")).toBeInTheDocument();
   });
+
+  // 2026-08-28 组合口径修正：reducer 是「当前 phase」口径（PhaseEvent(start) 重置
+  // units），白盒最后 phase 收尾后 fold=N/N=100% 而黑盒未跑——列表行按 src 源标记
+  // 套三阶段加权（白盒 5+50×ratio / 黑盒 55+45×ratio，对齐后端 _compute_progress_pct）。
+  it("组合扫描白盒段满格 -> 55% 而非 100%（黑盒未跑不谎报完成）", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["step-a", "step-b"], step_intents: ["", ""], src: "wb" },
+      { type: "StepEvent", name: "step-a", phase: "recon", event: "complete", src: "wb" },
+      { type: "StepEvent", name: "step-b", phase: "recon", event: "complete", src: "wb" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+      { ...running, scan_id: "s-comb", workflow_id: "ws-s-comb", combined: true, bb_phase: "pending" },
+    ])));
+    renderList();
+    expect(await screen.findByText("55%")).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  });
+
+  it("组合扫描黑盒段（run-K 源）-> 55+45×ratio；2 步完成 1 -> 78%", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "exploitation", event: "start", steps: ["inj-exploit", "xss-exploit"], step_intents: ["", ""], src: "run-1" },
+      { type: "StepEvent", name: "inj-exploit", phase: "exploitation", event: "complete", src: "run-1" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+      { ...running, scan_id: "s-comb", workflow_id: "ws-s-comb", combined: true, bb_phase: "running" },
+    ])));
+    renderList();
+    expect(await screen.findByText("78%")).toBeInTheDocument();
+  });
+
+  it("组合扫描黑盒 preflight 空窗（run-K 源、steps=[]）-> 55% 起点非 0/非回退", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "preflight", event: "start", steps: [], step_intents: [], src: "run-1" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+      { ...running, scan_id: "s-comb", workflow_id: "ws-s-comb", combined: true, bb_phase: "running" },
+    ])));
+    renderList();
+    expect(await screen.findByText("55%")).toBeInTheDocument();
+  });
 });
 
 describe("ScanList v4：整行可点 + 空态收敛", () => {

@@ -23,7 +23,7 @@ import {
 } from "@/api/client";
 import { useScans } from "./useScans";
 import { useEventSource } from "@/api/useEventSource";
-import { dashboardReducer, emptyState } from "@/state/dashboardReducer";
+import { liveScanPct } from "@/state/liveScanPct";
 import type { BlackboxRunSummary, ScanSummary } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
 import { fmtTime, fmtDur, compactUrl } from "@/utils/format";
@@ -322,18 +322,13 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   const sseUrl = isRunning ? scanEventsUrl(ws, scan.scan_id) : "";
   const { events } = useEventSource(sseUrl);
   const currentPhase = useCurrentPhase(events);
-  // 实时进度（2026-08-27 修复列表进度不动）：progress_pct 的分子 completed_agents
-  // 只在 workflow 结束才落盘 session.json，运行中恒定 → 进度条钉死。改为 fold 已订阅
-  // 的 SSE 归并流（authcheck/白盒/黑盒 run 全阶段事件按 ts 合一）取当前 phase 的
-  // completed_units/total_units——与详情页 ScanProgressOverview 同一 reducer 口径。
-  // total=0（无 PhaseEvent/phase 未声明 steps/precheck 期）→ null，展示层回退 progress_pct。
-  const liveState = useMemo(
-    () => events.reduce(dashboardReducer, emptyState()),
-    [events],
-  );
-  const livePct = liveState.total_units > 0
-    ? Math.round((liveState.completed_units / liveState.total_units) * 100)
-    : null;
+  // 实时进度（2026-08-27 修复列表进度不动；2026-08-28 组合口径修正）：progress_pct 的
+  // 分子 completed_agents 只在 workflow 结束才落盘 session.json，运行中恒定 → 进度条
+  // 钉死。改为 fold 已订阅的 SSE 归并流取实时进度——组合扫描按 src 源标记套三阶段
+  // 加权（白盒满格=55% 而非 100%，黑盒段 55→100，对齐后端 _compute_progress_pct /
+  // spec §9.2），纯白盒/correlation 保持当前 phase 直读（reducer 是当前 phase 口径，
+  // 单段即全部/累积网格）。无 src（旧后端流）或 total=0 → null，展示层回退 progress_pct。
+  const livePct = useMemo(() => liveScanPct(events, scan), [events, scan]);
   useEffect(() => {
     if (events.some((e) => e.type === "scan_end")) onChanged();
   }, [events, onChanged]);
