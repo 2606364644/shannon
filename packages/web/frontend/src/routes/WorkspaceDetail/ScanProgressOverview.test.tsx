@@ -39,6 +39,9 @@ function agentStart(name: string) {
 function toolCall(agent: string, tool: string, parameters: Record<string, unknown> = {}) {
   return { ts: TS, category: "TOOL", type: "ToolCallEvent", agent_name: agent, tool_name: tool, parameters };
 }
+function gnEvent(kind: "progress" | "hit" | "summary", done: number, total: number, hits: number, detail?: string) {
+  return { ts: TS, category: "GN-LLM", type: "GitnexusLlmEvent", phase: "chain-verdict", kind, done, total, hits, detail };
+}
 
 beforeEach(() => { i18n.changeLanguage("zh"); eventsState.events = []; eventsState.status = "open"; });
 
@@ -110,5 +113,41 @@ describe("ScanProgressOverview", () => {
     render(<ScanProgressOverview ws="ws" scanId="s1" />);
     // 组件根始终挂载
     expect(screen.getByTestId("scan-progress-overview")).toBeInTheDocument();
+  });
+
+  // === GitNexus 深判聚合行（2026-08-28 实时页 Agent 盲区修复，读侧）===
+  // 30+ 个 chain-verdict-* 短命 agent 的形态是一行聚合（GitnexusLlmEvent fold），
+  // 非平铺；running 明细仍走下方 Agent 区（写侧补 start 后自然出现）。
+  it("GitnexusLlmEvent → Popover 深判聚合行 + 最新命中摘要", () => {
+    eventsState.events = [
+      phaseStart("vulnerability-analysis", ["xss-vuln"]),
+      agentStart("xss-vuln"),
+      gnEvent("hit", 5, 69, 3, "XSS-GN-05 vulnerable: source=firstName → sink=render:51"),
+    ];
+    render(<ScanProgressOverview ws="ws" scanId="s1" />);
+    fireEvent.click(screen.getByTestId("progress-details-trigger"));
+    const gn = screen.getByTestId("progress-gn");
+    expect(gn).toHaveTextContent("GitNexus 深判");
+    expect(gn).toHaveTextContent("5/69");
+    expect(gn).toHaveTextContent("命中 3");
+    expect(screen.getByTestId("progress-gn-hit")).toHaveTextContent("XSS-GN-05");
+  });
+
+  it("无 GitnexusLlmEvent → 深判区不渲染", () => {
+    eventsState.events = [phaseStart("recon", ["pre-recon"])];
+    render(<ScanProgressOverview ws="ws" scanId="s1" />);
+    fireEvent.click(screen.getByTestId("progress-details-trigger"));
+    expect(screen.queryByTestId("progress-gn")).not.toBeInTheDocument();
+  });
+
+  it("深判有计数但无命中 detail → 只显聚合行（无 hit 摘要行）", () => {
+    eventsState.events = [
+      phaseStart("vulnerability-analysis", ["xss-vuln"]),
+      gnEvent("progress", 6, 69, 0),
+    ];
+    render(<ScanProgressOverview ws="ws" scanId="s1" />);
+    fireEvent.click(screen.getByTestId("progress-details-trigger"));
+    expect(screen.getByTestId("progress-gn")).toHaveTextContent("6/69");
+    expect(screen.queryByTestId("progress-gn-hit")).not.toBeInTheDocument();
   });
 });

@@ -224,6 +224,31 @@ export function ScanProgressOverview({
               </div>
             )}
 
+            {/* GitNexus 深判单行聚合（2026-08-28 Agent 盲区修复）：30+ 个 chain-verdict-*
+                短命 agent 的正确形态是一行 done/total·hits（GitnexusLlmEvent fold），
+                非平铺；最新命中链摘要一行（⚑ + 截断，title 悬停看全文）。 */}
+            {state.gitnexus_progress && (
+              <div className="mt-2 border-t border-border pt-2" data-testid="progress-gn">
+                <div className="flex items-center justify-between gap-2 font-mono text-xs">
+                  <span className="text-foreground">{t("workspaceDetail.live.gnVerdict")}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {state.gitnexus_progress.done}/{state.gitnexus_progress.total}
+                    {" · "}
+                    {t("workspaceDetail.live.gnHits")} {state.gitnexus_progress.hits}
+                  </span>
+                </div>
+                {state.gitnexus_progress.detail && (
+                  <div
+                    className="mt-0.5 truncate text-xs text-green"
+                    data-testid="progress-gn-hit"
+                    title={state.gitnexus_progress.detail}
+                  >
+                    ⚑ {state.gitnexus_progress.detail}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 正在跑的 Agent（spinner + 名 + 第几轮 + 在调什么工具） */}
             {running.length > 0 && (
               <div className="mt-2 space-y-1 border-t border-border pt-2">

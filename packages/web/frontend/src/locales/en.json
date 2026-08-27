@@ -1006,6 +1006,8 @@
       "statusError": "Reconnecting",
       "statusClosed": "Ended",
       "progressDetails": "Progress details",
+      "gnVerdict": "GitNexus verdict",
+      "gnHits": "hits",
       "endFailed": "Scan failed",
       "endInterrupted": "Scan interrupted",
       "endKilled": "Scan killed",

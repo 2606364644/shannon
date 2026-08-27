@@ -1006,6 +1006,8 @@
       "statusError": "重连中",
       "statusClosed": "已结束",
       "progressDetails": "进度详情",
+      "gnVerdict": "GitNexus 深判",
+      "gnHits": "命中",
       "endFailed": "扫描失败",
       "endInterrupted": "扫描已中断",
       "endKilled": "扫描被终止",

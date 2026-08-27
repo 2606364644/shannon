@@ -88,6 +88,7 @@ async def test_verdict_agent_attaches_tool_audit_logger(monkeypatch):
     )
 
     audit_session = MagicMock()
+    audit_session.start_agent = AsyncMock()
     audit_session.end_agent = AsyncMock()  # 对齐 AuditSession.end_agent 真实 async 签名
     await activities.run_gitnexus_verdict_agent(
         prompt="p", repo_path="/r", audit_session=audit_session
@@ -142,6 +143,7 @@ async def test_verdict_agent_records_cost_into_metrics(monkeypatch):
     _patch_verdict_llm(monkeypatch, fake_result)
 
     audit_session = MagicMock()
+    audit_session.start_agent = AsyncMock()
     audit_session.end_agent = AsyncMock()
 
     await activities.run_gitnexus_verdict_agent(
@@ -175,6 +177,7 @@ async def test_verdict_agent_records_cost_on_failure(monkeypatch):
     _patch_verdict_llm(monkeypatch, fake_result)
 
     audit_session = MagicMock()
+    audit_session.start_agent = AsyncMock()
     audit_session.end_agent = AsyncMock()
 
     await activities.run_gitnexus_verdict_agent(
@@ -198,6 +201,7 @@ async def test_verdict_agent_agent_name_passthrough(monkeypatch):
     )
 
     audit_session = MagicMock()
+    audit_session.start_agent = AsyncMock()
     audit_session.end_agent = AsyncMock()
 
     await activities.run_gitnexus_verdict_agent(
@@ -224,3 +228,48 @@ def test_gitnexus_verdict_phase_mapping():
     （authz-gitnexus-judge step 跑在该相）。"""
     from supernova_core.models.agents import AGENT_PHASE_MAP
     assert AGENT_PHASE_MAP.get("gitnexus-verdict") == "vulnerability-analysis"
+
+
+# --- start_agent 补发（2026-08-28 实时页 Agent 盲区修复，写侧） ------------------
+# 根因：本函数只发 end_agent（记账闭环）从不发 start_agent → 前端 dashboardReducer
+# fold 时 chain-verdict-*/gn-* 深判 agent 无 running 态：正在跑的不进 agents dict
+# （其 ToolCallEvent 也被 if(cur) 丢弃），完成的一进 dict 即 done——实时页 Agent 区
+# 在 LLM 轨 agent 全部收尾后的深判时段（可达几十分钟）整段空白。
+
+
+@pytest.mark.asyncio
+async def test_verdict_agent_emits_start_before_end(monkeypatch):
+    """入口发 start_agent 且先于 end_agent（对齐 run_agent :195 成对先例）。"""
+    _patch_verdict_llm(
+        monkeypatch,
+        ClaudeRunResult(text="ok", success=True, turns=1, cost=0.01,
+                        cost_currency="CNY", model="m"),
+    )
+
+    order: list = []
+    audit_session = MagicMock()
+    audit_session.start_agent = AsyncMock(
+        side_effect=lambda *a, **k: order.append(("start", a, k)))
+    audit_session.end_agent = AsyncMock(
+        side_effect=lambda *a, **k: order.append(("end", a, k)))
+
+    await activities.run_gitnexus_verdict_agent(
+        prompt="p", repo_path="/r", audit_session=audit_session,
+        agent_name="chain-verdict-xss-07")
+
+    assert [tag for tag, *_ in order] == ["start", "end"]
+    start_args = order[0][1]
+    assert start_args[0] == "chain-verdict-xss-07"   # agent_name 透传
+    assert order[0][2].get("attempt") == 1           # attempt=1
+
+
+@pytest.mark.asyncio
+async def test_verdict_agent_no_start_without_audit_session(monkeypatch):
+    """audit_session=None 不发任何 agent 事件（CLI 直跑，行为同前）。"""
+    _patch_verdict_llm(
+        monkeypatch,
+        ClaudeRunResult(text="ok", success=True, turns=1),
+    )
+    # 不传 audit_session：若误发事件会在 None 上炸 AttributeError
+    result = await activities.run_gitnexus_verdict_agent(prompt="p", repo_path="/r")
+    assert result.success is True

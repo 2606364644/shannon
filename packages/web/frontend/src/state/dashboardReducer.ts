@@ -19,12 +19,24 @@ export interface AgentRow {
   error: string | null;
 }
 
+/** GitNexus 深判（chain-verdict）单行聚合进度（GitnexusLlmEvent fold，2026-08-28）。 */
+export interface GitnexusProgress {
+  done: number;
+  total: number;
+  hits: number;
+  /** 最新一条 hit 的 detail（命中链摘要）；非 hit 事件不覆盖。 */
+  detail: string | null;
+}
+
 export interface DashboardState {
   current_phase: string | null;
   agents: Record<string, AgentRow>;
   phase_units: string[];
   unit_status: Record<string, string>;
   unit_intent: Record<string, string>;
+  /** GitNexus 深判聚合进度（前端扩展，core 无此字段——correlation_progress 先例）；
+   *  null = 本流尚无 chain-verdict 事件。PhaseEvent start 不清（终态跨 phase 保留）。 */
+  gitnexus_progress: GitnexusProgress | null;
   // 派生（core 是 @property；TS 在 reducer 末尾计算并挂上，便于组件直接读）
   completed_count: number;
   total_cost: number;
@@ -37,6 +49,7 @@ export interface DashboardState {
 export function emptyState(): DashboardState {
   return {
     current_phase: null, agents: {}, phase_units: [], unit_status: {}, unit_intent: {},
+    gitnexus_progress: null,
     completed_count: 0, total_cost: 0, cost_currency: "USD", total_units: 0, completed_units: 0, running_units: [],
   };
 }
@@ -72,7 +85,8 @@ function derive(s: DashboardState): DashboardState {
  * 1:1 复刻 core DashboardState.apply：fold 一个 ndjson 事件，返回新 state（不可变）。
  * 6 个状态变化分支（PhaseEvent / StepEvent / ResumeEvent / AgentEvent / ToolCallEvent /
  * LlmTurnEvent）+ SummaryEvent/scan_end 终态收敛 + correlation_progress（web 编排层
- * 专属事件，前端扩展映射，见 case 注释）+ 其余 type 无 dashboard 状态变化（return state）。
+ * 专属事件，前端扩展映射，见 case 注释）+ GitnexusLlmEvent→gitnexus_progress（chain-verdict
+ * 深判单行聚合，前端扩展，2026-08-28）+ 其余 type 无 dashboard 状态变化（return state）。
  */
 export function dashboardReducer(state: DashboardState, event: NdjsonEvent): DashboardState {
   let next: DashboardState = state;
@@ -226,7 +240,29 @@ export function dashboardReducer(state: DashboardState, event: NdjsonEvent): Das
       break;
     }
 
-    // ErrorEvent / WorkflowHeader / InfoEvent / GitnexusLlmEvent →
+    case "GitnexusLlmEvent": {
+      // chain-verdict 深判单行聚合（2026-08-28 实时页 Agent 盲区修复，读侧）：
+      // phase=chain-verdict 的 progress/hit/summary fold 成 done/total/hits，
+      // detail 只留最新 hit（summary 的汇总文本不作命中摘要）。note 与其他 phase
+      // （taint-analysis / sink-discovery 等一次性判定）不进本行。畸形事件
+      // Number()||0 回落防 NaN。PhaseEvent start 不清——深判终态是本 scan 的
+      // 既成事实，晚进页面的读者仍可见（见 case PhaseEvent 不动此字段）。
+      if (event.phase === "chain-verdict" && event.kind !== "note") {
+        const prev = state.gitnexus_progress;
+        next = {
+          ...state,
+          gitnexus_progress: {
+            done: Number(event.done) || 0,
+            total: Number(event.total) || 0,
+            hits: Number(event.hits) || 0,
+            detail: (event.kind === "hit" && event.detail) ? event.detail : prev?.detail ?? null,
+          },
+        };
+      }
+      break;
+    }
+
+    // ErrorEvent / WorkflowHeader / InfoEvent →
     // 无 dashboard 状态变化（对齐 core default）。
     default:
       next = state;

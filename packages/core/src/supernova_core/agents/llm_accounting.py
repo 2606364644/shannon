@@ -9,6 +9,8 @@ total_cost_usd / 进度条 / 报告 cost 全不含。本模块提取 22269e4a
 - 包装 runner（async (prompt, **kw) -> ClaudeRunResult-like）为轻量 client 契约
   （-> str | None：structured_output 优先 JSON 化、回落 text；失败/异常 → None）；
 - 闭包内累计 cost/tokens/turns/调用数；
+- 首次会入账的调用惰性发一次 ``start_agent``（2026-08-28 补——此前只有 end，
+  实时 dashboard 看不到轻量 agent 的 running 态；零调用零幽灵）；
 - activity 出口 ``await client.finalize()`` 一次 ``end_agent`` 记总账（agent_name
   唯一，如 track-parity / poc-gapfill——防 metrics.agents 同名覆盖）。
 
@@ -43,7 +45,25 @@ class AccountedLlmClient:
         self._cache_creation = 0
         self._calls = 0
         self._failures = 0
+        self._started = False
         self._start = time.monotonic()
+
+    async def _ensure_started(self) -> None:
+        """首次会入账的调用时发一次 start_agent（2026-08-28 实时页 Agent 盲区修复）。
+
+        此前只有 finalize 的 end_agent → 前端 dashboard 看不到轻量 agent 的
+        running 态。惰性触发点=首次成功/失败返回（不含被吞异常），保证
+        start→end 永远配对、零调用零幽灵条目。duck-typed session 无
+        start_agent 方法（旧 mock/降级）时跳过；prompt 传占位符（对齐
+        run_agent 先例，不把大 prompt 写盘）。
+        """
+        if self._started:
+            return
+        self._started = True
+        start = getattr(self._session, "start_agent", None)
+        if start is not None:
+            await start(self._agent_name,
+                        f"accounted-llm={self._agent_name}", attempt=1)
 
     async def call_result(self, prompt: str, **kw):
         """调 runner 返回原始 result 并记账（供需要 success/structured_output
@@ -51,7 +71,9 @@ class AccountedLlmClient:
         result = await self._runner(prompt, **kw)
         if result is None or getattr(result, "success", True) is False:
             self._failures += 1
+            await self._ensure_started()
             return result
+        await self._ensure_started()
         self._record_success(result)
         return result
 
@@ -64,7 +86,9 @@ class AccountedLlmClient:
             return None
         if result is None or getattr(result, "success", True) is False:
             self._failures += 1
+            await self._ensure_started()
             return None
+        await self._ensure_started()
         self._record_success(result)
         so = getattr(result, "structured_output", None)
         if so is not None:

@@ -464,3 +464,79 @@ describe("formatters — 对齐 core formatters.py", () => {
     expect(humanizeToolCall("Custom", "string")).toBe("");
   });
 });
+
+// === GitnexusLlmEvent → gitnexus_progress（2026-08-28 实时页 Agent 盲区修复，读侧）===
+// 事件源：core workflow_logger.log_gitnexus_progress（chain-verdict 深判每链完成 tick），
+// shape（events.py）：{type:"GitnexusLlmEvent", category:"GN-LLM", phase:"chain-verdict",
+// kind:"progress"|"hit"|"summary", done, total, hits, detail?}。
+// 前端映射（core DashboardState.apply 走 default 忽略——correlation_progress 先例：前端
+// 扩展映射）：phase=chain-verdict 的进度计数 fold 成单行聚合（done/total/hits + 最新命中
+// detail），供 ScanProgressOverview Popover「GitNexus 深判」行渲染——30+ 个 chain-verdict-*
+// 短命 agent 的正确形态是一行聚合而非平铺（写侧补 start 后 running 明细另有芯片区）。
+describe("dashboardReducer — GitnexusLlmEvent 事件", () => {
+  const gn = (kind: "progress" | "hit" | "summary" | "note", done: number,
+              total: number, hits: number, detail?: string) => ev({
+    type: "GitnexusLlmEvent", category: "GN-LLM", phase: "chain-verdict",
+    kind, done, total, hits, detail,
+  });
+
+  it("chain-verdict hit：fold 成 gitnexus_progress（done/total/hits + 命中 detail）", () => {
+    const s = dashboardReducer(emptyState(), gn("hit", 5, 69, 3,
+      "XSS-GN-05 vulnerable: source=firstName → sink=render:51"));
+    expect(s.gitnexus_progress).toEqual({
+      done: 5, total: 69, hits: 3,
+      detail: "XSS-GN-05 vulnerable: source=firstName → sink=render:51",
+    });
+  });
+
+  it("多条事件最新覆盖（计数单调推进）", () => {
+    let s = dashboardReducer(emptyState(), gn("progress", 1, 69, 0));
+    s = dashboardReducer(s, gn("hit", 5, 69, 3, "XSS-GN-05 vulnerable"));
+    s = dashboardReducer(s, gn("summary", 69, 69, 27));
+    expect(s.gitnexus_progress).toEqual({
+      done: 69, total: 69, hits: 27, detail: "XSS-GN-05 vulnerable",
+    });
+  });
+
+  it("非 hit 事件不带覆盖 detail（summary 的汇总文本不留作最新命中）", () => {
+    let s = dashboardReducer(emptyState(), gn("hit", 5, 69, 3, "XSS-GN-05 hit"));
+    s = dashboardReducer(s, gn("progress", 6, 69, 3));
+    expect(s.gitnexus_progress?.detail).toBe("XSS-GN-05 hit");
+  });
+
+  it("hit 的 detail 缺失/null：保留既有（不清空）", () => {
+    let s = dashboardReducer(emptyState(), gn("hit", 5, 69, 3, "XSS-GN-05 hit"));
+    s = dashboardReducer(s, gn("hit", 6, 69, 4));
+    expect(s.gitnexus_progress?.done).toBe(6);
+    expect(s.gitnexus_progress?.detail).toBe("XSS-GN-05 hit");
+  });
+
+  it("非 chain-verdict phase（taint-analysis/sink-discovery）忽略——本行只聚合深判", () => {
+    const s = dashboardReducer(emptyState(), ev({
+      type: "GitnexusLlmEvent", category: "GN-LLM", phase: "taint-analysis",
+      kind: "hit", done: 3, total: 10, hits: 1,
+    }));
+    expect(s.gitnexus_progress).toBeNull();
+  });
+
+  it("kind=note 忽略（杂注不推进计数）", () => {
+    const s = dashboardReducer(emptyState(), gn("note", 1, 69, 0));
+    expect(s.gitnexus_progress).toBeNull();
+  });
+
+  it("PhaseEvent start 不清 gitnexus_progress（深判终态跨 phase 保留——晚进页面的读者仍可见）", () => {
+    let s = dashboardReducer(emptyState(), gn("summary", 69, 69, 27));
+    s = dashboardReducer(s, ev({
+      type: "PhaseEvent", category: "PHASE", phase: "reporting", event: "start",
+      steps: ["report"], step_intents: [""],
+    }));
+    expect(s.gitnexus_progress?.done).toBe(69);
+  });
+
+  it("缺 done/total/hits 的畸形事件安全回落（不 NaN）", () => {
+    const s = dashboardReducer(emptyState(), ev({
+      type: "GitnexusLlmEvent", category: "GN-LLM", phase: "chain-verdict", kind: "hit",
+    }));
+    expect(s.gitnexus_progress).toEqual({ done: 0, total: 0, hits: 0, detail: null });
+  });
+});

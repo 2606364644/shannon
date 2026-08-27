@@ -3,7 +3,9 @@
 
 export type EventCategory =
   | "PHASE" | "STEP" | "AGENT" | "TOOL" | "LLM" | "ERROR"
-  | "INFO" | "WARN" | "RESUME" | "SUMMARY" | "HEADER" | "GITNEXUS" | "CONTROL";
+  | "INFO" | "WARN" | "RESUME" | "SUMMARY" | "HEADER" | "GITNEXUS" | "CONTROL"
+  // GN-LLM：GitnexusLlmEvent 内部 subtype（events.py：category 字段保留 GN-LLM）
+  | "GN-LLM";
 
 interface CommonFields {
   ts: string;          // 事件时间戳。历史 ndjson 为 worker 容器 UTC 墙钟 "YYYY-MM-DD HH:MM:SS"（无时区）；
@@ -60,7 +62,14 @@ export interface ResumeEvent extends CommonFields {
 }
 export interface GitnexusLlmEvent extends CommonFields {
   type: "GitnexusLlmEvent";
-  // 字段随 events.py GitnexusLlmEvent；前端按需透传
+  // 具体字段随 events.py GitnexusLlmEvent（2026-08-28 前端 fold chain-verdict 进度用）；
+  // 其余字段按需透传
+  phase: string;
+  kind: "progress" | "hit" | "summary" | "note";
+  done: number;
+  total: number;
+  hits: number;
+  detail?: string | null;
   [k: string]: unknown;
 }
 export interface LogEventEvent {

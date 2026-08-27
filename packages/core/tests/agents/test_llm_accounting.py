@@ -33,6 +33,10 @@ class _Result:
 class _RecordingSession:
     def __init__(self):
         self.agents = []
+        self.starts = []
+
+    async def start_agent(self, name, prompt, attempt=1):
+        self.starts.append((name, prompt, attempt))
 
     async def end_agent(self, name, result):
         self.agents.append((name, result))
@@ -128,3 +132,80 @@ async def test_call_result_returns_result_and_records():
     await client.finalize()
     _, rec = session.agents[0]
     assert rec.cost_usd == pytest.approx(0.05)
+
+
+# --- start_agent 补发（2026-08-28 实时页 Agent 盲区修复，写侧） ------------------
+# 根因：AccountedLlmClient 只在 finalize 发 end_agent，从不发 start_agent →
+# 前端 dashboardReducer 里轻量 agent（recon-summary / track-parity 等）无 running
+# 态、一进 agents dict 即 done。修复：首次「会计入账」的调用（成功或失败返回，
+# 不含被吞异常）惰性发一次 start_agent——保证 start→end 永远配对、零调用零幽灵。
+
+
+@pytest.mark.asyncio
+async def test_start_emitted_once_on_first_accounted_call():
+    """首次成功调用发一次 start_agent；多次调用不重复；finalize 后 start+end 配对。"""
+    session = _RecordingSession()
+
+    async def runner(prompt, **kw):
+        return _Result(cost=0.01)
+
+    client = AccountedLlmClient(runner, session, "recon-summary")
+    assert session.starts == []          # 未调用不发（惰性）
+    await client("p1")
+    assert len(session.starts) == 1      # 首次调用即发，一次
+    await client("p2")
+    assert len(session.starts) == 1      # 不随调用次数重复
+    await client.finalize()
+    assert session.starts[0][0] == "recon-summary"
+    assert len(session.agents) == 1      # start : end = 1 : 1，无悬挂
+
+
+@pytest.mark.asyncio
+async def test_start_emitted_on_failed_call_too():
+    """success=False 的失败调用同样会入账（finalize success=False），须先有 start。"""
+    session = _RecordingSession()
+
+    async def runner(prompt, **kw):
+        return _Result(success=False, cost=0.0, text="")
+
+    client = AccountedLlmClient(runner, session, "poc-gapfill")
+    assert await client("p") is None
+    assert len(session.starts) == 1
+    await client.finalize()
+    assert len(session.agents) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_start_without_accounted_call():
+    """异常被吞成 None（零成功零失败）→ 不发 start：否则 metrics 悬挂 running 幽灵。"""
+    async def runner(prompt, **kw):
+        raise RuntimeError("llm down")
+
+    session = _RecordingSession()
+    client = AccountedLlmClient(runner, session, "recon-summary")
+    assert await client("p") is None
+    await client.finalize()
+    assert session.starts == []
+    assert session.agents == []
+
+
+@pytest.mark.asyncio
+async def test_duck_typed_session_without_start_agent_noop():
+    """旧 duck-type 契约只有 end_agent（历史 mock/降级 session）——无 start_agent
+    方法时跳过，不炸。"""
+    class _EndOnlySession:
+        def __init__(self):
+            self.agents = []
+
+        async def end_agent(self, name, result):
+            self.agents.append((name, result))
+
+    session = _EndOnlySession()
+
+    async def runner(prompt, **kw):
+        return _Result(cost=0.01)
+
+    client = AccountedLlmClient(runner, session, "track-parity")
+    assert await client("p") == "raw"    # 不因缺 start_agent 抛错
+    await client.finalize()
+    assert len(session.agents) == 1      # 记账照常

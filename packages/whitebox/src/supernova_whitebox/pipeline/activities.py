@@ -2643,9 +2643,10 @@ async def run_gitnexus_verdict_agent(
     记账（2026-08-27 修成本漏记）：audit_session 非 None 时，result 的 cost/tokens/model
     经 end_agent(AgentEndResult) 记入 session.json metrics——此前调用方只消费
     structured_output，深判 LLM 消耗在总账不可见（2026-08-25 NodeGoat 扫描实证
-    authz 深判 7 轮成本整笔漏记）。run_claude_prompt 全捕获异常恒返回 result，
-    成功/失败两路都记账。一次扫描内多次调用（富化逐 class/回炉）须传唯一
-    agent_name，防 metrics.agents 同名条目互相覆盖（totals 累加、agents 覆盖）。
+    authz 深判 7 轮成本整笔漏记）。入口配对发 start_agent（2026-08-28 补——实时
+    dashboard 此前看不到深判 agent 的 running 态）。run_claude_prompt 全捕获异常恒
+    返回 result，成功/失败两路都记账。一次扫描内多次调用（富化逐 class/回炉）须传
+    唯一 agent_name，防 metrics.agents 同名条目互相覆盖（totals 累加、agents 覆盖）。
 
     供 spec-1 的 run_authz_gitnexus_judge 多轮判定用。单测 mock run_claude_prompt 验证
     max_turns 透传 / audit_session 注入 tool_audit_logger。
@@ -2660,6 +2661,12 @@ async def run_gitnexus_verdict_agent(
             audit_session, agent_name, attempt=1
         )
     agent_start = time.monotonic()
+    # start_agent 补发（2026-08-28 实时页 Agent 盲区修复）：此前只发 end_agent →
+    # 前端 dashboardReducer 里深判 agent（chain-verdict-*/gn-*）无 running 态。与
+    # 出口 end_agent 成对（对齐 run_agent :195 先例）；prompt 传占位符不落大文件。
+    if audit_session is not None:
+        await audit_session.start_agent(
+            agent_name, f"gitnexus-verdict:{agent_name}", attempt=1)
     try:
         if tool_audit_logger is not None:
             await tool_audit_logger.initialize()
