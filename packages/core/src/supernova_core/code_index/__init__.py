@@ -180,6 +180,7 @@ async def build_code_index_with_gitnexus(
     *,
     mcp_client,
     llm_client,
+    discovery_agent=None,
     auto_index: bool = False,
     progress_cb=None,
     model: str | None = None,
@@ -265,7 +266,8 @@ async def build_code_index_with_gitnexus(
 
     # ③b LLM sink 补召回 (spec §3.1): 规则未命中的可疑 call → 软 SinkCallSite
     soft_sinks, rule_gaps = await discover_sinks_llm(
-        suspicious, llm_client, progress_cb=progress_cb, model=model)
+        suspicious, llm_client, discovery_agent=discovery_agent,
+        progress_cb=progress_cb, model=model)
     if soft_sinks:
         sink_call_sites = sink_call_sites + soft_sinks
         logger.info("LLM sink discovery added %d soft sinks (%d rule gaps)",
@@ -418,7 +420,8 @@ async def build_code_index_with_gitnexus(
         entry_point_ids=entry_point_ids,
     )
     soft_sources, source_gaps = await discover_sources_llm(
-        source_candidates, llm_client, progress_cb=progress_cb, model=model)
+        source_candidates, llm_client, discovery_agent=discovery_agent,
+        progress_cb=progress_cb, model=model)
 
     # ⑩' storage LLM hunters (spec 子项⑤ §3.3, ASYNC, 平行 discover_sources_llm):
     #    候选 = entry handler blocks(对称 collect_entry_handler_blocks 的口径),用
@@ -435,11 +438,11 @@ async def build_code_index_with_gitnexus(
         for b in all_blocks if b.id in entry_point_ids
     ]
     soft_storage_reads, storage_read_gaps = await discover_storage_reads_llm(
-        storage_read_candidates, llm_client,
+        storage_read_candidates, llm_client, discovery_agent=discovery_agent,
         progress_cb=progress_cb, model=model,
     )
     soft_storage_writes, storage_write_gaps = await discover_storage_writes_llm(
-        storage_write_candidates, llm_client,
+        storage_write_candidates, llm_client, discovery_agent=discovery_agent,
         progress_cb=progress_cb, model=model,
     )
     storage_writes = storage_writes + soft_storage_writes

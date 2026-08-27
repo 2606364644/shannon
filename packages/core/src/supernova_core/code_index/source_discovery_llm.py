@@ -219,6 +219,39 @@ def _build_prompt(chunk: FileChunk) -> str:
     )
 
 
+# 多轮 agent 版 prompt（spec 2026-08-27 §5）：瘦身——函数定位清单替代源码快照，
+# agent 自主 Read 源码后识别 user-controllable 字段与 IDOR 向量。
+_PROMPT_AGENT_TMPL = """You are a multi-turn user-input source-discovery agent for the GitNexus track.
+You are given entry handler functions to inspect. Rule-based detection already covered
+common frameworks (Express/Django/...); you handle the unconventional ones. VERIFY in the
+actual repository — the repo is your working directory; Read each function and Grep for
+its bindings before deciding.
+
+**Also identify IDOR vectors**: any input field used as an entity identifier that flows
+to a lookup-by-id — seeds for missing-ownership (IDOR) analysis downstream.
+
+## File(s)
+{file_paths}
+
+## Functions to inspect (Read them)
+{locations_repr}
+
+## Task
+Return a JSON array. One object per user-controllable field:
+{{"field":"<param_name>","source_type":"query|path|body|form|header|cookie|file","expression":"<source-code expr>","line":<int>,"is_source":true|false,"rationale":"<one line citing what you read>"}}
+Return ONLY the JSON array, no prose. Omit fields that are NOT user-controllable (is_source=false).
+`line` is the FILE-absolute line number of the field."""
+
+
+def _build_agent_prompt(chunk: FileChunk) -> str:
+    locs = [f"- {b.function_name} ({b.file_path}:{b.start_line}-{b.end_line})"
+            for b in chunk.blocks]
+    return _PROMPT_AGENT_TMPL.format(
+        file_paths=", ".join(chunk.file_paths),
+        locations_repr="\n".join(locs),
+    )
+
+
 def _parse_fields(raw: str) -> list[dict]:
     payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
@@ -314,6 +347,7 @@ async def discover_sources_llm(
     candidates: list[SourceCandidate],
     llm_client: LLMClient | None,
     *,
+    discovery_agent=None,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
@@ -333,7 +367,7 @@ async def discover_sources_llm(
     progress_cb: best-effort 进度上报(每 chunk 一 tick + 一次 finalize 汇总);
     cb=None 全程 no-op。
     """
-    if llm_client is None or not candidates:
+    if (llm_client is None and discovery_agent is None) or not candidates:
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
@@ -348,9 +382,22 @@ async def discover_sources_llm(
 
     emitter = ProgressEmitter("source-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(chunk: FileChunk):
-        prompt = _build_prompt(chunk)
-        raw = await llm_client(prompt, output_format=_SOURCE_FIELD_SCHEMA)
+    async def _discover_one(item):
+        idx, chunk = item
+        if discovery_agent is not None:
+            result = await discovery_agent(
+                _build_agent_prompt(chunk),
+                output_format=_SOURCE_FIELD_SCHEMA,
+                agent_name=f"gn-discovery-source-{idx + 1:03d}")
+            if getattr(result, "success", True) is False:
+                raise RuntimeError(
+                    f"discovery agent failed: {getattr(result, 'error', None)}")
+            so = getattr(result, "structured_output", None)
+            raw = json.dumps(so, ensure_ascii=False) if so is not None else (
+                getattr(result, "text", "") or "")
+        else:
+            prompt = _build_prompt(chunk)
+            raw = await llm_client(prompt, output_format=_SOURCE_FIELD_SCHEMA)
         fields = _parse_fields(raw)
         out: list[SourcePoint] = []
         for f in fields:
@@ -378,6 +425,11 @@ async def discover_sources_llm(
     # 绕过 env(违反 spec「均可经 env 覆盖」+ concurrency.py docstring), 已修。
     effective_timeout = (per_call_timeout if per_call_timeout is not None
                          else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
+    if discovery_agent is not None:
+        # 多轮 agent 超时地板（spec 2026-08-27 §5）：单次档 60/120s 对自主
+        # Read/Grep 的多轮形态不够，取 max(现值, agent 地板默认 300s)。
+        from supernova_core.config.concurrency import get_gn_discovery_agent_timeout
+        effective_timeout = max(effective_timeout, get_gn_discovery_agent_timeout())
 
     async def _on_skip(idx, message):
         # idx → 文件路径(同 sink_discovery_llm): 跨文件合并后诊断单位是 chunk(可多文件),
@@ -386,7 +438,7 @@ async def discover_sources_llm(
         await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
-        chunks, _discover_one,
+        list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout, label="discover_sources_llm",
         on_skip=_on_skip,
     )

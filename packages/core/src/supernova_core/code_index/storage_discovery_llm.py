@@ -198,6 +198,30 @@ def _functions_repr(chunk: FileChunk) -> str:
     return "\n\n".join(parts)
 
 
+# 多轮 agent 版（spec 2026-08-27 §5）：瘦身——函数定位清单替代源码快照，agent 自主
+# Read 源码后识别 storage read/write 点。
+def _locations_repr(chunk: FileChunk) -> str:
+    return "\n".join(
+        f"- {b.function_name} ({b.file_path}:{b.start_line}-{b.end_line})"
+        for b in chunk.blocks)
+
+
+def _build_read_agent_prompt(chunk: FileChunk) -> str:
+    return _READ_PROMPT_TMPL.replace(
+        "## Functions\n{functions_repr}",
+        "## Functions to inspect (Read them)\n{functions_repr}",
+    ).format(file_paths=", ".join(chunk.file_paths),
+             functions_repr=_locations_repr(chunk))
+
+
+def _build_write_agent_prompt(chunk: FileChunk) -> str:
+    return _WRITE_PROMPT_TMPL.replace(
+        "## Functions\n{functions_repr}",
+        "## Functions to inspect (Read them)\n{functions_repr}",
+    ).format(file_paths=", ".join(chunk.file_paths),
+             functions_repr=_locations_repr(chunk))
+
+
 def _parse_verdicts(raw: str) -> list[dict]:
     payload = _extract_json_payload(raw) if isinstance(raw, str) else None
     try:
@@ -329,6 +353,7 @@ async def discover_storage_reads_llm(
     candidates: list[StorageReadCandidate],
     llm_client: LLMClient | None,
     *,
+    discovery_agent=None,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
@@ -346,7 +371,7 @@ async def discover_storage_reads_llm(
     软 read rule_id=``"llm-discovered-storage"`` needs_review=True
     (下游 chain_verdict 复核)。
     """
-    if llm_client is None or not candidates:
+    if (llm_client is None and discovery_agent is None) or not candidates:
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
@@ -361,9 +386,22 @@ async def discover_storage_reads_llm(
 
     emitter = ProgressEmitter("storage-read-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(chunk: FileChunk) -> list[SourcePoint]:
-        prompt = _build_read_prompt(chunk)
-        raw = await llm_client(prompt, output_format=_STORAGE_READ_SCHEMA)
+    async def _discover_one(item) -> list[SourcePoint]:
+        idx, chunk = item
+        if discovery_agent is not None:
+            result = await discovery_agent(
+                _build_read_agent_prompt(chunk),
+                output_format=_STORAGE_READ_SCHEMA,
+                agent_name=f"gn-discovery-storage-r-{idx + 1:03d}")
+            if getattr(result, "success", True) is False:
+                raise RuntimeError(
+                    f"discovery agent failed: {getattr(result, 'error', None)}")
+            so = getattr(result, "structured_output", None)
+            raw = json.dumps(so, ensure_ascii=False) if so is not None else (
+                getattr(result, "text", "") or "")
+        else:
+            prompt = _build_read_prompt(chunk)
+            raw = await llm_client(prompt, output_format=_STORAGE_READ_SCHEMA)
         verdicts = _parse_verdicts(raw)
         out: list[SourcePoint] = []
         for v in verdicts:
@@ -391,13 +429,17 @@ async def discover_storage_reads_llm(
     effective_timeout = (per_call_timeout if per_call_timeout is not None
                          else max(get_per_call_timeout(),
                                   DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
+    if discovery_agent is not None:
+        # 多轮 agent 超时地板（spec 2026-08-27 §5）：单次档不够，取 max(现值, 300s)。
+        from supernova_core.config.concurrency import get_gn_discovery_agent_timeout
+        effective_timeout = max(effective_timeout, get_gn_discovery_agent_timeout())
 
     async def _on_skip(idx, message):
         chunk = chunks[idx]
         await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
-        chunks, _discover_one,
+        list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout,
         label="discover_storage_reads_llm", on_skip=_on_skip,
     )
@@ -413,6 +455,7 @@ async def discover_storage_writes_llm(
     candidates: list[StorageWriteCandidate],
     llm_client: LLMClient | None,
     *,
+    discovery_agent=None,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
@@ -426,7 +469,7 @@ async def discover_storage_writes_llm(
     per-item 容错 / LLM 不可用降级。软 write rule_id=``"llm-discovered-storage"``
     needs_review=True(下游二阶 LLM join 复核)。
     """
-    if llm_client is None or not candidates:
+    if (llm_client is None and discovery_agent is None) or not candidates:
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
@@ -441,9 +484,22 @@ async def discover_storage_writes_llm(
 
     emitter = ProgressEmitter("storage-write-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(chunk: FileChunk) -> list[StorageWritePoint]:
-        prompt = _build_write_prompt(chunk)
-        raw = await llm_client(prompt, output_format=_STORAGE_WRITE_SCHEMA)
+    async def _discover_one(item) -> list[StorageWritePoint]:
+        idx, chunk = item
+        if discovery_agent is not None:
+            result = await discovery_agent(
+                _build_write_agent_prompt(chunk),
+                output_format=_STORAGE_WRITE_SCHEMA,
+                agent_name=f"gn-discovery-storage-w-{idx + 1:03d}")
+            if getattr(result, "success", True) is False:
+                raise RuntimeError(
+                    f"discovery agent failed: {getattr(result, 'error', None)}")
+            so = getattr(result, "structured_output", None)
+            raw = json.dumps(so, ensure_ascii=False) if so is not None else (
+                getattr(result, "text", "") or "")
+        else:
+            prompt = _build_write_prompt(chunk)
+            raw = await llm_client(prompt, output_format=_STORAGE_WRITE_SCHEMA)
         verdicts = _parse_verdicts(raw)
         out: list[StorageWritePoint] = []
         for v in verdicts:
@@ -469,13 +525,17 @@ async def discover_storage_writes_llm(
     effective_timeout = (per_call_timeout if per_call_timeout is not None
                          else max(get_per_call_timeout(),
                                   DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
+    if discovery_agent is not None:
+        # 多轮 agent 超时地板（spec 2026-08-27 §5）：单次档不够，取 max(现值, 300s)。
+        from supernova_core.config.concurrency import get_gn_discovery_agent_timeout
+        effective_timeout = max(effective_timeout, get_gn_discovery_agent_timeout())
 
     async def _on_skip(idx, message):
         chunk = chunks[idx]
         await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
-        chunks, _discover_one,
+        list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout,
         label="discover_storage_writes_llm", on_skip=_on_skip,
     )

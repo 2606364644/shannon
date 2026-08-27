@@ -345,14 +345,55 @@ def _build_discovery_prompt(chunk: FileChunk) -> str:
             f"Parameters: {list(b.parameters)}\n"
             f"```\n{b.source_code}\n```"
         )
-    call_lines: list[str] = []
-    for sc in chunk.items:
-        target = sc.callee if sc.receiver is None else f"{sc.receiver}.{sc.callee}"
-        call_lines.append(f"- call_ref: {sc.callee}:{sc.line}  call: {target}  args: {sc.arg_exprs}")
+    call_lines = _call_lines(chunk)
     return _DISCOVERY_PROMPT_TMPL.format(
         file_paths=", ".join(chunk.file_paths),
         functions_repr="\n\n".join(func_parts),
         suspicious_repr="\n".join(call_lines),
+    )
+
+
+# 多轮 agent 版 prompt（spec 2026-08-27 §5）：瘦身——只给 call 清单与函数定位，
+# 不塞源码快照；agent 自主 Read 源码、跨文件追 callee 定义与框架包装后判定。
+_DISCOVERY_AGENT_PROMPT_TMPL = """You are a multi-turn security sink-discovery agent for the GitNexus track.
+You are given suspicious calls (callee/receiver that look sink-ish but were NOT matched
+by the deterministic rule library). VERIFY each call in the actual repository, then
+judge whether it is a real security sink. The repo is your working directory.
+
+## File(s)
+{file_paths}
+
+## Suspicious calls (judge each by call_ref)
+{suspicious_repr}
+
+## Verification protocol (use your tools)
+1. Read the file/line around each call: see how the call is built and what flows in.
+2. If the callee is a local/project function or framework wrapper, Grep/Read its
+   definition — judge the underlying operation (raw SQL? command exec? file write?
+   template render? outbound fetch?), not just the name.
+3. Judge each call on its own merits.
+
+## Task
+For EACH call above, return a JSON array. One object per call:
+{{"call_ref": "<callee>:<line>", "is_sink": true|false, "category": "sql|command|file|template|deserialization|ssrf|xss|redirect|log", "slot": "sql_value|sql_identifier|cmd_argument|file_path|template_expr|url|deserialize|generic", "arg_index": <0-based int or -1>, "rationale": "<one line citing what you read>"}}
+Return ONLY the JSON array, no prose."""
+
+
+def _call_lines(chunk: FileChunk) -> list[str]:
+    call_lines: list[str] = []
+    for sc in chunk.items:
+        target = sc.callee if sc.receiver is None else f"{sc.receiver}.{sc.callee}"
+        call_lines.append(f"- call_ref: {sc.callee}:{sc.line}  call: {target}  args: {sc.arg_exprs}")
+    return call_lines
+
+
+def _build_discovery_agent_prompt(chunk: FileChunk) -> str:
+    """agent 版 prompt：call 清单（含函数定位提示）无源码快照——agent 自己 Read。"""
+    locs = [f"- {b.function_name} ({b.file_path}:{b.start_line}-{b.end_line})"
+            for b in chunk.blocks]
+    return _DISCOVERY_AGENT_PROMPT_TMPL.format(
+        file_paths=", ".join(chunk.file_paths),
+        suspicious_repr="\n".join(_call_lines(chunk) + ["", "Function locations:"] + locs),
     )
 
 
@@ -438,6 +479,7 @@ async def discover_sinks_llm(
     suspicious: list[SuspiciousCall],
     llm_client: LLMClient | None,
     *,
+    discovery_agent=None,
     concurrency: int | None = None,
     per_call_timeout: float | None = None,
     progress_cb: ProgressCb = None,
@@ -447,8 +489,14 @@ async def discover_sinks_llm(
 ) -> tuple[list[SinkCallSite], list[RuleGap]]:
     """对含可疑 call 的函数并发调 LLM, 判定哪些是真 sink → 软 SinkCallSite + RuleGap。
 
+    判定通道双形态（spec 2026-08-27 §5）：
+    - ``discovery_agent``：多轮 agent（生产主线）——每 chunk 一个 agent，prompt 只给
+      call 清单（瘦身），agent 自主 Read 源码 / Grep 追 callee 定义后判定；
+      agent_name=gn-discovery-sink-NNN（记账唯一名）。
+    - ``llm_client``：单次路径（历史契约，chunk 全源码快照），测试 / 兼容。
+
     调用粒度 = **文件级**(spec 2026-07-10 §3.1): 同文件所有可疑 call → 一个 chunk →
-    一次 LLM 调用(大幅减调用次数: N 函数 → 文件 chunk 数)。大文件按 token 贪心拆 chunk
+    一次判定(大幅减调用次数: N 函数 → 文件 chunk 数)。大文件按 token 贪心拆 chunk
     (token_threshold, 默认由 get_chunk_token_threshold(model) 派生: 按当前模型 context
     自适应, glm-5.2 走 750K / 默认 96K)防 prompt 爆 LLM context。
 
@@ -461,7 +509,7 @@ async def discover_sinks_llm(
     progress_cb: best-effort 进度上报(每 chunk 一 tick + 一次 finalize 汇总);
     cb=None 全程 no-op。
     """
-    if llm_client is None or not suspicious:
+    if (llm_client is None and discovery_agent is None) or not suspicious:
         return [], []
     effective_threshold = (token_threshold if token_threshold is not None
                            else get_chunk_token_threshold(model))
@@ -476,9 +524,22 @@ async def discover_sinks_llm(
 
     emitter = ProgressEmitter("sink-discovery", len(chunks), progress_cb)
 
-    async def _discover_one(chunk: FileChunk) -> list[SinkCallSite]:
-        prompt = _build_discovery_prompt(chunk)
-        raw = await llm_client(prompt, output_format=_SINK_VERDICT_SCHEMA)
+    async def _discover_one(item) -> list[SinkCallSite]:
+        idx, chunk = item
+        if discovery_agent is not None:
+            result = await discovery_agent(
+                _build_discovery_agent_prompt(chunk),
+                output_format=_SINK_VERDICT_SCHEMA,
+                agent_name=f"gn-discovery-sink-{idx + 1:03d}")
+            if getattr(result, "success", True) is False:
+                raise RuntimeError(
+                    f"discovery agent failed: {getattr(result, 'error', None)}")
+            so = getattr(result, "structured_output", None)
+            raw = json.dumps(so, ensure_ascii=False) if so is not None else (
+                getattr(result, "text", "") or "")
+        else:
+            prompt = _build_discovery_prompt(chunk)
+            raw = await llm_client(prompt, output_format=_SINK_VERDICT_SCHEMA)
         verdicts = _parse_verdicts(raw)
         vmap = {str(v.get("call_ref")): v for v in verdicts}
         out: list[SinkCallSite] = []
@@ -510,6 +571,11 @@ async def discover_sinks_llm(
     # 绕过 env(违反 spec「均可经 env 覆盖」+ concurrency.py docstring), 已修。
     effective_timeout = (per_call_timeout if per_call_timeout is not None
                          else max(get_per_call_timeout(), DEFAULT_DISCOVERY_PER_CALL_TIMEOUT))
+    if discovery_agent is not None:
+        # 多轮 agent 超时地板（spec 2026-08-27 §5）：单次档 60/120s 对自主
+        # Read/Grep 的多轮形态不够，取 max(现值, agent 地板默认 300s)。
+        from supernova_core.config.concurrency import get_gn_discovery_agent_timeout
+        effective_timeout = max(effective_timeout, get_gn_discovery_agent_timeout())
 
     async def _on_skip(idx, message):
         # idx → 文件路径: 跨文件合并后诊断单位是 chunk(可多文件); file_paths join 标注。
@@ -519,7 +585,7 @@ async def discover_sinks_llm(
         await emitter.note(f"{', '.join(chunk.file_paths)}: {message}")
 
     per_chunk = await map_llm_with_bounds(
-        chunks, _discover_one,
+        list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout, label="discover_sinks_llm",
         on_skip=_on_skip,
     )

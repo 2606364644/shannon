@@ -194,3 +194,16 @@ async def test_on_skip_message_carries_per_call_timeout():
         ["ok", "slow"], fn, concurrency=2, per_call_timeout=0.05, on_skip=on_skip)
     assert seen, "on_skip 未被调用(应部分失败: slow 超时, ok 成功)"
     assert ">0.05s" in seen[0], f"message 应含 per_call_timeout: {seen[0]}"
+
+
+def test_gn_discovery_agent_timeout_default_and_guard(monkeypatch):
+    """SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT：默认 300；畸形/<=0 回退+warning。"""
+    from supernova_core.config.concurrency import get_gn_discovery_agent_timeout
+    monkeypatch.delenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT", raising=False)
+    assert get_gn_discovery_agent_timeout() == 300.0
+    monkeypatch.setenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT", "600")
+    assert get_gn_discovery_agent_timeout() == 600.0
+    monkeypatch.setenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT", "bad")
+    assert get_gn_discovery_agent_timeout() == 300.0
+    monkeypatch.setenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT", "-5")
+    assert get_gn_discovery_agent_timeout() == 300.0

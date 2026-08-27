@@ -715,3 +715,36 @@ def test_discover_sources_by_rules_sink_func_ids_none_tolerant():
     assert len(out) == 1
     assert out[0].param_name == "preTax"
 
+
+
+# ===== spec 2026-08-27 §5：discovery 多轮 agent 路径 =====
+
+class _AgentResult:
+    def __init__(self, *, success=True, structured_output=None, text="", error=None):
+        self.success = success
+        self.structured_output = structured_output
+        self.text = text
+        self.error = error
+
+
+def test_discover_sources_llm_agent_path():
+    """多轮 agent 路径：瘦身 prompt（无源码快照）+ agent_name=gn-discovery-source-NNN
+    + structured_output 解析软 source（产物形态与单次路径一致）。"""
+    calls_rec = []
+    block = _block("f.js", "f", 1, 'function f(req){ const x = input.get("x"); }\n')
+    cands = collect_source_candidates([block], {block.id},
+                                      source_provider=lambda b: block.source_code.encode())
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls_rec.append({"prompt": prompt, "name": agent_name})
+        return _AgentResult(structured_output=[
+            {"field": "x", "source_type": "query", "is_source": True,
+             "rationale": "r"}])
+
+    out, _gaps = asyncio.run(discover_sources_llm(cands, None,
+                                                  discovery_agent=fake_agent))
+    assert len(out) == 1
+    assert out[0].rule_id == "llm-discovered-source"
+    assert calls_rec[0]["name"] == "gn-discovery-source-001"
+    assert "def handler" not in calls_rec[0]["prompt"]
+    assert "input.get" not in calls_rec[0]["prompt"]  # 无源码快照（agent 自己 read）

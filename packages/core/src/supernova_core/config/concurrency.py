@@ -182,3 +182,30 @@ def get_chain_verdict_max_agents() -> int:
                      "falling back to %d", val, _CHAIN_VERDICT_MAX_AGENTS_DEFAULT)
         return _CHAIN_VERDICT_MAX_AGENTS_DEFAULT
     return val
+
+
+_GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT = 300.0
+
+
+def get_gn_discovery_agent_timeout() -> float:
+    """SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT（spec 2026-08-27 §5，默认 300s）：
+    discovery 多轮 agent 的单 chunk 超时地板。原 SUPERNOVA_LLM_PER_CALL_TIMEOUT
+    （60s）与文件级默认（120s）都是单次档——多轮 agent（自主 Read/Grep）需更高；
+    agent 路径取 max(现值, 本值)。经 ws_getenv 支持 per-workspace 覆盖。
+
+    返回 env 值(float>0)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT")
+    if raw is None:
+        return _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT
+    try:
+        val = float(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT=%r not a float; "
+                     "falling back to %s", raw, _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT)
+        return _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT
+    if val <= 0:
+        _log.warning("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT=%s must be >0; "
+                     "falling back to %s", val, _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT)
+        return _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT
+    return val

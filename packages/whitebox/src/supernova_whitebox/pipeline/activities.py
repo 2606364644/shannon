@@ -704,6 +704,15 @@ async def run_code_index(input: ActivityInput) -> dict:
                 return _client
 
             _llm_taint_client = _make_gitnexus_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
+            # discovery 多轮 agent（spec 2026-08-27 §5）：sink/source/storage 补召回
+            # 走逐 chunk 多轮 agent（自主 Read 源码 / Grep 追 callee）；taint 分析
+            # 仍走单次 llm_client（per-function 批量分类器，多轮成本不可行）。
+            # agent_name 由 discovery 层传 gn-discovery-{kind}-NNN 前缀（记账唯一）。
+            _discovery_agent = None
+            if is_gitnexus_llm_enabled():
+                _discovery_agent = _make_verdict_agent_runner(
+                    str(repo), provider_config=input.provider_config,
+                    audit_session=get_audit_session())
 
             # --- GitNexus integration ---
             # GitNexus MCP serves ALL indexed repos from its global registry
@@ -750,6 +759,7 @@ async def run_code_index(input: ActivityInput) -> dict:
                         str(repo),
                         mcp_client=mcp,
                         llm_client=_llm_taint_client,
+                        discovery_agent=_discovery_agent,
                         auto_index=False,
                         progress_cb=_make_gitnexus_progress_cb(get_audit_session()),
                         model=_medium_model,

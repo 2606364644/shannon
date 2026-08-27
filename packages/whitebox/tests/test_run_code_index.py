@@ -244,3 +244,41 @@ async def test_run_code_index_mcp_timeout_is_retryable(tmp_path):
         # 关键断言：连接类瞬时错误必须可重试（non_retryable=False），
         # 让 CODE_INDEX_RETRY 接管而非把整条扫描打死。
         assert ei.value.non_retryable is False
+
+
+@pytest.mark.asyncio
+async def test_run_code_index_passes_discovery_agent_when_enabled(tmp_path):
+    """spec 2026-08-27 §5：GitNexus-LLM 开 → discovery 走多轮 agent（非 None
+    discovery_agent 传入 build_code_index_with_gitnexus）；关 → None（单次降级）。"""
+    from supernova_core.config import concurrency as conc
+
+    input = ActivityInput(repo_path=str(tmp_path), workspace_name="test")
+    fake_index = MagicMock(
+        total_blocks=1, total_entry_points=0, total_chains=0, degradation_level="full",
+    )
+    for enabled, expect_agent in ((True, True), (False, False)):
+        with patch("supernova_whitebox.audit.session_registry.get_audit_session") as mock_sess, \
+             patch("supernova_core.code_index.gitnexus_engine.GitNexusEngine") as mock_engine_cls, \
+             patch("supernova_whitebox.pipeline.activities._get_paths") as mock_paths, \
+             patch("supernova_core.code_index.gitnexus_mcp.GitNexusMCPClient"), \
+             patch("supernova_core.code_index.build_code_index_with_gitnexus",
+                   new=AsyncMock(return_value=(fake_index, [], [], []))) as mock_build, \
+             patch("supernova_core.code_index.write_index_files",
+                   return_value=(tmp_path / "code_index.json", tmp_path / "code_index_summary.md")), \
+             patch("supernova_whitebox.pipeline.activities.is_gitnexus_llm_enabled",
+                   lambda: enabled):
+            cm = mock_sess.return_value.track_step.return_value
+            cm.__aenter__ = AsyncMock(return_value=None)
+            cm.__aexit__ = AsyncMock(return_value=None)
+            mock_engine = MagicMock()
+            mock_engine.is_available.return_value = True
+            mock_engine.ensure_indexed_async = AsyncMock(
+                return_value=MagicMock(success=True))
+            mock_engine_cls.return_value = mock_engine
+            mock_paths.return_value = (tmp_path, tmp_path / "deliverables", tmp_path)
+
+            await run_code_index(input)
+
+            kwargs = mock_build.call_args.kwargs
+            has_agent = kwargs.get("discovery_agent") is not None
+            assert has_agent is expect_agent, f"enabled={enabled}"

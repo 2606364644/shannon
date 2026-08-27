@@ -193,3 +193,58 @@ def test_discover_storage_reads_prompt_includes_file_and_function():
     assert seen
     assert "H.java" in seen[0]
     assert "repo.findByName" in seen[0]
+
+
+# ===== spec 2026-08-27 §5：discovery 多轮 agent 路径 =====
+
+class _AgentResult:
+    def __init__(self, *, success=True, structured_output=None, text="", error=None):
+        self.success = success
+        self.structured_output = structured_output
+        self.text = text
+        self.error = error
+
+
+def test_discover_storage_reads_agent_path():
+    """多轮 agent 路径：瘦身 prompt + agent_name=gn-discovery-storage-r-NNN +
+    structured_output 解析软 storage read。"""
+    calls_rec = []
+    block = _block(
+        "H.java", "f", 1,
+        'void f(String name){ var x = repo.findByName(name); echo(x); }\n')
+    cands = [StorageReadCandidate(block=block)]
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls_rec.append({"prompt": prompt, "name": agent_name})
+        return _AgentResult(structured_output=[
+            {"read": "repo.findByName(name)", "medium": "db", "token": "name",
+             "read_var": "x", "line": 1, "is_storage_read": True,
+             "rationale": "orm find"}])
+
+    reads, gaps = asyncio.run(discover_storage_reads_llm(
+        cands, None, discovery_agent=fake_agent))
+    assert len(reads) == 1
+    assert reads[0].rule_id == "llm-discovered-storage"
+    assert calls_rec[0]["name"] == "gn-discovery-storage-r-001"
+    # 无源码快照（agent 自己 read）——测试 block 的源码不在 prompt（模板示例除外）
+    assert "void f(String name)" not in calls_rec[0]["prompt"]
+
+
+def test_discover_storage_writes_agent_path():
+    calls_rec = []
+    block = _block(
+        "H.java", "f", 1,
+        'void f(String name){ repo.save(new User(name)); }\n')
+    cands = [StorageWriteCandidate(block=block)]
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls_rec.append({"prompt": prompt, "name": agent_name})
+        return _AgentResult(structured_output=[
+            {"write": "repo.save(new User(name))", "medium": "db",
+             "token": "User", "written_expr": "name", "line": 1,
+             "is_storage_write": True, "rationale": "orm save"}])
+
+    writes, gaps = asyncio.run(discover_storage_writes_llm(
+        cands, None, discovery_agent=fake_agent))
+    assert len(writes) == 1
+    assert calls_rec[0]["name"] == "gn-discovery-storage-w-001"

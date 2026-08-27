@@ -776,3 +776,71 @@ class TestDeepsecCandidateSchemaNarrowing:
         )
         out = self._py_suspicious(src)
         assert not any(c.callee == "loads" for c in out)
+
+
+# ===== spec 2026-08-27 §5：discovery 多轮 agent 路径 =====
+
+class _AgentResult:
+    def __init__(self, *, success=True, structured_output=None, text="", error=None):
+        self.success = success
+        self.structured_output = structured_output
+        self.text = text
+        self.error = error
+
+
+async def test_discover_sinks_llm_agent_path(monkeypatch):
+    """多轮 agent 路径：prompt 只给 call 清单（无源码快照，agent 自己 read）、
+    output_format/_SINK_VERDICT_SCHEMA 透传、agent_name=gn-discovery-sink-NNN、
+    structured_output（list）→ 解析软 sink（产物形态与单次路径一致）。"""
+    from supernova_core.code_index.sink_discovery_llm import _SINK_VERDICT_SCHEMA
+    calls_rec = []
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls_rec.append({"prompt": prompt, "schema": output_format,
+                          "name": agent_name})
+        return _AgentResult(structured_output=[
+            {"call_ref": "raw_query:1", "is_sink": True, "category": "sql",
+             "slot": "sql_value", "arg_index": 0, "rationale": "raw SQL"}])
+
+    soft, gaps = await discover_sinks_llm([_suspicious()], None,
+                                          discovery_agent=fake_agent)
+    assert len(soft) == 1
+    assert soft[0].rule_id == "llm-discovered"
+    assert soft[0].needs_review is True
+    assert len(gaps) == 1
+    assert len(calls_rec) == 1
+    assert calls_rec[0]["schema"] is _SINK_VERDICT_SCHEMA
+    assert calls_rec[0]["name"] == "gn-discovery-sink-001"
+    # agent 版 prompt：call 清单在，源码快照不在（瘦身——agent 自己 read）
+    assert "raw_query" in calls_rec[0]["prompt"]
+    assert "def handler(): pass" not in calls_rec[0]["prompt"]
+
+
+async def test_discover_sinks_llm_agent_failure_chunk_degrades():
+    """agent success=False → 该 chunk 降级空返回（对齐单次路径 raise/超时降级）。"""
+    async def failing_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(success=False, error="timeout")
+
+    soft, gaps = await discover_sinks_llm([_suspicious()], None,
+                                          discovery_agent=failing_agent)
+    assert soft == [] and gaps == []
+
+
+async def test_discover_sinks_llm_agent_timeout_floor(monkeypatch):
+    """agent 路径 per_call_timeout 地板 = SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT
+    （默认 300s——多轮 agent 120s 单次档不够；spec 2026-08-27 §5）。"""
+    from supernova_core.code_index import sink_discovery_llm as mod
+    captured = {}
+
+    async def fake_map(items, fn, *, concurrency, per_call_timeout=None,
+                       label="", on_skip=None):
+        captured["timeout"] = per_call_timeout
+        return []
+
+    monkeypatch.setattr(mod, "map_llm_with_bounds", fake_map)
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text="[]")
+
+    await discover_sinks_llm([_suspicious()], None, discovery_agent=fake_agent)
+    assert captured["timeout"] >= 300
