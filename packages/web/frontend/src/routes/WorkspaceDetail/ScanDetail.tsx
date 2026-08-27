@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useParams, useLocation, useNavigate, Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Plus, Trash2, CheckCircle2, PlayCircle, Circle } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
-import { rerunBlackbox, addBlackboxToWhitebox, deleteBlackboxRun, ApiError } from "@/api/client";
+import { rerunBlackbox, addBlackboxToWhitebox, deleteBlackboxRun, resumeScan,
+         getResumePreview, ApiError, type ResumePreview } from "@/api/client";
 import type { BlackboxRunSummary } from "@/api/types";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { runStatusLabelKey, isRunFailureStatus, isRunTerminal, RunFailureBanner } from "./runStatus";
@@ -132,6 +133,151 @@ function CombinedDetailTimeline({
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowRerun(false)}>{t("common.cancel")}</Button>
             <Button onClick={doRerun} disabled={busy}>{t("common.confirm")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// 白盒编排顺序（对齐后端 whitebox_resume._AGENT_ORDER）：断点详情卡据此渲染
+// 全量 agent 三态（✅ 已完成 / ▶ 将从此继续 / ⏳ 未跑到）——preview 响应只带
+// completed/interrupted 两集合，全序由前端静态持有（agent 集稳定）。
+const BREAKPOINT_AGENT_ORDER = [
+  "pre-recon", "recon", "injection-vuln", "xss-vuln", "auth-vuln", "ssrf-vuln", "authz-vuln",
+] as const;
+
+const BREAKPOINT_STEP_LABEL: Record<string, string> = {
+  done: "workspaceDetail.scans.breakpointStepDone",
+  stale: "workspaceDetail.scans.breakpointStepStale",
+  missing: "workspaceDetail.scans.breakpointStepMissing",
+};
+
+/** 断点详情卡（spec 2026-08-27-web-resume-breakpoint §4.6）：非 completed/running
+ *  的白盒行展示 agent 三态 + 步骤缓存简表 + warnings + 续跑按钮（确认流与列表页
+ *  同款：摘要弹窗 → POST resume → 跳 live）。resumable:false 直示原因（引导重跑）。 */
+function ResumeBreakpointCard({ ws, scanId, onResumed }: {
+  ws: string; scanId: string; onResumed: () => void;
+}) {
+  const { t } = useTranslation();
+  const nav = useNavigate();
+  const [preview, setPreview] = useState<ResumePreview | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getResumePreview(ws, scanId)
+      .then((p) => { if (alive) setPreview(p); })
+      .catch(() => { /* preview 拉取失败静默：列表页入口仍是主路径 */ });
+    return () => { alive = false; };
+  }, [ws, scanId]);
+
+  if (!preview) return null;
+
+  async function doResume() {
+    setBusy(true);
+    try {
+      await resumeScan(ws, scanId);
+      toast.success(t("workspaceDetail.scans.resumed"));
+      setConfirmOpen(false);
+      onResumed();
+      nav("live");
+    } catch (e) {
+      toast.error(t("workspaceDetail.scans.resumeFailed", { error: apiErrMsg(e) }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const completed = new Set(preview.completed_agents);
+  const doneSteps = preview.steps.filter((s) => s.state === "done").length;
+  return (
+    <div className="rounded-md border border-border bg-card p-3 space-y-2" data-testid="resume-breakpoint">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("workspaceDetail.scans.breakpointTitle")}
+        </div>
+        {preview.resumable && (
+          <Button size="sm" variant="outline" onClick={() => setConfirmOpen(true)} disabled={busy}>
+            <PlayCircle className="size-3.5" /> {t("workspaceDetail.scans.resume")}
+          </Button>
+        )}
+      </div>
+      {!preview.resumable ? (
+        <div className="text-sm text-muted-foreground">
+          {preview.reason ?? preview.abort_reason}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+            {BREAKPOINT_AGENT_ORDER.map((a) => {
+              if (completed.has(a)) {
+                return (
+                  <span key={a} className="inline-flex items-center gap-1 text-muted-foreground">
+                    <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden /> {a}
+                  </span>
+                );
+              }
+              if (a === preview.interrupted_agent) {
+                return (
+                  <span key={a} className="inline-flex items-center gap-1 font-medium text-primary">
+                    <PlayCircle className="size-3.5" aria-hidden /> {a}
+                    <span className="text-[11px] font-normal opacity-80">
+                      {t("workspaceDetail.scans.breakpointNextLabel")}
+                    </span>
+                  </span>
+                );
+              }
+              return (
+                <span key={a} className="inline-flex items-center gap-1 text-muted-foreground/60">
+                  <Circle className="size-3.5" aria-hidden /> {a}
+                  <span className="text-[11px] opacity-80">{t("workspaceDetail.scans.breakpointNotRun")}</span>
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {preview.steps.map((s) => (
+              <span key={s.step} className="font-mono">
+                {s.step}
+                <span className="ml-1 opacity-70">
+                  {t(BREAKPOINT_STEP_LABEL[s.state] ?? s.state)}
+                </span>
+              </span>
+            ))}
+          </div>
+          {preview.warnings.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {preview.warnings.map((w, i) => <li key={i}>· {w}</li>)}
+            </ul>
+          )}
+        </>
+      )}
+      {/* 续跑确认弹窗（摘要与列表页同款文案） */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("workspaceDetail.scans.resumeConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {preview.completed_agents.length > 0
+                ? t("workspaceDetail.scans.resumeSummary", {
+                    count: preview.completed_agents.length,
+                    agents: preview.completed_agents.join(" / "),
+                    next: preview.interrupted_agent ?? "—",
+                    steps: doneSteps,
+                  })
+                : t("workspaceDetail.scans.resumeNoSkip")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={busy}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={doResume} disabled={busy}>
+              {busy && <RefreshCw className="mr-1 size-3.5 animate-spin" />}
+              {t("common.confirm")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -313,6 +459,14 @@ export default function ScanDetail() {
           <CombinedDetailTimeline
             ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase} onRerunDone={load}
           />
+        </div>
+      )}
+      {/* 断点详情卡（spec 2026-08-27 §4.6）：非 completed/running 白盒行（含组合）
+          展示 agent 三态 + 步骤缓存 + 续跑入口；correlation/blackbox 无此区块。 */}
+      {!loading && meta && meta.scan_type === "whitebox"
+        && !["completed", "done", "running"].includes(status) && (
+        <div className={isFlexLayout ? "shrink-0" : ""}>
+          <ResumeBreakpointCard ws={workspace!} scanId={scanId!} onResumed={load} />
         </div>
       )}
       {isCombined && selectedRunObj && isRunFailureStatus(selectedRunObj.status) &&

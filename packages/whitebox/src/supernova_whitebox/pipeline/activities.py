@@ -41,6 +41,12 @@ from supernova_core.audit.session_recovery import (
 
 from .shared import ActivityInput
 from .step_intents import intent_for
+from .step_cache import (
+    STEP_AUTHZ_GITNEXUS_JUDGE,
+    STEP_GITNEXUS_CHAIN_VERDICT,
+    mark_done,
+    should_skip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +399,26 @@ async def log_info_activity(input: ActivityInput) -> None:
 
 
 @activity.defn
+async def persist_completed_agents(input: ActivityInput, completed_agents: list[str]) -> None:
+    """completed_agents 增量落盘 session.json（2026-08-27 列表进度不动修复 · 写侧）。
+
+    原只在 workflow 结束（finalize_summary）落盘 → 运行中 session.json 恒 []，
+    progress_pct 分子不动（列表/详情/仪表盘阶段内钉死）。workflow 在每个 agent
+    完成点调本 activity 落盘（Temporal workflow 禁 IO）。异常上抛由 workflow 侧
+    _persist_progress 吞（best-effort：进度失败不阻塞扫描）。
+
+    session.json 缺失（异常路径）时 no-op——update_session 对缺失文件会写出只含
+    completed_agents 的残缺 session，破坏后续读取。
+    """
+    from supernova_core.session import SessionManager
+    scan_dir = Path(input.workspace_path)
+    if not (scan_dir / "session.json").exists():
+        return
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"completed_agents": list(completed_agents)})
+
+
+@activity.defn
 async def write_track_status_activity(input: ActivityInput) -> dict:
     """Task 4 fail-fast: 写 gitnexus_track_status.json(workflow->activity->helper).
 
@@ -468,6 +494,18 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
             intent=intent_for("authz-gitnexus-judge"),
         ):
             repo, deliverables, _ = _get_paths(input)
+            # step cache（spec 2026-08-27-web-resume-breakpoint §4.3）：输入指纹
+            # （code_index/framework_analysis，均产自 pre-recon 守卫块、块后无人
+            # 覆写）全匹配 → 跳过候选轨重建与判定 agent，还原缓存返回值。
+            _cache_inputs = [
+                intermediate_path(deliverables, "code_index.json"),
+                intermediate_path(deliverables, "framework_analysis.json"),
+            ]
+            _skip, _cached = should_skip(
+                STEP_AUTHZ_GITNEXUS_JUDGE, deliverables, inputs=_cache_inputs)
+            if _skip:
+                logger.info("authz-gitnexus-judge: step cache 命中，跳过判定（输入指纹一致）")
+                return _cached
             try:
                 md, dom_cands, fw_cands, http_route_count, entry_point_total = build_authz_gitnexus_track(str(deliverables))
             except Exception as exc:
@@ -623,7 +661,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 intermediate_path(deliverables, "authz_gitnexus_queue.json"),
                 {"vulnerabilities": vulnerabilities},
             )
-            return {
+            _ret = {
                 "candidate_count": candidate_count,
                 "verdict_count": len(vulnerabilities),
                 "dominance_candidates": len(dom_cands),
@@ -631,6 +669,16 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                 "failed": failed,
                 "fail_reason": fail_reason,
             }
+            # step cache：干净完成（failed=False）才打点（§4.3——agent 失败降级
+            # failed=True 不打，resume=再试一次）。
+            if not failed:
+                mark_done(
+                    STEP_AUTHZ_GITNEXUS_JUDGE, deliverables,
+                    inputs=_cache_inputs,
+                    outputs=[intermediate_path(
+                        deliverables, "authz_gitnexus_queue.json")],
+                    ret=_ret)
+            return _ret
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
@@ -1001,12 +1049,29 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                 llm_findings = []
                 llm_warnings = []
                 if exploitation_path is not None:
-                    # 保 LLM 轨原始副本（tier：*_llm_queue.json → intermediate/）
+                    # merge 幂等（spec 2026-08-27-web-resume-breakpoint §4.4）：
+                    # agent 级 resume 跳过 vuln agent 后，exploitation 可能是
+                    # merge 自己写回的合并版（卡带 merge_source 标——merger 独有，
+                    # LLM agent 产的卡没有）→ LLM 输入改读首跑备份的原始件，
+                    # 不二次合并、不覆盖备份（无条件备份会销毁唯一 LLM 原始件）。
+                    # 无标（首跑 / ¬G agent 重跑产新件）走原件并首写备份。
+                    # 备份缺失的合并版（用户手删/修复前老 session）回落原件路径，
+                    # 行为等同修复前，不再恶化。
                     llm_path = intermediate_path(
                         deliverables, f"{vuln_class}_llm_queue.json")
-                    llm_path.parent.mkdir(parents=True, exist_ok=True)
-                    llm_path.write_text(exploitation_path.read_text(encoding="utf-8"), encoding="utf-8")
-                    llm_parsed = VulnerabilityQueue.parse_lenient(llm_path.read_text(encoding="utf-8"))
+                    _raw = exploitation_path.read_text(encoding="utf-8")
+                    _parsed = VulnerabilityQueue.parse_lenient(_raw)
+                    _already_merged = any(
+                        getattr(f, "merge_source", None)
+                        for f in _parsed.queue.vulnerabilities)
+                    if _already_merged and llm_path.exists():
+                        llm_parsed = VulnerabilityQueue.parse_lenient(
+                            llm_path.read_text(encoding="utf-8"))
+                    else:
+                        # 保 LLM 轨原始副本（tier：*_llm_queue.json → intermediate/）
+                        llm_path.parent.mkdir(parents=True, exist_ok=True)
+                        llm_path.write_text(_raw, encoding="utf-8")
+                        llm_parsed = _parsed
                     llm_findings = llm_parsed.queue.vulnerabilities
                     llm_warnings = llm_parsed.warnings
                 elif not gitnexus_findings:
@@ -2766,6 +2831,21 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         from supernova_core.utils.atomic_write import atomic_write_json
 
         repo, deliverables, _ = _get_paths(input)
+        # step cache（spec 2026-08-27-web-resume-breakpoint §4.3）：输入指纹
+        # （parameter_graph/code_index，均产自 pre-recon 守卫块、块后无人覆写）
+        # + salt（gn-llm env 开关——off 跑出的 unadjudicated 结果不得在 on 的
+        # 续跑里被复用）全匹配 → 跳过整段判定，还原缓存返回值。
+        _cache_inputs = [
+            intermediate_path(deliverables, "parameter_graph.json"),
+            intermediate_path(deliverables, "code_index.json"),
+        ]
+        _cache_salt = f"gn-llm={is_gitnexus_llm_enabled()}"
+        _skip, _cached = should_skip(
+            STEP_GITNEXUS_CHAIN_VERDICT, deliverables,
+            inputs=_cache_inputs, salt=_cache_salt)
+        if _skip:
+            logger.info("gitnexus chain-verdict: step cache 命中，跳过判定（输入指纹一致）")
+            return _cached
         per_class: dict[str, int] = {}
         failed_classes: list[str] = []
         fail_reasons: dict[str, str] = {}
@@ -3007,11 +3087,23 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             except Exception:
                 pass
 
-        return {
+        _ret = {
             "per_class": per_class,
             "failed_classes": failed_classes,
             "fail_reasons": fail_reasons,
         }
+        # step cache：干净完成才打点（§4.3——failed_classes 非空不打，resume=
+        # 再试一次；关轨 fail-fast 下打点会让续跑用缓存返回值原地下场）。
+        # outputs 只记实际落盘的 queue 文件（零 finding 类不产空文件）。
+        if not failed_classes:
+            mark_done(
+                STEP_GITNEXUS_CHAIN_VERDICT, deliverables,
+                inputs=_cache_inputs,
+                outputs=[p for p in (
+                    intermediate_path(deliverables, f"{vc}_gitnexus_queue.json")
+                    for vc in ("injection", "xss", "ssrf")) if p.exists()],
+                ret=_ret, salt=_cache_salt)
+        return _ret
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e

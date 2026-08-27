@@ -570,3 +570,116 @@ async def test_builders_run_concurrently_shared_budget(tmp_path, monkeypatch):
     assert sorted(state["names"]) == [
         "chain-verdict-injection-01", "chain-verdict-injection-02",
         "chain-verdict-ssrf-01", "chain-verdict-ssrf-02"]
+
+
+# ── step cache 接线（spec 2026-08-27-web-resume-breakpoint §4.3）───────────────
+#
+# marker + 输入指纹（parameter_graph.json / code_index.json）+ salt
+# （gn-llm env 开关）——命中则整段判定机制不跑、直接还原缓存返回值；
+# 干净完成（failed_classes 空）末尾打点，类级失败不打（resume=再试一次）。
+
+_STEP = "gitnexus-chain-verdict"
+
+
+def _cache_inputs(deliverables):
+    from supernova_core.utils.paths import intermediate_path
+    return [intermediate_path(deliverables, "parameter_graph.json"),
+            intermediate_path(deliverables, "code_index.json")]
+
+
+def _salt():
+    return f"gn-llm={activities.is_gitnexus_llm_enabled()}"
+
+
+def _marker(deliverables):
+    return deliverables / "intermediate" / ".step-cache" / f"{_STEP}.json"
+
+
+@pytest.mark.asyncio
+async def test_step_cache_hit_skips_verdict_machinery(tmp_path, monkeypatch):
+    """marker 有效（指纹+salt 匹配）→ 判定通道不进，返回缓存快照。"""
+    from supernova_whitebox.pipeline import step_cache
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    inter = deliverables / "intermediate"
+    inter.mkdir(parents=True)
+    (inter / "parameter_graph.json").write_text("{}")
+    (inter / "code_index.json").write_text("{}")
+    cached_ret = {"per_class": {"injection": 2}, "failed_classes": [],
+                  "fail_reasons": {}}
+    step_cache.mark_done(_STEP, deliverables, inputs=_cache_inputs(deliverables),
+                         outputs=[], ret=cached_ret, salt=_salt())
+
+    async def fake_llm(prompt, **kw):
+        raise AssertionError("缓存命中时不得走判定通道")
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert result == cached_ret
+
+
+@pytest.mark.asyncio
+async def test_clean_run_writes_marker(tmp_path, monkeypatch):
+    """干净完成末尾打点，键料（inputs/salt/ret）与跳过侧一致——下一轮 resume 即命中。"""
+    from supernova_whitebox.pipeline import step_cache
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    inter = deliverables / "intermediate"
+    inter.mkdir(parents=True)
+    (inter / "parameter_graph.json").write_text(json.dumps({
+        "taint_flows": [_flow("sql_value")],
+        "language_coverage": ["python"], "skipped_languages": []}))
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert result["failed_classes"] == []
+    skip, cached = step_cache.should_skip(
+        _STEP, deliverables, inputs=_cache_inputs(deliverables), salt=_salt())
+    assert skip is True
+    assert cached == result
+
+
+@pytest.mark.asyncio
+async def test_failed_classes_run_does_not_write_marker(tmp_path, monkeypatch):
+    """类级判定失败（failed_classes 非空）不打点——resume 语义=再试一次；
+    打点会让关轨 fail-fast 的续跑用缓存返回值原地下场（spec §4.3）。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    inter = deliverables / "intermediate"
+    inter.mkdir(parents=True)
+    (inter / "parameter_graph.json").write_text(json.dumps({
+        "taint_flows": [_flow("sql_value")],
+        "language_coverage": ["python"], "skipped_languages": []}))
+
+    import supernova_core.code_index.vuln_chain_builders.injection_builder as ib
+    monkeypatch.setattr(
+        ib, "build_injection_findings",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("builder boom")))
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"x","evidence_chain":"q->db",'
+                '"mismatch_reason":"concat","confidence":"high"}')
+
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    set_audit_session(_RecordingSession())
+    try:
+        result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert "injection" in result["failed_classes"]
+    assert not _marker(deliverables).exists()

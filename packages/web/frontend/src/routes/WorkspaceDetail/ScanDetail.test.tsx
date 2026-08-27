@@ -311,3 +311,62 @@ describe("DefaultScanTab correlation 默认概览", () => {
     await waitFor(() => expect(screen.getByText("rp-content")).toBeInTheDocument());
   });
 });
+
+// ── 断点详情卡（spec 2026-08-27-web-resume-breakpoint §4.6）──────────────────
+
+describe("断点详情卡", () => {
+  it("failed 白盒行：agent 状态列表 + 步骤缓存简表 + 续跑确认流", async () => {
+    const resumeCalls: string[] = [];
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "failed", scan_type: "whitebox",
+                            repo_path: "/root/code", workflow_id: "ws-s1" })),
+      http.get("/api/workspaces/:ws/scans/:scanId/resume-preview", () =>
+        HttpResponse.json({
+          status: "failed", resumable: true, reason: null, scan_type: "whitebox",
+          completed_agents: ["pre-recon", "recon"], interrupted_agent: "injection-vuln",
+          steps: [{ step: "gitnexus-chain-verdict", state: "done", ts: 1 }],
+          warnings: [], abort_reason: null, resume_attempts: 1,
+        })),
+      http.post("/api/workspaces/:ws/scans/:scanId/resume", ({ params }) => {
+        resumeCalls.push(`${params.ws}/${params.scanId}`);
+        return HttpResponse.json({ workspace: params.ws, scan_id: params.scanId });
+      }),
+    );
+    renderAt("/p/ws/scans/s1/live");
+    // 卡片：标题 + 已完成 agent + 继续点 + 步骤缓存条目
+    expect(await screen.findByText("断点详情")).toBeInTheDocument();
+    expect(screen.getByText(/pre-recon/)).toBeInTheDocument();
+    expect(screen.getByText(/将从此继续/)).toBeInTheDocument();
+    expect(screen.getByText(/gitnexus-chain-verdict/)).toBeInTheDocument();
+    // 续跑 → 确认弹窗（摘要）→ POST resume
+    fireEvent.click(screen.getByRole("button", { name: "续跑" }));
+    expect(await screen.findByText(/已完成 2 项/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    await waitFor(() => expect(resumeCalls).toEqual(["ws/s1"]));
+  });
+
+  it("resumable:false：卡内直示原因，无续跑按钮", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({ status: "failed", scan_type: "whitebox",
+                            repo_path: "/root/code", workflow_id: "ws-s1" })),
+      http.get("/api/workspaces/:ws/scans/:scanId/resume-preview", () =>
+        HttpResponse.json({
+          status: "failed", resumable: false,
+          reason: "resume 中止：recon 产出物文件缺失", scan_type: "whitebox",
+          completed_agents: [], interrupted_agent: null, steps: [], warnings: [],
+          abort_reason: "resume 中止：recon 产出物文件缺失", resume_attempts: 0,
+        })),
+    );
+    renderAt("/p/ws/scans/s1/live");
+    expect(await screen.findByText(/产出物文件缺失/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "续跑" })).not.toBeInTheDocument();
+  });
+
+  it("running 行不渲染断点详情卡", async () => {
+    renderAt("/p/ws/scans/s1/live");
+    await waitFor(() => expect(screen.getByText("whitebox")).toBeInTheDocument());
+    expect(screen.queryByText("断点详情")).not.toBeInTheDocument();
+  });
+});

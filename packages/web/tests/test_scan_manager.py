@@ -11,7 +11,7 @@ import json
 import time
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1295,3 +1295,269 @@ async def test_resume_correlation_stale_marks_interrupted(tmp_path):
     with pytest.raises(ValueError, match="不支持断点恢复"):
         await sm.resume("ws", scan_id)
     assert (scan_dir / "events.ndjson").read_text().count('"scan_end"') == 1
+
+
+# ── resume 接通 agent 级断点续传（spec 2026-08-27-web-resume-breakpoint §4.1/4.2）──
+
+class _StubResumeState:
+    def __init__(self, completed_agents=None, aborted=False, abort_reason=None,
+                 warnings=None, interrupted_agent=None):
+        self.completed_agents = completed_agents or []
+        self.aborted = aborted
+        self.abort_reason = abort_reason
+        self.warnings = warnings or []
+        self.interrupted_agent = interrupted_agent
+
+
+class _StubResumeBuilder:
+    """wiring 级替身：记录 build/cleanup 调用、返回受控 state。
+    builder 本体（G∧F 对账）在 whitebox 侧测试覆盖，web 层只验接线。"""
+
+    def __init__(self):
+        self.build_calls = []
+        self.cleanup_calls = []
+        self._next_state = _StubResumeState()
+
+    def set_state(self, state):
+        self._next_state = state
+
+    async def build(self, *, mode, workspace, deliverables, repo_path, **kw):
+        self.build_calls.append({"mode": mode, "workspace": workspace,
+                                 "deliverables": deliverables,
+                                 "repo_path": repo_path})
+        return self._next_state
+
+    async def cleanup(self, *, mode, deliverables, completed_agents, **kw):
+        self.cleanup_calls.append({"mode": mode, "deliverables": deliverables,
+                                   "completed_agents": list(completed_agents)})
+
+
+@pytest.fixture
+def stub_resume_builder(monkeypatch):
+    import supernova_web.components.scan_manager as scm
+    inst = _StubResumeBuilder()
+    monkeypatch.setattr(scm, "WhiteboxResumeStateBuilder", lambda: inst)
+    return inst
+
+
+def _set_status(scan_dir, status):
+    from supernova_core.session import SessionManager
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"status": status})
+
+
+@pytest.mark.asyncio
+async def test_resume_whitebox_reconciles_and_passes_completed_agents(
+        tmp_path, monkeypatch, stub_resume_builder):
+    """§4.2：resume 白盒行先对账（builder）+ cleanup 删半成品，再把
+    completed_agents 透传进 PipelineInput（workflow L105-107 激活跳过守卫），
+    并写续跑摘要 InfoEvent 进 events.ndjson（live 流可见）。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    SessionManager(scan_dir.parent).update_session(scan_dir, {"status": "interrupted"})
+    stub_resume_builder.set_state(_StubResumeState(
+        completed_agents=["pre-recon", "recon"], interrupted_agent="injection-vuln"))
+
+    _patch_temporal_ok(monkeypatch, sm)
+    mock_client = _patch_client(monkeypatch)
+    with patch.object(sm, "_watch", new=AsyncMock()):
+        await sm.resume("ws", scan_id)
+
+    call = stub_resume_builder.build_calls[0]
+    assert call["mode"] == "auto"
+    assert call["workspace"] == scan_dir
+    assert call["deliverables"] == scan_dir / "deliverables" / "whitebox"
+    assert stub_resume_builder.cleanup_calls[0]["completed_agents"] == ["pre-recon", "recon"]
+    inp = mock_client.start_workflow.call_args.args[1]
+    assert inp.resume_completed_agents == ["pre-recon", "recon"]
+    events = (scan_dir / "events.ndjson").read_text()
+    assert '"InfoEvent"' in events
+    assert "pre-recon" in events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "cancelled", "killed", "crashed", "interrupted"])
+async def test_resume_status_gate_allows_non_completed_terminal_states(
+        tmp_path, monkeypatch, stub_resume_builder, status):
+    """§4.1：_RESUMABLE_STATUSES 扩集——failed（最常见中断出口）/cancelled/killed
+    全部放行（无心跳时）；不再只有 interrupted/crashed。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, status)
+
+    _patch_temporal_ok(monkeypatch, sm)
+    _patch_client(monkeypatch)
+    with patch.object(sm, "_watch", new=AsyncMock()):
+        ws, sid = await sm.resume("ws", scan_id)  # 不抛「不可恢复」即过门
+    assert (ws, sid) == ("ws", scan_id)
+
+
+@pytest.mark.asyncio
+async def test_resume_completed_status_still_rejected(tmp_path):
+    """completed 仍不可续跑（重跑语义走新建 scan）。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "completed")
+    with pytest.raises(ValueError, match="不可恢复"):
+        await sm.resume("ws", scan_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["cancelled", "killed", "crashed", "interrupted"])
+async def test_resume_fresh_heartbeat_rejected(tmp_path, monkeypatch, status):
+    """§4.1：非 failed 状态 + 心跳新鲜 → 撞车拒绝（防与残留 workflow 撞车），
+    零提交零 session 改动。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, status)
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh
+    before = (scan_dir / "session.json").read_text()
+
+    _patch_temporal_ok(monkeypatch, sm)
+    mock_client = _patch_client(monkeypatch)
+    with pytest.raises(ValueError, match="仍在运行"):
+        await sm.resume("ws", scan_id)
+
+    assert (scan_dir / "session.json").read_text() == before
+    mock_client.start_workflow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_failed_bypasses_heartbeat_gate(tmp_path, monkeypatch, stub_resume_builder):
+    """§4.1：failed = Temporal 已 FAILED 终态，无并发风险——即使心跳文件残留也直接放行。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "failed")
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # 残留心跳不拦 failed
+
+    _patch_temporal_ok(monkeypatch, sm)
+    _patch_client(monkeypatch)
+    with patch.object(sm, "_watch", new=AsyncMock()):
+        await sm.resume("ws", scan_id)
+
+
+@pytest.mark.asyncio
+async def test_resume_builder_abort_raises_with_reason(
+        tmp_path, monkeypatch, stub_resume_builder):
+    """§4.2/§4.6：G∧¬F 产物丢失 → builder abort → ValueError 带 abort_reason
+    （API 层映射 422），不 cleanup、不提交 workflow。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "interrupted")
+    stub_resume_builder.set_state(_StubResumeState(
+        aborted=True, abort_reason="resume 中止：recon 有 deliverable commit 但产出物文件缺失"))
+
+    _patch_temporal_ok(monkeypatch, sm)
+    mock_client = _patch_client(monkeypatch)
+    with pytest.raises(ValueError, match="产出物文件缺失"):
+        await sm.resume("ws", scan_id)
+
+    assert stub_resume_builder.cleanup_calls == []
+    mock_client.start_workflow.assert_not_called()
+
+
+# ── resume-preview（spec 2026-08-27-web-resume-breakpoint §4.5）──────────────
+
+@pytest.mark.asyncio
+async def test_resume_preview_whitebox_full(tmp_path, monkeypatch, stub_resume_builder):
+    """白盒行可续跑：builder 对账结果 + step 简表（无 marker → missing）+ 摘要
+    字段齐全；只读——不调 cleanup、不提交 workflow。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    from supernova_core.session import SessionManager
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "failed")
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"resumeAttempts": [{"workflowId": "x"}, {"workflowId": "y"}]})
+    stub_resume_builder.set_state(_StubResumeState(
+        completed_agents=["pre-recon", "recon"], interrupted_agent="injection-vuln",
+        warnings=["xss-vuln: 半成品，将重跑"]))
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is True
+    assert result["status"] == "failed"
+    assert result["scan_type"] == "whitebox"
+    assert result["completed_agents"] == ["pre-recon", "recon"]
+    assert result["interrupted_agent"] == "injection-vuln"
+    assert result["warnings"] == ["xss-vuln: 半成品，将重跑"]
+    assert result["resume_attempts"] == 2
+    assert {r["step"] for r in result["steps"]} == {
+        "authz-gitnexus-judge", "gitnexus-chain-verdict"}
+    assert all(r["state"] == "missing" for r in result["steps"])
+    assert stub_resume_builder.cleanup_calls == []  # 只读不动状态
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_abort_maps_unresumable(tmp_path, stub_resume_builder):
+    """G∧¬F abort → resumable:false + abort_reason（前端引导重跑），不 cleanup。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "interrupted")
+    stub_resume_builder.set_state(_StubResumeState(
+        aborted=True, abort_reason="resume 中止：recon 产出物文件缺失"))
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is False
+    assert "产出物文件缺失" in result["abort_reason"]
+    assert stub_resume_builder.cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_correlation_unresumable(tmp_path):
+    """correlation 主行：resumable:false + 引导重新提交（子仓产物可复用）。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "frontend", "correlation")
+    _set_status(scan_dir, "interrupted")
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is False
+    assert "重新提交" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_blackbox_unresumable(tmp_path):
+    """黑盒行：resumable:false（黑盒走 rerun 语义）。"""
+    from supernova_core.session import SessionManager
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    SessionManager(scan_dir.parent).update_session(
+        scan_dir, {"scan_type": "blackbox", "status": "interrupted"})
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is False
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_completed_unresumable(tmp_path):
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "completed")
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is False
+    assert result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_fresh_heartbeat_unresumable(tmp_path):
+    """心跳新鲜（worker 复活 race）→ resumable:false「仍在运行」。"""
+    sm, store = _make_manager_with_store(tmp_path)
+    scan_id, scan_dir = store.create_scan("ws", "", "/repo/a", "whitebox")
+    _set_status(scan_dir, "cancelled")
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")
+
+    result = await sm.resume_preview("ws", scan_id)
+
+    assert result["resumable"] is False
+    assert "仍在运行" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_missing_scan_raises(tmp_path):
+    sm, _ = _make_manager_with_store(tmp_path)
+    with pytest.raises(ValueError, match="不存在"):
+        await sm.resume_preview("ws", "nope")

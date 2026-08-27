@@ -761,7 +761,7 @@
       "rerunFailed": "Rerun failed: {{error}}",
       "canceled": "Scan {{scanId}} canceled",
       "deleted": "Scan {{scanId}} deleted",
-      "resumed": "Scan resumed, jumping to live view",
+      "resumed": "Resumed scan, opening live view",
       "noMatch": "No matching scans",
       "card": {
         "scanId": "Scan ID",
@@ -850,7 +850,17 @@
         "toggleExpand": "Expand correlation children",
         "toggleCollapse": "Collapse correlation children"
       },
-      "avgCtx": "avg {{avg}} · max {{max}} · min {{min}}"
+      "avgCtx": "avg {{avg}} · max {{max}} · min {{min}}",
+      "resumeConfirmTitle": "Resume scan",
+      "resumeSummary": "{{count}} agent(s) completed ({{agents}}), resuming from {{next}}; {{steps}} step cache hit(s)",
+      "resumeNoSkip": "Nothing to skip; the scan will start from scratch",
+      "resumePreviewFailed": "Failed to load resume preview: {{error}}",
+      "breakpointTitle": "Resume breakpoint",
+      "breakpointNextLabel": "Resuming from here",
+      "breakpointNotRun": "Not reached",
+      "breakpointStepDone": "cached",
+      "breakpointStepStale": "stale",
+      "breakpointStepMissing": "no cache"
     },
     "errorBoundary": {
       "title": "This section failed to load",

@@ -35,6 +35,14 @@ class FakeSM:
         self.add_run = []  # [(ws, scan_id, req), ...]
         self.deleted_runs = []  # [(ws, scan_id, run_id), ...]
         self.resume_exc = None
+        self.preview_result = {
+            "status": "failed", "resumable": True, "reason": None,
+            "scan_type": "whitebox",
+            "completed_agents": ["pre-recon"], "interrupted_agent": "recon",
+            "steps": [{"step": "gitnexus-chain-verdict", "state": "done",
+                       "ts": 1756272000.0}],
+            "warnings": [], "abort_reason": None, "resume_attempts": 1}
+        self.preview_exc = None
         self.delete_exc = None
         self.delete_run_exc = None
 
@@ -43,6 +51,11 @@ class FakeSM:
             raise self.resume_exc
         self.resumed.append((ws, scan_id))
         return ws, scan_id
+
+    async def resume_preview(self, ws, scan_id):
+        if self.preview_exc:
+            raise self.preview_exc
+        return self.preview_result
 
     async def cancel(self, ws, scan_id=None):
         self.cancelled.append((ws, scan_id))
@@ -402,10 +415,12 @@ def test_resume_completed_422(authed_client, app_with_ws, tmp_workspaces):
 
 
 def test_resume_failed_422(authed_client, app_with_ws, tmp_workspaces):
-    """failed scan 不可 resume -> 422（扫描失败应重扫，旧记录保留）。"""
+    """resume 被 ValueError 拒 -> 422。failed 现已可续跑（spec 2026-08-27 §4.1），
+    典型拒绝场景换为 builder abort（G∧¬F 产物丢失带 abort_reason）。"""
     _make_scan(tmp_workspaces, "WS", scan_id="s1", status="failed")
     fake = FakeSM()
-    fake.resume_exc = ValueError("该扫描状态为 failed，不可恢复，请重新扫描")
+    fake.resume_exc = ValueError(
+        "resume 中止：recon 有 deliverable commit 但产出物文件缺失")
     app_with_ws.state.scan_manager = fake
     tok = _csrf(authed_client)
     assert authed_client.post("/api/workspaces/WS/scans/s1/resume",
@@ -789,3 +804,24 @@ def test_scan_detail_bb_phase_merged_from_latest_run(authed_client, tmp_workspac
     row = next(s for s in lst if s["scan_id"] == wb_id)
     assert row["status"] == "running"
     assert row["bb_phase"] == "running" and row["progress_pct"] == 77.5
+
+
+# ── resume-preview（spec 2026-08-27-web-resume-breakpoint §4.5）──────────────
+
+def test_resume_preview_200(authed_client, app_with_ws):
+    fake = FakeSM()
+    app_with_ws.state.scan_manager = fake
+    r = authed_client.get("/api/workspaces/WS/scans/s1/resume-preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resumable"] is True
+    assert body["completed_agents"] == ["pre-recon"]
+    assert body["steps"][0]["state"] == "done"
+
+
+def test_resume_preview_unknown_404(authed_client, app_with_ws):
+    fake = FakeSM()
+    fake.preview_exc = ValueError("scan 不存在")
+    app_with_ws.state.scan_manager = fake
+    assert authed_client.get(
+        "/api/workspaces/WS/scans/nope/resume-preview").status_code == 404

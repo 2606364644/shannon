@@ -747,7 +747,7 @@
       "setupAuth": "配置认证档案 →",
       "newScan": "新建扫描",
       "view": "查看",
-      "resume": "恢复",
+      "resume": "续跑",
       "rerun": "重跑",
       "rerunLoadFailed": "无法加载原扫描配置，请手动填写",
       "loadError": "扫描列表加载失败：{{error}}",
@@ -755,13 +755,13 @@
       "cancelConfirmDesc": "取消扫描 {{scanId}}？进度将丢失。",
       "deleteConfirmTitle": "删除扫描",
       "deleteConfirmDesc": "删除扫描 {{scanId}}？该扫描的目录和产物将永久删除，工作区与其他扫描不受影响。",
-      "resumeFailed": "恢复失败：{{error}}",
+      "resumeFailed": "续跑失败：{{error}}",
       "cancelFailed": "取消失败：{{error}}",
       "deleteFailed": "删除失败：{{error}}",
       "rerunFailed": "重跑失败：{{error}}",
       "canceled": "已取消扫描 {{scanId}}",
       "deleted": "已删除扫描 {{scanId}}",
-      "resumed": "已恢复扫描，跳转实时页",
+      "resumed": "已续跑扫描，跳转实时页",
       "noMatch": "无匹配的扫描任务",
       "card": {
         "scanId": "扫描 ID",
@@ -850,7 +850,17 @@
         "toggleExpand": "展开关联子行",
         "toggleCollapse": "收起关联子行"
       },
-      "avgCtx": "平均耗时 {{avg}} · 最长 {{max}} · 最短 {{min}}"
+      "avgCtx": "平均耗时 {{avg}} · 最长 {{max}} · 最短 {{min}}",
+      "resumeConfirmTitle": "续跑确认",
+      "resumeSummary": "已完成 {{count}} 项（{{agents}}），将从 {{next}} 继续；步骤缓存命中 {{steps}} 项",
+      "resumeNoSkip": "无可跳过部分，将从头扫描",
+      "resumePreviewFailed": "断点详情加载失败：{{error}}",
+      "breakpointTitle": "断点详情",
+      "breakpointNextLabel": "将从此继续",
+      "breakpointNotRun": "未跑到",
+      "breakpointStepDone": "缓存命中",
+      "breakpointStepStale": "已变化",
+      "breakpointStepMissing": "无缓存"
     },
     "errorBoundary": {
       "title": "该模块加载出错",

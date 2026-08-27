@@ -621,11 +621,31 @@ async def cancel_scan(ws: str, scan_id: str, request: Request, _: User = Depends
     return result
 
 
+@router.get("/{ws}/scans/{scan_id}/resume-preview")
+async def get_resume_preview(ws: str, scan_id: str, request: Request,
+                             _: User = Depends(workspace_member)):
+    """断点详情（spec 2026-08-27-web-resume-breakpoint §4.5，只读不动状态）。
+
+    白盒行：agent 对账（completed_agents / interrupted_agent / warnings）+ step
+    缓存简表（done/stale/missing）+ resumable 判定（abort/心跳/状态不可续跑 →
+    false 带 reason/abort_reason）。correlation / blackbox → resumable:false。
+    scan 不存在 -> 404。
+    """
+    sm = request.app.state.scan_manager
+    try:
+        return await sm.resume_preview(ws, scan_id)
+    except ValueError as e:
+        msg = str(e)
+        if "不存在" in msg:
+            raise HTTPException(404, msg)
+        raise HTTPException(422, msg)
+
+
 @router.post("/{ws}/scans/{scan_id}/resume", status_code=202)
 async def resume_scan(ws: str, scan_id: str, request: Request, _: User = Depends(workspace_member)):
-    """resume 已停未完成的 scan（interrupted/crashed）。
-
-    completed/failed/cancelled/running -> 422（用重扫 POST /api/scan 起新 scan，旧记录保留）。
+    """续跑已停未完成的 scan（interrupted/crashed/failed/cancelled/killed，
+    spec 2026-08-27-web-resume-breakpoint §4.1）——白盒行先 agent 级对账再提交，
+    completed/running -> 422（completed 用重扫 POST /api/scan 起新 scan，旧记录保留）。
     scan 不存在 -> 404。
     """
     from supernova_web.components.scan_manager import TemporalUnavailable, TooManyScans

@@ -18,10 +18,12 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  cancelScan, deleteScan, deleteBlackboxRun, resumeScan, getScan, scanEventsUrl, ApiError,
+  cancelScan, deleteScan, deleteBlackboxRun, resumeScan, getScan, getResumePreview,
+  scanEventsUrl, ApiError, type ResumePreview,
 } from "@/api/client";
 import { useScans } from "./useScans";
 import { useEventSource } from "@/api/useEventSource";
+import { dashboardReducer, emptyState } from "@/state/dashboardReducer";
 import type { BlackboxRunSummary, ScanSummary } from "@/api/types";
 import { fmtCost } from "@/utils/currency";
 import { fmtTime, fmtDur, compactUrl } from "@/utils/format";
@@ -29,8 +31,9 @@ import { isRunTerminal } from "./runStatus";
 import { scanSegmentLabel } from "./ScanProgressBadge";
 import type { WsOverviewCtx } from "./";
 
-// 终态集（spec §5.1 resume 仅非终态放行，终态 422）。interrupted 等属未完成可恢复。
-// cancelled 是终态（用户主动停；后端 resume 拒 422）→ 显 查看/重跑/删除 而非恢复。
+// 终态集（重跑/删除入口口径）。续跑显示另判（spec 2026-08-27-web-resume-breakpoint
+// §4.6）：!running ∧ status ∉ {completed, done} ∧ 白盒行（含组合；correlation 无入口）——
+// failed/cancelled/killed/crashed/interrupted 均可续跑，与后端 _RESUMABLE_STATUSES 对齐。
 const TERMINAL = new Set(["completed", "done", "failed", "killed", "crashed", "cancelled"]);
 
 // 运行中判定（分段过滤用）；轮询节奏由 useScans 的 SWR refreshInterval 管理。
@@ -281,7 +284,9 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   const { t } = useTranslation();
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<"cancel" | "delete" | null>(null);
+  const [pending, setPending] = useState<"cancel" | "delete" | "resume" | null>(null);
+  // 续跑确认流（§4.6）：点续跑先拉断点详情，弹窗摘要后确认才 POST resume。
+  const [resumePreview, setResumePreview] = useState<ResumePreview | null>(null);
   const isCombined = scan.combined === true;
   const isCorr = scan.scan_type === "correlation";
   // 黑盒 run 子行：组合任务 + correlation 主行（段③黑盒验证经 create_blackbox_run
@@ -297,8 +302,11 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
 
   const isRunning = isRun(scan);
   const isTerminal = TERMINAL.has(scan.status);
-  // 恢复仅未完成（非 running 非终态，如 interrupted）；running 在跑无需恢复，终态不可恢复。
-  const canResume = !isRunning && !isTerminal;
+  // 续跑入口（§4.6）：非 running ∧ 非 completed/done ∧ 白盒行（含组合；correlation
+  // 走重新提交、无黑盒独立行）——failed/cancelled/killed/crashed/interrupted 全放行。
+  const canResume = !isRunning
+    && !["completed", "done"].includes(scan.status)
+    && scan.scan_type === "whitebox";
   const scanPath = `/p/${ws}/scans/${scan.scan_id}`;
   // 任务名展示用 workflow_id（{ws}-{scan_id}[-resume-N]），路由/API 仍用 scan_id 定位目录。
   const label = scan.workflow_id ?? scan.scan_id;
@@ -314,19 +322,31 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   const sseUrl = isRunning ? scanEventsUrl(ws, scan.scan_id) : "";
   const { events } = useEventSource(sseUrl);
   const currentPhase = useCurrentPhase(events);
+  // 实时进度（2026-08-27 修复列表进度不动）：progress_pct 的分子 completed_agents
+  // 只在 workflow 结束才落盘 session.json，运行中恒定 → 进度条钉死。改为 fold 已订阅
+  // 的 SSE 归并流（authcheck/白盒/黑盒 run 全阶段事件按 ts 合一）取当前 phase 的
+  // completed_units/total_units——与详情页 ScanProgressOverview 同一 reducer 口径。
+  // total=0（无 PhaseEvent/phase 未声明 steps/precheck 期）→ null，展示层回退 progress_pct。
+  const liveState = useMemo(
+    () => events.reduce(dashboardReducer, emptyState()),
+    [events],
+  );
+  const livePct = liveState.total_units > 0
+    ? Math.round((liveState.completed_units / liveState.total_units) * 100)
+    : null;
   useEffect(() => {
     if (events.some((e) => e.type === "scan_end")) onChanged();
   }, [events, onChanged]);
 
   async function onResume() {
+    // §4.6 确认流：先拉断点详情（只读）→ 弹窗展示可跳过摘要 / 不可续跑原因。
     setBusy(true);
     try {
-      await resumeScan(ws, scan.scan_id);
-      toast.success(t("workspaceDetail.scans.resumed"));
-      // 恢复后落默认 tab（correlation 行无 live tab——落概览，D6）
-      nav(`${scanPath}/${defaultTab}`);
+      const preview = await getResumePreview(ws, scan.scan_id);
+      setResumePreview(preview);
+      setPending("resume");
     } catch (e) {
-      toast.error(t("workspaceDetail.scans.resumeFailed", { error: msg(e) }));
+      toast.error(t("workspaceDetail.scans.resumePreviewFailed", { error: msg(e) }));
     } finally {
       setBusy(false);
     }
@@ -361,15 +381,25 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
       if (pending === "cancel") {
         await cancelScan(ws, scan.scan_id);
         toast.success(t("workspaceDetail.scans.canceled", { scanId: label }));
+        setPending(null);
+        onChanged();
+      } else if (pending === "resume") {
+        await resumeScan(ws, scan.scan_id);
+        toast.success(t("workspaceDetail.scans.resumed"));
+        setPending(null);
+        // 续跑后落默认 tab（correlation 行无 live tab——落概览，D6）
+        nav(`${scanPath}/${defaultTab}`);
       } else {
         await deleteScan(ws, scan.scan_id);
         toast.success(t("workspaceDetail.scans.deleted", { scanId: label }));
+        setPending(null);
+        onChanged();
       }
-      setPending(null);
-      onChanged();
     } catch (e) {
       toast.error(t(
-        pending === "cancel" ? "workspaceDetail.scans.cancelFailed" : "workspaceDetail.scans.deleteFailed",
+        pending === "cancel" ? "workspaceDetail.scans.cancelFailed"
+          : pending === "resume" ? "workspaceDetail.scans.resumeFailed"
+          : "workspaceDetail.scans.deleteFailed",
         { error: msg(e) },
       ));
     } finally {
@@ -378,7 +408,8 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   }
 
   const v = scan.vuln_count ?? 0;
-  const pct = Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
+  // SSE 实时进度优先（见上 livePct 注释）；无实时数据回退轮询快照 progress_pct。
+  const pct = livePct ?? Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
   const dur = fmtDur(scan.total_duration_ms);
 
   return (
@@ -564,24 +595,43 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
         </>
       )}
 
-      {/* 取消/删除确认 Dialog */}
+      {/* 取消/删除/续跑确认 Dialog（续跑 = 断点摘要确认流，§4.6） */}
       <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
               {pending === "cancel"
                 ? t("workspaceDetail.scans.cancelConfirmTitle")
-                : t("workspaceDetail.scans.deleteConfirmTitle")}
+                : pending === "resume"
+                  ? t("workspaceDetail.scans.resumeConfirmTitle")
+                  : t("workspaceDetail.scans.deleteConfirmTitle")}
             </DialogTitle>
             <DialogDescription>
               {pending === "cancel"
                 ? t("workspaceDetail.scans.cancelConfirmDesc", { scanId: label })
-                : t("workspaceDetail.scans.deleteConfirmDesc", { scanId: label })}
+                : pending === "resume"
+                  ? (resumePreview?.resumable
+                      ? (resumePreview.completed_agents.length > 0
+                          ? t("workspaceDetail.scans.resumeSummary", {
+                              count: resumePreview.completed_agents.length,
+                              agents: resumePreview.completed_agents.join(" / "),
+                              next: resumePreview.interrupted_agent ?? "—",
+                              steps: resumePreview.steps.filter((x) => x.state === "done").length,
+                            })
+                          : t("workspaceDetail.scans.resumeNoSkip"))
+                      : (resumePreview?.reason ?? ""))
+                  : t("workspaceDetail.scans.deleteConfirmDesc", { scanId: label })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPending(null)}>{t("common.cancel")}</Button>
-            <Button variant="destructive" disabled={busy} onClick={doAction}>{t("common.confirm")}</Button>
+            <Button
+              variant={pending === "resume" ? "default" : "destructive"}
+              disabled={busy || (pending === "resume" && resumePreview?.resumable === false)}
+              onClick={doAction}
+            >
+              {t("common.confirm")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

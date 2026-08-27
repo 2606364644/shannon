@@ -17,9 +17,22 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => navMock };
 });
 
+// SSE mock（2026-08-27 列表进度不动修复）：useEventSource 的 events 可控——运行行
+// 进度条应由 events fold（dashboardReducer，详情页同机制）实时驱动。默认空数组
+// （等价 jsdom 无 EventSource 的现状），既有用例零影响。
+const { sseState } = vi.hoisted(() => ({
+  sseState: { events: [] as unknown[] },
+}));
+vi.mock("@/api/useEventSource", () => ({
+  useEventSource: () => ({ events: sseState.events, status: "closed" as const }),
+}));
+
 const running = {
   scan_id: "s1", scan_type: "whitebox", status: "running", created_at: 1000,
   completed_at: null, vuln_count: 0, total_cost_usd: 1.5, cost_currency: "USD", is_running: true,
+  // 后端 session.json completed_agents 运行中不落盘 → progress_pct 阶段内恒定（本 bug
+  // 根因）；取 5 断言「SSE 进度优先、progress_pct 仅兜底」。
+  progress_pct: 5,
 } as const;
 const completed = {
   scan_id: "s2", scan_type: "blackbox", status: "completed", created_at: 2000,
@@ -29,8 +42,30 @@ const interrupted = {
   scan_id: "s3", scan_type: "whitebox", status: "interrupted", created_at: 3000,
   completed_at: null, vuln_count: 1, total_cost_usd: 0.5, cost_currency: "USD", is_running: false,
 } as const;
-// cancelled（2026-08-17 根因修）：取消手动黑盒 run 后任务级落 cancelled——终态口径
-// （后端 resume 拒 422），显 查看/重跑/删除，不显恢复/取消。
+// 续跑（spec 2026-08-27 §4.6）：failed 是最常见中断出口——白盒 failed 行有续跑。
+const failedWb = {
+  scan_id: "s9", scan_type: "whitebox", status: "failed", created_at: 7000,
+  completed_at: null, vuln_count: 2, total_cost_usd: 1, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-s9",
+} as const;
+// 关联主行（非 completed 也一样）：无续跑入口（重新提交语义）。
+const corrFailed = {
+  scan_id: "corr-9", scan_type: "correlation", status: "failed", created_at: 7100,
+  completed_at: null, vuln_count: 0, total_cost_usd: 0, cost_currency: "USD",
+  is_running: false, workflow_id: "ws-corr-9",
+} as const;
+// resume-preview 响应（§4.5 形状）。
+const previewOk = {
+  status: "interrupted", resumable: true, reason: null, scan_type: "whitebox",
+  completed_agents: ["pre-recon", "recon"], interrupted_agent: "injection-vuln",
+  steps: [
+    { step: "gitnexus-chain-verdict", state: "done", ts: 1756272000 },
+    { step: "authz-gitnexus-judge", state: "missing" },
+  ],
+  warnings: [], abort_reason: null, resume_attempts: 1,
+} as const;
+// cancelled（2026-08-17 根因修）：取消手动黑盒 run 后任务级落 cancelled——现口径
+// 亦可续跑（spec 2026-08-27 §4.1 扩集）。
 const cancelled = {
   scan_id: "s4", scan_type: "whitebox", status: "cancelled", created_at: 4000,
   completed_at: 5000, vuln_count: 0, total_cost_usd: 1, cost_currency: "USD", is_running: false,
@@ -80,7 +115,10 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-beforeEach(() => { i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear(); });
+beforeEach(() => {
+  i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear();
+  sseState.events = [];
+});
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
@@ -173,15 +211,15 @@ describe("ScanList 卡片操作按钮按 status 显隐", () => {
     await waitFor(() => expect(screen.getByText("s1")).toBeInTheDocument());
     // running -> 显取消（common.cancel）
     expect(screen.getAllByRole("button", { name: "取消" }).length).toBeGreaterThan(0);
-    // running -> 不显恢复
-    expect(screen.queryByRole("button", { name: "恢复" })).not.toBeInTheDocument();
+    // running -> 不显续跑
+    expect(screen.queryByRole("button", { name: "续跑" })).not.toBeInTheDocument();
   });
 
-  it("interrupted scan：显恢复，不显取消", async () => {
+  it("interrupted scan：显续跑，不显取消", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([interrupted])));
     renderList();
     await waitFor(() => expect(screen.getByText("s3")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "恢复" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "续跑" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
   });
 
@@ -267,10 +305,25 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     await waitFor(() => expect(deleteCalls).toEqual(["ws/s2"]));
   });
 
-  it("恢复 interrupted scan -> POST resume", async () => {
+  // ── 续跑（spec 2026-08-27-web-resume-breakpoint §4.6：preview 弹窗 → 确认 → POST）──
+
+  it("续跑按钮显示矩阵：failed/cancelled/interrupted 白盒行显示；completed 白盒行与 correlation 行不显示", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+        failedWb, cancelled, interrupted, wbDone, corrFailed])),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-s9")).toBeInTheDocument());
+    // failed(s9) / cancelled(s4) / interrupted(s3) 三行有续跑；wbDone(completed)、corrFailed(关联) 无
+    expect(screen.getAllByRole("button", { name: "续跑" })).toHaveLength(3);
+  });
+
+  it("续跑确认流：GET resume-preview → 弹窗摘要 → 确认 -> POST resume", async () => {
     const resumeCalls: string[] = [];
     server.use(
       http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([interrupted])),
+      http.get("/api/workspaces/:ws/scans/:scanId/resume-preview", () =>
+        HttpResponse.json(previewOk)),
       http.post("/api/workspaces/:ws/scans/:scanId/resume", ({ params }) => {
         resumeCalls.push(`${params.ws}/${params.scanId}`);
         return HttpResponse.json({ workspace: params.ws as string, scan_id: params.scanId as string });
@@ -278,8 +331,34 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     );
     renderList();
     await waitFor(() => expect(screen.getByText("s3")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    fireEvent.click(screen.getByRole("button", { name: "续跑" }));
+    // 弹窗摘要：已完成 2 项 + 继续点 + 缓存命中 1 项
+    expect(await screen.findByText(/已完成 2 项/)).toBeInTheDocument();
+    expect(screen.getByText(/injection-vuln/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
     await waitFor(() => expect(resumeCalls).toEqual(["ws/s3"]));
+  });
+
+  it("resumable:false -> 弹窗展示原因、确认禁用、不 POST", async () => {
+    const resumeCalls: string[] = [];
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([failedWb])),
+      http.get("/api/workspaces/:ws/scans/:scanId/resume-preview", () =>
+        HttpResponse.json({ ...previewOk, resumable: false,
+                            reason: "resume 中止：recon 产出物文件缺失" })),
+      http.post("/api/workspaces/:ws/scans/:scanId/resume", ({ params }) => {
+        resumeCalls.push(`${params.ws}/${params.scanId}`);
+        return HttpResponse.json({ workspace: params.ws as string, scan_id: params.scanId as string });
+      }),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-s9")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "续跑" }));
+    expect(await screen.findByText(/产出物文件缺失/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "确认" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(resumeCalls).toEqual([]);
   });
 
   it("重跑入口（D4 黑盒历史行移除）：黑盒行无重跑按钮；白盒重跑不受影响", async () => {
@@ -383,6 +462,37 @@ describe("ScanList 表格设计不变量（重设计 2026-08-15：漏洞数 hero
 });
 
 // v4（workspace-page-preview-v4.html）：整行可点 + 空工作区收敛。
+describe("ScanList 运行行实时进度（2026-08-27 修复：列表进度不动）", () => {
+  // 根因：progress_pct 分子 completed_agents 只在 workflow 结束落盘 session.json，
+  // 运行中恒定 → 列表进度条钉死。修复：运行行 fold 已订阅的 SSE 归并流（与详情页
+  // ScanProgressOverview 同一 dashboardReducer 口径）取 completed_units/total_units。
+  it("SSE 事件驱动进度：2 步完成 1 步 -> 50%（非 progress_pct 的 5%）", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["step-a", "step-b"], step_intents: ["", ""] },
+      { type: "StepEvent", name: "step-a", phase: "recon", event: "complete" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    renderList();
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+  });
+
+  it("SSE 无事件回退 progress_pct（连接建立前 / precheck 期无 PhaseEvent）", async () => {
+    sseState.events = [];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    renderList();
+    expect(await screen.findByText("5%")).toBeInTheDocument();
+  });
+
+  it("SSE 事件但 phase 未声明 steps（total=0）-> 仍回退 progress_pct", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "precheck", event: "start" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    renderList();
+    expect(await screen.findByText("5%")).toBeInTheDocument();
+  });
+});
+
 describe("ScanList v4：整行可点 + 空态收敛", () => {
   it("点击行非交互区 -> 导航到默认 tab（completed -> report）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));

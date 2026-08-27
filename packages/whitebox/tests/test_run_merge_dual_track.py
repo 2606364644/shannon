@@ -365,6 +365,107 @@ async def test_merge_enrich_mode_off_skips_parity_entirely(tmp_path):
     assert ids == ["G9", "L9"]  # 确定性 merge 结果直出，无配对无补全
 
 
+# ── merge 幂等（spec 2026-08-27-web-resume-breakpoint §4.4）────────────────────
+#
+# agent 级 resume 跳过 vuln agent 后，exploitation_queue 躺的是 merge 自己写回
+# 的合并版（卡带 merge_source 标）——重跑 merge 必须路由到首跑备份的
+# {vc}_llm_queue.json 原始件，不得把合并版当 LLM 轨输入再合并一遍。
+
+def _merged_output(card: dict, merge_source: str) -> dict:
+    """模拟首跑 merge 写回的合并版卡（带 merge_source 标）。"""
+    return dict(card, merge_source=merge_source)
+
+
+@pytest.mark.asyncio
+async def test_merge_rerun_routes_already_merged_queue_to_llm_backup(tmp_path):
+    """幂等重跑：exploitation 已是合并版 → LLM 输入改读 {vc}_llm_queue.json 备份。
+
+    双轨判别锚点：首跑留下的 GN-only 卡 G2（上轮没配上对）——干净重跑从备份
+    原件 [L1] 重建，G2 保持 gitnexus-only；double-merge 路径会把合并版当 LLM
+    输入，G2 进入 llm 侧与 GN 侧的 G2 自配 → merge_source 漂移成 both。"""
+    inter = _inter(tmp_path)
+    # 首跑备份：LLM 轨真·原始件（无 merge_source）
+    (inter / "injection_llm_queue.json").write_text(
+        json.dumps({"vulnerabilities": [_LLM_VULN]}))
+    # exploitation = 首跑 merge 写回的合并版（全卡带 merge_source，含 GN-only 残留 G2）
+    (inter / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [
+            _merged_output(_LLM_VULN, "both"),
+            _merged_output(dict(_GN_VULN, ID="G2", sink_call="other.exec"),
+                           "gitnexus-only"),
+        ]}))
+    # GN 轨独立产物（首跑后未变）
+    (inter / "injection_gitnexus_queue.json").write_text(json.dumps({
+        "vulnerabilities": [
+            _GN_VULN,
+            dict(_GN_VULN, ID="G2", sink_call="other.exec"),
+        ]}))
+
+    await _run(tmp_path, enrich_mode="off")
+
+    out = json.loads(
+        (inter / "injection_exploitation_queue.json").read_text())
+    g2 = next(v for v in out["vulnerabilities"] if v["ID"] == "G2")
+    assert g2["merge_source"] == "gitnexus-only", (
+        "重跑从备份原始件重建：G2 不得因 double-merge 自配漂移成 both")
+    l1 = next(v for v in out["vulnerabilities"] if v["ID"] == "L1")
+    assert l1["merge_source"] == "both"
+
+
+@pytest.mark.asyncio
+async def test_merge_rerun_does_not_overwrite_llm_backup(tmp_path):
+    """幂等重跑不得覆盖备份：无条件备份（现行为）会用合并版销毁唯一 LLM 原始件。"""
+    inter = _inter(tmp_path)
+    (inter / "injection_llm_queue.json").write_text(
+        json.dumps({"vulnerabilities": [_LLM_VULN]}))
+    (inter / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [_merged_output(_LLM_VULN, "both")]}))
+    (inter / "injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [_GN_VULN]}))
+
+    await _run(tmp_path, enrich_mode="off")
+
+    backup = json.loads(
+        (inter / "injection_llm_queue.json").read_text())
+    assert [v["ID"] for v in backup["vulnerabilities"]] == ["L1"], (
+        "备份保持首跑原始件，不得被合并版覆盖")
+    assert "merge_source" not in backup["vulnerabilities"][0]
+
+
+@pytest.mark.asyncio
+async def test_merge_partial_rerun_splits_classes_by_marker(tmp_path):
+    """半途中断按类分流：merge 逐类处理——inj 已合并（带标走备份）、
+    xss 仍为 LLM 原始件（无标走原件并首写备份）。"""
+    inter = _inter(tmp_path)
+    # injection：首跑已合并（有备份）
+    (inter / "injection_llm_queue.json").write_text(
+        json.dumps({"vulnerabilities": [_LLM_VULN]}))
+    (inter / "injection_exploitation_queue.json").write_text(json.dumps({
+        "vulnerabilities": [_merged_output(_LLM_VULN, "both")]}))
+    (inter / "injection_gitnexus_queue.json").write_text(
+        json.dumps({"vulnerabilities": [_GN_VULN]}))
+    # xss：中断在 merge 处理到它之前——仍是 LLM 原始件、无备份
+    xss_vuln = dict(_LLM_VULN, ID="X1", vulnerability_type="xss")
+    (inter / "xss_exploitation_queue.json").write_text(
+        json.dumps({"vulnerabilities": [xss_vuln]}))
+
+    await _run(tmp_path, enrich_mode="off")
+
+    # inj：备份未被覆盖（仍是原始件）
+    inj_backup = json.loads(
+        (inter / "injection_llm_queue.json").read_text())
+    assert "merge_source" not in inj_backup["vulnerabilities"][0]
+    # xss：正常首跑路径——备份创建且等于原始件
+    assert (inter / "xss_llm_queue.json").exists(), "无标类走原件并首写备份"
+    xss_backup = json.loads(
+        (inter / "xss_llm_queue.json").read_text())
+    assert [v["ID"] for v in xss_backup["vulnerabilities"]] == ["X1"]
+    assert "merge_source" not in xss_backup["vulnerabilities"][0]
+    out_xss = json.loads(
+        (inter / "xss_exploitation_queue.json").read_text())
+    assert out_xss["vulnerabilities"][0]["merge_source"] == "llm-only"
+
+
 @pytest.mark.asyncio
 async def test_merge_collapses_llm_same_endpoint_params(tmp_path):
     """LLM 轨同接口多参数归并（数据层，2026-08-26 用户口径：多参数不拆卡）。

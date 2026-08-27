@@ -238,6 +238,30 @@ export type ResumeResult = { workspace: string; scan_id: string };
 export const resumeScan = (ws: string, scanId: string) =>
   apiPost<ResumeResult>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/resume`, {});
 
+/** 断点详情（spec 2026-08-27-web-resume-breakpoint §4.5，只读）：
+ *  agent 对账（completed_agents/interrupted_agent/warnings）+ step 缓存简表
+ *  （done/stale/missing）+ resumable 判定（false 带 reason/abort_reason）。 */
+export type ResumePreviewStep = {
+  step: string;
+  state: "done" | "stale" | "missing";
+  ts?: number | null;
+  reason?: string | null;
+};
+export type ResumePreview = {
+  status: string;
+  resumable: boolean;
+  reason: string | null;
+  scan_type: string;
+  completed_agents: string[];
+  interrupted_agent: string | null;
+  steps: ResumePreviewStep[];
+  warnings: string[];
+  abort_reason: string | null;
+  resume_attempts: number;
+};
+export const getResumePreview = (ws: string, scanId: string) =>
+  apiGet<ResumePreview>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/resume-preview`);
+
 /** 组合扫描黑盒续跑（spec §11.3 / D5）：黑盒 failed 后换认证续跑，复用白盒产物。
  *  body 可选——无 body 沿用原认证；有 body（ScanRequest）换认证。前端只 POST 不读 body。 */
 export const rerunBlackbox = (ws: string, scanId: string) =>

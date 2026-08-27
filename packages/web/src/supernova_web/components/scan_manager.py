@@ -26,6 +26,7 @@ from supernova_multi.correlation_event_writer import CorrelationEventWriter
 from supernova_multi.orchestrator import plan_repo_scans
 from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
+from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
 from supernova_web.models import ScanRequest
 from .host_profile_store import (
     HostMapping,
@@ -74,10 +75,13 @@ class AuthValidationPending(Exception):
     """
 
 
-# resume 放行的状态：已停未完成（worker 中途停止、有部分进度可续）。
-# completed/failed（已结束）/ cancelled（用户主动停）/ running（在跑，resume 会重复提交）
-# -> 不可 resume，用重扫（POST /api/scan 起新 scan_id，旧记录保留）。
-_RESUMABLE_STATUSES = frozenset({"interrupted", "crashed"})
+# resume 放行的状态：已停未完成（有部分进度可续）。spec 2026-08-27-web-resume-
+# breakpoint §4.1 扩集——failed（最常见中断出口，Temporal 已 FAILED 终态无并发
+# 风险）/ cancelled / killed 全部放行（后三者先 heartbeat 判活防撞车，见 resume）。
+# completed（已完成）/ running（在跑，resume 会重复提交）-> 不可 resume，用重扫
+# （POST /api/scan 起新 scan_id，旧记录保留）。
+_RESUMABLE_STATUSES = frozenset(
+    {"interrupted", "crashed", "failed", "cancelled", "killed"})
 
 
 def _now_iso() -> str:
@@ -540,6 +544,12 @@ class ScanManager:
             raise ValueError(
                 "关联扫描暂不支持断点恢复，请重新提交关联扫描（子仓白盒产物保留可复用）")
 
+        # §4.1 判活：failed = Temporal 已 FAILED 终态无并发风险直接放行；其余续跑
+        # 状态（cancelled/killed/crashed/interrupted）先 heartbeat 判活——心跳新鲜
+        # 说明 worker 仍在跑（session 显式终态但 worker 复活的 race），拒绝防撞车。
+        if status != "failed" and is_scan_recently_active(scan_dir):
+            raise ValueError("该扫描仍在运行，无需恢复")
+
         await self._check_temporal()
         if len(self._handles) >= self._max_concurrent:
             raise TooManyScans(self._max_concurrent)
@@ -599,10 +609,14 @@ class ScanManager:
                 mgr.update_session(scan_dir, {"resumeAttempts": attempts})
                 repo_path = data.get("repo_path") or ""
                 web_url = data.get("web_url") or ""
+                # §4.2：组合白盒段与独立白盒行同通路——agent 级对账 + 跳过透传。
+                rstate = await self._reconcile_whitebox_resume(
+                    scan_dir, repo_path, event_file)
                 try:
                     handle = await self._submit_whitebox(
                         repo_path, ws, scan_id, scan_dir, event_file, web_url,
-                        combined=True)
+                        combined=True,
+                        resume_completed_agents=rstate.completed_agents)
                 except BaseException as exc:
                     self._active_reqs.pop(scan_key, None)
                     await self._mark_submission_failed(scan_dir, event_file, exc)
@@ -661,8 +675,14 @@ class ScanManager:
                     repo_path or None, ws, scan_id, scan_dir, event_file, web_url, config_path,
                     host_mappings=self._session_host_mappings(data))
             else:
+                # §4.2：白盒行 agent 级对账（builder G∧F + cleanup 半成品）——
+                # 假续跑根因修复：resume_completed_agents 进 PipelineInput，
+                # 激活 workflow 既有跳过守卫（黑盒行走上方分支，维持原状）。
+                rstate = await self._reconcile_whitebox_resume(
+                    scan_dir, repo_path, event_file)
                 handle = await self._submit_whitebox(
-                    repo_path, ws, scan_id, scan_dir, event_file, web_url)
+                    repo_path, ws, scan_id, scan_dir, event_file, web_url,
+                    resume_completed_agents=rstate.completed_agents)
         except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
             await self._mark_submission_failed(scan_dir, event_file, exc)
@@ -671,9 +691,103 @@ class ScanManager:
         self._tasks[scan_key] = asyncio.create_task(self._watch(scan_key, event_file, scan_dir))
         return ws, scan_id
 
+    async def resume_preview(self, ws: str, scan_id: str) -> dict:
+        """断点详情（spec 2026-08-27-web-resume-breakpoint §4.5，只读不动状态）。
+
+        复用 WhiteboxResumeStateBuilder.build()（不调 cleanup、不 abort 抛异常——
+        abort 映射 resumable:false + abort_reason）+ step_cache.preview_steps 读
+        marker 简表。correlation / blackbox / 不可续跑状态 / 心跳新鲜 → resumable:false
+        带 reason；scan 不存在 → ValueError（API 层 404）。
+        """
+        from supernova_whitebox.pipeline.step_cache import preview_steps
+        scan_dir = self._store.get_scan_dir(ws, scan_id)
+        if scan_dir is None:
+            raise ValueError("scan 不存在")
+        mgr = SessionManager(scan_dir.parent)
+        status = _compute_status(scan_dir, mgr.get_status(scan_dir))
+        scan_type = mgr.get_scan_type(scan_dir) or "whitebox"
+        data = mgr.get_session_data(scan_dir)
+        attempts = data.get("resumeAttempts") or []
+        base: dict = {
+            "status": status, "scan_type": scan_type, "reason": None,
+            "completed_agents": [], "interrupted_agent": None,
+            "steps": [], "warnings": [], "abort_reason": None,
+            "resume_attempts": len(attempts) if isinstance(attempts, list) else 0,
+        }
+
+        if self._scan_row_is_correlation(scan_dir):
+            base.update(resumable=False,
+                        reason="关联扫描暂不支持断点恢复，请重新提交关联扫描（子仓白盒产物保留可复用）")
+            return base
+        if scan_type == "blackbox":
+            base.update(resumable=False,
+                        reason="黑盒扫描非幂等，不支持断点续跑（失败走整体重跑）")
+            return base
+        if status not in _RESUMABLE_STATUSES:
+            base.update(resumable=False,
+                        reason=f"该扫描状态为 {status}，不可续跑（completed 用重跑、running 在跑）")
+            return base
+        if status != "failed" and is_scan_recently_active(scan_dir):
+            base.update(resumable=False, reason="该扫描仍在运行，无需恢复")
+            return base
+
+        deliverables = scan_dir / "deliverables" / "whitebox"
+        rstate = await WhiteboxResumeStateBuilder().build(
+            mode="auto", workspace=scan_dir, deliverables=deliverables,
+            repo_path=Path(data.get("repo_path") or ""))
+        if rstate.aborted:
+            base.update(resumable=False, abort_reason=rstate.abort_reason,
+                        reason=rstate.abort_reason)
+            return base
+        base.update(
+            resumable=True,
+            completed_agents=rstate.completed_agents,
+            interrupted_agent=rstate.interrupted_agent,
+            warnings=rstate.warnings,
+            steps=preview_steps(deliverables),
+        )
+        return base
+
+    async def _reconcile_whitebox_resume(
+        self, scan_dir: Path, repo_path: str, event_file: Path,
+    ) -> Any:
+        """agent 级对账（spec 2026-08-27-web-resume-breakpoint §4.2）。
+
+        builder 以 git deliverable commit（G）∧ 产物存在（F）对账出 completed_agents；
+        G∧¬F abort → ValueError（API 层映射 422 带 abort_reason，引导重跑）；
+        cleanup 删 ¬G 半成品；续跑摘要以 InfoEvent（同 log_info_activity 落盘形态）
+        写进 events.ndjson，用户在 live 流可见「跳过 N 项、从哪继续」。
+        """
+        builder = WhiteboxResumeStateBuilder()
+        rstate = await builder.build(
+            mode="auto", workspace=scan_dir,
+            deliverables=scan_dir / "deliverables" / "whitebox",
+            repo_path=Path(repo_path or ""))
+        if rstate.aborted:
+            raise ValueError(rstate.abort_reason)
+        await builder.cleanup(
+            mode="auto", deliverables=scan_dir / "deliverables" / "whitebox",
+            completed_agents=rstate.completed_agents)
+        skipped = "、".join(rstate.completed_agents) or "无"
+        summary = (f"续跑：跳过已完成 agent（{skipped}），"
+                   f"从 {rstate.interrupted_agent or '未定位中断点'} 继续")
+        if rstate.warnings:
+            summary += "；" + "；".join(rstate.warnings)
+        try:
+            async with aiofiles.open(event_file, "a") as fh:
+                await fh.write(json.dumps({
+                    "ts": _now_iso(), "category": "INFO", "type": "InfoEvent",
+                    "message": summary, "level": "info",
+                }, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # best-effort：显示通道失败不阻塞续跑
+        return rstate
+
     async def _submit_whitebox(self, target: str | None, ws: str, scan_id: str,
                                scan_dir: Path, event_file: Path, web_url: str,
-                               combined: bool = False) -> Any:
+                               combined: bool = False,
+                               resume_completed_agents: list[str] | None = None,
+                               ) -> Any:
         """算 workflow_id(读 resumeAttempts) + Client.connect + start_workflow 到固定 queue.
 
         T3: workspace_name=scan_id（worker 据此 + event_file.parent 推导 scan_dir 产物目录，
@@ -697,6 +811,7 @@ class ScanManager:
             env_overrides=self._resolve_env_overrides(ws),
             enable_llm_track=self._resolve_llm_track(ws),
             combined=combined,
+            resume_completed_agents=list(resume_completed_agents or []),
         )
         handle = await client.start_workflow(
             WhiteboxScanWorkflow.run, inp, id=workflow_id,

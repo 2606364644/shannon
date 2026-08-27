@@ -323,3 +323,122 @@ def _noop_cm_factory():
         async def __aexit__(self, *a):
             return False
     return lambda *a, **k: _CM()
+
+
+# ── step cache 接线（spec 2026-08-27-web-resume-breakpoint §4.3）───────────────
+#
+# marker + 输入指纹（code_index.json / framework_analysis.json）——命中则
+# 候选轨重建与判定 agent 都不跑、直接还原缓存返回值；干净完成（failed=False）
+# 末尾打点，agent 失败降级（failed=True）不打（resume=再试一次）。
+
+_STEP = "authz-gitnexus-judge"
+
+
+def _cache_inputs(deliverables):
+    from supernova_core.utils.paths import intermediate_path
+    return [intermediate_path(deliverables, "code_index.json"),
+            intermediate_path(deliverables, "framework_analysis.json")]
+
+
+def _marker(deliverables):
+    return deliverables / "intermediate" / ".step-cache" / f"{_STEP}.json"
+
+
+def _mk_inter(tmp_path):
+    deliverables = tmp_path / "whitebox"
+    inter = deliverables / "intermediate"
+    inter.mkdir(parents=True, exist_ok=True)
+    (inter / "code_index.json").write_text("{}")
+    (inter / "framework_analysis.json").write_text("{}")
+    return deliverables, inter
+
+
+@pytest.mark.asyncio
+async def test_step_cache_hit_skips_track_build_and_agent(tmp_path):
+    """marker 有效 → build_authz_gitnexus_track 与 run_gitnexus_verdict_agent
+    均不得被调用，返回缓存快照。"""
+    from supernova_whitebox.pipeline import step_cache
+    deliverables, inter = _mk_inter(tmp_path)
+    cached_ret = {"candidate_count": 2, "verdict_count": 1,
+                  "dominance_candidates": 1, "framework_candidates": 1,
+                  "failed": False, "fail_reason": None}
+    # 首跑产物在盘（outputs 存在性校验的一部分）
+    (inter / "authz_gitnexus_queue.json").write_text(
+        '{"vulnerabilities": []}', encoding="utf-8")
+    step_cache.mark_done(_STEP, deliverables,
+                         inputs=_cache_inputs(deliverables),
+                         outputs=[inter / "authz_gitnexus_queue.json"],
+                         ret=cached_ret)
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
+        with patch("supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+                   side_effect=AssertionError("缓存命中时不得重建候选轨")):
+            with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent",
+                       side_effect=AssertionError("缓存命中时不得调判定 agent")):
+                with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
+                    inst = gs.return_value
+                    inst.track_step = _noop_cm_factory()
+                    inst.log_info = AsyncMock()
+                    result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    assert result == cached_ret
+
+
+@pytest.mark.asyncio
+async def test_clean_run_writes_marker(tmp_path):
+    """干净完成（failed=False）末尾打点，键料与跳过侧一致。"""
+    from supernova_whitebox.pipeline import step_cache
+    deliverables, _inter = _mk_inter(tmp_path)
+
+    def fake_build(out):
+        return ("# no candidates", [], [], 0, 0)
+
+    async def fake_agent(**kwargs):
+        return type("R", (), {
+            "success": True, "error": None, "retryable": False, "turns": 1,
+            "cost": 0.0, "text": "", "model": "m", "stop_reason": "end",
+            "tokens": None, "structured_output": None,
+        })()
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
+        with patch("supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+                   new=fake_build):
+            with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent",
+                       new=fake_agent):
+                with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
+                    inst = gs.return_value
+                    inst.track_step = _noop_cm_factory()
+                    inst.log_info = AsyncMock()
+                    result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    assert result["failed"] is False
+    skip, cached = step_cache.should_skip(
+        _STEP, deliverables, inputs=_cache_inputs(deliverables))
+    assert skip is True
+    assert cached == result
+
+
+@pytest.mark.asyncio
+async def test_failed_run_does_not_write_marker(tmp_path):
+    """agent 失败降级（failed=True 返回）不打点——resume 会重试。"""
+    deliverables, _inter = _mk_inter(tmp_path)
+
+    def fake_build(out):
+        return ("# no candidates", [], [], 0, 0)
+
+    async def fake_agent(**kwargs):
+        raise RuntimeError("agent boom")
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, deliverables, tmp_path)):
+        with patch("supernova_core.code_index.authz_gitnexus_track.build_authz_gitnexus_track",
+                   new=fake_build):
+            with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent",
+                       new=fake_agent):
+                with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
+                    inst = gs.return_value
+                    inst.track_step = _noop_cm_factory()
+                    inst.log_info = AsyncMock()
+                    result = await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    assert result["failed"] is True
+    assert not _marker(deliverables).exists()

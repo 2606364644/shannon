@@ -433,3 +433,53 @@ async def test_cancel_non_combined_zero_regression(tmp_path, monkeypatch):
 
     assert result == {"cancelled": "s1"}
     mock_handle.cancel.assert_awaited_once()  # ① 轨 handle.cancel
+
+
+# ── resume 组合白盒段接 agent 级对账（spec 2026-08-27-web-resume-breakpoint §4.2）──
+
+class _StubResumeState:
+    def __init__(self, completed_agents=None, interrupted_agent=None):
+        self.completed_agents = completed_agents or []
+        self.aborted = False
+        self.abort_reason = None
+        self.warnings = []
+        self.interrupted_agent = interrupted_agent
+
+
+@pytest.mark.asyncio
+async def test_resume_combined_whitebox_segment_passes_completed_agents(
+        tmp_path, monkeypatch):
+    """组合扫描白盒段（bb_phase=pending）resume：与独立白盒行同通路——builder
+    对账 + resume_completed_agents 透传进 PipelineInput（假续跑根因修复的组 合段覆盖）。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    _patch_temporal_ok(monkeypatch, mgr)
+    mock_client = _patch_client(monkeypatch)
+
+    stub = _StubResumeState(completed_agents=["pre-recon"],
+                            interrupted_agent="recon")
+    built_with = {}
+    cleaned_with = {}
+
+    class _Builder:
+        async def build(self, *, mode, workspace, deliverables, repo_path, **kw):
+            built_with.update(mode=mode, workspace=workspace,
+                              deliverables=deliverables, repo_path=repo_path)
+            return stub
+
+        async def cleanup(self, *, mode, deliverables, completed_agents, **kw):
+            cleaned_with.update(completed_agents=list(completed_agents))
+
+    import supernova_web.components.scan_manager as scm
+    monkeypatch.setattr(scm, "WhiteboxResumeStateBuilder", lambda: _Builder())
+
+    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="pending")
+    with patch.object(mgr, "_watch", new=AsyncMock()), \
+         patch.object(mgr, "_combined_orchestrator", new=AsyncMock()):
+        await mgr.resume("WS", "s1")
+
+    scan_dir = tmp_path / "WS" / "scans" / "s1"
+    assert built_with["workspace"] == scan_dir
+    assert built_with["deliverables"] == scan_dir / "deliverables" / "whitebox"
+    assert cleaned_with["completed_agents"] == ["pre-recon"]
+    inp = mock_client.start_workflow.call_args.args[1]
+    assert inp.resume_completed_agents == ["pre-recon"]
