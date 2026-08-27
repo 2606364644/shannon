@@ -37,6 +37,11 @@ class BaseVulnerability(BaseModel):
     affected_entries: list[dict] | None = None  # {parameter, sink_location, chain_id, track, direct}
     verification: str | None = None        # static_analysis | dynamically_verified
     code_snippet: str | None = None        # 渲染层注入，不落 queue
+    # "true"|"false" 契约（到达该缺陷是否需登录；PoC preconditions/Authorization
+    # 头的信号源）。全类收编进基类（2026-08-27：auth/authz/ssrf 曾只教 prompt
+    # 不落模型被静默丢弃——同 2026-08-20 injection/xss 教训，双侧契约见
+    # tests/prompts/test_vuln_prompt_schema_contract.py）。
+    authentication_required: str | None = None
     # spec 2026-08-25（Task 7）：LLM 轨 collector（submit_finding）新输出字段，
     # append-only 兼容旧 queue——不落 schema 的话 pydantic 会静默丢弃 collector
     # 产出的这两个字段（同 2026-08-20 authentication_required 静默丢弃教训）。
@@ -62,7 +67,6 @@ class InjectionVulnerability(BaseVulnerability):
     # 字段表所教，2026-08-20 follow-up 起与 collector schema 一致——见
     # collectors/vuln.py 与 tests/prompts/test_vuln_prompt_schema_contract.py）。
     source: str | None = None
-    authentication_required: str | None = None
     accessible_routes: str | None = None
     path: str | None = None
     sink_call: str | None = None
@@ -93,7 +97,6 @@ class InjectionVulnerability(BaseVulnerability):
 class XssVulnerability(BaseVulnerability):
     source: str | None = None
     source_detail: str | None = None
-    authentication_required: str | None = None
     accessible_routes: str | None = None
     path: str | None = None
     # GN 轨 sink 全标识（file:cls:fn:line:col，xss_builder 回填）——gn_collapse

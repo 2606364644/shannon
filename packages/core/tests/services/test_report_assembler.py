@@ -180,6 +180,25 @@ def test_summary_table_endpoint_falls_back_to_path_extract(monkeypatch):
     assert "| - |" in rows[1]                 # 无 endpoint 且 path 无可提取路由
 
 
+def test_summary_table_report_endpoints_gn_track(monkeypatch):
+    """GN-only 卡速查表（双轨对齐）：endpoint 缺、path 是数据流摘要时接口列从
+    report_endpoints（②富化写回）拼 'METHOD /path (auth)'；参数列从其 params
+    兜底——速查表是渗透入口索引，不落内部数据流文本。"""
+    monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")
+    table = render_summary_table({"ssrf": [
+        _sv("SSRF-GN-01", "high", [], endpoint=None,
+            path="symbol -> app/routes/research.js:ResearchHandler:get:16:19 (needs_review)",
+            report_endpoints=[{"method": "GET", "path": "/research", "role": "trigger",
+                               "auth": "isLoggedIn",
+                               "params": ["url (query)", "symbol (query)"]}],
+            vulnerability_type="ssrf"),
+    ]})
+    rows = [l for l in table.splitlines() if l.startswith("| SSRF-")]
+    assert "GET /research (isLoggedIn)" in rows[0]
+    assert "url (query)" in rows[0] and "symbol (query)" in rows[0]
+    assert "app/routes/research.js" not in rows[0]   # 数据流文本不进速查表
+
+
 def test_summary_table_params_over_three_collapsed(monkeypatch):
     """参数 >3 个：取前 3 join + '等 N 个'；≤3 全量 join。"""
     monkeypatch.setenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh")

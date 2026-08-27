@@ -94,3 +94,24 @@ def test_collapse_xss_without_sink_call_keeps_strict_no_overmerge():
     ]
     out = collapse_gn_entries(gn)
     assert len(out) == 2
+
+def test_collapse_preserves_placement_annotation():
+    """builder 透传的 affected_parameters 注记（'preTax (body)'——placement
+    显式信号）折叠时保留；affected_entries[].parameter 保持裸名（行内定位
+    用，与注记无关）。"""
+    def _gn_aps(id_, param, sink, aps):
+        return InjectionVulnerability(
+            ID=id_, vulnerability_type="injection", externally_exploitable=True,
+            confidence="low",
+            source=f"{param} (app/routes/contributions.js:ContributionsHandler:7)",
+            path="POST /contributions → chain", sink_call=sink,
+            verdict="vulnerable", source_track="gitnexus",
+            affected_parameters=aps)
+
+    out = collapse_gn_entries([
+        _gn_aps("INJ-GN-01", "preTax", SINK32, ["preTax (body)"]),
+        _gn_aps("INJ-GN-02", "preTax", SINK33, ["preTax (body)"]),
+        _gn_aps("INJ-GN-03", "afterTax", SINK32, None),  # 无注记 → 裸名兜底
+    ])
+    assert out[0].affected_parameters == ["preTax (body)", "afterTax"]
+    assert out[0].affected_entries[0]["parameter"] == "preTax"  # 裸名

@@ -19,6 +19,7 @@ from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     http_route_label,
     judge_chain_verdict,
+    placement_noted_params,
 )
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
@@ -183,6 +184,9 @@ async def build_xss_findings(
             confidence=verdict.confidence,
             title=verdict.title,
             source=f"{chain.source_param} ({chain.entry_point_id})",
+            # placement 分层（Agent 判定优先，source_type 确定性兜底——同
+            # injection_builder，公共 placement_noted_params）。
+            affected_parameters=placement_noted_params(chain, verdict),
             source_detail=verdict.evidence_chain,
             path=path,
             sink_function=_sink_function_label(chain.sink_call_site_id),

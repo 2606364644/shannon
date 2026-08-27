@@ -90,18 +90,64 @@ def _type_title(vuln) -> str:
     return vtype or _PLACEHOLDER
 
 
+def _report_endpoint_routes(vuln) -> list[str]:
+    """report_endpoints（②富化写回）→ 'METHOD /path (auth)' 串列表。
+
+    GN-only 卡的路由锚点主信号：endpoint/endpoints 全空、path 是 source→sink
+    数据流摘要（非 HTTP 路由）——速查表是渗透入口索引，须从富化产物取路由
+    而非落内部数据流文本。畸形条目（非 dict / path 不以 / 开头）跳过。
+    """
+    out: list[str] = []
+    for ep in (getattr(vuln, "report_endpoints", None) or []):
+        if not isinstance(ep, dict):
+            continue
+        path = ep.get("path")
+        p = path.strip() if isinstance(path, str) else ""
+        if not p.startswith("/"):
+            continue
+        method = ep.get("method")
+        m = (method.strip().upper()
+             if isinstance(method, str) and method.strip() else "")
+        route = f"{m} {p}".strip()
+        auth = ep.get("auth")
+        if isinstance(auth, str) and auth.strip():
+            route += f" ({auth.strip()})"
+        out.append(route)
+    return out
+
+
+def _report_endpoint_params(vuln) -> list[str]:
+    """report_endpoints[].params 展开（去重保序）——affected_parameters 缺时的参数兜底。"""
+    out: list[str] = []
+    for ep in (getattr(vuln, "report_endpoints", None) or []):
+        if not isinstance(ep, dict):
+            continue
+        for prm in (ep.get("params") or []):
+            s = str(prm).strip()
+            if s and s not in out:
+                out.append(s)
+    return out
+
+
 def _endpoint_cell(vuln) -> str:
-    """接口列：vuln.endpoint（extract 归一化，失败用原值）→ extract_endpoint(path) → '-'。"""
+    """接口列：vuln.endpoint（extract 归一化，失败用原值）→ report_endpoints
+    （②富化写回，GN 轨卡主信号）→ extract_endpoint(path) → '-'。"""
     endpoint = getattr(vuln, "endpoint", None)
     if endpoint:
         # endpoint 可能带 " → file:line" 尾巴（GN 归并产物），归一化成 METHOD /route
         return extract_endpoint(endpoint) or endpoint
+    routes = _report_endpoint_routes(vuln)
+    if routes:
+        return ", ".join(routes)
     return extract_endpoint(getattr(vuln, "path", None)) or _PLACEHOLDER
 
 
 def _params_cell(vuln) -> str:
-    """参数列：affected_parameters join；>3 个取前 3 + "等 N 个"。"""
+    """参数列：affected_parameters join（缺时 report_endpoints[].params 兜底）；
+    >3 个取前 3 + "等 N 个"。"""
     params = [str(p) for p in (getattr(vuln, "affected_parameters", None) or []) if p]
+    if not params:
+        params = _report_endpoint_params(vuln)
     if not params:
         return _PLACEHOLDER
     if len(params) > 3:

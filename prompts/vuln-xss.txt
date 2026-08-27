@@ -138,7 +138,7 @@ Structure: Each `submit_finding` argument MUST follow this exact format:
 		"owasp_category": "可选：OWASP Top 10 分类，如 'A03:2021-Injection'；不确定时省略。",
 		"notes": "Relevant CSP, HttpOnly flags, WAF behavior, or other environmental factors.",
 		"endpoints": ["POST /memos (write)", "GET /memos (trigger)"],
-		"affected_parameters": ["memo (body)", "q (query)"],
+		"affected_parameters": ["memo (body)", "q (query)"] — every parameter MUST carry a location annotation: (body) or (query), judged from how the route reads it (req.body.x → body, req.query.x / ?x= → query).
 			{"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
 		]
 	}

@@ -75,13 +75,20 @@ def collapse_gn_entries(findings: list) -> list:
         entries = []
         params: list[str] = []
         for f in group:
-            param = (extract_param(getattr(f, "source", None))
-                     or (getattr(f, "affected_parameters", None) or [None])[0])
+            # affected_parameters 优先（builder 透传的 placement 注记原样保留，
+            # 如 'preTax (body)'——PoC 参数位显式信号）；无则 source 提裸名。
+            aps = [a for a in (getattr(f, "affected_parameters", None) or [])
+                   if isinstance(a, str) and a.strip()]
+            noted = aps[0] if aps else None
+            param = extract_param(getattr(f, "source", None)) or (
+                noted.rsplit(" (", 1)[0] if noted else None)
             _, loc = parse_sink_call_site_id(getattr(f, "sink_call", "") or "")
+            # entries[].parameter 裸名（行内定位用）；params 列表带注记。
             entries.append({"parameter": param, "sink_location": loc,
                             "chain_id": getattr(f, "ID", None), "track": "gitnexus"})
-            if param and param not in params:
-                params.append(param)
+            value = noted or param
+            if value and value not in params:
+                params.append(value)
         data = primary.model_dump()
         data["affected_entries"] = entries
         data["affected_parameters"] = params or None

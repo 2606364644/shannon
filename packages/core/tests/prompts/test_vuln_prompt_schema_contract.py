@@ -107,6 +107,22 @@ def test_report_card_fields_in_prompt_and_schema(vuln_class):
     )
 
 
+# 双轨 PoC 前置条件信号（2026-08-27）：authentication_required 派生 PoC 的
+# preconditions/Authorization 头，auth 9/9、authz 6/6、ssrf 2/2 卡曾整类缺失
+# ——prompt 不教 + schema 不声明，模型无从交出。全类双侧锁定。
+@pytest.mark.parametrize("vuln_class", VULN_CLASSES)
+def test_authentication_required_in_prompt_and_schema(vuln_class):
+    """authentication_required 双侧锁定（PoC preconditions 的唯一信号源）。"""
+    assert "authentication_required" in _prompt_finding_fields(vuln_class), (
+        f"vuln-{vuln_class}.txt 字段表缺 authentication_required"
+        f"（模型不会被教到，PoC preconditions 整类为空）"
+    )
+    assert "authentication_required" in _schema_finding_fields(vuln_class), (
+        f"submit_finding schema 缺 authentication_required"
+        f"（collector 会静默丢弃）"
+    )
+
+
 # 各 vuln class 落盘解析用的 pydantic 子类（queue_schemas._CLASS_ADAPTERS 同款
 # 映射；子类 model_fields 含继承自 BaseVulnerability 的字段）。
 _CLASS_MODELS = {

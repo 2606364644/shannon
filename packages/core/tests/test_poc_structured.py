@@ -139,6 +139,121 @@ def test_build_structured_poc_none_when_no_route_anchor():
     assert build_structured_poc(None, BASE) is None
 
 
+# --------------------------------------------------------------------------- #
+# report_endpoints（②富化写回）：GN 轨卡的路由锚点主信号
+# --------------------------------------------------------------------------- #
+
+_GN_REPORT_ENDPOINTS = [{
+    "method": "POST", "path": "/contributions", "role": "write",
+    "auth": "isLoggedIn", "params": ["preTax", "afterTax", "roth"],
+    "route_registered_at": "app/routes/index.js:52",
+    "source_location": "app/routes/contributions.js:32",
+    "sink_location": "app/views/contributions.html:65",
+}]
+
+
+def test_build_structured_poc_report_endpoints_gn_track():
+    """GN-only 卡：endpoint/endpoints 全空、path 是数据流摘要，路由锚点在
+    report_endpoints（endpoint 富化写回的结构化 dict）——从它提 method/path
+    产完整 PoC（修 GN 轨整轨缺 PoC：XSS-GN-01/13/14、SSRF-GN-01）。"""
+    v = _vuln(
+        endpoint=None, endpoints=None,
+        path="preTax -> app/routes/contributions.js:ContributionsHandler:render:21:19 (llm-pass-failed, needs_review)",
+        source="preTax (app/routes/contributions.js:ContributionsHandler:7)",
+        witness_payload="<img src=x onerror=alert(1)>",
+        affected_parameters=["preTax", "afterTax", "roth"],
+        report_endpoints=_GN_REPORT_ENDPOINTS,
+    )
+    poc = build_structured_poc(v, BASE)
+    assert poc is not None
+    assert poc["request"]["method"] == "POST"
+    assert poc["request"]["url"].startswith(f"{BASE}/contributions")
+    assert poc["preconditions"] == "需登录（携带有效会话凭证）"
+    assert poc["witness_payload"] == "<img src=x onerror=alert(1)>"
+    assert poc["curl"].startswith("curl -i -X POST")
+    assert poc["raw_http"].startswith("POST /contributions")
+
+
+def test_build_structured_poc_report_endpoints_beats_endpoint_fields():
+    """report_endpoints 优先于 endpoint/endpoints/path——对齐渲染层 _endpoint_entries
+    的优先级（富化产物权威于原始串），两消费者单一口径。"""
+    v = _vuln(endpoint="GET /legacy", report_endpoints=_GN_REPORT_ENDPOINTS)
+    poc = build_structured_poc(v, BASE)
+    assert poc["request"]["method"] == "POST"
+    assert poc["request"]["url"].startswith(f"{BASE}/contributions")
+
+
+def test_build_structured_poc_report_endpoints_malformed_entries_skipped():
+    """畸形 report_endpoints 条目（非 dict / path 不以 / 开头）跳过，回落后续字段链。"""
+    v = _vuln(endpoint=None, affected_parameters=None, witness_payload=None,
+              report_endpoints=[
+                  "POST /not-a-dict",
+                  {"method": "POST", "path": "no-leading-slash"},
+                  {"method": None, "path": "/only-path"},
+              ])
+    poc = build_structured_poc(v, BASE)
+    assert poc is not None
+    assert poc["request"]["url"].startswith(f"{BASE}/only-path")
+    assert poc["request"]["method"] == "GET"  # method 缺 + query 放置（无 witness）→ GET
+
+
+# --------------------------------------------------------------------------- #
+# placement 推断（method 启发式 + 富化注记）：修 POST form 参数被拼进 query
+# --------------------------------------------------------------------------- #
+
+def test_build_structured_poc_post_method_defaults_to_body():
+    """method 启发式：POST + 无注记/无 req.body 文本信号（GN 卡典型形态，
+    source 是代码位置）→ witness 进 form body 而非 URL query。"""
+    v = _vuln(endpoint="POST /contributions",
+              source="preTax (app/routes/contributions.js:ContributionsHandler:7)",
+              affected_parameters=None)
+    poc = build_structured_poc(v, BASE)
+    req = poc["request"]
+    assert req["method"] == "POST"
+    assert req["url"] == f"{BASE}/contributions"       # payload 不进 query
+    assert "?" not in req["url"]
+    # witness raw + param（source 提取 preTax）→ form body
+    assert req["body"] == "preTax=<img src=x onerror=alert(1)>"
+    assert req["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+
+
+def test_build_structured_poc_report_endpoints_param_annotation_beats_method():
+    """report_endpoints[].params 显式注记（'url (query)'）权威于 method 启发式：
+    POST 路由但参数注记 query → witness 进 URL query。"""
+    v = _vuln(endpoint=None, affected_parameters=["url"],
+              report_endpoints=[{"method": "POST", "path": "/research",
+                                 "params": ["url (query)"]}])
+    poc = build_structured_poc(v, BASE)
+    req = poc["request"]
+    assert req["method"] == "POST"
+    assert req["url"].startswith(f"{BASE}/research?url=")
+    assert req["body"] is None
+
+
+def test_build_structured_poc_get_method_keeps_query():
+    """GET + 无显式 body 信号 → 维持 query（既有行为，防启发式误伤）。"""
+    v = _vuln(endpoint="GET /search", affected_parameters=["q"],
+              source="q (app/routes/search.js:5)")
+    poc = build_structured_poc(v, BASE)
+    req = poc["request"]
+    assert req["method"] == "GET"
+    assert req["url"].startswith(f"{BASE}/search?q=")
+    assert req["body"] is None
+
+
+def test_build_structured_poc_report_endpoints_body_annotation_beats_default():
+    """report_endpoints[].params 注记 'memo (body)' 权威于 GET/query 兜底：
+    GET 路由但参数在 body（如 GET 语义化接口）→ witness 进 body、method 升 POST。"""
+    v = _vuln(endpoint="GET /memos", affected_parameters=["memo"],
+              report_endpoints=[{"method": "GET", "path": "/memos",
+                                 "params": ["memo (body)"]}])
+    poc = build_structured_poc(v, BASE)
+    req = poc["request"]
+    assert req["body"] == "memo=<img src=x onerror=alert(1)>"
+    assert req["method"] == "POST"          # 有 body → GET 升 POST（既有规则）
+    assert "?" not in req["url"]
+
+
 def test_build_structured_poc_base_url_normalization():
     """空 base_url → 占位符 host；无 scheme → 补 http://（raw_http Host 依赖 netloc）。"""
     poc = build_structured_poc(_vuln(), None)
@@ -286,3 +401,15 @@ def test_apply_structured_poc_none_clears_field():
     entry = {"ID": "X", "report_poc": {"request": {}}}
     out = apply_structured_poc(entry, None)
     assert out["report_poc"] is None
+
+
+def test_build_structured_poc_text_body_signal_retired():
+    """_BODY_SIGNALS 文本启发已删：GET + source 文本 req.body 字样不再改判 body
+    ——位置由注记/富化注记/Agent 判定字段显式承载，method 启发式只认写方法。"""
+    v = _vuln(endpoint="GET /x", source="uid (req.body.uid at app.js:3)",
+              affected_parameters=None)
+    poc = build_structured_poc(v, BASE)
+    req = poc["request"]
+    assert req["method"] == "GET"
+    assert req["body"] is None              # 不再因文本信号进 body
+    assert "?uid=" in req["url"]            # param 提取仍工作（req.body.uid → uid）

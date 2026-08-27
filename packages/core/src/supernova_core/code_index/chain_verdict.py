@@ -53,11 +53,44 @@ CHAIN_VERDICT_SCHEMA: dict = {
         "mismatch_reason": {"type": ["string", "null"]},
         "confidence": {"type": "string"},
         "title": {"type": ["string", "null"]},
+        # PoC 参数位的 Agent 判定（body|query|null）——builder 落 affected_parameters
+        # 注记；缺失退 source_type 确定性注记（deterministic_param_location）。
+        "source_param_location": {"type": ["string", "null"]},
     },
     # witness_payload 入 required（可 null）：openai_compatible 引擎不发 schema 时
     # 仅靠 prompt 约束，不在 required 里模型常直接省略 → 下游 PoC 无 witness 可用。
     "required": ["verdict", "witness_payload", "evidence_chain", "title"],
 }
+
+# source_type（source_rules.yml 匹配事实，与 method 无关——req.body.x 挂 GET 路由
+# 照样是 body）→ PoC 参数位。path/header/cookie 等无 HTTP placement 对应 → None
+# （不虚构位置，留给 method 启发式）。chain_verdict 失败时的确定性降级层。
+_PARAM_LOCATION_BY_SOURCE_TYPE = {
+    "body": "body", "form": "body", "query": "query",
+}
+
+
+def deterministic_param_location(source_type: str | None) -> str | None:
+    """source_type → 'body'|'query'|None（builder 组装 affected_parameters 注记）。"""
+    return _PARAM_LOCATION_BY_SOURCE_TYPE.get(
+        str(source_type or "").strip().lower())
+
+
+def placement_noted_params(chain, verdict) -> list[str] | None:
+    """source_param → 带位置注记的 affected_parameters（'q (query)'）。
+
+    Agent 判定（verdict.source_param_location）优先；None 退 source_type
+    确定性注记（判定通道失败时仍有位置——PoC 参数位不再依赖文本启发式）；
+    都无对应位（path/header/…）→ None（不虚构位置）。三个 taint builder 共用。"""
+    loc = (getattr(verdict, "source_param_location", None)
+           or deterministic_param_location(chain.source_type))
+    return [f"{chain.source_param} ({loc})"] if loc else None
+
+
+def _norm_location(val) -> str | None:
+    """LLM 产的位置值归一：只认 body/query（大小写折叠），其余 → None。"""
+    v = str(val or "").strip().lower()
+    return v if v in ("body", "query") else None
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +140,14 @@ Rules:
 - witness_payload = the MINIMAL concrete attack input that would trigger this sink
   (e.g. "' OR '1'='1" for a SQL value slot, "http://169.254.169.254/" for a url slot).
   Required when verdict is vulnerable; use null only when verdict is safe.
+- source_param_location = where the source parameter is delivered in the HTTP
+  request: "body" or "query". Judge from the source expression shown above
+  (e.g. req.body.x → body, req.query.x / ?x= → query); use null only when
+  genuinely indeterminable.
 - {title_directive}
 
 Respond with a compact JSON object ONLY:
-{{"verdict":"safe|vulnerable","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>"}}
+{{"verdict":"safe|vulnerable","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>","source_param_location":"body|query|null"}}
 """
 
 # unparseable 有界重试（spec O2 后半）：openai_compatible 引擎（GLM）端点不支持
@@ -133,7 +170,7 @@ def _reformat_prompt(raw: str) -> str:
         '{"verdict":"safe|vulnerable","witness_payload":"<攻击载荷字符串或 null>",'
         '"evidence_chain":"<source->sink 证据链>",'
         '"mismatch_reason":"<字符串或 null>","confidence":"high|medium|low",'
-        '"title":"<一句话标题>"}\n'
+        '"title":"<一句话标题>","source_param_location":"<body|query|null>"}\n'
         f"待转换文本：\n{raw[:4000]}"
     )
 
@@ -163,6 +200,9 @@ class ChainVerdict:
     mismatch_reason: str | None
     confidence: str
     title: str | None = None
+    # PoC 参数位 Agent 判定（"body"|"query"|None）——None 时 builder 落
+    # source_type 确定性注记（判定通道失败亦然，见 _norm_location 缺省）。
+    source_param_location: str | None = None
 
 
 def _slot_value(slot) -> str:
@@ -461,4 +501,5 @@ async def judge_chain_verdict(
         mismatch_reason=data.get("mismatch_reason"),
         confidence=str(data.get("confidence", "medium")).strip().lower(),
         title=str(title).strip() if isinstance(title, str) and title.strip() else None,
+        source_param_location=_norm_location(data.get("source_param_location")),
     )

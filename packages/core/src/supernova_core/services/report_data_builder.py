@@ -32,6 +32,8 @@ from supernova_core.services.findings_renderer import CLASS_CONFIG
 from supernova_core.services.report_assembler import (
     _confidence_cell,
     _endpoint_cell,
+    _report_endpoint_params,
+    _report_endpoint_routes,
     _severity_cell,
     _type_title,
     _verification_cell,
@@ -261,11 +263,14 @@ def _quick_reference_row(vuln) -> QuickReferenceRow:
     """速查表行（spec 单源化 §5）：单元格口径复用 report_assembler（同 md 表）。
 
     params 存全量原样（>3 截断是渲染层的事）；endpoints 串原样，空时
-    endpoint/path 兜底归一化（对齐 _endpoint_cell，但不落 '-' placeholder——
+    report_endpoints（②富化写回，GN 轨卡的路由锚点主信号——不落数据流文本）
+    → endpoint/path 兜底归一化（对齐 _endpoint_cell，但不落 '-' placeholder——
     行是数据不是展示，渲染层管空态）。
     """
     endpoints = [str(e).strip() for e in (getattr(vuln, "endpoints", None) or [])
                  if str(e).strip()]
+    if not endpoints:
+        endpoints = _report_endpoint_routes(vuln)
     if not endpoints:
         fallback = (getattr(vuln, "endpoint", None)
                     or getattr(vuln, "path", None))
@@ -279,6 +284,8 @@ def _quick_reference_row(vuln) -> QuickReferenceRow:
         p = str(p).strip()
         if p and p not in params:
             params.append(p)
+    if not params:
+        params = _report_endpoint_params(vuln)
     title = getattr(vuln, "title", None) or _type_title(vuln)
     return QuickReferenceRow(
         id=str(vuln.ID),

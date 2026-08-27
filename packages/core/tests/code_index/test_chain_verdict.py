@@ -533,3 +533,70 @@ def test_render_context_for_dom_subtypes_unchanged():
     """既有 DOM 子型映射不回归(xss_dom→html_body 默认)。"""
     from supernova_core.code_index.chain_verdict import _render_context_for
     assert _render_context_for("xss_dom") == "html_body"
+
+
+@pytest.mark.asyncio
+async def test_judge_verdict_parses_source_param_location():
+    """判定输出带 source_param_location（PoC 参数位的 Agent 判定）→ 透传。"""
+    chain = CandidateChain(
+        vuln_class="injection", flow_id="f1", entry_point_id="ep",
+        source_param="preTax", source_type="body", sink_call_site_id="db.eval:1",
+        sink_slot="cmd_argument", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="forward",
+        post_sanitize_concat=True,
+    )
+
+    async def fake_llm(prompt, **kw):
+        return ('{"verdict":"vulnerable","witness_payload":"1;id","evidence_chain":'
+                '"preTax -> eval","mismatch_reason":"eval on body param",'
+                '"confidence":"high","source_param_location":"body"}')
+
+    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    assert verdict.source_param_location == "body"
+
+
+@pytest.mark.asyncio
+async def test_judge_verdict_normalizes_bad_source_param_location():
+    """位置值归一：大小写折叠；非法值（header/空）→ None（不虚构位置，
+    留给确定性 source_type 兜底与 method 启发式）。"""
+    chain = CandidateChain(
+        vuln_class="ssrf", flow_id="f1", entry_point_id="ep",
+        source_param="url", source_type="query", sink_call_site_id="http.get:1",
+        sink_slot="url", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="forward",
+        post_sanitize_concat=True,
+    )
+
+    async def llm_returns(loc):
+        async def _f(prompt, **kw):
+            return ('{"verdict":"vulnerable","witness_payload":"http://x/",'
+                    '"evidence_chain":"url -> get","confidence":"medium",'
+                    f'"source_param_location":"{loc}"' + '}')
+        return _f
+
+    v = await judge_chain_verdict(chain, llm_client=await llm_returns("QUERY"))
+    assert v.source_param_location == "query"      # 大小写折叠
+    v = await judge_chain_verdict(chain, llm_client=await llm_returns("header"))
+    assert v.source_param_location is None          # 非法 → None
+    v = await judge_chain_verdict(chain, llm_client=await llm_returns(""))
+    assert v.source_param_location is None
+
+
+@pytest.mark.asyncio
+async def test_judge_verdict_fallback_location_none():
+    """判定通道失败（llm-pass-failed）→ source_param_location=None（Agent 判定
+    不可用，位置由 builder 的 source_type 确定性注记兜底）。"""
+    chain = CandidateChain(
+        vuln_class="xss", flow_id="f1", entry_point_id="ep",
+        source_param="memo", source_type="body", sink_call_site_id="render:1",
+        sink_slot="template_expr", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="forward",
+        post_sanitize_concat=True,
+    )
+
+    async def boom(prompt, **kw):
+        raise RuntimeError("llm down")
+
+    verdict = await judge_chain_verdict(chain, llm_client=boom)
+    assert verdict.confidence == "unadjudicated"
+    assert verdict.source_param_location is None

@@ -223,14 +223,26 @@ async def test_polish_qa_flags_when_rework_also_fails(tmp_path, monkeypatch):
 
 async def test_polish_qa_seven_section_checks(tmp_path, monkeypatch):
     """§6：七节覆盖率逐卡 checks——缺 problem_points/poc/params/narrative/
-    行号链各记 failed_ids（显式呈现，不静默）。"""
+    行号链各记 failed_ids（显式呈现，不静默）。
+
+    poc_complete 检出用无锚点卡（XSS-GN-09）演示；有 report_endpoints 路由的卡
+    （XSS-VULN-01）修复后必有结构化 POC（poc_structured 读 report_endpoints），
+    不再进 failed_ids——此处显式断言锁定该行为。"""
     d = _wb(tmp_path)
     _write_queue(d, [{
-        # taint 卡：接口有但无参数/无行号链，无 problem_points/POC/narrative
+        # taint 卡：接口有（report_endpoints）但无参数/无行号链，
+        # 无 problem_points/narrative；路由锚点在 → POC 可产
         "ID": "XSS-VULN-01", "vulnerability_type": "Stored",
         "externally_exploitable": True, "confidence": "high",
         "merge_source": "llm-only", "title": "t", "severity": "high",
         "report_endpoints": [{"method": "POST", "path": "/memos"}],
+    }, {
+        # GN 轨卡：无任何路由锚点（endpoint/endpoints/report_endpoints 全空，
+        # path 是数据流摘要）→ 结构化 POC 提不出 → poc_complete 检出
+        "ID": "XSS-GN-09", "vulnerability_type": "Stored",
+        "externally_exploitable": True, "confidence": "low",
+        "merge_source": "gitnexus-only", "title": "t2", "severity": "high",
+        "path": "memo -> app/routes/memos.js:render:12:5 (needs_review)",
     }])
     monkeypatch.setattr(activities, "_get_paths",
                         lambda inp: (tmp_path, d, tmp_path))
@@ -247,10 +259,10 @@ async def test_polish_qa_seven_section_checks(tmp_path, monkeypatch):
 
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
-    assert checks["problem_points_present"] == ["XSS-VULN-01"]
-    assert checks["poc_complete"] == ["XSS-VULN-01"]
+    assert checks["problem_points_present"] == ["XSS-VULN-01", "XSS-GN-09"]
+    assert checks["poc_complete"] == ["XSS-GN-09"]
     assert checks["params_present"] == ["XSS-VULN-01"]
-    assert checks["narrative_complete"] == ["XSS-VULN-01"]
+    assert checks["narrative_complete"] == ["XSS-VULN-01", "XSS-GN-09"]
     assert checks["endpoint_rows_have_locations"] == ["XSS-VULN-01"]
     assert data["qa"]["passed"] is False
 

@@ -106,6 +106,7 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 		"title": "一句话描述性标题，编码 SSRF 类型 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'SSRF：/api/webhooks 的 webhook_url 可访问内部元数据'。不要只写 'URL_Manipulation' 这种裸标签。",
 		"vulnerability_type": "URL_Manipulation | Redirect_Abuse | Webhook_Injection | API_Proxy_Bypass | File_Fetch_Abuse | Service_Discovery | Open_Redirect",
 		"externally_exploitable": true | false,
+		"authentication_required": "true | false — whether login is required to reach this sink via this route. Check the route definition in the router file for authentication middleware. A route WITHOUT auth middleware means the vulnerability is exploitable WITHOUT authentication.",
 	  "source_endpoint": "{HTTP_METHOD} {endpoint_path}",
 	  "vulnerable_parameter": "Name of the parameter that accepts user input (e.g., 'url', 'callback', 'webhook_url').",
 	  "witness_payload": "the payload VALUE itself — no param-name prefix (NOT 'url=http://...'), no request line, no explanation text (e.g., 'http://127.0.0.1:22/', 'http://169.254.169.254/latest/meta-data/'). Where/how to deliver it goes in `notes`.",
@@ -122,7 +123,7 @@ An **exploitable vulnerability** is a data flow where user-controlled input infl
 	  "owasp_category": "可选：OWASP Top 10 分类，如 'A03:2021-Injection'；不确定时省略。",
 	  "notes": "Relevant details about request format, authentication requirements, observed timeouts, or links to related findings.",
 	  "endpoints": ["POST /memos (write)", "GET /memos (trigger)"],
-	  "affected_parameters": ["memo (body)", "q (query)"],
+	  "affected_parameters": ["memo (body)", "q (query)"] — every parameter MUST carry a location annotation: (body) or (query), judged from how the route reads it (req.body.x → body, req.query.x / ?x= → query).
 		  {"label": "orm.escape", "file": "app/helpers/query.js", "line": 30, "protection": "orm.escape"}
 	  ]
 	}

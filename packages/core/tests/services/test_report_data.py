@@ -259,6 +259,31 @@ async def test_build_report_data_quick_reference(tmp_path):
     assert r3.verification == "已动态验证"
 
 
+async def test_build_report_data_quick_reference_report_endpoints(tmp_path):
+    """GN-only 卡速查表行（双轨对齐）：endpoints/affected_parameters 全空、path 是
+    数据流摘要时，endpoints/params 从 report_endpoints（②富化写回）派生——
+    渗透者速查表要的是 HTTP 路由（GET /research）而非内部数据流文本。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "ssrf_exploitation_queue.json", [
+        {"ID": "SSRF-GN-01", "vulnerability_type": "SSRF",
+         "externally_exploitable": True, "confidence": "unadjudicated",
+         "merge_source": "gitnexus-only", "title": "SSRF /research", "severity": "high",
+         "path": "symbol -> app/routes/research.js:ResearchHandler:get:16:19 (needs_review)",
+         "report_endpoints": [
+             {"method": "GET", "path": "/research", "role": "trigger",
+              "auth": "isLoggedIn", "params": ["url (query)", "symbol (query)"]}],
+         },
+    ])
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+
+    row = rd.quick_reference[0]
+    assert row.endpoints == ["GET /research (isLoggedIn)"]
+    assert row.params == ["url (query)", "symbol (query)"]
+
+
 async def test_build_report_data_endpoint_params_backfill(tmp_path):
     """确定性路径 params/行号链回填（spec 单源化 §5）：无 report_endpoints
     富化时 params ← affected_parameters（去重保序）、行号链 ← affected_entries

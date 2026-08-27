@@ -12,6 +12,7 @@ from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     http_route_label,
     judge_chain_verdict,
+    placement_noted_params,
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
@@ -77,6 +78,10 @@ async def build_injection_findings(
             confidence=verdict.confidence,
             title=verdict.title,
             source=_source_text(chain),
+            # placement 分层：Agent 判定（verdict.source_param_location）优先，
+            # 失败/缺失退 source_type 确定性注记（chain_verdict 通道失败时
+            # 仍有位置——PoC 参数位不再依赖文本启发式）。
+            affected_parameters=placement_noted_params(chain, verdict),
             path=path,
             sink_call=chain.sink_call_site_id,
             slot_type=_SLOT_LABEL.get(chain.sink_slot, chain.sink_slot),

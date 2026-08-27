@@ -268,3 +268,47 @@ async def test_build_injection_entry_points_miss_keeps_path():
         pgraph, llm_client=fake_llm,
         entry_points={"app.py:handler:1": _ep(http_method=None)})
     assert findings[0].path == "q->db.exec"
+
+
+@pytest.mark.asyncio
+async def test_build_injection_affected_parameters_placement_note():
+    """placement 分层（Agent 判定优先，source_type 确定性兜底）落 finding：
+    - verdict 带 source_param_location → 注记用它（Agent 判定优先于规则）；
+    - verdict 缺失 → source_type 确定性注记（query → '(query)'）；
+    - 两者皆无对应位（path 等）→ 不注（不虚构位置）。"""
+    def _flow_st(source_type):
+        return TaintFlow(
+            flow_id="app.py:handler:1#app.py:handler:db.execute:5:0",
+            entry_point_id="app.py:handler:1", source_param="q",
+            source_type=source_type,
+            sink_call_site_id="app.py:handler:db.execute:5:0",
+            sink_slot="sql_value", propagation_steps=[_step("concat")],
+        )
+
+    async def llm_with(loc):
+        async def _f(prompt, **kw):
+            extra = f',"source_param_location":"{loc}"' if loc else ""
+            return ('{"verdict":"vulnerable","witness_payload":"\'",'
+                    '"evidence_chain":"q->db.exec","confidence":"high"' + extra + '}')
+        return _f
+
+    # A: Agent 判定 body，flow source_type=query → Agent 优先
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow_st(ParameterSource.QUERY_PARAM)], language_coverage=["python"])
+    findings = await build_injection_findings(
+        pgraph, llm_client=await llm_with("body"))
+    assert findings[0].affected_parameters == ["q (body)"]
+
+    # B: Agent 缺失 → source_type=query 确定性注记
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow_st(ParameterSource.QUERY_PARAM)], language_coverage=["python"])
+    findings = await build_injection_findings(
+        pgraph, llm_client=await llm_with(None))
+    assert findings[0].affected_parameters == ["q (query)"]
+
+    # C: Agent 缺失 + source_type=path（无 HTTP placement 对应）→ 不注
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow_st(ParameterSource.PATH_PARAM)], language_coverage=["python"])
+    findings = await build_injection_findings(
+        pgraph, llm_client=await llm_with(None))
+    assert findings[0].affected_parameters is None

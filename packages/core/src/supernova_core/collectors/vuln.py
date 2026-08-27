@@ -439,8 +439,9 @@ _INJECTION_FINDING_PROPS: dict = {
         "type": "array",
         "items": {"type": "string"},
         "description": (
-            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
-            "'memo (body)'、'q (query)'。"),
+            "外部可控参数名，每个必须带位置注记：(body) 或 (query)，按路由"
+            "读取方式判定（req.body.x → body，req.query.x / ?x= → query）——"
+            "PoC 参数位的权威信号。"),
     },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
@@ -475,14 +476,18 @@ _XSS_FINDING_PROPS: dict = {
         "type": "array",
         "items": {"type": "string"},
         "description": (
-            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
-            "'memo (body)'、'q (query)'。"),
+            "外部可控参数名，每个必须带位置注记：(body) 或 (query)，按路由"
+            "读取方式判定（req.body.x → body，req.query.x / ?x= → query）——"
+            "PoC 参数位的权威信号。"),
     },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
 _AUTH_FINDING_PROPS: dict = {
     "source_endpoint": _str_field('"{HTTP_METHOD} {endpoint_path}".'),
+    "authentication_required": _str_field(
+        '"true" | "false" — whether login is required to reach this flaw via '
+        "this route (check the router file for auth middleware)."),
     "vulnerable_code_location": _str_field("Exact file:line of the flawed logic or missing check."),
     "missing_defense": _str_field("Concise core problem (e.g. 'No rate limit on POST /login')."),
     "exploitation_hypothesis": _str_field("Active attack outcome on success (not just confirmation)."),
@@ -506,14 +511,18 @@ _SSRF_FINDING_PROPS: dict = {
         "type": "array",
         "items": {"type": "string"},
         "description": (
-            "外部可控参数名（body/query/param 各归位），可带来源注记如 "
-            "'memo (body)'、'q (query)'。"),
+            "外部可控参数名，每个必须带位置注记：(body) 或 (query)，按路由"
+            "读取方式判定（req.body.x → body，req.query.x / ?x= → query）——"
+            "PoC 参数位的权威信号。"),
     },
     "dataflow_steps": _DATAFLOW_STEPS_FIELD,
 }
 
 _AUTHZ_FINDING_PROPS: dict = {
     "endpoint": _str_field("Affected endpoint (e.g. 'POST /api/auth/logout')."),
+    "authentication_required": _str_field(
+        '"true" | "false" — whether the attacker must be authenticated to '
+        "trigger this flaw (broken object-level auth is usually \"true\")."),
     "vulnerable_code_location": _str_field("Guard location (file:line)."),
     "role_context": _str_field("Roles involved (owner/victim or role pair)."),
     "guard_evidence": _str_field("What the guard checks vs. omits (ownership re-validation gap)."),

@@ -154,6 +154,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 		"title": "一句话描述性标题，编码授权缺陷 + 端点，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'IDOR：DELETE /api/Feedbacks/:id 缺少归属校验'。不要只写 'Horizontal' 这种裸标签。",
 		"vulnerability_type": "Horizontal | Vertical | Context_Workflow",
 		"externally_exploitable": true | false,
+		"authentication_required": "true | false — whether the attacker must be an authenticated user to trigger this flaw. Broken object-level or role-based auth is usually \"true\" (a logged-in user reaching another user's resource); endpoints reachable without any login are \"false\".",
 		"endpoint": "HTTP_METHOD /path/to/endpoint",
 		"vulnerable_code_location": "file:line where guard is missing or misplaced",
 		"role_context": "role(s) that can trigger this vulnerability",

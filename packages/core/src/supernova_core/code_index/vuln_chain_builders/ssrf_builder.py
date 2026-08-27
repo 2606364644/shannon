@@ -14,6 +14,7 @@ from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     http_route_label,
     judge_chain_verdict,
+    placement_noted_params,
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import (
@@ -75,6 +76,9 @@ async def build_ssrf_findings(
             title=verdict.title,
             source_endpoint=route_label or chain.entry_point_id,  # best-effort; renderer tolerant
             vulnerable_parameter=chain.source_param,
+            # placement 分层（Agent 判定优先，source_type 确定性兜底——公共
+            # placement_noted_params，同 injection/xss builder）。
+            affected_parameters=placement_noted_params(chain, verdict),
             vulnerable_code_location=chain.sink_call_site_id,
             # spec 2026-08-26 §7 根因修复：回填 sink 全标识供 gn_collapse 折叠
             # （vulnerable_code_location 保留兼容渲染层位置回退链）。

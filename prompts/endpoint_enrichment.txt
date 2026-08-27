@@ -53,7 +53,7 @@ Respond with a JSON object of exactly this shape (no prose outside JSON):
           "path": "/memos",
           "role": "write | trigger | read (omit if unknown)",
           "auth": "isLoggedIn | public | isAdmin (omit if unknown)",
-          "params": ["memo"],
+          "params": ["memo (body)", "q (query)"] — every param MUST carry a location annotation: (body) or (query), judged from how the route reads it.
           "route_registered_at": "app/routes/index.js:66",
           "source_location": "app/routes/memos.js:13",
           "sink_location": "app/views/memos.html:31"

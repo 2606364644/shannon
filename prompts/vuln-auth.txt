@@ -108,6 +108,7 @@ An **exploitable vulnerability** is a logical flaw in the code that represents a
 		"title": "一句话描述性标题，编码认证缺陷 + 位置，用简体中文撰写（漏洞类型/参数/路径/端点保留英文），如 'POST /login 缺少速率限制，可被暴力破解'。不要只写 'Authentication_Bypass' 这种裸标签。",
 		"vulnerability_type": "Authentication_Bypass | Session_Management_Flaw | Login_Flow_Logic | Token_Management_Issue | Reset_Recovery_Flaw | Transport_Exposure | Abuse_Defenses_Missing | OAuth_Flow_Issue",
 		"externally_exploitable": true | false,
+		"authentication_required": "true | false — whether login is required to reach this flaw via this route. Check the route definition in the router file for authentication middleware. Flaws on the login/reset endpoints themselves (brute force, token issuance) are \"false\"; session/token flaws exploitable after login are \"true\".",
 	  "source_endpoint": "{HTTP_METHOD} {endpoint_path}",
 	  "vulnerable_code_location": "Exact file:line of the flawed logic or missing check.",
 	  "missing_defense": "Concise description of the core problem (e.g., 'No rate limit on POST /login', 'Session ID not rotated after login').",

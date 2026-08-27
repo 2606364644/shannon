@@ -7,9 +7,10 @@ witness_payload + 确定性 curl/raw_http），由上层编排写回 queue entry
 ``report_poc`` 字段（queue_schemas 已加，append-only）。
 
 职责分层（spec §5.3 升级位）：
-- ``request`` **纯确定性**——endpoint/endpoints/path/source_endpoint/source 提取
-  method+path（复用 poc_generator 的 extract_method_path/parse_witness/_infer_placement
-  等成熟逻辑），base_url 拼接；body 由 witness_payload/affected_parameters 构造。
+- ``request`` **纯确定性**——report_endpoints（②富化写回）/endpoint/endpoints/
+  path/source_endpoint/source 提取 method+path（复用 poc_generator 的
+  extract_method_path/parse_witness/_infer_placement 等成熟逻辑），base_url 拼接；
+  body 由 witness_payload/affected_parameters 构造。
   提不出路由锚点（纯非 HTTP 入口，如 GN 轨纯代码位置 source 且无 witness 请求行）
   → 返回 None，调用方回退现行确定性模板路径（§5.6 降级矩阵），不硬拼 ``GET /``。
 - ``expected_response`` **LLM 产**——经 ``llm_fn(prompt) -> dict | str | None`` 注入
@@ -30,7 +31,6 @@ from urllib.parse import urlencode
 from supernova_core.services.poc_generator import (
     _build_body_from_values,
     _extract_body_param,
-    _infer_placement,
     _sh_quote,
     extract_gn_location,
     extract_method_path,
@@ -65,12 +65,39 @@ def _route_from_field(text: str | None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _extract_route(vuln: Any) -> tuple[str | None, str | None]:
-    """确定性路由链：endpoint → endpoints 列表 → path → source_endpoint → source。
+def _route_from_report_endpoints(vuln: Any) -> tuple[str | None, str | None]:
+    """report_endpoints（②富化写回的结构化路由）提 (method, path)。
 
-    对齐 derive_method_path 的字段优先级并扩 endpoints 列表（'POST /memos (write)'，
-    角色注记不进 path）；witness 请求行兜底在 _build_request 里（parse_witness 产物）。
+    GN-only 卡的路由锚点主信号：endpoint/endpoints 全空、path 是 source→sink
+    数据流摘要（非 HTTP 路由），路由信息只在富化写回的 report_endpoints 里
+    （时序：run_endpoint_enrichment 先于 write_structured_poc）。畸形条目
+    （非 dict / path 不以 / 开头）跳过，取首条有效。
     """
+    for ep in (getattr(vuln, "report_endpoints", None) or []):
+        if not isinstance(ep, dict):
+            continue
+        path = ep.get("path")
+        p = path.strip() if isinstance(path, str) else ""
+        if not p.startswith("/"):
+            continue
+        method = ep.get("method")
+        m = method.strip().upper() if isinstance(method, str) and method.strip() else None
+        return m, p
+    return None, None
+
+
+def _extract_route(vuln: Any) -> tuple[str | None, str | None]:
+    """确定性路由链：report_endpoints（②富化写回）→ endpoint → endpoints 列表
+    → path → source_endpoint → source。
+
+    report_endpoints 最优先——对齐渲染层 _endpoint_entries 的优先级（富化产物
+    权威于原始串，两消费者单一口径）；derive_method_path 的字段优先级随后，
+    并扩 endpoints 列表（'POST /memos (write)'，角色注记不进 path）；witness
+    请求行兜底在 _build_request 里（parse_witness 产物）。
+    """
+    m, p = _route_from_report_endpoints(vuln)
+    if m or p:
+        return m, p
     m, p = _route_from_field(_s(getattr(vuln, "endpoint", None)))
     if m or p:
         return m, p
@@ -107,6 +134,43 @@ def _annotated_placement(vuln: Any) -> str | None:
         if low.endswith("(query)"):
             return "query"
     return None
+
+
+def _report_endpoints_placement(vuln: Any) -> str | None:
+    """report_endpoints[].params 注记位（②富化写回）：'url (query)' → query。"""
+    for ep in (getattr(vuln, "report_endpoints", None) or []):
+        if not isinstance(ep, dict):
+            continue
+        for prm in (ep.get("params") or []):
+            low = str(prm).lower()
+            if low.endswith("(body)"):
+                return "body"
+            if low.endswith("(query)"):
+                return "query"
+    return None
+
+
+_BODY_WRITE_METHODS = frozenset(("POST", "PUT", "PATCH", "DELETE"))
+
+
+def _resolve_placement(vuln: Any, method: str | None) -> str:
+    """参数位信号链（修 POST form 参数被拼进 query——两轨一致弱）：
+
+    1. affected_parameters 显式注记（'memo (body)'）——prompt 契约注记 /
+       GN 轨 builder 透传（Agent 判定优先，source_type 确定性兜底）；
+    2. report_endpoints[].params 显式注记（'url (query)'）——富化产物注记；
+    3. method 启发式：写方法（POST/PUT/PATCH/DELETE）无任何显式信号 → body
+       （REST 惯例：写操作参数在 body），GET/未知 → query（历史行为）。
+
+    _BODY_SIGNALS 文本启发已删（2026-08-27）：位置由上述显式信号承载，
+    文本子串匹配只剩误报风险（同义形态追不完 + 描述文本与实际位置不符）。
+    """
+    placement = _annotated_placement(vuln) or _report_endpoints_placement(vuln)
+    if placement:
+        return placement
+    if method and method.upper() in _BODY_WRITE_METHODS:
+        return "body"
+    return "query"
 
 
 def _extract_param(vuln: Any) -> str | None:
@@ -159,7 +223,11 @@ def _build_request(vuln: Any, base_url: str | None) -> dict | None:
         path = path or wp.path
     if not path:
         return None  # 纯非 HTTP 入口：无锚点不硬拼（调用方回退现行降级路径）
-    placement = _annotated_placement(vuln) or _infer_placement(vuln, "")
+    placement = _annotated_placement(vuln) or _report_endpoints_placement(vuln)
+    if not placement and wp.method and wp.path and wp.values:
+        placement = "query"  # witness 请求行自带的 query 参数是显式位置证据（G1）
+    if not placement:
+        placement = _resolve_placement(vuln, method)
     param = _extract_param(vuln)
     body: str | None = None
     query: dict[str, str] = {}
