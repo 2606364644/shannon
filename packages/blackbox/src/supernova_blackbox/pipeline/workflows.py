@@ -448,6 +448,7 @@ class BlackboxScanWorkflow:
                         else:
                             self._state.completed_agents.append(agent_name.value)
                             self._state.agent_metrics[agent_name.value] = result
+                            await self._persist_progress(act_input)
                             outcomes.append(
                                 exploit_result_to_outcome(result, agent_name.value, vt)
                             )
@@ -501,6 +502,7 @@ class BlackboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.REPORT.value)
                 self._state.agent_metrics[AgentName.REPORT.value] = metrics
+                await self._persist_progress(act_input)
                 self._state.current_agent = None
 
             # 漏洞节覆盖校验+自愈（report-executive 之后）：agent 自写脚本压缩正文丢
@@ -595,6 +597,23 @@ class BlackboxScanWorkflow:
                     )
                 except Exception:
                     pass  # best-effort，绝不阻断 workflow shutdown
+
+    async def _persist_progress(self, act_input: BlackboxActivityInput) -> None:
+        """completed_agents 增量落盘 run 级 session.json（2026-08-27 列表进度不动修复 · 写侧）。
+
+        与 whitebox 侧同构：每个 agent 完成点调用，progress_pct 分子原只在结束落盘。
+        best-effort：activity 失败吞异常（进度显示降级回 SSE 读侧，不影响扫描本体）；
+        单次尝试不重试（下一个 agent 完成点会再写）。
+        """
+        try:
+            await workflow.execute_activity(
+                activities.persist_completed_agents,
+                args=[act_input, list(self._state.completed_agents)],
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+        except Exception:
+            pass
 
     def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
         """构造 finalize_summary 用的 summary dict（success/failed 路径共用，DRY）。

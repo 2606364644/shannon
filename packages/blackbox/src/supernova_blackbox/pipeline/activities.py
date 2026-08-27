@@ -689,6 +689,24 @@ async def log_info_activity(input: BlackboxActivityInput) -> None:
 
 
 @activity.defn
+async def persist_completed_agents(input: BlackboxActivityInput,
+                                   completed_agents: list[str]) -> None:
+    """completed_agents 增量落盘 run 级 session.json（2026-08-27 列表进度不动修复 · 写侧）。
+
+    与 whitebox 侧同构：原只在 workflow 结束落盘 → 运行中恒 []，组合扫描黑盒段
+    progress_pct 分子不动（钉死 55%）。workflow 在每个 agent 完成点调本 activity
+    落盘（Temporal workflow 禁 IO）；异常由 workflow 侧 _persist_progress 吞。
+    session.json 缺失（异常路径）no-op，防 update_session 写出残缺 session。
+    """
+    from supernova_core.session import SessionManager
+    run_dir = Path(input.workspace_path)
+    if not (run_dir / "session.json").exists():
+        return
+    SessionManager(run_dir.parent).update_session(
+        run_dir, {"completed_agents": list(completed_agents)})
+
+
+@activity.defn
 async def load_correlation_context(corr_workspace_path: str) -> dict | None:
     """读关联 workspace 的 topology/boundaries 作为 exploitation 上下文（B2）。
 

@@ -100,6 +100,24 @@ class WhiteboxScanWorkflow:
             "error": (self._state.errors[0] if self._state.errors else error_fallback),
         }
 
+    async def _persist_progress(self, act_input: ActivityInput) -> None:
+        """completed_agents 增量落盘 session.json（2026-08-27 列表进度不动修复 · 写侧）。
+
+        每个 agent 完成点调用——progress_pct 分子原只在 workflow 结束落盘，运行中
+        恒 []（列表/仪表盘 progress_pct 阶段内钉死）。best-effort：activity 失败吞
+        异常继续扫描（进度显示降级回 SSE 读侧，不影响扫描本体）；单次尝试不重试
+        （下一个 agent 完成点会再写，无需为此占用重试预算）。
+        """
+        try:
+            await workflow.execute_activity(
+                activities.persist_completed_agents,
+                args=[act_input, list(self._state.completed_agents)],
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+        except Exception:
+            pass
+
     @workflow.run
     async def run(self, input: PipelineInput) -> PipelineState:
         # resume: 预填已完成 agent，激活下方 `if X not in completed_agents` 守卫
@@ -241,6 +259,7 @@ class WhiteboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.PRE_RECON.value)
                 self._state.agent_metrics[AgentName.PRE_RECON.value] = pre_recon_metrics
+                await self._persist_progress(act_input)
 
                 self._state.code_index_stats = code_index_result
 
@@ -319,6 +338,7 @@ class WhiteboxScanWorkflow:
                 )
                 self._state.completed_agents.append(AgentName.RECON.value)
                 self._state.agent_metrics[AgentName.RECON.value] = metrics
+                await self._persist_progress(act_input)
                 self._state.current_agent = None
                 await workflow.execute_activity(
                     activities.log_phase_complete_activity,
@@ -435,6 +455,7 @@ class WhiteboxScanWorkflow:
                     else:
                         self._state.completed_agents.append(agent_name.value)
                         self._state.agent_metrics[agent_name.value] = result
+                        await self._persist_progress(act_input)
             # === Authz GitNexus track: judge IDOR candidates (spec §5.7) ===
             # Runs after vuln agents (LLM track queues ready) and before the
             # dual-track merge (Plan 3) so authz_gitnexus_queue.json exists

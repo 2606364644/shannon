@@ -95,6 +95,8 @@ def _build_proxy_chain_mocks(call_order: list, proxy_url_return: str) -> list:
         call_order.append(f"stop_host_proxy:{proxy_url}")
     @activity.defn
     async def finalize_summary(i, summary): pass
+    @activity.defn
+    async def persist_completed_agents(i, completed_agents): pass
     return [setup_display, log_phase_start_activity, run_host_proxy_setup,
             run_blackbox_preflight, resolve_blackbox_engine,
             detect_whitebox_results, log_info_activity,
@@ -102,7 +104,8 @@ def _build_proxy_chain_mocks(call_order: list, proxy_url_return: str) -> list:
             validate_exploitation_queue, write_engine_config_for_session,
             run_exploit_agent, assemble_report, run_report_agent,
             finalize_report, cleanup_engine_configs,
-            cleanup_auth_state_activity, stop_host_proxy, finalize_summary]
+            cleanup_auth_state_activity, stop_host_proxy, finalize_summary,
+            persist_completed_agents]
 
 
 async def _run_workflow(acts, inp, wid, tq):
