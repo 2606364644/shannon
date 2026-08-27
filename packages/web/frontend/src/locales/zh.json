@@ -569,7 +569,8 @@
       "allClearEyebrow": "一切正常 · SURFACE CLEAR",
       "unit": "条可利用污点路径",
       "allClearUnit": "未发现可利用污点路径",
-      "context": "跨 {{scans}} 次扫描 · {{repos}} 个仓库 · {{workspaces}} 个工作区 · {{live}} 个进行中",
+      "context": "跨 {{scans}} 次扫描 · {{repos}} 个仓库 · {{workspaces}} 个工作区",
+      "topTargetAria": "最重目标：{{ws}} · {{n}} 条发现",
       "composition": "发现构成",
       "other": "其他"
     },

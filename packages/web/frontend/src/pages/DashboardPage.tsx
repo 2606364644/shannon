@@ -55,10 +55,16 @@ const FX_KEY = "supernova-dash-fx";
 type DashFx = "signal" | "flow";
 
 /**
- * 概览页 = 态势大屏（重设计 v2，overview-workspace-redesign-preview.html 2026-08-16）：
- * 威胁横幅（全局数字 + 构成谱带 + 运营指标 + CTA 一行装下）+ 工作区磁贴网格
+ * 概览页 = 态势大屏（v2 重设计 2026-08-16；v3 横幅重组 2026-08-27，
+ * dashboard-overview-v3-preview.html）：作战简报行横幅 + 工作区磁贴网格
  * （运行中进度直接融进磁贴）。单屏只读——扫描明细与全部操作在工作区页，
- * 两页零结构重叠（无 Hero 大卡 / 无指标条 / 无扫描表格 / 无过滤器）。
+ * 两页零结构重叠（无 Hero 大卡 / 无扫描表格 / 无过滤器）。
+ *
+ * v3 改动：①运营指标从四格等权 BnStat 改为按行动优先级排序的注脚行
+ * （运行中>需关注>今日完成>成本；色点=状态信号灯、无点=统计，规模 context
+ * 右对齐收尾——消除 v2 context「N 个进行中」与「运行中」格的重复）；
+ * ②大数字下新增「最重目标」去向注记（统计→战场的连接，点击直达该 ws）；
+ * ③磁贴数字 30→24px 让级（46px 大数字语言由横幅独占）。
  *
  * 聚合数据源 GET /api/scans（listAllScans 注入 workspace 字段）；有扫描在跑时 10s
  * 静默轮询保持磁贴进度新鲜。
@@ -125,12 +131,20 @@ export function DashboardPage() {
     return [...by.entries()]
       .map(([name, scans]) => {
         const latest = [...scans].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
-        return { name, scans, latest, hasRunning: scans.some(isRun) };
+        const totalVulns = scans.reduce((a, s) => a + (s.vuln_count ?? 0), 0);
+        return { name, scans, latest, hasRunning: scans.some(isRun), totalVulns };
       })
       .sort((a, b) => (a.hasRunning === b.hasRunning
         ? (b.latest?.created_at ?? 0) - (a.latest?.created_at ?? 0)
         : a.hasRunning ? -1 : 1));
   }, [data]);
+
+  // 最重目标（横幅去向注记）：发现数最大的 ws；tie 时 tiles 序（运行置顶）先者胜。
+  // 0 发现（allClear）→ null 不渲染——一切正常时没有「去哪」的问题。
+  const topTile = useMemo(
+    () => tiles.reduce<(typeof tiles)[number] | null>(
+      (best, t) => (t.totalVulns > 0 && t.totalVulns > (best?.totalVulns ?? 0) ? t : best), null),
+    [tiles]);
 
   if ((loading || wsLoading) && data.length === 0) {
     return (
@@ -173,11 +187,14 @@ export function DashboardPage() {
     <div className="space-y-4">
       <h1 className="sr-only">{t("dashboard.title")}</h1>
 
-      {/* ===== 威胁横幅：全局威胁 + 构成 + 运营指标 + CTA 一行装下（替代 Hero 大卡 + 四格指标条）。
-          0 发现 = 一切正常（绿色 allClear 措辞）；有扫描在跑时底部显 FX 脉冲带。 ===== */}
+      {/* ===== 威胁横幅 v3 · 作战简报行（重设计 2026-08-27，dashboard-overview-v3-preview.html）：
+          左块 = 威胁主体（eyebrow + 大数字 + 最重目标去向）；右块 = 构成谱带 + 运营注脚行
+          （按行动优先级：运行中 > 需关注 > 今日完成 > 成本；色点 = 状态信号灯、无点 = 统计，
+          规模 context 右对齐收尾——替代 v2 四格等权 BnStat，消除 context 与「运行中」格的重复）。
+          0 发现 = 一切正常（绿色 allClear 措辞 + 去向/谱带隐藏）；有扫描在跑时底部显 FX 脉冲带。 ===== */}
       <Card className="relative overflow-hidden">
         <div className={cn("flex flex-wrap items-stretch", running.length > 0 && "pb-12")}>
-          <div className="min-w-[240px] px-6 pt-4">
+          <div className="min-w-[264px] px-6 pb-4 pt-4">
             <div className="flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               <span className="h-[13px] w-[3px] rounded-sm bg-primary" aria-hidden />
               {allClear ? t("dashboard.hero.allClearEyebrow") : t("dashboard.hero.eyebrow")}
@@ -196,39 +213,57 @@ export function DashboardPage() {
                 {allClear ? t("dashboard.hero.allClearUnit") : t("dashboard.hero.unit")}
               </span>
             </div>
+            {/* 最重目标去向注记：统计 → 战场的连接（统计数字只回答「多少」，这里补「去哪」）。
+                tie 时 tiles 序（运行置顶）先者胜；0 发现 = 一切正常，没有「去哪」的问题，不渲染。 */}
+            {topTile && (
+              <Link
+                to={`/p/${topTile.name}`}
+                className="mt-2.5 inline-flex items-baseline gap-1.5 font-mono text-[12px] text-primary transition-opacity hover:opacity-80"
+                aria-label={t("dashboard.hero.topTargetAria", {
+                  ws: topTile.name,
+                  n: topTile.totalVulns.toLocaleString(),
+                })}
+              >
+                <span aria-hidden className="opacity-75">→</span>
+                <span>{topTile.name}</span>
+                <span className="font-semibold">{topTile.totalVulns.toLocaleString()}</span>
+              </Link>
+            )}
           </div>
 
-          <div className="flex min-w-[260px] flex-1 flex-col justify-center gap-2 py-4 pr-6 pl-2">
+          <div className="flex min-w-[300px] flex-1 flex-col justify-center gap-2 py-4 pr-4 pl-2">
             {composition.total > 0 && (
-              <div className="max-w-[460px]">
+              <div className="max-w-[520px]">
                 <div data-testid="dash-composition-bar" className="flex h-1.5 gap-px overflow-hidden rounded-full bg-border" aria-label={t("dashboard.hero.composition")}>
                   {composition.top.map(([cls, n], i) => (
                     <span key={cls} className="bg-red" style={{ width: `${(n / composition.total) * 100}%`, opacity: 1 - i * 0.22 }} />
                   ))}
                   {composition.rest > 0 && <span className="bg-red/25" style={{ width: `${(composition.rest / composition.total) * 100}%` }} />}
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 font-mono text-[11px] text-muted-foreground">
+                <div className="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 font-mono text-[11px] text-muted-foreground">
                   {composition.top.map(([cls, n]) => <span key={cls}>{cls} {n.toLocaleString()}</span>)}
                   {composition.rest > 0 && <span>{t("dashboard.hero.other")} {composition.rest.toLocaleString()}</span>}
                 </div>
               </div>
             )}
-            <div className="font-mono text-[11.5px] text-muted-foreground">
-              {t("dashboard.hero.context", {
-                scans: data.length.toLocaleString(),
-                repos: repoCount,
-                workspaces: wsCount,
-                live: running.length,
-              })}
+            {/* 运营注脚行：hairline 分组沿袭横幅竖切语言；有谱带时以 border-t 分组，
+                allClear（无谱带）免线更透气。「N 个进行中」并入运行中信号，不再单列。 */}
+            <div className={cn(
+              "flex flex-wrap items-center gap-y-1.5 font-mono text-[11.5px]",
+              composition.total > 0 && "mt-1 border-t border-border pt-2",
+            )}>
+              <Sig value={running.length.toLocaleString()} label={t("dashboard.stats.running")} live={running.length > 0} />
+              <Sig value={attention.toLocaleString()} label={t("dashboard.stats.needsAttention")} warn={attention > 0} />
+              <Sig value={completedToday.length.toLocaleString()} label={t("dashboard.stats.completedToday")} />
+              <Sig value={fmtCost(totalCost, currency)} label={t("dashboard.stats.totalCost")} />
+              <span className="ml-auto pl-3.5 text-[11px] text-muted-foreground">
+                {t("dashboard.hero.context", {
+                  scans: data.length.toLocaleString(),
+                  repos: repoCount,
+                  workspaces: wsCount,
+                })}
+              </span>
             </div>
-          </div>
-
-          {/* 运营指标（inline 竖切）：运行中染 cyan，需关注 >0 染 amber */}
-          <div className="flex flex-wrap items-stretch border-l border-border">
-            <BnStat label={t("dashboard.stats.running")} value={running.length.toLocaleString()} tone="live" />
-            <BnStat label={t("dashboard.stats.completedToday")} value={completedToday.length.toLocaleString()} />
-            <BnStat label={t("dashboard.stats.totalCost")} value={fmtCost(totalCost, currency)} />
-            <BnStat label={t("dashboard.stats.needsAttention")} value={attention.toLocaleString()} tone={attention > 0 ? "warn" : undefined} />
           </div>
 
           <div className="flex items-center px-5 py-4">
@@ -295,31 +330,38 @@ export function DashboardPage() {
   );
 }
 
-/** 横幅运营指标格：竖切边线 + mono 数字 + 小号大写标签 */
-function BnStat({ label, value, tone }: { label: string; value: ReactNode; tone?: "live" | "warn" }) {
+/** 运营注脚信号（v3）：按行动优先级排——色点 = 状态信号灯（运行 cyan 活点脉冲 /
+ *  需关注 amber 静点），无点 = 纯统计（今日完成 / 成本）。hairline 竖切分隔沿袭
+ *  横幅语言；live dot 复用 .dash-live-dot（7px，与磁贴身份区同语言）。 */
+function Sig({ value, label, live, warn }: { value: ReactNode; label: string; live?: boolean; warn?: boolean }) {
   return (
-    <div className="flex min-w-[86px] flex-col justify-center border-l border-border px-[18px] py-3 first:border-l-0">
-      <div className={cn(
-        "font-mono text-xl font-semibold leading-none tabular-nums",
-        tone === "live" ? "text-cyan" : tone === "warn" ? "text-amber" : "text-foreground",
+    <span className="ml-3.5 inline-flex items-center gap-1.5 whitespace-nowrap border-l border-border pl-3.5 first:ml-0 first:border-l-0 first:pl-0">
+      {live && <span className="dash-live-dot h-[7px] w-[7px]" aria-hidden />}
+      {warn && <span className="h-[6px] w-[6px] flex-none rounded-full bg-amber" aria-hidden />}
+      <span className={cn(
+        "font-semibold tabular-nums",
+        live ? "text-cyan" : warn ? "text-amber" : "text-foreground/85",
       )}>
         {value}
-      </div>
-      <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.07em] text-muted-foreground">{label}</div>
-    </div>
+      </span>
+      <span className="text-muted-foreground">{label}</span>
+    </span>
   );
 }
 
-/** 工作区磁贴（重设计 2026-08-17，preview/dashboard-ws-tiles-redesign.html）：hairline 分区
- *  （身份 / 信号 / 活动 / meta，对齐威胁横幅竖切语言）+ 目标锁定角括线（.ws-tile，见 index.css：
- *  hover=coral 锁定，运行中=cyan 常显「正在被扫描」）。运行进度条 fill 统一 cyan（运行=cyan
- *  全局语义）；空态（0 发现）是正向时刻——绿色盾形对勾。meta 区图标统计与切换器抽屉同语言。
- *  整卡可点进工作区页；运行中 mini 行可点直达该扫描 live（stopPropagation）。 */
-function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; latest?: ScanSummary }) {
+/** 工作区磁贴（重设计 2026-08-17，preview/dashboard-ws-tiles-redesign.html；v3 数字让级
+ *  2026-08-27：30→24px，46px 大数字语言由横幅独占，磁贴以谱带形状为扫描主角）：
+ *  hairline 分区（身份 / 信号 / 活动 / meta，对齐威胁横幅竖切语言）+ 目标锁定角括线
+ *  （.ws-tile，见 index.css：hover=coral 锁定，运行中=cyan 常显「正在被扫描」）。
+ *  运行进度条 fill 统一 cyan（运行=cyan 全局语义）；空态（0 发现）是正向时刻——绿色盾形
+ *  对勾。meta 区图标统计与切换器抽屉同语言。整卡可点进工作区页；运行中 mini 行可点直达
+ *  该扫描 live（stopPropagation）。totalVulns 由 tiles 分组层预算（横幅去向注记同源）。 */
+function WsTile({ name, scans, latest, totalVulns }: {
+  name: string; scans: ScanSummary[]; latest?: ScanSummary; totalVulns: number;
+}) {
   const { t } = useTranslation();
   const nav = useNavigate();
   const running = scans.filter(isRun);
-  const totalVulns = scans.reduce((a, s) => a + (s.vuln_count ?? 0), 0);
   const composition = useMemo(() => vulnComposition(scans), [scans]);
 
   return (
@@ -352,17 +394,17 @@ function WsTile({ name, scans, latest }: { name: string; scans: ScanSummary[]; l
         )}
       </div>
 
-      {/* 信号区：发现数（主角）+ 分段构成谱带（2px 间隙分段读数，红色威胁通道透明度阶梯） */}
+      {/* 信号区：发现数（24px 让级）+ 分段构成谱带（2px 间隙分段读数，红色威胁通道透明度阶梯） */}
       {totalVulns === 0 ? (
         <div className="flex items-end gap-2 px-4 pb-3.5 pt-1">
           <ShieldCheck className="mb-1 size-4 shrink-0 text-green" aria-hidden />
-          <span className="font-mono text-[30px] font-semibold leading-none tracking-tight tabular-nums text-green">0</span>
+          <span className="font-mono text-[24px] font-semibold leading-none tracking-tight tabular-nums text-green">0</span>
           <span className="pb-0.5 text-[10px] tracking-[0.08em] text-muted-foreground">{t("dashboard.tiles.allClear")}</span>
         </div>
       ) : (
         <div className="flex items-end gap-3 px-4 pb-3">
           <div className="flex flex-none flex-col gap-0.5">
-            <span className="font-mono text-[30px] font-semibold leading-none tracking-tight tabular-nums text-red">
+            <span className="font-mono text-[24px] font-semibold leading-none tracking-tight tabular-nums text-red">
               {totalVulns.toLocaleString()}
             </span>
             <span className="text-[10px] tracking-[0.08em] text-muted-foreground">{t("dashboard.tiles.findings")}</span>

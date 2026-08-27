@@ -569,7 +569,8 @@
       "allClearEyebrow": "SURFACE CLEAR",
       "unit": "exploitable taint paths",
       "allClearUnit": "No exploitable taint paths",
-      "context": "across {{scans}} scans · {{repos}} repos · {{workspaces}} workspaces · {{live}} live",
+      "context": "across {{scans}} scans · {{repos}} repos · {{workspaces}} workspaces",
+      "topTargetAria": "Heaviest target: {{ws}} · {{n}} findings",
       "composition": "By class",
       "other": "Other"
     },

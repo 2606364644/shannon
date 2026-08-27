@@ -32,7 +32,7 @@ function renderPage() {
   return renderWithSwr(<MemoryRouter><DashboardPage /></MemoryRouter>);
 }
 
-describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
+describe("DashboardPage 态势大屏（v2 结构 + v3 横幅重组：横幅 + 工作区磁贴）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiGetMock.mockResolvedValue([]);
@@ -41,7 +41,7 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
   });
   afterEach(() => cleanup());
 
-  it("横幅：累计发现大数字 + 运营指标（运行中/今日完成/累计成本/需关注）", async () => {
+  it("横幅：累计发现大数字 + 运营注脚行（运行中/需关注/今日完成/累计成本）+ 最重目标去向", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue(mockScans);
     renderPage();
@@ -49,13 +49,17 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
     const num = await screen.findByTestId("dash-total-vulns");
     expect(num.textContent).toBe("3");
     expect(num.className).toMatch(/text-red/);
-    // context 行含仓库数：repo 标签去重（frontend+backend=2；s3 复用 backend 不重复计）
-    expect(screen.getByText("跨 3 次扫描 · 2 个仓库 · 2 个工作区 · 1 个进行中")).toBeInTheDocument();
-    // 横幅运营指标四格（「运行中」也出现在 running 磁贴状态字 → 多元素用 getAllByText）
+    // 规模 context 收尾注脚（v3：「N 个进行中」并入运行中信号不再单列）：repo 标签去重
+    // （frontend+backend=2；s3 复用 backend 不重复计）
+    expect(screen.getByText("跨 3 次扫描 · 2 个仓库 · 2 个工作区")).toBeInTheDocument();
+    // 运营注脚行四信号（「运行中」也出现在 running 磁贴状态字 → 多元素用 getAllByText）
     expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
     expect(screen.getByText("今日完成")).toBeInTheDocument();
     expect(screen.getByText("累计成本")).toBeInTheDocument();
     expect(screen.getByText("需关注")).toBeInTheDocument();
+    // 最重目标去向注记：ws-a=1 / ws-b=2+0=2 → ws-b，点击直达该工作区
+    const top = screen.getByRole("link", { name: /最重目标：ws-b · 2 条发现/ });
+    expect(top).toHaveAttribute("href", "/p/ws-b");
   });
 
   it("构成谱带：红色威胁通道（bg-red），不用品牌色 primary（mac 下蓝会弱化危害感）", async () => {
@@ -101,13 +105,15 @@ describe("DashboardPage v2 态势大屏（横幅 + 工作区磁贴）", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it("全部完成 + 0 发现 → 绿色 all-clear", async () => {
+  it("全部完成 + 0 发现 → 绿色 all-clear（无最重目标去向 / 无谱带分组线）", async () => {
     const { listAllScans } = await import("@/api/client");
     (listAllScans as any).mockResolvedValue([{ ...mockScans[1], vuln_count: 0 }]);
     renderPage();
     const num = await screen.findByTestId("dash-total-vulns");
     expect(num.className).toMatch(/text-green/);
     expect(screen.getByText("未发现可利用污点路径")).toBeInTheDocument();
+    // 一切正常 = 没有「去哪」的问题：去向注记不渲染
+    expect(screen.queryByRole("link", { name: /最重目标/ })).not.toBeInTheDocument();
   });
 
   it("empty state when no scans", async () => {

@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>概览 v3 · 作战简报行 — supernova</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============ DSF tokens（mirror src/styles/tokens.css 真值） ============ */
+:root {
+  /* charcoal 深色（Claude 深色） */
+  --background: 60 3% 15%;
+  --foreground: 36 10% 90%;
+  --card: 60 3% 18%;
+  --primary: 15 60% 56%;
+  --primary-foreground: 40 4% 12%;
+  --muted-foreground: 36 5% 62%;
+  --border: 36 10% 90% / 0.10;
+  --c-cyan: 190 70% 60%;
+  --c-red: 5 62% 60%;
+  --c-green: 142 50% 56%;
+  --c-amber: 36 78% 58%;
+  --radius: 12px;
+  --shadow-card: 0 0 0 1px hsl(36 10% 100% / 0.05), 0 1px 2px hsl(0 0% 0% / 0.2), 0 2px 8px hsl(0 0% 0% / 0.25);
+  --shadow-cta: 0 1px 2px hsl(0 0% 0% / 0.30), 0 6px 16px -6px hsl(15 70% 45% / 0.35);
+  color-scheme: dark;
+}
+.light {
+  /* warm-paper 浅色（Claude 浅色 + 纸纹示意） */
+  --background: 48 33% 97%;
+  --foreground: 40 4% 17%;
+  --card: 0 0% 100%;
+  --primary: 15 58% 50%;
+  --primary-foreground: 0 0% 100%;
+  --muted-foreground: 40 4% 42%;
+  --border: 40 8% 17% / 0.10;
+  --c-cyan: 190 65% 32%;
+  --c-red: 5 58% 46%;
+  --c-green: 142 38% 35%;
+  --c-amber: 36 73% 34%;
+  --shadow-card: inset 0 1px 0 hsl(40 30% 100% / 0.7), 0 1px 2px hsl(40 12% 20% / 0.06), 0 8px 24px -8px hsl(40 12% 20% / 0.09);
+  --shadow-cta: inset 0 1px 0 hsl(40 30% 100% / 0.22), 0 1px 2px hsl(40 12% 20% / 0.12), 0 6px 18px -6px hsl(15 58% 45% / 0.25);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 28px 0 60px;
+}
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.section-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  margin: 36px 24px 14px;
+}
+.stage { width: min(1360px, calc(100vw - 48px)); margin: 0 auto; }
+
+/* ============ 横幅 v3 · 作战简报行 ============ */
+.banner {
+  position: relative;
+  background: hsl(var(--card));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+.banner.running { padding-bottom: 34px; }
+
+/* 左块：身份 + 威胁主体 + 去向 */
+.banner-left { min-width: 264px; padding: 16px 20px 18px 24px; }
+.eyebrow {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.eyebrow::before {
+  content: ""; width: 3px; height: 13px; border-radius: 2px;
+  background: hsl(var(--primary));
+}
+.big-row { display: flex; align-items: baseline; gap: 12px; margin-top: 9px; flex-wrap: wrap; }
+.big-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 46px; font-weight: 600; line-height: 1; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.big-num.red { color: hsl(var(--c-red)); }
+.big-num.green { color: hsl(var(--c-green)); }
+.unit-chip {
+  white-space: nowrap; border: 1px solid hsl(var(--border));
+  border-radius: 999px; padding: 2px 8px;
+  font-size: 11.5px; color: hsl(var(--muted-foreground));
+}
+/* 最重目标：统计 → 战场的去向注记（v3 新增，页面唯一新信息） */
+.top-target {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  margin-top: 9px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px; color: hsl(var(--primary));
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.top-target:hover { opacity: 0.8; }
+.top-target .tt-arrow { opacity: 0.75; }
+.top-target .tt-num { font-weight: 600; }
+.top-target .tt-rest { color: hsl(var(--muted-foreground)); }
+
+/* 右块：构成谱带 + 运营注脚行 */
+.banner-right {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  padding: 16px 8px 14px 4px;
+}
+.band {
+  display: flex; height: 6px; gap: 1px; overflow: hidden; border-radius: 999px;
+  background: hsl(var(--border));
+  max-width: 460px;
+}
+.band span { background: hsl(var(--c-red)); }
+.band span.rest { opacity: 0.25; }
+.legend {
+  display: flex; flex-wrap: wrap; column-gap: 14px; row-gap: 4px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; color: hsl(var(--muted-foreground));
+  margin-top: 4px;
+}
+
+/* 运营注脚行：按行动优先级排（运行中 > 需关注 > 产出 > 开销 ‖ 规模），
+   替代 v2 四格等权 BnStat——异质语义不再同构承载；信号灯（色点）= 状态，
+   无点 = 统计。规模 context 右对齐收尾，消除 v2 「N 个进行中」重复。 */
+.footline {
+  display: flex; align-items: center; gap: 0;
+  margin-top: 6px; padding-top: 9px;
+  border-top: 1px solid hsl(var(--border));
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  flex-wrap: wrap;
+}
+.sig {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 14px;
+  white-space: nowrap;
+  color: hsl(var(--foreground) / 0.85);
+}
+.sig:first-child { padding-left: 0; }
+.sig + .sig { border-left: 1px solid hsl(var(--border)); }
+.sig .v { font-weight: 600; }
+.sig .l { color: hsl(var(--muted-foreground)); }
+.sig-live .v { color: hsl(var(--c-cyan)); }
+.sig-warn .v { color: hsl(var(--c-amber)); }
+.sig-dot {
+  width: 6px; height: 6px; border-radius: 999px; flex: none;
+  animation: dot-pulse 1.9s ease-out infinite;
+}
+.sig-dot.cyan { background: hsl(var(--c-cyan)); }
+.sig-dot.amber { background: hsl(var(--c-amber)); animation: none; }
+.sig-scale {
+  margin-left: auto;
+  color: hsl(var(--muted-foreground));
+  padding-left: 14px;
+  font-size: 11px;
+}
+@keyframes dot-pulse {
+  0% { box-shadow: 0 0 0 0 hsl(var(--c-cyan) / 0.5); }
+  70% { box-shadow: 0 0 0 7px hsl(var(--c-cyan) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--c-cyan) / 0); }
+}
+
+/* CTA 竖直居中于右缘 */
+.banner-cta {
+  display: flex; align-items: center; padding: 0 20px 0 12px;
+}
+.cta {
+  display: inline-flex; align-items: center;
+  background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+  font-size: 13.5px; font-weight: 600;
+  padding: 9px 18px; border-radius: 9px;
+  box-shadow: var(--shadow-cta);
+  text-decoration: none; white-space: nowrap;
+}
+
+/* FX 信号带（复刻 v2，仅运行中） */
+.fx {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+}
+.fx svg { display: block; width: 100%; height: 34px; }
+.fx-pulse {
+  stroke: hsl(var(--primary)); stroke-width: 1.75; fill: none;
+  stroke-dasharray: 2400; animation: trace 3.6s linear infinite;
+  filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.55));
+}
+@keyframes trace {
+  0% { stroke-dashoffset: 2400; }
+  60% { stroke-dashoffset: -400; opacity: 1; }
+  100% { stroke-dashoffset: -2400; opacity: 0; }
+}
+
+/* ============ 小节标题 ============ */
+.sec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 20px 0 12px;
+}
+.sec-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.sec-meta {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; color: hsl(var(--muted-foreground));
+  display: flex; gap: 16px; align-items: center;
+}
+.sec-meta a { color: inherit; }
+
+/* ============ 工作区磁贴（v3：数字让级 30→24，谱带升为主角） ============ */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tile {
+  position: relative; display: flex; flex-direction: column;
+  background: hsl(var(--card)); border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  min-height: 148px;
+}
+.tile:hover { transform: translateY(-2px); }
+.tile::before, .tile::after {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  pointer-events: none; opacity: 0; transition: opacity 0.16s ease; z-index: 1;
+}
+.tile::before {
+  top: 6px; left: 6px;
+  border-top: 1.5px solid hsl(var(--primary)); border-left: 1.5px solid hsl(var(--primary));
+  border-top-left-radius: 3px;
+}
+.tile::after {
+  bottom: 6px; right: 6px;
+  border-bottom: 1.5px solid hsl(var(--primary)); border-right: 1.5px solid hsl(var(--primary));
+  border-bottom-right-radius: 3px;
+}
+.tile:hover::before, .tile:hover::after { opacity: 0.85; }
+.tile.live::before, .tile.live::after { opacity: 1; border-color: hsl(var(--c-cyan)); }
+.tile .edge {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 3px;
+  background: hsl(var(--c-cyan)); box-shadow: 0 0 8px hsl(var(--c-cyan) / 0.5);
+}
+/* 身份区 */
+.t-id { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; }
+.t-name {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.t-chip {
+  margin-left: auto; flex: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid hsl(var(--c-cyan) / 0.5); border-radius: 999px;
+  padding: 1px 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; color: hsl(var(--c-cyan));
+}
+.t-chip::before { content: ""; width: 4px; height: 4px; border-radius: 999px; background: currentColor; }
+/* 信号区：数字 24px（v3 让级——横幅独占 46 大数字语言）+ 谱带主角 */
+.t-sig { display: flex; align-items: flex-end; gap: 12px; padding: 2px 16px 12px; }
+.t-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 24px; font-weight: 600; line-height: 1; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--c-red));
+}
+.t-num-label { font-size: 10px; letter-spacing: 0.08em; color: hsl(var(--muted-foreground)); margin-top: 3px; }
+.t-band-wrap { flex: 1; min-width: 0; padding-bottom: 2px; }
+.t-band { display: flex; height: 5px; gap: 2px; }
+.t-band span { background: hsl(var(--c-red)); border-radius: 2px; }
+.t-band span.rest { opacity: 0.25; }
+.t-legend {
+  margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.t-clear {
+  display: flex; align-items: flex-end; gap: 8px; padding: 2px 16px 14px;
+}
+.t-clear .n {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 24px; font-weight: 600; line-height: 1; color: hsl(var(--c-green));
+}
+.t-clear .l { font-size: 10px; letter-spacing: 0.08em; color: hsl(var(--muted-foreground)); padding-bottom: 1px; }
+.shield { color: hsl(var(--c-green)); padding-bottom: 2px; }
+/* 运行 mini 行 */
+.t-run {
+  border-top: 1px solid hsl(var(--border) / 0.7);
+  padding: 8px 16px 10px;
+  display: grid; gap: 5px;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+}
+.t-run-row { display: flex; justify-content: space-between; gap: 10px; }
+.t-run-row .id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-run-row .meta { color: hsl(var(--muted-foreground)); flex: none; }
+.pbar { display: block; height: 3px; border-radius: 999px; background: hsl(var(--border)); overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 999px; background: hsl(var(--c-cyan)); }
+/* meta 区 */
+.t-meta {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 12px;
+  border-top: 1px solid hsl(var(--border) / 0.7);
+  padding: 8px 16px 10px;
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+}
+.t-meta .strong { color: hsl(var(--foreground) / 0.8); }
+
+/* 主题切换 body class 演示区 */
+.theme-note {
+  margin: 0 24px 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; color: hsl(var(--muted-foreground));
+}
+</style>
+</head>
+<body>
+
+<p class="theme-note">v3 preview · charcoal 深色 / warm-paper 浅色两段（浅色段含 allClear 变体）。token 真值 mirror tokens.css。</p>
+
+<!-- ================= 状态一：威胁态（深色 charcoal） ================= -->
+<div class="section-label">① 威胁态 · Claude 深色（128 发现 · 2 运行中 · 1 需关注）</div>
+<div class="stage">
+  <section class="banner running">
+    <div class="banner-left">
+      <div class="eyebrow">累计发现 · FINDINGS</div>
+      <div class="big-row">
+        <span class="big-num red">128</span>
+        <span class="unit-chip">条可利用污点路径</span>
+      </div>
+      <a class="top-target" href="#">
+        <span class="tt-arrow">→</span><span>nodegoat</span>
+        <span class="tt-num">87</span>
+      </a>
+    </div>
+
+    <div class="banner-right">
+      <div>
+        <div class="band">
+          <span style="width:35%; opacity:1"></span>
+          <span style="width:23%; opacity:0.78"></span>
+          <span style="width:22%; opacity:0.56"></span>
+          <span style="width:12%; opacity:0.34"></span>
+          <span class="rest" style="width:8%"></span>
+        </div>
+        <div class="legend">
+          <span>xss 45</span><span>inj 30</span><span>ssrf 28</span><span>auth 12</span><span>其他 13</span>
+        </div>
+      </div>
+      <div class="footline">
+        <span class="sig sig-live"><span class="sig-dot cyan"></span><span class="v">2</span><span class="l">运行中</span></span>
+        <span class="sig sig-warn"><span class="sig-dot amber"></span><span class="v">1</span><span class="l">需关注</span></span>
+        <span class="sig"><span class="v">5</span><span class="l">今日完成</span></span>
+        <span class="sig"><span class="v">¥1,024</span><span class="l">累计成本</span></span>
+        <span class="sig-scale">跨 42 次扫描 · 8 个仓库 · 3 个工作区</span>
+      </div>
+    </div>
+
+    <div class="banner-cta"><a class="cta" href="#">新建扫描</a></div>
+
+    <div class="fx">
+      <svg viewBox="0 0 1200 34" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,17 1200,17" fill="none" style="stroke: hsl(var(--border)); stroke-width: 1.5"></polyline>
+        <polyline class="fx-pulse" points="0,17 90,17 110,17 118,17 126,9 134,25 142,4 150,30 158,17 210,17 260,17 280,17 296,17 306,12 314,22 322,17 380,17 440,17 470,17 486,17 498,10 510,24 522,17 580,17 640,17 680,17 720,17 740,17 752,13 762,21 772,17 840,17 920,17 1000,17 1100,17 1200,17"></polyline>
+      </svg>
+    </div>
+  </section>
+
+  <div class="sec-head">
+    <div class="sec-title">工作区态势</div>
+    <div class="sec-meta"><span>12 秒前更新 · 刷新</span><a href="#">管理全部工作区 →</a></div>
+  </div>
+
+  <div class="tiles">
+    <!-- 运行中磁贴 -->
+    <div class="tile live">
+      <span class="edge"></span>
+      <div class="t-id"><span class="t-name">nodegoat</span><span class="t-chip">运行中</span></div>
+      <div class="t-sig">
+        <div><div class="t-num">87</div><div class="t-num-label">发现</div></div>
+        <div class="t-band-wrap">
+          <div class="t-band">
+            <span style="width:40%; opacity:1"></span>
+            <span style="width:30%; opacity:0.78"></span>
+            <span style="width:20%; opacity:0.56"></span>
+            <span class="rest" style="width:10%"></span>
+          </div>
+          <div class="t-legend">xss 35 · inj 26 · ssrf 17 · 其他 9</div>
+        </div>
+      </div>
+      <div class="t-run">
+        <div class="t-run-row"><span class="id">nodegoat-0827-a</span><span class="meta">62% · 白盒 · 12 分钟</span></div>
+        <span class="pbar"><i style="width:62%"></i></span>
+      </div>
+      <div class="t-meta"><span class="strong">6 扫描</span><span>¥412</span><span>14:32</span></div>
+    </div>
+    <!-- 常规有发现 -->
+    <div class="tile">
+      <div class="t-id"><span class="t-name">shannon-ts</span></div>
+      <div class="t-sig">
+        <div><div class="t-num">31</div><div class="t-num-label">发现</div></div>
+        <div class="t-band-wrap">
+          <div class="t-band">
+            <span style="width:45%; opacity:1"></span>
+            <span style="width:35%; opacity:0.78"></span>
+            <span class="rest" style="width:20%"></span>
+          </div>
+          <div class="t-legend">inj 14 · xss 11 · 其他 6</div>
+        </div>
+      </div>
+      <div class="t-meta"><span class="strong">3 扫描</span><span>¥186</span><span>11:08</span></div>
+    </div>
+    <!-- allClear -->
+    <div class="tile">
+      <div class="t-id"><span class="t-name">mall-api</span></div>
+      <div class="t-clear">
+        <svg class="shield" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span class="n">0</span><span class="l">无发现</span>
+      </div>
+      <div class="t-meta"><span class="strong">2 扫描</span><span>¥54</span><span>09:41</span></div>
+    </div>
+    <!-- 常规有发现 -->
+    <div class="tile">
+      <div class="t-id"><span class="t-name">blog-demo</span></div>
+      <div class="t-sig">
+        <div><div class="t-num">10</div><div class="t-num-label">发现</div></div>
+        <div class="t-band-wrap">
+          <div class="t-band">
+            <span style="width:60%; opacity:1"></span>
+            <span style="width:40%; opacity:0.78"></span>
+          </div>
+          <div class="t-legend">xss 6 · ssrf 4</div>
+        </div>
+      </div>
+      <div class="t-meta"><span class="strong">1 扫描</span><span>¥22</span><span>昨天</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 状态二：allClear（浅色 warm-paper） ================= -->
+<div class="light">
+<div class="section-label">② allClear 态 · Claude 浅色（0 发现 · 无 FX · 最重目标隐藏 · 需关注 0 无信号灯）</div>
+<div class="stage">
+  <section class="banner">
+    <div class="banner-left">
+      <div class="eyebrow">一切正常 · SURFACE CLEAR</div>
+      <div class="big-row">
+        <span class="big-num green">0</span>
+        <span class="unit-chip">未发现可利用污点路径</span>
+      </div>
+    </div>
+
+    <div class="banner-right">
+      <div class="footline" style="margin-top: 0; padding-top: 0; border-top: none;">
+        <span class="sig"><span class="v">0</span><span class="l">运行中</span></span>
+        <span class="sig"><span class="v">3</span><span class="l">今日完成</span></span>
+        <span class="sig"><span class="v">¥86</span><span class="l">累计成本</span></span>
+        <span class="sig-scale">跨 12 次扫描 · 4 个仓库 · 2 个工作区</span>
+      </div>
+    </div>
+
+    <div class="banner-cta"><a class="cta" href="#">新建扫描</a></div>
+  </section>
+
+  <div class="sec-head">
+    <div class="sec-title">工作区态势</div>
+    <div class="sec-meta"><span>刚刚更新 · 刷新</span><a href="#">管理全部工作区 →</a></div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile">
+      <div class="t-id"><span class="t-name">mall-api</span></div>
+      <div class="t-clear">
+        <svg class="shield" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span class="n">0</span><span class="l">无发现</span>
+      </div>
+      <div class="t-meta"><span class="strong">2 扫描</span><span>¥54</span><span>09:41</span></div>
+    </div>
+    <div class="tile">
+      <div class="t-id"><span class="t-name">docs-site</span></div>
+      <div class="t-clear">
+        <svg class="shield" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span class="n">0</span><span class="l">无发现</span>
+      </div>
+      <div class="t-meta"><span class="strong">4 扫描</span><span>¥31</span><span>08:15</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+</body>
+</html>
