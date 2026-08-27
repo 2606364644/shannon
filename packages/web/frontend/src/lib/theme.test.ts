@@ -41,13 +41,13 @@ describe("theme lib", () => {
     expect(localStorage.getItem(THEME_KEY)).toBe("frost");
   });
 
-  it("getInitialTheme: 无 stored → 读 prefers-color-scheme（stub matches=false → charcoal）", () => {
-    expect(getInitialTheme()).toBe("charcoal");
+  it("getInitialTheme: 无 stored → 读 prefers-color-scheme（stub matches=false → graphite）", () => {
+    expect(getInitialTheme()).toBe("graphite");
   });
 
-  it("getInitialTheme: 非法 stored 值回退 charcoal", () => {
+  it("getInitialTheme: 非法 stored 值回退 graphite", () => {
     localStorage.setItem(THEME_KEY, "purple");
-    expect(getInitialTheme()).toBe("charcoal");
+    expect(getInitialTheme()).toBe("graphite");
   });
 
   it("applyTheme(warm-paper): 写 <html>.light + localStorage", () => {
@@ -83,7 +83,7 @@ describe("theme lib", () => {
     expect(cl.contains("light")).toBe(false);
   });
 
-  it("THEMES 覆盖 13 主题；palette id 与 paletteClass 一一对应；浅色组默认 warm-paper 在前", () => {
+  it("THEMES 覆盖 13 主题；palette id 与 paletteClass 一一对应；基础对 charcoal/warm-paper 各组在前", () => {
     expect(THEMES.map((t) => t.id)).toEqual([
       "charcoal", "midnight", "graphite", "sentry", "arc", "mission",
       "warm-paper", "mac", "github", "notion", "kami", "blueprint", "openai",
@@ -104,10 +104,10 @@ describe("theme lib", () => {
     expect(getThemeDef("system")).toBeNull();
   });
 
-  it("oppositeBaseTheme: dark→warm-paper / light→charcoal（翻到对侧默认主题）", () => {
-    // 2026-08-27 默认主题对回切：mac 果味修订（Apple 蓝主色）后默认浅色回品牌基准
-    expect(oppositeBaseTheme("dark")).toBe("warm-paper");
-    expect(oppositeBaseTheme("light")).toBe("charcoal");
+  it("oppositeBaseTheme: dark→openai / light→graphite（翻到对侧默认主题）", () => {
+    // 2026-08-27 默认主题对调整：深色=graphite / 浅色=openai（用户决策，同日第二次调默认）
+    expect(oppositeBaseTheme("dark")).toBe("openai");
+    expect(oppositeBaseTheme("light")).toBe("graphite");
   });
 
   it("applyTheme(sentry/arc/mission): dark + 各自 palette class", () => {
@@ -199,24 +199,24 @@ describe("theme system 态", () => {
     expect(resolveEffectiveTheme("warm-paper")).toBe("light");
   });
 
-  it("applyTheme(system): 存 system + 挂 effective class（系统深色→dark，落默认深色 charcoal 无 palette）", () => {
+  it("applyTheme(system): 存 system + 挂 effective class（系统深色→dark，落默认深色 graphite 的 palette）", () => {
     mockMatchMedia(false);
     applyTheme("system");
     expect(localStorage.getItem(THEME_KEY)).toBe("system");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(document.documentElement.className).not.toContain("theme-");
+    expect(document.documentElement.classList.contains("theme-graphite")).toBe(true);
   });
 
-  it("applyTheme(system): 系统浅色 → light + theme-warm-paper（默认亮色=品牌基准）", () => {
+  it("applyTheme(system): 系统浅色 → light + theme-openai（默认亮色=openai）", () => {
     mockMatchMedia(true);
     applyTheme("system");
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
+    expect(document.documentElement.classList.contains("theme-openai")).toBe(true);
   });
 
-  it("getInitialTheme: 无 stored + 系统浅色 → warm-paper（默认亮色主题）", () => {
+  it("getInitialTheme: 无 stored + 系统浅色 → openai（默认亮色主题）", () => {
     mockMatchMedia(true);
-    expect(getInitialTheme()).toBe("warm-paper");
+    expect(getInitialTheme()).toBe("openai");
   });
 
   it("applyTheme(system): 注册 matchMedia change 监听", () => {
@@ -225,16 +225,17 @@ describe("theme system 态", () => {
     expect(mm.listenerCount()).toBe(1);
   });
 
-  it("system 下系统偏好变化 → 实时重挂 class + 切默认主题 palette（dark 无 / light=theme-warm-paper）", () => {
+  it("system 下系统偏好变化 → 实时重挂 class + 切默认主题 palette（dark=theme-graphite / light=theme-openai）", () => {
     const mm = mockMatchMedia(false);
     applyTheme("system");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    mm.change(true); // 系统切浅色 → 默认亮色 warm-paper（品牌基准）
+    mm.change(true); // 系统切浅色 → 默认亮色 openai
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
-    mm.change(false); // 切回深色 → palette 清回 charcoal 基础态
-    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-openai")).toBe(true);
+    mm.change(false); // 切回深色 → 默认深色 graphite
+    expect(document.documentElement.classList.contains("theme-openai")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-graphite")).toBe(true);
   });
 
   it("切回显式态 → 清理 system 监听（无泄漏）", () => {

@@ -10,6 +10,10 @@
    2026-08-27 默认浅色回切 warm-paper：mac 果味修订（Apple 蓝主色）后，默认主题
    保留品牌 coral（用户决策）——mac 成为纯可选的果味主题，brand 基准回到
    warm-paper/charcoal 一对（spec 2026-08-27-mac-theme-apple-flavor）。
+   2026-08-27（同日再调，用户决策）默认对改为：深色=graphite（近黑工作室）、
+   浅色=openai（近单色研究室）。charcoal/warm-paper 仍是 token 基准对
+   （:root/.light 基础块 + THEMES 组首），但不再是默认——「默认」单源于
+   defaultThemeFor，与排序解绑。
    2026-08-25 扩展至 11 主题：+sentry/arc/mission（深）+ github/notion/kami（浅），
    移植自 OpenDesign DESIGN.md（spec 2026-08-25-theme-expansion）。
    2026-08-26 亮色材质升级至 12 主题：warm-paper 获得 paletteClass（材质专用块
@@ -39,9 +43,9 @@ export interface ThemeDef {
 }
 
 /** 全部主题：深色组在前、浅色组在后（SettingsPicker 按组分块渲染；
-    浅色组默认主题 warm-paper 排最前——2026-08-27 默认浅色回切品牌基准）。
-    charcoal/warm-paper = Claude 风深/浅基础主题
-    （tokens.css :root/.light 精确对齐 claude.ai 真值色）。 */
+    各组以基础主题对排首——charcoal/warm-paper = Claude 风深/浅基础主题
+    （tokens.css :root/.light 精确对齐 claude.ai 真值色）。排序表达「基准」，
+    不表达「默认」——默认对（2026-08-27：graphite/openai）见 defaultThemeFor。 */
 export const THEMES: readonly ThemeDef[] = [
   {
     id: "charcoal",
@@ -138,14 +142,14 @@ export function getThemeDef(id: ThemeId): ThemeDef | null {
   return THEMES.find((t) => t.id === id) ?? null;
 }
 
-/** 各 mode 的默认主题（2026-08-24 起浅色=Mac；2026-08-27 回切浅色=warm-paper——
-    mac 果味修订（Apple 蓝主色）后默认主题保留品牌 coral，深色=Claude 深色 charcoal）。
-    首次访问无 stored、system 态解析、快捷翻转三处共用这一对。 */
-export function defaultThemeFor(mode: ThemeMode): "warm-paper" | "charcoal" {
-  return mode === "light" ? "warm-paper" : "charcoal";
+/** 各 mode 的默认主题（2026-08-27 用户决策：深色=graphite 近黑工作室 / 浅色=openai
+    近单色研究室；同日早先为 charcoal/warm-paper 品牌对）。首次访问无 stored、
+    system 态解析、快捷翻转三处共用这一对。 */
+export function defaultThemeFor(mode: ThemeMode): "openai" | "graphite" {
+  return mode === "light" ? "openai" : "graphite";
 }
 
-/** 快捷翻转的目标：对侧 mode 的默认主题（dark→warm-paper / light→charcoal）。
+/** 快捷翻转的目标：对侧 mode 的默认主题（dark→openai / light→graphite）。
     palette 主题（midnight/mac 等）无对侧变体，一律翻到对侧默认。 */
 export function oppositeBaseTheme(mode: ThemeMode): Exclude<ThemeId, "system"> {
   return defaultThemeFor(mode === "dark" ? "light" : "dark");
@@ -221,7 +225,7 @@ function detachSystemListener(): void {
 function attachSystemListener(): void {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
   systemMql = window.matchMedia(MQ);
-  // system 态 = 跟随系统用「该 mode 的默认主题」（light→mac / dark→charcoal）。
+  // system 态 = 跟随系统用「该 mode 的默认主题」（light→openai / dark→graphite）。
   systemListener = (e) => {
     const mode = e.matches ? "light" : "dark";
     applyClass(mode, getThemeDef(defaultThemeFor(mode))?.paletteClass ?? null);

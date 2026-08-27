@@ -14,13 +14,13 @@ describe("ThemeContext", () => {
     document.documentElement.classList.remove("dark", "light", "theme-mac", "theme-midnight", "theme-graphite");
   });
 
-  it("Provider 初始化读 getInitialTheme（无 stored → charcoal）", () => {
+  it("Provider 初始化读 getInitialTheme（无 stored → graphite）", () => {
     render(
       <ThemeProvider>
         <Consumer label="c" />
       </ThemeProvider>
     );
-    expect(screen.getByTestId("c").textContent).toBe("charcoal");
+    expect(screen.getByTestId("c").textContent).toBe("graphite");
   });
 
   it("Provider 初始化读 stored mac（palette 主题原样）", () => {
@@ -62,8 +62,8 @@ describe("ThemeContext", () => {
         <Setter />
       </ThemeProvider>
     );
-    expect(screen.getByTestId("a").textContent).toBe("charcoal");
-    expect(screen.getByTestId("b").textContent).toBe("charcoal");
+    expect(screen.getByTestId("a").textContent).toBe("graphite");
+    expect(screen.getByTestId("b").textContent).toBe("graphite");
     fireEvent.click(screen.getByText("to-system"));
     // 两个消费者都应同步到 system —— 现状两处独立 useState 时这里会失败
     expect(screen.getByTestId("a").textContent).toBe("system");

@@ -150,14 +150,16 @@ describe("SettingsPage", () => {
     expect(localStorage.getItem("supernova-theme")).toBe("midnight");
   });
 
-  it("主题选择器：点跟随系统 → localStorage=system 且 palette class 清空", async () => {
+  it("主题选择器：点跟随系统 → localStorage=system 且 palette 切到默认深色 graphite", async () => {
     localStorage.setItem("supernova-theme", "midnight");
     renderWithTheme(<SettingsPage />);
     await screen.findByText("个人化");
     expect(document.documentElement.classList.contains("theme-midnight")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /跟随系统/ }));
     expect(localStorage.getItem("supernova-theme")).toBe("system");
-    expect(document.documentElement.className).not.toContain("theme-");
+    // matchMedia stub matches=false → 系统深色 → 默认深色 graphite（2026-08-27 默认对调整）
+    expect(document.documentElement.classList.contains("theme-midnight")).toBe(false);
+    expect(document.documentElement.classList.contains("theme-graphite")).toBe(true);
   });
 
   it("主题选择器：新六主题全部渲染 + 点 kami → light + theme-kami", async () => {

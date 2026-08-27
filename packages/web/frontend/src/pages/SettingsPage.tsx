@@ -86,15 +86,16 @@ function ThemeOption({
   );
 }
 
-/** 主题选择器：跟随系统（半分色卡）+ 深色组（Claude 深色/午夜/石墨）+ 浅色组（Mac/Claude 浅色）。
+/** 主题选择器：跟随系统（半分色卡 = 各 mode 默认主题）+ 深色组 + 浅色组（按 THEMES 顺序）。
     基础主题（charcoal/warm-paper = Claude 风深/浅）走 :root/.light；palette 主题见 tokens.css。 */
 function ThemePicker() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const darks = THEMES.filter((d) => d.mode === "dark");
   const lights = THEMES.filter((d) => d.mode === "light");
-  const charcoal = THEMES.find((d) => d.id === "charcoal")!;
-  const warmPaper = THEMES.find((d) => d.id === "warm-paper")!;
+  // 跟随系统半分卡展示各 mode 默认主题（defaultThemeFor 同源；2026-08-27：graphite/openai）
+  const graphite = THEMES.find((d) => d.id === "graphite")!;
+  const openai = THEMES.find((d) => d.id === "openai")!;
   const systemActive = theme === "system";
 
   return (
@@ -113,7 +114,7 @@ function ThemePicker() {
           aria-hidden
           className="h-5 w-9 shrink-0 rounded-md border border-border"
           style={{
-            background: `linear-gradient(90deg, ${charcoal.preview.bg} 50%, ${warmPaper.preview.bg} 50%)`,
+            background: `linear-gradient(90deg, ${graphite.preview.bg} 50%, ${openai.preview.bg} 50%)`,
           }}
         />
         <span className="flex items-center gap-1 text-xs font-medium">

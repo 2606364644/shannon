@@ -31,19 +31,23 @@
             blueprint: ["light", "theme-blueprint"],
             // 2026-08-26 亮色材质升级：warm-paper 获材质专用 palette class（画布纸纹）
             "warm-paper": ["light", "theme-warm-paper"],
+            // 2026-08-27 openai 主题补录（此前漏更：stored=openai 首帧错挂默认对再闪变）
+            openai: ["light", "theme-openai"],
           };
           var legacy = { dark: "charcoal", light: "warm-paper", frost: "mac" };
           var t = localStorage.getItem("supernova-theme");
           if (legacy[t]) t = legacy[t];
           if (!DEF[t]) {
-            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "warm-paper" : "charcoal";
+            // 默认主题对（2026-08-27 用户决策）：深色=graphite / 浅色=openai，与 theme.ts defaultThemeFor 同源同步
+            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "openai" : "graphite";
           }
           var cl = document.documentElement.classList;
           DEF[t].forEach(function (c) {
             cl.add(c);
           });
         } catch (e) {
-          document.documentElement.classList.add("dark");
+          // 异常兜底与默认深色 graphite 一致（mode + palette，防首帧 token 闪变）
+          document.documentElement.classList.add("dark", "theme-graphite");
         }
       })();
     </script>

@@ -34,42 +34,41 @@ describe("ThemeToggle", () => {
     expect(container.querySelector("svg.lucide-sun")).not.toBeNull();
   });
 
-  it("点击 dark→light 并持久化（对侧默认主题 warm-paper，挂 theme-warm-paper）", () => {
+  it("点击 dark→light 并持久化（对侧默认主题 openai，挂 theme-openai）", () => {
     localStorage.setItem(THEME_KEY, "dark"); // 旧值 → 读时归一 charcoal
     renderToggle();
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
-    // 2026-08-27 默认主题对回切：mac 果味修订（Apple 蓝主色）后默认浅色回品牌基准
-    // warm-paper（coral），快捷翻转落点同步（spec 2026-08-27-mac-theme-apple-flavor）
-    expect(document.documentElement.classList.contains("theme-warm-paper")).toBe(true);
-    expect(localStorage.getItem(THEME_KEY)).toBe("warm-paper");
+    // 2026-08-27 默认主题对调整：深色=graphite / 浅色=openai（用户决策）
+    expect(document.documentElement.classList.contains("theme-openai")).toBe(true);
+    expect(localStorage.getItem(THEME_KEY)).toBe("openai");
   });
 
-  it("点击 light→dark（对侧基础主题 charcoal）", () => {
+  it("点击 light→dark（对侧默认主题 graphite）", () => {
     localStorage.setItem(THEME_KEY, "light"); // 旧值 → 读时归一 warm-paper
     renderToggle();
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(localStorage.getItem(THEME_KEY)).toBe("charcoal");
+    expect(localStorage.getItem(THEME_KEY)).toBe("graphite");
   });
 
-  it("palette 主题（mac）点击 → 翻到对侧基础主题 charcoal（无对侧变体）", () => {
+  it("palette 主题（mac）点击 → 翻到对侧默认主题 graphite（无对侧变体）", () => {
     localStorage.setItem(THEME_KEY, "mac");
     renderToggle();
     expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
-    expect(localStorage.getItem(THEME_KEY)).toBe("charcoal");
+    expect(localStorage.getItem(THEME_KEY)).toBe("graphite");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("theme-mac")).toBe(false);
   });
 
-  it("system 态点击 → 落到显式反色（effective dark → warm-paper，退出 system）", () => {
+  it("system 态点击 → 落到显式反色（effective dark → openai，退出 system）", () => {
     localStorage.setItem(THEME_KEY, "system");
     // test-setup matchMedia stub matches=false → effective dark
     renderToggle();
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /切换主题/ }));
-    expect(localStorage.getItem(THEME_KEY)).toBe("warm-paper");
+    expect(localStorage.getItem(THEME_KEY)).toBe("openai");
     expect(document.documentElement.classList.contains("light")).toBe(true);
   });
 
