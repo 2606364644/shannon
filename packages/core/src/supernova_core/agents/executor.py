@@ -217,6 +217,43 @@ def _dump_safe_vectors(deliverables: Path, vc: str, payload_bag: dict) -> None:
     )
 
 
+def _archive_dismissed_from_safe_vectors(deliverables: Path, vc: str,
+                                         payload_bag: dict) -> None:
+    """LLM 轨判非漏洞留档（spec 2026-08-27 §6）：safe_vectors（分析后确认健壮
+    防御的向量）→ dismissed_findings.json（source_track=llm）。
+
+    复用 set_safe_vectors collector 通道（§4 语义即「探索过但判非漏洞」——
+    spec 原计划新造 submit_dismissed 工具，实现时确认语义已被覆盖，零 prompt /
+    collector 改动，防双通道漂移）。空/缺失不写；同文件读-合并由
+    append_dismissed 承担（GN 轨 chain-verdict 分流先写、LLM 轨后并）。"""
+    sv = payload_bag.get("safe_vectors")
+    if not sv:
+        return
+    vectors = sv.get("vectors") if isinstance(sv, dict) else sv
+    if not vectors:
+        return
+    from supernova_core.services.dismissed_archive import append_dismissed
+    entries = []
+    for i, v in enumerate(vectors, start=1):
+        if not isinstance(v, dict):
+            continue
+        entries.append({
+            "ID": f"{vc.upper()}-LLM-SAFE-{i:02d}",
+            "source_track": "llm",
+            "vuln_class": vc,
+            "title": v.get("subject"),
+            "dismiss_reason": v.get("defense_mechanism"),
+            "evidence": v.get("location"),
+            "confidence": None,
+            "source": v.get("subject"),
+            "sink_call": None,
+            "dismissed_at_stage": "llm-exploration",
+        })
+    if entries:
+        append_dismissed(
+            intermediate_path(deliverables, "dismissed_findings.json"), entries)
+
+
 class AgentExecutor:
     def __init__(self, prompt_manager: PromptManager):
         self.prompt_manager = prompt_manager
@@ -449,6 +486,9 @@ class AgentExecutor:
             # 组装器需结构化源（safe_vectors 目前只渲染进 md）。空/缺失不落盘。
             _dump_safe_vectors(deliverables, agent_name.value.removesuffix("-vuln"),
                                payload_bag)
+            # spec 2026-08-27 §6：LLM 轨判非漏洞（safe_vectors）并档
+            _archive_dismissed_from_safe_vectors(
+                deliverables, agent_name.value.removesuffix("-vuln"), payload_bag)
         elif (
             not skip_artifact_postprocess
             and result.structured_output is not None
