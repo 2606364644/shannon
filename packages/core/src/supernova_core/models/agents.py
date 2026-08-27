@@ -29,6 +29,7 @@ class AgentName(str, Enum):
     REPORT = "report"
     VALIDATE_AUTH = "validate-authentication"
     CROSS_REPO_CORRELATION = "cross-repo-correlation"
+    CROSS_REPO_ADJUDICATION = "cross-repo-adjudication"  # spec 2026-08-27 阶段 B 跨仓裁决
     ATTACK_CHAIN = "attack-chain"
     ENDPOINT_VERIFY = "endpoint-verify"  # spec 2026-08-03 黑盒端点 live 验证
 
@@ -159,6 +160,14 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,  # 产物由编排器从 LLM 输出解析落盘
         model_tier="large",
     ),
+    AgentName.CROSS_REPO_ADJUDICATION: AgentDefinition(
+        name=AgentName.CROSS_REPO_ADJUDICATION,
+        display_name="Cross-Repo Adjudication",
+        prerequisites=[],  # 阶段 B 裁决由编排器在关联产物落盘后触发(spec 2026-08-27 §7.1)
+        prompt_template="cross-repo-adjudication",
+        deliverable_filename=None,  # adjudication-log 由编排器从 LLM 输出解析落盘
+        model_tier="large",
+    ),
     AgentName.ATTACK_CHAIN: AgentDefinition(
         name=AgentName.ATTACK_CHAIN,
         display_name="Attack Chain Analysis",
@@ -199,6 +208,13 @@ AGENT_PHASE_MAP: dict[str, str] = {
     # 漏记）：authz judge 跑在 vulnerability-analysis 相。富化唯一名
     # （gn-enrich-*/endpoint-enrich-*）不进 map——不聚合 phase，只进 agents+totals。
     "gitnexus-verdict": "vulnerability-analysis",
+    # 轻量单次调用记账（spec 2026-08-27 §8，AccountedLlmClient finalize 名）——
+    # 此前这批调用的 cost 被闭包剥 str 时整笔丢弃，session 总账不可见。
+    "track-parity": "vulnerability-analysis",
+    "poc-gapfill": "exploitation",
+    "expected-response": "exploitation",
+    "report-summary": "reporting",
+    "recon-summary": "recon",
     "recon-blackbox": "recon",
     "injection-exploit": "exploitation",
     "xss-exploit": "exploitation",
@@ -208,6 +224,9 @@ AGENT_PHASE_MAP: dict[str, str] = {
     "report": "reporting",
     "validate-authentication": "pre-recon",
     "cross-repo-correlation": "correlation",
+    # 在途阶段 B（跨仓裁决）枚举补映射——对齐相邻 correlation 语义（枚举已入
+    # AgentName 但 map 漏，test_all_agent_names_have_phase_mapping 红）。
+    "cross-repo-adjudication": "correlation",
     AgentName.ATTACK_CHAIN: "attack-chain",
     "endpoint-verify": "endpoint-verify",
 }

@@ -21,3 +21,16 @@ def test_validate_auth_mapped():
     assert AGENT_PHASE_MAP["validate-authentication"] == "pre-recon"
 
 
+
+
+def test_lightweight_llm_agents_have_phase_mapping():
+    """spec 2026-08-27 §8：轻量单次调用记账 agent_name 进 phase 汇总
+    （AccountedLlmClient 的 finalize 记账名）。"""
+    for name, phase in (
+        ("track-parity", "vulnerability-analysis"),
+        ("poc-gapfill", "exploitation"),
+        ("expected-response", "exploitation"),
+        ("report-summary", "reporting"),
+        ("recon-summary", "recon"),
+    ):
+        assert AGENT_PHASE_MAP.get(name) == phase, name

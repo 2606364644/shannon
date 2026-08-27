@@ -268,21 +268,27 @@ def _is_vuln_agent(agent_name: AgentName) -> bool:
     return agent_name in _VULN_AGENT_NAMES
 
 
-def _make_recon_summary_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
-    """LLM client for summarize_recon_context.
+def _make_recon_summary_llm_client(repo_path: str, provider_config: dict | None = None,
+                                   audit_session=None):   # P3c 阶段 1 + spec 2026-08-27 §8
+    """LLM client for summarize_recon_context（记账版）。
 
     Always attempts an LLM call (not gated by GitNexus-LLM toggle, since the
     summarizer belongs to the LLM track, not GitNexus). When the LLM provider
     itself is unavailable, run_claude_prompt raises and the summarizer degrades
     gracefully to raw §4/§8 extraction (non-fatal).
+
+    spec 2026-08-27 §8：AccountedLlmClient 包装——cost/tokens 此前被闭包剥 str
+    时整笔丢弃；调用方用完须 ``await client.finalize()``（agent_name=
+    recon-summary）。audit_session=None → 纯透传（兼容旧行为）。
     """
-    async def _client(prompt: str, **kwargs) -> str:
-        result = await run_claude_prompt(
+    from supernova_core.agents.llm_accounting import AccountedLlmClient
+
+    async def _runner(prompt: str, **kwargs):
+        return await run_claude_prompt(
             prompt=prompt, repo_path=repo_path, model_tier="medium",
             provider_config=provider_config,
         )
-        return result.text
-    return _client
+    return AccountedLlmClient(_runner, audit_session, "recon-summary")
 
 
 async def _build_vuln_prompt_variables(
@@ -298,12 +304,19 @@ async def _build_vuln_prompt_variables(
     deterministic-layer (CLAUDE.md §1 ironclad rule).
     """
     repo, deliverables, _ = _get_paths(input)
+    from supernova_whitebox.audit.session_registry import get_audit_session
 
     # RECON_CONTEXT: summarize recon_deliverable.md §4/§8
     recon_md_path = deliverables / "recon_deliverable.md"
     recon_md = recon_md_path.read_text("utf-8") if recon_md_path.exists() else ""
-    llm_client = _make_recon_summary_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
+    llm_client = _make_recon_summary_llm_client(
+        str(repo), provider_config=input.provider_config,
+        audit_session=get_audit_session())   # P3c 阶段 1 + spec 2026-08-27 §8
     recon_context = await summarize_recon_context(recon_md, llm_client)
+    try:
+        await llm_client.finalize()  # 记账出口（no-op when session=None）
+    except Exception:
+        pass  # best-effort：记账失败不影响 prompt 变量注入
     base["RECON_CONTEXT"] = recon_context
 
     # FRAMEWORK_ANALYSIS: conditional — only when inferred_endpoints non-empty
@@ -936,6 +949,20 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
         from supernova_core.models.queue_schemas import VulnerabilityQueue
 
         repo, deliverables, _ = _get_paths(input)
+        # track-parity 记账 client（spec 2026-08-27 §8）：轻量调用 cost 此前被
+        # _make_track_parity_client 闭包剥 str 时整笔丢弃——AccountedLlmClient 累计，
+        # 循环外一次 finalize 记总账（agent_name=track-parity 进 phase 汇总）。
+        from supernova_core.agents.llm_accounting import AccountedLlmClient
+        _parity_repo = str(repo) if repo else ""
+
+        async def _parity_runner(prompt, **kw):
+            return await run_claude_prompt(
+                prompt=prompt, repo_path=_parity_repo, model_tier="medium",
+                structured_output_schema=kw.get("output_format"),
+                provider_config=getattr(input, "provider_config", None))
+
+        _accounted_parity = AccountedLlmClient(
+            _parity_runner, get_audit_session(), "track-parity")
         # GitNexus 轨 per-class 状态(Task 4 写,文件缺/损坏返 {} 容错)。
         # 仅供 merger 标记 gitnexus_status + 报告标红;合并逻辑不读它(failed 类
         # 自然 gitnexus_findings=[] -> llm-only 或 continue 跳过)。
@@ -1012,10 +1039,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                         from supernova_core.services.track_parity import (
                             enhance_track_parity,
                         )
-                        _parity_client = _make_track_parity_client(
-                            str(repo) if repo else "",
-                            provider_config=getattr(input, "provider_config", None),
-                        )
+                        _parity_client = _accounted_parity
                         merged = await enhance_track_parity(
                             merged, vuln_class, _parity_client,
                             complete=(_enrich_mode == "light"),
@@ -1060,6 +1084,7 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                         "merge: vuln=%s merged %d gitnexus-only findings (LLM track did not cover)",
                         vuln_class, gn_only)
 
+        await _accounted_parity.finalize()  # spec 2026-08-27 §8：出口一次记账
         return {"merged_classes": merged_classes, "per_class_counts": per_class_counts}
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
@@ -2184,19 +2209,14 @@ async def run_report_polish(input: ActivityInput) -> dict:
                       checks=checks, reworked_ids=reworked_ids)
 
         # --- ④执行摘要 ---
+        # spec 2026-08-27 §8：AccountedLlmClient 包装（report-summary 记账——
+        # 此前单次调用 cost 整笔丢弃）；finalize 在 try 出口。
+        from supernova_core.agents.llm_accounting import AccountedLlmClient
         summary_source = "deterministic"
         es = None
-        try:
-            digest_lines = [
-                f"- {v.id} | {v.type} | {v.severity} | {v.title} | "
-                f"endpoints={','.join(e.path for e in v.endpoints) or '-'}"
-                for v in rd.vulnerabilities
-            ]
-            prompt = prompt_manager.load_sync(
-                "report_summary",
-                variables={"vuln_digest": "\n".join(digest_lines) or "(none)"},
-            )
-            result = await run_claude_prompt(
+
+        async def _summary_runner(prompt, **kw):
+            return await run_claude_prompt(
                 prompt=prompt, repo_path=str(repo), model_tier="medium",
                 structured_output_schema={
                     "type": "object",
@@ -2207,8 +2227,29 @@ async def run_report_polish(input: ActivityInput) -> dict:
                         "remediation_order": {"type": "string"},
                     },
                 },
-                provider_config=input.provider_config,
+                provider_config=input.provider_config)
+
+        _summary_client = AccountedLlmClient(
+            _summary_runner, get_audit_session(), "report-summary")
+        try:
+            digest_lines = [
+                f"- {v.id} | {v.type} | {v.severity} | {v.title} | "
+                f"endpoints={','.join(e.path for e in v.endpoints) or '-'}"
+                for v in rd.vulnerabilities
+            ]
+            prompt = prompt_manager.load_sync(
+                "report_summary",
+                variables={"vuln_digest": "\n".join(digest_lines) or "(none)"},
             )
+            raw_summary = await _summary_client(prompt)
+            result = type("_R", (), {})()  # 兼容下游 payload 读取
+            result.structured_output = None
+            if raw_summary:
+                import json as _json
+                try:
+                    result.structured_output = _json.loads(raw_summary)
+                except (ValueError, TypeError):
+                    result.structured_output = None
             payload = result.structured_output
             if isinstance(payload, dict) and payload.get("narrative"):
                 es = ExecutiveSummary.model_validate(payload)
@@ -2216,6 +2257,11 @@ async def run_report_polish(input: ActivityInput) -> dict:
         except Exception as exc:  # noqa: BLE001 — 摘要失败回退确定性
             logger.warning("report-polish: summary agent failed "
                            "(deterministic fallback): %s", exc)
+        finally:
+            try:
+                await _summary_client.finalize()  # spec 2026-08-27 §8 记账出口
+            except Exception:
+                pass  # best-effort
         if es is None:
             es = _deterministic_summary(rd)
 

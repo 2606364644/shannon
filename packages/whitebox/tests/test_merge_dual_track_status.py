@@ -212,3 +212,66 @@ async def test_failed_class_logged(tmp_path, monkeypatch, caplog):
     assert any(
         "xss" in r.getMessage() and "failed" in r.getMessage() for r in caplog.records
     ), "GitNexus 轨 failed 类合并时应打 info 日志(含 vuln 类名 + failed)"
+
+
+@pytest.mark.asyncio
+async def test_merge_activity_accounts_parity_client(tmp_path, monkeypatch):
+    """spec 2026-08-27 §8：track-parity 轻量调用记账——merge activity 构造
+    AccountedLlmClient（enrich_mode 开时），出口 finalize 一次 end_agent
+    （agent_name=track-parity，非 per-vc 同名覆盖）。"""
+    import json as _json
+    from unittest.mock import AsyncMock
+    from supernova_core.agents.llm_accounting import AccountedLlmClient
+    from supernova_whitebox.pipeline import activities as act_mod
+
+    # 最小中间产物：双轨 queue 各一张同 key 卡 → 触发 enhance_track_parity 路径
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    (deliverables / "intermediate").mkdir(parents=True)
+    (deliverables / "intermediate" / "xss_exploitation_queue.json").write_text(_json.dumps({
+        "vulnerabilities": [{"ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+                             "externally_exploitable": True, "confidence": "high",
+                             "verdict": "vulnerable", "source": "q",
+                             "sink_call": "db.exec"}]}))
+    (deliverables / "intermediate" / "xss_gitnexus_queue.json").write_text(_json.dumps({
+        "vulnerabilities": [{"ID": "XSS-GN-01", "vulnerability_type": "Reflected",
+                             "externally_exploitable": True, "confidence": "high",
+                             "verdict": "vulnerable", "source": "q",
+                             "sink_call": "db.exec"}]}))
+
+    recorded = []
+
+    class _Session:
+        @asynccontextmanager
+        async def track_step(self, *a, **kw):
+            yield
+
+        async def end_agent(self, name, result):
+            recorded.append((name, result))
+
+    async def fake_rcp(*, prompt, **kw):
+        class _R:
+            success = True
+            cost = 0.03
+            cost_currency = "CNY"
+            model = "glm-5.3"
+            turns = 1
+            text = '{"pairs": []}'
+            structured_output = {"pairs": []}
+            from supernova_core.agents.runner import TokenUsage
+            tokens = TokenUsage(input_tokens=10, output_tokens=5,
+                                cache_read_input_tokens=0,
+                                cache_creation_input_tokens=0)
+        return _R()
+
+    monkeypatch.setattr(act_mod, "run_claude_prompt", fake_rcp)
+    monkeypatch.setattr(act_mod, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    monkeypatch.setattr("supernova_whitebox.audit.session_registry.get_audit_session",
+                        lambda: _Session())
+
+    result = await act_mod.run_merge_dual_track_queues(_input(tmp_path))
+    assert "xss" in result["merged_classes"]
+    # 记账生效：track-parity 总账一条（配对归并调了一次 LLM）
+    names = [n for n, _ in recorded]
+    assert "track-parity" in names
+    _, res = [r for r in recorded if r[0] == "track-parity"][0]
+    assert res.cost_usd == 0.03
