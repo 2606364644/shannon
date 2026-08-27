@@ -410,3 +410,79 @@ async def test_safe_verdict_excluded_from_queue_and_archived(tmp_path, monkeypat
     assert d["dismissed_at_stage"] == "chain-verdict"
     assert d["dismiss_reason"] == "parameterized query"
     assert d["evidence"] == "b->db"
+
+
+# ===== spec 2026-08-27 §3：多轮 verdict agent 接线（env 开走 agent 路径）=====
+
+class _AgentRunResult:
+    def __init__(self, text="", structured_output=None, success=True, error=None):
+        self.text = text
+        self.structured_output = structured_output
+        self.success = success
+        self.error = error
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_factory_passes_through(monkeypatch, tmp_path):
+    """_make_verdict_agent_runner 闭包 → run_gitnexus_verdict_agent 参数透传：
+    prompt / structured_output_schema（output_format 归一）/ agent_name /
+    audit_session / provider_config / max_turns（env 默认 30）。"""
+    captured = {}
+
+    async def fake_run_agent(*, prompt, repo_path, structured_output_schema=None,
+                             audit_session=None, provider_config=None,
+                             max_turns=None, agent_name="gitnexus-verdict"):
+        captured.update(prompt=prompt, repo_path=repo_path,
+                        schema=structured_output_schema,
+                        audit_session=audit_session,
+                        provider_config=provider_config,
+                        max_turns=max_turns, agent_name=agent_name)
+        return _AgentRunResult(
+            structured_output={"verdict": "safe", "witness_payload": None,
+                               "evidence_chain": "x->y", "title": "t"})
+
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", fake_run_agent)
+    runner = activities._make_verdict_agent_runner(
+        str(tmp_path), provider_config={"provider": "x"}, audit_session=object())
+    result = await runner("p", output_format={"type": "object"},
+                          agent_name="chain-verdict-xss-01")
+    assert captured["repo_path"] == str(tmp_path)
+    assert captured["schema"] == {"type": "object"}
+    assert captured["agent_name"] == "chain-verdict-xss-01"
+    assert captured["provider_config"] == {"provider": "x"}
+    assert captured["audit_session"] is not None
+    assert captured["max_turns"] == 30  # SUPERNOVA_CHAIN_VERDICT_MAX_TURNS 默认
+
+
+@pytest.mark.asyncio
+async def test_activity_uses_agent_path_when_enabled(tmp_path, monkeypatch):
+    """env 开（is_gitnexus_llm_enabled=True）→ activity 构造 agent runner 走
+    多轮路径（run_gitnexus_verdict_agent 被调、agent_name 唯一化）。"""
+    deliverables = tmp_path / "deliverables" / "whitebox"
+    deliverables.mkdir(parents=True)
+    _write_pgraph(deliverables, [_flow("sql_value")])
+    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: True)
+
+    agent_calls = []
+
+    async def fake_run_agent(*, prompt, repo_path, structured_output_schema=None,
+                             audit_session=None, provider_config=None,
+                             max_turns=None, agent_name="gitnexus-verdict"):
+        agent_calls.append(agent_name)
+        return _AgentRunResult(structured_output={
+            "verdict": "vulnerable", "witness_payload": "'",
+            "evidence_chain": "q->db", "mismatch_reason": "concat",
+            "confidence": "high", "title": "SQLi"})
+
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", fake_run_agent)
+    monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
+    set_audit_session(_RecordingSession())
+    try:
+        await activities.run_gitnexus_chain_verdict(_input(tmp_path))
+    finally:
+        clear_audit_session()
+
+    assert agent_calls == ["chain-verdict-injection-01"]
+    q = json.loads(
+        (deliverables / "intermediate" / "injection_gitnexus_queue.json").read_text())
+    assert q["vulnerabilities"][0]["verdict"] == "vulnerable"

@@ -2425,6 +2425,29 @@ async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
     )
 
 
+def _make_verdict_agent_runner(repo_path: str, provider_config: dict | None = None,
+                               audit_session=None):
+    """多轮 verdict agent runner 工厂（spec 2026-08-27 §3，生产主线）。
+
+    闭包契约对齐 core 层 judge_chain_verdict 的 verdict_agent 形态：
+    ``async (prompt, *, output_format, agent_name) -> ClaudeRunResult``——
+    经 run_gitnexus_verdict_agent 多轮跑（grep/read 自主验证链），继承记账
+    （audit_session → end_agent）、工具审计、max_turns
+    （SUPERNOVA_CHAIN_VERDICT_MAX_TURNS 默认 30）。agent_name 由 builder 逐链
+    传唯一名（chain-verdict-{vc}-{i:02d}，防 metrics.agents 同名覆盖）。"""
+    async def runner(prompt: str, *, output_format=None, agent_name=None):
+        return await run_gitnexus_verdict_agent(
+            prompt=prompt,
+            repo_path=repo_path,
+            structured_output_schema=output_format,
+            audit_session=audit_session,
+            provider_config=provider_config,
+            max_turns=int(os.getenv("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS", "30")),
+            agent_name=agent_name or "chain-verdict",
+        )
+    return runner
+
+
 def _make_verdict_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
     """接通后: 真 client; env 关时返回 raise-client(降级)。
 
@@ -2749,7 +2772,18 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             "vulnerability-analysis", "gitnexus-chain-verdict",
             intent=None,
         ):
-            llm = _make_verdict_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
+            # 判定通道（spec 2026-08-27 §3）：env 开 → 逐条多轮 verdict agent
+            # （grep/read 自主验证，agent_name 唯一化记账）；env 关 → 单次
+            # llm_client 兼容路径（生产走模块级 raise 兜底 → unadjudicated
+            # 保守；测试经 _gitnexus_verdict_llm_client 注入 fake）。
+            _verdict_agent = None
+            llm = None
+            if is_gitnexus_llm_enabled():
+                _verdict_agent = _make_verdict_agent_runner(
+                    str(repo), provider_config=input.provider_config,
+                    audit_session=get_audit_session())
+            else:
+                llm = _make_verdict_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
 
             # Second-order storage-taint findings (子项⑤): compute once, group
@@ -2779,6 +2813,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
 
                     second_order = await build_second_order_findings(
                         storage_writes, pgraph, llm_client=llm,
+                        verdict_agent=_verdict_agent,
                         sink_call_sites=sink_call_sites, reads_by_id=reads_by_id,
                         source_provider=_second_order_source_provider,
                         progress_cb=_chain_cb,
@@ -2810,6 +2845,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             ):
                 try:
                     findings = await builder(pgraph, llm_client=llm,
+                                             verdict_agent=_verdict_agent,
                                              sink_call_sites=sink_call_sites,
                                              entry_points=entry_point_map,
                                              progress_cb=_chain_cb)

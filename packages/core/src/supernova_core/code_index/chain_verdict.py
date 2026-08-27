@@ -150,6 +150,55 @@ Respond with a compact JSON object ONLY:
 {{"verdict":"safe|vulnerable","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>","source_param_location":"body|query|null"}}
 """
 
+# 多轮 agent 版 prompt（spec 2026-08-27 §3，逐条深判）：同一链快照与输出契约，
+# 差异在判定形态——不再假设快照完备，agent 自主 grep/read 验证每一步
+# （sanitize 实际实现、sink 实参构造、可达性）。内嵌常量对齐 _VERDICT_PROMPT
+# 同模式（core 层无 prompt_manager；spec 所指 prompts/chain-verdict-agent.txt
+# 落在此处，避免双份漂移）。
+_VERDICT_PROMPT_AGENT = """You are a multi-turn chain-verdict agent for the {vuln_class} GitNexus track.
+You are given ONE candidate source->sink chain with deterministic (best-effort) annotations.
+Your job: VERIFY it in the actual repository, then judge whether it is vulnerable.
+
+Candidate chain (leads to verify, NOT ground truth):
+- source: {source_param} ({source_type})
+- sink: {sink_call_site_id}
+- slot/render_context: {sink_slot}
+- sink arg expressions (deterministic layer's view of what reaches the slot): {sink_expressions}
+- direction: {direction_hint}
+- propagation steps: {steps_repr}
+- sanitizer annotations (claimed, NOT judged for effectiveness): {sanitizers_repr}
+- post-sanitize concatenation detected: {post_sanitize_concat}
+
+Verification protocol (use your tools; the repo is your working directory):
+1. Read the sink call site file/line: confirm the tainted expression actually flows into
+   the dangerous slot as claimed, and note how the sink argument is built.
+2. Grep/Read each claimed sanitizer: check its real implementation — does it actually
+   encode/escape for THIS slot/render_context, and is it applied on the tainted path
+   with no concatenation afterwards?
+3. Read the entry point / handler: confirm reachability (route registered, param bound).
+4. Only after verification, judge. Do NOT re-run a full analysis methodology — verify
+   THIS chain's claims, that is all.
+
+Rules (same as the single-pass caliber):
+- post-sanitize concatenation = sanitizer considered INEFFECTIVE (tainted again) —
+  but verify it: read the code between sanitizer and sink.
+- A defense is effective ONLY if it matches the slot/render_context AND no concat after.
+- Be decisive: return vulnerable OR safe. If after honest reading you still cannot
+  decide (e.g. depends on runtime config you cannot see), return needs_review.
+- witness_payload = the MINIMAL concrete attack input that would trigger this sink
+  (e.g. "' OR '1'='1" for a SQL value slot, "http://169.254.169.254/" for a url slot).
+  Required when verdict is vulnerable; use null only when verdict is safe.
+- source_param_location = where the source parameter is delivered in the HTTP
+  request: "body" or "query". Judge from the source expression you read
+  (e.g. req.body.x → body, req.query.x / ?x= → query); use null only when
+  genuinely indeterminable.
+- evidence_chain must cite what you READ (file:line), not just the claims you were given.
+- {title_directive}
+
+Respond with a compact JSON object ONLY:
+{{"verdict":"safe|vulnerable|needs_review","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with file:line citations>","mismatch_reason":"<if vulnerable or needs_review>","confidence":"high|medium|low","title":"<one-line descriptive name>","source_param_location":"body|query|null"}}
+"""
+
 # unparseable 有界重试（spec O2 后半）：openai_compatible 引擎（GLM）端点不支持
 # response_format=json_schema（发之 400），schema 只用于本地解析，模型仅受 prompt
 # 约束——实测对 Markdown 输出合规率极低（2026-07-22 spec R5: 14/14 unparseable）。
@@ -418,20 +467,71 @@ async def _retry_verdict_parse(
     return None
 
 
+def unadjudicated_verdict(candidate: "CandidateChain", reason: str) -> ChainVerdict:
+    """判定通道未跑/失败 → 保守 verdict（spec 2026-08-26 §5.7 + 2026-08-27 §3 护栏）。
+
+    verdict=vulnerable（OR-friendly，不静默清空）+ confidence="unadjudicated"
+    （通道失败 ≠ LLM 判了且低置信——渲染层显示「未判定」）。LLM 异常 /
+    unparseable / 候选链超护栏 共用。
+    """
+    return ChainVerdict(
+        verdict="vulnerable",
+        witness_payload=None,
+        evidence_chain=(f"{candidate.source_param} -> {candidate.sink_call_site_id} "
+                        f"(unadjudicated, needs_review)"),
+        mismatch_reason=reason,
+        confidence="unadjudicated",
+        title=_fallback_title(candidate),
+    )
+
+
+async def _resolve_agent_raw(verdict_agent, prompt: str, *,
+                             agent_name: str | None = None) -> str:
+    """多轮 agent 结果 → raw str（与 llm_client 契约归一）。
+
+    structured_output（dict/list）→ JSON str；缺失回退 .text；success=False
+    → raise（由 judge 的 except 接住走保守 unadjudicated——通道失败 ≠ 判非漏洞）。
+    """
+    result = await verdict_agent(
+        prompt, output_format=CHAIN_VERDICT_SCHEMA, agent_name=agent_name)
+    if result is None:
+        raise RuntimeError("verdict agent returned None")
+    if getattr(result, "success", True) is False:
+        raise RuntimeError(
+            f"verdict agent failed: {getattr(result, 'error', None) or 'unknown'}")
+    so = getattr(result, "structured_output", None)
+    if so is not None:
+        import json as _json
+        return _json.dumps(so, ensure_ascii=False)
+    return getattr(result, "text", "") or ""
+
+
 async def judge_chain_verdict(
     candidate: CandidateChain,
     *,
-    llm_client: Callable[..., Awaitable[str]],
+    llm_client: Callable[..., Awaitable[str]] | None = None,
+    verdict_agent: Callable[..., Awaitable] | None = None,
+    agent_name: str | None = None,
 ) -> ChainVerdict:
-    """Light LLM pass: judge one candidate chain -> verdict.
+    """Judge one candidate chain -> verdict（spec 2026-08-27 §3 双形态）。
 
-    Graceful on LLM failure: never crash; return a conservative vulnerable
+    - ``llm_client``：单次轻量路径（async (prompt, output_format=...) -> str），
+      历史契约，测试 / 降级场景。
+    - ``verdict_agent``：多轮 agent 路径（async (prompt, *, output_format,
+      agent_name) -> ClaudeRunResult-like），生产主线——agent 自主 grep/read
+      验证链快照后判定；structured_output 优先、text 兜底、success=False 走
+      保守 unadjudicated。
+    - ``agent_name``：多轮调用记账名（chain-verdict-{vc}-{i:02d}，防
+      metrics.agents 同名覆盖，对齐 22269e4a）。
+
+    Graceful on failure: never crash; return a conservative vulnerable
     verdict with confidence="unadjudicated" (spec 2026-08-26 §5.7 — the verdict
     CHANNEL failed, which is a different statement than the LLM judging with
     low confidence) so the merger still processes it (Plan 3 OR is
     conservative).
     """
-    prompt = _VERDICT_PROMPT.format(
+    template = _VERDICT_PROMPT_AGENT if verdict_agent is not None else _VERDICT_PROMPT
+    prompt = template.format(
         vuln_class=candidate.vuln_class,
         source_param=candidate.source_param,
         source_type=candidate.source_type,
@@ -453,7 +553,14 @@ async def judge_chain_verdict(
     )
 
     try:
-        raw = await llm_client(prompt, output_format=CHAIN_VERDICT_SCHEMA)
+        if verdict_agent is not None:
+            raw = await _resolve_agent_raw(
+                verdict_agent, prompt, agent_name=agent_name)
+        else:
+            if llm_client is None:
+                raise ValueError(
+                    "judge_chain_verdict requires llm_client or verdict_agent")
+            raw = await llm_client(prompt, output_format=CHAIN_VERDICT_SCHEMA)
     except Exception as exc:
         logger.warning("chain-verdict LLM pass failed (%s); marking unadjudicated", exc)
         return ChainVerdict(
@@ -469,8 +576,14 @@ async def judge_chain_verdict(
 
     data = _parse_verdict_json(raw)
     if data is None:
+        # retry 与首call同通道（agent 路径走 agent，单次路径走 llm_client）
+        async def _retry_caller(p: str, **kw) -> str:
+            if verdict_agent is not None:
+                return await _resolve_agent_raw(
+                    verdict_agent, p, agent_name=agent_name)
+            return await llm_client(p, output_format=kw.get("output_format"))
         data = await _retry_verdict_parse(
-            prompt, raw if isinstance(raw, str) else "", llm_client=llm_client)
+            prompt, raw if isinstance(raw, str) else "", llm_client=_retry_caller)
     if data is None:
         # 空输出与非法输出分流：诊断时区分「调用层失败」与「模型不合规」。
         final_raw = raw if isinstance(raw, str) else ""

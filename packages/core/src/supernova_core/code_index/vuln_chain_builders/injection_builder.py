@@ -13,7 +13,9 @@ from supernova_core.code_index.chain_verdict import (
     http_route_label,
     judge_chain_verdict,
     placement_noted_params,
+    unadjudicated_verdict,
 )
+from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.code_index.parameter_models import ParameterPropagationGraph, SinkCallSite
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
@@ -40,7 +42,8 @@ def _source_text(candidate) -> str:
 async def build_injection_findings(
     pgraph: ParameterPropagationGraph,
     *,
-    llm_client: Callable[..., Awaitable[str]],
+    llm_client: Callable[..., Awaitable[str]] | None = None,
+    verdict_agent: Callable[..., Awaitable] | None = None,
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
@@ -54,9 +57,26 @@ async def build_injection_findings(
     candidates = [c for c in candidates
                   if c.source_type != ParameterSource.STORAGE.value]
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
+    # 护栏（spec 2026-08-27 §3）：逐条多轮深判的链数上限——超限链不再跑
+    # agent，unadjudicated 保守进 findings（不烧 token、不静默丢）。
+    max_agents = get_chain_verdict_max_agents()
     findings: list[InjectionVulnerability] = []
     for i, chain in enumerate(candidates, start=1):
-        verdict = await judge_chain_verdict(chain, llm_client=llm_client)
+        if i > max_agents:
+            logger.warning(
+                "chain-verdict budget exceeded (%d); candidate %d of %d "
+                "left unadjudicated (conservative, in queue)",
+                max_agents, i, len(candidates))
+            verdict = unadjudicated_verdict(
+                chain, f"candidate chain beyond verdict budget ({max_agents}); "
+                       f"left unadjudicated for human review")
+        else:
+            verdict = await judge_chain_verdict(
+                chain,
+                llm_client=llm_client,
+                verdict_agent=verdict_agent,
+                agent_name=f"chain-verdict-injection-{i:02d}",
+            )
         is_vuln = (verdict.verdict == "vulnerable")
         detail = None
         if is_vuln:

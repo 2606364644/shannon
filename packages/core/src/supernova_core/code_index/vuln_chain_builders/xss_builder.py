@@ -19,8 +19,10 @@ from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     http_route_label,
     judge_chain_verdict,
+    unadjudicated_verdict,
     placement_noted_params,
 )
+from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     SinkCallSite,
@@ -143,7 +145,8 @@ def _sink_function_label(sink_call_site_id: str) -> str:
 async def build_xss_findings(
     pgraph: ParameterPropagationGraph,
     *,
-    llm_client: Callable[..., Awaitable[str]],
+    llm_client: Callable[..., Awaitable[str]] | None = None,
+    verdict_agent: Callable[..., Awaitable] | None = None,
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
@@ -164,8 +167,16 @@ async def build_xss_findings(
 
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[XssVulnerability] = []
+    max_agents = get_chain_verdict_max_agents()
     for i, chain in enumerate(candidates, start=1):
-        verdict = await judge_chain_verdict(chain, llm_client=llm_client)
+        if i > max_agents:
+            verdict = unadjudicated_verdict(
+                chain, f"candidate chain beyond verdict budget ({max_agents}); "
+                       f"left unadjudicated for human review")
+        else:
+            verdict = await judge_chain_verdict(
+                chain, llm_client=llm_client, verdict_agent=verdict_agent,
+                agent_name=f"chain-verdict-xss-{i:02d}")
         is_vuln = (verdict.verdict == "vulnerable")
         detail = None
         if is_vuln:

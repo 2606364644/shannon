@@ -122,7 +122,8 @@ async def test_build_injection_findings_reports_chain_progress(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def fake_judge(chain, *, llm_client):
+    async def fake_judge(chain, *, llm_client=None, verdict_agent=None,
+                         agent_name=None):
         call_count["n"] += 1
         # first chain vulnerable, others safe
         is_vuln = (call_count["n"] == 1)
@@ -312,3 +313,68 @@ async def test_build_injection_affected_parameters_placement_note():
     findings = await build_injection_findings(
         pgraph, llm_client=await llm_with(None))
     assert findings[0].affected_parameters is None
+
+
+# ===== spec 2026-08-27 §3：多轮 agent 透传 + 候选链护栏 =====
+
+@pytest.mark.asyncio
+async def test_build_injection_passes_agent_name_and_verdict_agent(monkeypatch):
+    """builder 逐链传 verdict_agent + 唯一 agent_name（chain-verdict-{vc}-{i:02d}，
+    防 metrics.agents 同名覆盖）。"""
+    pgraph = ParameterPropagationGraph(
+        taint_flows=[_flow("sql_value")], language_coverage=["python"],
+    )
+    calls = []
+
+    class _AgentResult:
+        success = True
+        error = None
+        text = ('{"verdict":"vulnerable","witness_payload":"\'",'
+                '"evidence_chain":"q->db","confidence":"high"}')
+        structured_output = None
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls.append(agent_name)
+        return _AgentResult()
+
+    findings = await build_injection_findings(pgraph, verdict_agent=fake_agent)
+    assert len(findings) == 1
+    assert calls == ["chain-verdict-injection-01"]
+
+
+@pytest.mark.asyncio
+async def test_build_injection_respects_verdict_budget(monkeypatch):
+    """SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS=1、2 条候选链 → 只跑 1 个 agent，
+    第 2 条 unadjudicated 保守进 findings（不烧 token、不静默丢——「没判成 ≠
+    非漏洞」，防大仓 runaway）。"""
+    from supernova_core.code_index.parameter_models import TaintFlow
+    flows = [TaintFlow(
+        flow_id=f"app.py:handler:1#app.py:handler:db.execute:{5 + i}:0",
+        entry_point_id="app.py:handler:1", source_param=f"q{i}",
+        source_type=ParameterSource.QUERY_PARAM,
+        sink_call_site_id=f"app.py:handler:db.execute:{5 + i}:0",
+        sink_slot="sql_value", propagation_steps=[],
+    ) for i in range(2)]
+    pgraph = ParameterPropagationGraph(taint_flows=flows, language_coverage=["python"])
+
+    agent_calls = []
+
+    class _AgentResult:
+        success = True
+        error = None
+        text = ('{"verdict":"vulnerable","witness_payload":"\'",'
+                '"evidence_chain":"q->db","confidence":"high"}')
+        structured_output = None
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        agent_calls.append(agent_name)
+        return _AgentResult()
+
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS", "1")
+    findings = await build_injection_findings(pgraph, verdict_agent=fake_agent)
+    assert len(agent_calls) == 1  # 第 2 条不再烧 agent
+    assert len(findings) == 2     # 超限链保守进 findings
+    over = findings[1]
+    assert over.verdict == "vulnerable"
+    assert over.confidence == "unadjudicated"
+    assert "budget" in (over.mismatch_reason or "").lower()

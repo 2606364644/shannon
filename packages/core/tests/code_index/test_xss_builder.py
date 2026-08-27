@@ -148,7 +148,8 @@ async def test_build_xss_findings_reports_chain_progress(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def fake_judge(chain, *, llm_client):
+    async def fake_judge(chain, *, llm_client=None, verdict_agent=None,
+                         agent_name=None):
         call_count["n"] += 1
         is_vuln = (call_count["n"] == 2)  # second chain vulnerable
         return ChainVerdict(

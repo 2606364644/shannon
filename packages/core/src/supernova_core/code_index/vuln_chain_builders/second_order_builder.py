@@ -12,11 +12,13 @@ from typing import Awaitable, Callable
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     judge_chain_verdict,
+    unadjudicated_verdict,
 )
 from supernova_core.code_index.second_order_join import (
     extract_second_order_candidates,
 )
 from supernova_core.code_index.storage_models import StorageWritePoint
+from supernova_core.config.concurrency import get_chain_verdict_max_agents
 from supernova_core.code_index.progress import ProgressCb, ProgressEmitter
 from supernova_core.models.queue_schemas import InjectionVulnerability
 
@@ -66,7 +68,8 @@ async def build_second_order_findings(
     writes: list[StorageWritePoint],
     pgraph,
     *,
-    llm_client: Callable[..., Awaitable[str]],
+    llm_client: Callable[..., Awaitable[str]] | None = None,
+    verdict_agent: Callable[..., Awaitable] | None = None,
     sink_call_sites,
     reads_by_id: dict,
     source_provider: "Callable[[StorageWritePoint], bytes | None] | None" = None,
@@ -114,10 +117,19 @@ async def build_second_order_findings(
     emitter = ProgressEmitter("chain-verdict", len(candidates), progress_cb)
     findings: list[InjectionVulnerability] = []
 
+    max_agents = get_chain_verdict_max_agents()
     for i, cand in enumerate(candidates, start=1):
-        read_verdict = await judge_chain_verdict(
-            cand.read_side_chain, llm_client=llm_client,
-        )
+        if i > max_agents:
+            read_verdict = unadjudicated_verdict(
+                cand.read_side_chain,
+                f"candidate chain beyond verdict budget ({max_agents}); "
+                f"left unadjudicated for human review")
+        else:
+            read_verdict = await judge_chain_verdict(
+                cand.read_side_chain, llm_client=llm_client,
+                verdict_agent=verdict_agent,
+                agent_name=f"chain-verdict-2nd-{i:02d}",
+            )
         write_tainted = _looks_user_tainted(cand.write.written_expr)
         is_vuln = write_tainted and (read_verdict.verdict == "vulnerable")
 

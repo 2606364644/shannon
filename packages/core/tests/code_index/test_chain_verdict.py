@@ -600,3 +600,76 @@ async def test_judge_verdict_fallback_location_none():
     verdict = await judge_chain_verdict(chain, llm_client=boom)
     assert verdict.confidence == "unadjudicated"
     assert verdict.source_param_location is None
+
+
+# ===== spec 2026-08-27 §3：多轮 verdict agent 路径（逐条深判）=====
+
+class _AgentResult:
+    """ClaudeRunResult-like：judge 只消费 success/structured_output/text/error。"""
+
+    def __init__(self, *, success=True, structured_output=None, text="", error=None):
+        self.success = success
+        self.structured_output = structured_output
+        self.text = text
+        self.error = error
+
+
+def _agent_chain():
+    return CandidateChain(
+        vuln_class="injection", flow_id="f1", entry_point_id="ep",
+        source_param="q", source_type="query", sink_call_site_id="db.execute:1",
+        sink_slot="sql_value", propagation_steps=[_step("concat")],
+        sanitizer_annotations=[], direction_hint="forward",
+        post_sanitize_concat=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_agent_runner_structured_output():
+    """verdict_agent 路径：structured_output（dict）优先 → JSON str 解析；
+    agent 收到 CHAIN_VERDICT_SCHEMA（output_format 透传）与 agent_name。"""
+    calls = []
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        calls.append({"prompt": prompt, "output_format": output_format,
+                      "agent_name": agent_name})
+        return _AgentResult(structured_output={
+            "verdict": "vulnerable", "witness_payload": "'",
+            "evidence_chain": "q -> db.execute(L1)",
+            "mismatch_reason": "concat into sql value slot",
+            "confidence": "high", "title": "SQLi in search",
+        })
+
+    verdict = await judge_chain_verdict(
+        _agent_chain(), verdict_agent=fake_agent, agent_name="chain-verdict-injection-01")
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload == "'"
+    assert verdict.title == "SQLi in search"
+    assert len(calls) == 1
+    assert calls[0]["output_format"] is CHAIN_VERDICT_SCHEMA
+    assert calls[0]["agent_name"] == "chain-verdict-injection-01"
+    # agent prompt 引导自主读码（多轮形态），不再是单次快照假设
+    assert "grep" in calls[0]["prompt"].lower() or "read" in calls[0]["prompt"].lower()
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_agent_runner_text_fallback():
+    """agent 无 structured_output → text 兜底（与 llm_client 路径同解析）。"""
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text='{"verdict":"safe","witness_payload":null,'
+                                 '"evidence_chain":"q -> db(ORM)","confidence":"high"}')
+
+    verdict = await judge_chain_verdict(_agent_chain(), verdict_agent=fake_agent)
+    assert verdict.verdict == "safe"
+
+
+@pytest.mark.asyncio
+async def test_judge_chain_verdict_agent_failure_conservative():
+    """agent 返回 success=False → 保守 unadjudicated（通道失败 ≠ 判非漏洞，
+    对齐 llm_client 异常路径）。"""
+    async def failing_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(success=False, error="max turns reached")
+
+    verdict = await judge_chain_verdict(_agent_chain(), verdict_agent=failing_agent)
+    assert verdict.confidence == "unadjudicated"
+    assert verdict.verdict == "vulnerable"

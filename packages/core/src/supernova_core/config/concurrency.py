@@ -154,3 +154,31 @@ def get_per_call_timeout() -> float:
             val, _PER_CALL_TIMEOUT_DEFAULT)
         return _PER_CALL_TIMEOUT_DEFAULT
     return val
+
+
+_CHAIN_VERDICT_MAX_AGENTS_DEFAULT = 200
+
+
+def get_chain_verdict_max_agents() -> int:
+    """SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS（spec 2026-08-27 §3 护栏，默认 200）：
+    逐条多轮深判的候选链数上限。多轮化后每链一个 agent（max_turns 默认 30），
+    大仓候选链 runaway 会 token 爆——超限链不再跑 agent，直接 unadjudicated
+    保守进 queue（「没判成 ≠ 非漏洞」，不烧 token、不静默丢）+ warning。
+    经 ws_getenv 支持 per-workspace 覆盖。
+
+    返回 env 值(int>=1)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS")
+    if raw is None:
+        return _CHAIN_VERDICT_MAX_AGENTS_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS=%r not an int; "
+                     "falling back to %d", raw, _CHAIN_VERDICT_MAX_AGENTS_DEFAULT)
+        return _CHAIN_VERDICT_MAX_AGENTS_DEFAULT
+    if val < 1:
+        _log.warning("SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS=%d must be >=1; "
+                     "falling back to %d", val, _CHAIN_VERDICT_MAX_AGENTS_DEFAULT)
+        return _CHAIN_VERDICT_MAX_AGENTS_DEFAULT
+    return val
