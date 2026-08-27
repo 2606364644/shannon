@@ -225,7 +225,7 @@ def test_parse_lenient_with_vuln_class_forces_injection_subtype():
 
 def test_parse_lenient_without_vuln_class_backward_compatible():
     """不传 vuln_class 时:entry 仍被解析(不丢、不崩),通用字段可访问——
-    向后兼容契约(poc_generator/queue_merge/blackbox checker 等通用调用者只读
+    向后兼容契约(queue_merge/blackbox checker 等通用调用者只读
     BaseVulnerability 字段,不依赖具体子类型)。
 
     具体子类型由 smart-union 决定、不绑定(字段对齐后默认也会选 InjectionVulnerability,

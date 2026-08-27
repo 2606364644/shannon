@@ -27,6 +27,7 @@ import shlex
 from pathlib import Path
 from urllib.parse import urlparse
 
+from supernova_core.collectors.exploit import normalize_exploit_step
 from supernova_core.models.report_data import (
     EndpointEntry,
     PocBlock,
@@ -37,6 +38,7 @@ from supernova_core.models.report_data import (
     ReportVulnerability,
     ScanMeta,
     TypeStats,
+    VerifyStep,
     VulnEvidence,
     VulnNarrative,
 )
@@ -78,16 +80,41 @@ def _strip_step_num(s: str) -> str:
 # ── verdict → ReportVulnerability ─────────────────────────────────────────────
 
 def _verdict_texts(verdict: dict) -> list[str]:
-    """按序收集可能含「实际发出的请求」的文本（步骤优先，其次尝试/证据）。"""
+    """按序收集可能含「实际发出的请求」的文本（结构化 command 最优先，其次散文）。"""
     texts: list[str] = []
     steps = verdict.get("exploitation_steps")
     if isinstance(steps, list):
-        texts.extend(str(s) for s in steps if s)
+        for s in steps:
+            if isinstance(s, dict):
+                # 结构化步骤：command 是完整命令（最优先 curl 候选），action/result 随后
+                for key in ("command", "action", "result"):
+                    val = s.get(key)
+                    if val:
+                        texts.append(str(val))
+            elif s:
+                texts.append(str(s))
     for key in ("what_we_tried", "proof_of_impact", "evidence_of_vulnerability"):
         val = verdict.get(key)
         if val:
             texts.append(str(val))
     return texts
+
+
+def _verdict_steps(verdict: dict) -> list[VerifyStep]:
+    """verdict 落盘 json 的 ``exploitation_steps`` → ``[VerifyStep]``。
+
+    与采集层 L0（``collectors.exploit.normalize_exploit_step``）同款归一化：
+    结构化 dict 保结构、纯字符串剥编号 + 拆尾随命令（旧落盘 json 兼容——
+    生成层解决，组装层不做第二套启发式）。畸形项丢弃，不编造。
+    """
+    steps: list[VerifyStep] = []
+    raw = verdict.get("exploitation_steps")
+    if isinstance(raw, list):
+        for s in raw:
+            norm = normalize_exploit_step(s)
+            if norm is not None:
+                steps.append(VerifyStep.model_validate(norm))
+    return steps
 
 
 def _parse_curl_command(candidate: str) -> "PocRequest | None":
@@ -202,6 +229,7 @@ def _map_verdict(vc: str, verdict: dict) -> ReportVulnerability:
     evidence = VulnEvidence(
         verification="dynamic",
         dynamic_evidence=str(dynamic_evidence) if dynamic_evidence else None,
+        steps=_verdict_steps(verdict),
         verdict=status or None,
         notes=notes,
     )

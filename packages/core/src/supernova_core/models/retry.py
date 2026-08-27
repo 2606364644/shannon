@@ -93,7 +93,7 @@ GITNEXUS_VERDICT_RETRY = RetryPolicy(
     non_retryable_error_types=NON_RETRYABLE,
 )
 
-# PoC 报告增强(generate_poc_report)专用:短重试。
+# PoC 写回(write_agent_poc,前身 generate_poc_report)专用:短重试。
 # PoC 对 N 个 externally_exploitable 漏洞串行 llm_fill_gap(各 max_turns 上限),
 # 单 activity 耗时易超 start_to_close_timeout;超时幂等(同输入再跑照样超时),
 # 绝不能套 PRODUCTION_RETRY(max 8)——那会把单次超时放大成数小时卡死

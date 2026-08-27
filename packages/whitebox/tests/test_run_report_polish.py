@@ -432,24 +432,6 @@ _POC_QUEUE_VULN = {
 }
 
 
-async def test_generate_poc_report_no_longer_writes_report_poc(tmp_path, monkeypatch):
-    """§4.2：generate_poc_report 只保留 PoC md 生成，不再触发结构化写回
-    （写回拆到 write_agent_poc，前移到 render_findings 之前）。"""
-    d = _wb(tmp_path)
-    _write_queue(d, [_POC_QUEUE_VULN])
-    monkeypatch.setattr(activities, "_get_paths",
-                        lambda inp: (tmp_path, d, tmp_path))
-    with patch("supernova_core.services.poc_generator.PoCGenerator.generate",
-               return_value=None) as mock_gen, \
-         patch.object(activities, "run_claude_prompt") as mock_llm:
-        await activities.generate_poc_report(_FakeInput(tmp_path))
-
-    mock_gen.assert_called_once()   # md 文档生成保留
-    mock_llm.assert_not_called()    # 不再吃结构化 POC 的 expected_response LLM
-    queue = json.loads(d.joinpath("intermediate", "xss_exploitation_queue.json")
-                       .read_text(encoding="utf-8"))
-    assert "report_poc" not in queue["vulnerabilities"][0]
-
 
 async def test_write_agent_poc_activity_writes_report_poc(tmp_path, monkeypatch):
     """§4.2 + spec 2026-08-27-poc-agent-direct-design：write_agent_poc 独立

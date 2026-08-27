@@ -10,7 +10,7 @@
 段(对齐 vuln-authz.txt)。本测试锁定这两个 prompt 必须含 reachability 语义 +
 "requires login" 区分,防回归到"零定义"。
 
-注:PoC 门控已于同期从 externally_exploitable 解耦(poc_generator.py 改为
+注:PoC 门控已于同期从 externally_exploitable 解耦(后随 poc-agent 直产退役,
 "能拼出 HTTP 形态即生成,纯非 HTTP 入口自然 skip"),ee 不再决定是否有 PoC;
 但 ee 仍是 queue 里的 reachability tag(报告严重性维度),语义正确性仍需保证。
 

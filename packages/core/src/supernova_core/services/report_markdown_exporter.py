@@ -342,7 +342,8 @@ def export_poc_collection(report_data: ReportData) -> str:
     """poc_collection.md 导出（spec §4 PoC 单源）。
 
     从 report_data.poc 导出（raw_http 优先，request 确定性拼兜底），节结构
-    对齐 poc_generator.render_poc_md：文档标题 + 概览表 + 详细 PoC
+    节结构承自 poc_generator.render_poc_md(已退役,2026-08-27 poc-agent 直产接管)：
+    文档标题 + 概览表 + 详细 PoC
     （``**curl:**`` ```bash 与 ``**Burp Repeater (raw):**`` ```http 双标签
     双 fence）；无 POC 卡整卡省略。
     """

@@ -40,6 +40,8 @@ def _fuse_card(wb: ReportVulnerability, bb: ReportVulnerability,
         # 动态证据优先（实测 > 静态推断）；verdict 以黑盒实测为准
         evidence.verification = "dynamic"
         evidence.dynamic_evidence = bb_ev.dynamic_evidence
+        # 黑盒验证步骤（分步骤命令复验的底座）随动态证据带入；白盒 static 轨为空
+        evidence.steps = bb_ev.steps
         evidence.verdict = bb_ev.verdict or evidence.verdict
         evidence.notes = bb_ev.notes or evidence.notes
     poc = bb.poc or wb.poc

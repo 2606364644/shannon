@@ -295,7 +295,7 @@ def test_vuln_view_renders_card_without_raw():
 
 
 def test_export_poc_collection_structure():
-    """poc_collection.md 对齐 poc_generator.render_poc_md 节结构：文档标题 +
+    """poc_collection.md 节结构（前身 poc_generator.render_poc_md，已退役）：文档标题 +
     概览表 + 详细 PoC（curl/Burp 双标签双 fence）。"""
     from supernova_core.services.report_markdown_exporter import (
         export_poc_collection,

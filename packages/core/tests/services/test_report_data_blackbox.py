@@ -304,3 +304,79 @@ def test_build_scan_meta_from_none_session():
     assert meta.track == "blackbox"
     assert meta.duration_ms is None
     assert meta.model is None
+
+
+# ── 结构化验证步骤贯通（验证证据展示优化，2026-08-27）──────────────────────────
+# verdict 落盘 json 的 steps（新结构化 / 旧字符串形态）→ evidence.steps 逐字保序，
+# 报告（黑盒 + 融合）天然分步骤；命令有独立字段，poc.request 优先直取。
+
+_STRUCTURED_STEPS_VERDICT = {
+    "vulnerability_id": "INJ-VULN-07",
+    "status": "exploited",
+    "severity": "high",
+    "impact": "SQLi 数据抽取。",
+    "exploitation_steps": [
+        {"action": "Confirm injection point",
+         "command": "curl -s 'http://target:4000/api/search?q=test%27'",
+         "result": "500 SyntaxError — injectable"},
+        {"action": "Enumerate columns",
+         "command": "curl -s 'http://target:4000/api/search?q=x%27+ORDER+BY+4--'",
+         "result": "200 — 4 columns"},
+    ],
+    "proof_of_impact": "users 表 5 行凭证抽取成功。",
+}
+
+
+async def test_structured_steps_flow_to_evidence_steps(tmp_path):
+    from supernova_core.services.report_data_blackbox import build_blackbox_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    _write_verdicts(d, "injection", _payload("injection", [_STRUCTURED_STEPS_VERDICT]))
+    rd = await build_blackbox_report_data(d, ScanMeta(id="bb-2", track="blackbox"))
+    v = rd.vulnerabilities[0]
+    assert v.evidence is not None and len(v.evidence.steps) == 2
+    s1 = v.evidence.steps[0]
+    assert s1.action == "Confirm injection point"
+    assert s1.command == "curl -s 'http://target:4000/api/search?q=test%27'"
+    assert s1.result == "500 SyntaxError — injectable"
+    # 步数/顺序保真（分步骤报告的数据底座）
+    assert v.evidence.steps[1].action == "Enumerate columns"
+
+
+async def test_structured_command_feeds_poc_request_first(tmp_path):
+    """poc.request 优先直取结构化 command（生成层有字段就不再靠散文正则反解）。"""
+    from supernova_core.services.report_data_blackbox import build_blackbox_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    _write_verdicts(d, "injection", _payload("injection", [_STRUCTURED_STEPS_VERDICT]))
+    rd = await build_blackbox_report_data(d, ScanMeta(id="bb-2", track="blackbox"))
+    v = rd.vulnerabilities[0]
+    assert v.poc is not None and v.poc.request is not None
+    assert v.poc.request.method == "GET"
+    assert v.poc.request.url == "http://target:4000/api/search?q=test%27"
+
+
+async def test_legacy_string_steps_normalized_into_steps(tmp_path):
+    """旧落盘 json（纯字符串步骤）→ 组装时同款归一化（剥编号+拆尾随命令）进 steps。"""
+    from supernova_core.services.report_data_blackbox import build_blackbox_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    legacy = dict(_EXPLOITED_VERDICT)
+    d = tmp_path / "deliverables"
+    _write_verdicts(d, "injection", _payload("injection", [legacy]))
+    rd = await build_blackbox_report_data(d, ScanMeta(id="bb-3", track="blackbox"))
+    v = rd.vulnerabilities[0]
+    assert v.evidence is not None and len(v.evidence.steps) == 2
+    s1, s2 = v.evidence.steps
+    assert s1.action == "Authenticate as any valid user (session cookie required)."
+    assert s1.command is None
+    # 「2. Full curl: curl '...'」→ 剥编号、散文留 action、命令拆进 command 字段
+    assert s2.action == "Full curl:"
+    assert s2.command is not None and s2.command.startswith("curl 'http://target:4000/contributions'")
+    # 无 steps 字段的 verdict（如 blocked 档）→ steps 空列表（不炸、不编造）
+    _write_verdicts(d, "xss", _payload("xss", [_BLOCKED_VERDICT]))
+    rd2 = await build_blackbox_report_data(d, ScanMeta(id="bb-4", track="blackbox"))
+    assert all(v.evidence is not None and v.evidence.steps == []
+               for v in rd2.vulnerabilities if v.type == "xss")

@@ -9,7 +9,7 @@ from supernova_core.utils.paths import COMBINED_SUBDIR, WHITEBOX_SUBDIR, resolve
 BIG_JSON_THRESHOLD = 50_000
 _EXCLUDE_DIRS = {"__pycache__", "schemas"}
 
-# PoC 生成器(poc_generator._POC_FILENAME)写入的产物文件名,report() 接口拼接用。
+# PoC 集合 md 文件名——export_report_markdown_files 单源导出(前身 poc_generator,已退役)。
 POC_FILENAME = "exploitable_poc_collection.md"
 
 

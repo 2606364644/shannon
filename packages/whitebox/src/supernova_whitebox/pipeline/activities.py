@@ -1861,38 +1861,6 @@ async def inject_gitnexus_track_status(input: ActivityInput) -> None:
 
 
 @activity.defn
-async def generate_poc_report(input: ActivityInput) -> None:
-    """【退役 2026-08-26（spec §3.1）】poc_collection.md 改由
-    export_report_markdown_files 从 report_data.poc 单源导出（poc_generator
-    的独立 HttpRequestSpec 源收编）；workflow 不再调度。
-
-    原职责：报告增强：生成 curl/Burp PoC md 文档。失败不阻塞主报告（吞异常）。
-
-    §4.2（spec 2026-08-26-vuln-card-seven-sections）：结构化 POC 写回已拆到
-    独立 activity write_agent_poc（render_findings 之前执行），本 activity
-    只保留 PoC md 生成（继续消费写回后的 report_poc）。
-    """
-    import logging
-    log = logging.getLogger(__name__)
-    try:
-        from supernova_core.services.poc_generator import PoCGenerator
-        from supernova_core.models.config import ALL_VULN_CLASSES
-
-        _, deliverables, _ = _get_paths(input)
-        await PoCGenerator.generate(
-            deliverables_dir=deliverables,
-            vuln_classes=input.vuln_classes or list(ALL_VULN_CLASSES),
-            target_url=(input.web_url or None),
-            track="whitebox",
-            repo_path=input.repo_path,
-            api_key=input.api_key,
-            provider_config=input.provider_config,   # P3c 阶段 1
-        )
-    except Exception as exc:  # noqa: BLE001 — 报告增强失败绝不阻塞主流程
-        log.warning("poc: whitebox generate_poc_report failed (non-blocking): %s", exc)
-
-
-@activity.defn
 async def write_agent_poc(input: ActivityInput) -> None:
     """poc-agent 产出写回 queue（spec 2026-08-27-poc-agent-direct-design）。
 
