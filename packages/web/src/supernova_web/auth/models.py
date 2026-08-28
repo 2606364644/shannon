@@ -16,7 +16,7 @@ class User(BaseModel):
     pinned_workspace: str | None = None
     # SSO（OA passport，spec 2026-08-25 §6）：头像 URL（浏览器直连加载；账密用户 None）
     avatar_url: str | None = None
-    # 'password' | 'sso'——账号来源（信息性；SSO 户密码为随机不可逆 hash）
+    # 'password' | 'sso'——账号来源（信息性；SSO 初建户密码按 nick+@123 设置后仅存 hash）
     auth_provider: str = "password"
 
 

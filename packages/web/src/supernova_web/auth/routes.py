@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import secrets
+import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -13,6 +13,7 @@ from .csrf import generate_csrf_token, verify_csrf
 from .dependencies import current_user, require_admin
 from .models import SsoConfig, User
 from .passwords import hash_password, verify_password
+from supernova_web.components.workspace_provisioner import ensure_user_workspace
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -158,7 +159,8 @@ def sso_login(request: Request, next: str = "/"):
 @router.get("/sso/callback")
 def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
     """OA 登录后 302 回调。校验链（spec §5.2）：开关→ticket 存在→防重放→
-    validateTicket→白名单→JIT 建户→建 session。任一失败 302 /login?sso_error=<code>。"""
+    validateTicket→白名单→按 nick 查找/创建账号→确保工作区→建 session。
+    任一失败 302 /login?sso_error=<code>。"""
     cfg = request.app.state.config
     sc = _sso_rt(request)
     store = request.app.state.auth_store
@@ -180,24 +182,45 @@ def sso_callback(request: Request, AUTH_TICKET: str = "", next: str = "/"):
         # validateTicket URL（即 ticket 明文），禁 str(exc)/__cause__/traceback 入日志。
         _log.warning("sso ticket rejected: %s (ticket=%s…)", exc.code, AUTH_TICKET[:8])
         return _fail(exc.code)
-    # 白名单为运行时开关管控（admin 可在 /users 页关闭=全员可登录）；
-    # nick_conflict 撞本地账密户护栏不随开关变化（防账号接管）。
+    # 白名单为运行时开关管控（admin 可在设置页关闭=全员可登录）。
+    # Passport 已在服务端完成 ticket / authDomain 校验；按当前业务约定，OA
+    # 返回的 nick 是权威身份，后续应复用同 nick 的既有本地账号，而不是再做
+    # 一层会让合法 SSO 登录失败的本地账号冲突拦截。
     if store.get_whitelist_enabled() and not store.is_nick_whitelisted(info.nick):
         _log.warning("sso nick not whitelisted: %r", info.nick)
         return _fail("not_whitelisted")
     store.mark_ticket_used(AUTH_TICKET)
 
-    # JIT 建户：随机不可逆密码 hash——SSO 户无法走账密登录（spec §5.2）。
-    # 撞名护栏（最终审查 Important-1）：OA nick 命中本地账密户（auth_provider != "sso"）
-    # 时拒绝——静默合并等于把本地账户拱手让给 OA 同 nick 持有者（接管面）；
-    # 不建会话、不 update_avatar，仅既有 SSO 户走复用 + avatar 刷新。
+    # OA 是本部署的权威身份源：已有账号（无论原先是 password 还是 sso）
+    # 直接复用其 id / role / 本地密码；不会改密码或角色。新账号使用
+    # “用户名+@123”作为初始本地密码，并只保存 bcrypt hash。
     user = store.get_user_by_username(info.nick)
-    if user is not None and user.auth_provider != "sso":
-        _log.warning("sso nick conflicts with local password account: %r", info.nick)
-        return _fail("nick_conflict")
+    created = False
     if user is None:
-        user = store.create_user(info.nick, hash_password(secrets.token_urlsafe(32)),
-                                 role="user", auth_provider="sso")
+        try:
+            user = store.create_user(info.nick, hash_password(f"{info.nick}@123"),
+                                     role="user", auth_provider="sso")
+            created = True
+        except sqlite3.IntegrityError:
+            # 两个不同 ticket 并发首次登录同一 OA nick 时，唯一约束可能由
+            # 另一请求先完成；重新读取后按既有账号路径继续，避免偶发 500。
+            user = store.get_user_by_username(info.nick)
+            if user is None:
+                raise
+
+    # SSO 首次登录必须同时具备同名工作区和成员关系；对既有账号也做幂等
+    # reconciliation，修复历史账号/启动对账尚未完成时的登录空窗。
+    try:
+        ensure_user_workspace(request.app.state.config.workspaces_dir, store, user)
+    except Exception:
+        if created:
+            try:
+                store.delete_user(user.id)
+            except Exception:
+                _log.exception("failed to roll back SSO user after workspace provisioning failure")
+        _log.exception("sso workspace provisioning failed for nick=%r", info.nick)
+        return _fail("workspace_provision_failed")
+
     store.update_avatar(user.id, info.avatar_url)
 
     sid = request.app.state.session_manager.create(

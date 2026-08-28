@@ -312,7 +312,11 @@ class AuthStore:
             c.execute("UPDATE users SET pinned_workspace=? WHERE id=?", (ws_name, user_id))
 
     def update_avatar(self, user_id: int, avatar_url: str | None) -> None:
-        """SSO 登录 upsert 头像（OA 头像可能变更）。账密用户不动（不调用）。"""
+        """SSO 回调 upsert 头像（OA 头像可能变更）。
+
+        既有 password 账号也可能按 OA 权威身份进入 SSO，会同步其 OA 头像；
+        该方法不修改密码、角色或 auth_provider。
+        """
         with self._conn() as c:
             c.execute("UPDATE users SET avatar_url=? WHERE id=?", (avatar_url, user_id))
 

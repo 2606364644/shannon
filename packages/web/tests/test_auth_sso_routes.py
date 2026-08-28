@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 
 from supernova_web.app import create_app
 from supernova_web.auth import sso as sso_mod
-from supernova_web.auth.passwords import hash_password
+from supernova_web.auth.passwords import hash_password, verify_password
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_sso_login_unsafe_next_falls_back(sso_client):
 
 # ---------- callback ----------
 
-def test_callback_success_creates_user_session_cookie(sso_client, monkeypatch):
+def test_callback_success_creates_user_session_cookie(sso_client, tmp_workspaces, monkeypatch):
     _mock_validate(monkeypatch)
     r = sso_client.get("/api/auth/sso/callback",
                        params={"AUTH_TICKET": "T-1", "next": "/p/ws-1"}, follow_redirects=False)
@@ -96,7 +96,10 @@ def test_callback_success_creates_user_session_cookie(sso_client, monkeypatch):
     store = sso_client.app.state.auth_store
     u = store.get_user_by_username("niu")
     assert u is not None and u.auth_provider == "sso"
+    assert verify_password("niu@123", store.get_password_hash("niu"))
     assert u.avatar_url == "https://cdn.test/a.png"
+    assert (tmp_workspaces / "niu" / "workspace.json").is_file()
+    assert store.get_workspace_member_role("niu", u.id) == "manager"
     # 会话生效
     me = sso_client.get("/api/auth/me")
     assert me.status_code == 200 and me.json()["user"]["username"] == "niu"
@@ -113,19 +116,43 @@ def test_callback_jit_idempotent_and_avatar_refresh(sso_client, monkeypatch):
     assert len(users) == 1 and users[0].avatar_url == "https://cdn.test/b.png"
 
 
-def test_callback_nick_conflicts_with_local_password_user(sso_client, monkeypatch):
-    """JIT 撞名护栏（最终审查 Important-1）：OA nick 命中本地账密户（auth_provider=password）
-    → nick_conflict 拒绝——不静默合并/接管本地账户（不建会话、不覆写本地户 avatar）。"""
+def test_callback_reuses_existing_local_password_user(sso_client, tmp_workspaces, monkeypatch):
+    """OA 身份是权威来源：同 nick 的本地账号直接建立 SSO 会话并补齐工作区。
+
+    既有账号的密码、角色和 provider 标记保持不变；SSO 只增加本次 session 的认证方式。
+    """
     _mock_validate(monkeypatch)
     store = sso_client.app.state.auth_store
     store.create_user("niu", hash_password("x" * 60), role="admin")  # 本地账密户，与白名单 nick 撞名
+    password_hash = store.get_password_hash("niu")
     r = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-conf"},
                        follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers["location"] == "/login?sso_error=nick_conflict"
+    assert r.headers["location"] == "/"
     u = store.get_user_by_username("niu")
-    assert u.auth_provider == "password" and u.avatar_url is None  # 本地户未被触碰
-    assert sso_client.get("/api/auth/me").status_code == 401  # 无新会话
+    assert u.auth_provider == "password" and u.role == "admin"
+    assert store.get_password_hash("niu") == password_hash
+    assert u.avatar_url == "https://cdn.test/a.png"
+    assert (tmp_workspaces / "niu" / "workspace.json").is_file()
+    assert store.get_workspace_member_role("niu", u.id) == "manager"
+    assert sso_client.get("/api/auth/me").json()["user"]["username"] == "niu"
+    assert store.get_session(sso_client.cookies.get("sn-sid")).auth_method == "sso"
+
+
+def test_callback_workspace_failure_rolls_back_new_user(sso_client, tmp_workspaces, monkeypatch):
+    """工作区 provision 失败时，不留下半成品 JIT 用户。"""
+    _mock_validate(monkeypatch)
+    from supernova_web.auth import routes as auth_routes
+
+    def fail(*_args, **_kwargs):
+        raise OSError("workspace unavailable")
+
+    monkeypatch.setattr(auth_routes, "ensure_user_workspace", fail)
+    r = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-ws-fail"},
+                       follow_redirects=False)
+    assert r.headers["location"] == "/login?sso_error=workspace_provision_failed"
+    assert sso_client.app.state.auth_store.get_user_by_username("niu") is None
+    assert not (tmp_workspaces / "niu").exists()
 
 
 def test_callback_not_whitelisted(sso_client, monkeypatch):
@@ -220,7 +247,7 @@ def test_whitelist_disabled_404(plain_client):
 
 def test_whitelist_off_allows_any_nick(sso_client, monkeypatch):
     """运行时开关关闭：非白名单 nick 可登录建户（用户确认的全员可登录语义）；
-    撞本地账密户护栏（nick_conflict）不随开关变化（防账号接管）。"""
+    同 nick 的本地账密户也按 OA 权威身份直接复用。"""
     _mock_validate(monkeypatch, payload={**_payload(), "data": {
         **_payload()["data"], "userInfo": {"uid": 9, "nick": "anyone", "avatarUrl": None}}})
     r1 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w1"}, follow_redirects=False)
@@ -236,13 +263,14 @@ def test_whitelist_off_allows_any_nick(sso_client, monkeypatch):
     r3 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w2"}, follow_redirects=False)
     assert r3.status_code == 302 and r3.headers["location"] == "/"
     assert sso_client.app.state.auth_store.get_user_by_username("anyone") is not None  # JIT 建户
-    # 护栏不随开关变化：关闭态下撞本地账密户仍拒（nick_conflict，不接管）
+    # 白名单关闭后，既有本地账号同样直接复用。
     sso_client.app.state.auth_store.create_user("bob", hash_password("pw12345"))
     _mock_validate(monkeypatch, payload={**_payload(), "data": {
         **_payload()["data"], "userInfo": {"uid": 10, "nick": "bob", "avatarUrl": None}}})
     r4 = sso_client.get("/api/auth/sso/callback", params={"AUTH_TICKET": "T-w3"}, follow_redirects=False)
-    assert r4.headers["location"] == "/login?sso_error=nick_conflict"
+    assert r4.status_code == 302 and r4.headers["location"] == "/"
     assert sso_client.app.state.auth_store.get_user_by_username("bob").auth_provider == "password"
+    assert sso_client.get("/api/auth/me").json()["user"]["username"] == "bob"
 
 
 def test_whitelist_toggle_guard(sso_client):

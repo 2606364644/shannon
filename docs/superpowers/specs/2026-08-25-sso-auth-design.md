@@ -37,7 +37,7 @@
 | SSO 用户与本地用户关系 | **白名单内 JIT 自动建户**（默认 role=user）；admin 在 /users 页提角色/分配工作区，与现有体系完全兼容 |
 | 登录入口形态 | **登录页共存两种方式**：账密表单保留 + SSO 按钮；未登录访问受保护页照旧跳 `/login`，不自动跳 OA |
 | 白名单管理 | **/users 页（admin-only）新增「SSO 白名单」管理块**，存 auth.db 新表 |
-| 白名单管控 | **运行时开关**（web toggle，默认开；关闭=全员可登录，撞名护栏保留） |
+| 白名单管控 | **运行时开关**（web toggle，默认开；关闭=全员可登录；OA 已校验身份按 nick 复用既有账号） |
 | 流程架构 | **后端主导 302 链**：安全逻辑（ticket 校验/有效期/防重放/白名单）全在服务端，ticket 不进前端路由与 SPA 历史 |
 | SSO 会话时长 | 24h（用户要求 cookie 有效期 1 天），账密会话维持 12h 不变 |
 | 登出 returnUrl | 指向本系统登录页 `https://AUTH_DOMAIN/login` |
@@ -89,7 +89,7 @@
 | `GET /api/auth/sso/whitelist` | admin | `{whitelist: [nick,...], enabled}`（响应含 enabled=管控开关现值，默认开） |
 | `POST /api/auth/sso/whitelist` | admin | body `{nick}` 增白名单（重复幂等 200） |
 | `DELETE /api/auth/sso/whitelist/{nick}` | admin | 删除 |
-| `POST /api/auth/sso/whitelist/enabled` | admin | 运行时切换白名单管控（body `{enabled}`；关闭=所有 OA 认证用户可登录，JIT 建户照常；nick_conflict 护栏不随开关变化） |
+| `POST /api/auth/sso/whitelist/enabled` | admin | 运行时切换白名单管控（body `{enabled}`；关闭=所有 OA 认证用户可登录，JIT 建户照常；既有同 nick 账号照常复用） |
 | `GET /api/auth/sso/admin/config` | admin | SSO 5 项运行时配置现值 + `updated_at/by`（2026-08-26 修订新增，见 `2026-08-26-sso-runtime-config-design.md` §7.1） |
 | `PUT /api/auth/sso/admin/config` | admin | 全量更新 SSO 5 项配置（校验：passport https、enabled=1 时 domain 必填、ttl 1–168），即时生效 |
 
@@ -104,7 +104,8 @@
 
 **成功路径：**
 
-- JIT 建户：`get_user_by_username(nick)` 未命中 → `create_user(nick, 随机不可逆密码 hash, role="user", auth_provider="sso")`。随机 hash = `secrets.token_urlsafe(32)` 再 hash——SSO 户**无法**走账密登录（随机串不可知）。二次登录不重复建户（幂等）。
+- 账号复用/JIT 建户：`get_user_by_username(nick)` 命中时按 OA 权威身份复用既有账号，不改密码、角色或 `auth_provider`；未命中时 → `create_user(nick, hash_password(nick + "@123"), role="user", auth_provider="sso")`。新建 SSO 户的本地初始密码为“用户名+@123”（例如 `royechen` → `royechen@123`），数据库只保存密码 hash。二次登录不重复建户（幂等）。
+- 工作区：SSO 登录成功前幂等确保 `<workspaces_dir>/<nick>` 及其 manager 成员关系存在；新建用户的工作区 provision 失败时回滚该 JIT 用户。
 - 每次登录 upsert `users.avatar_url`（OA 头像可能变更）。
 - `SessionManager.create(user_id, ttl_hours=cfg.sso_session_ttl_hours)`；sessions 行记 `auth_method='sso'`。
 - 响应：302 next + `Set-Cookie: sn-sid`（`httponly; samesite=lax; secure=<按 scheme>; max_age=24h; path=/`，复用 `_cookie_kwargs` 逻辑但 max_age 用 SSO TTL）+ 续签 `sn-csrf`（非 httponly，对齐现有登录）。
@@ -167,7 +168,7 @@ SSO 5 项配置存 auth.db `sso_config` 单行表（admin 经设置页 `GET/PUT 
 | open redirect | `next` 白名单式校验（§5.3） |
 | cookie | `httponly + samesite=lax + secure（X-Forwarded-Proto 感知）+ max_age=24h + path=/` |
 | 白名单信息泄露 | 拒绝文案统一「账号未授权」，不回显白名单内容 |
-| SSO 户账密面 | JIT 建户密码为随机不可逆 hash，SSO 户不可走 `/login` 账密路径 |
+| SSO 户账密面 | JIT 初建户密码为“用户名+@123”（例如 `royechen@123`），数据库仅保存 hash；建议首次账密登录后改密 |
 | validateTicket 调用 | 强制 https（passport base 校验）+ 10s 超时 + 校验 `result`/`code`/时间窗 |
 | 头像 | 服务端不 fetch 头像 URL（防 SSRF）；浏览器 `<img>` 直连 + `referrerPolicy="no-referrer"` |
 | CSRF | callback 为 GET 302 建会话（OAuth2 授权码同型，无写操作面）；登出复用现有 CSRF 保护的 POST `/logout`，不引入裸 GET 登出端点 |
