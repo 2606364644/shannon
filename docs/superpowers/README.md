@@ -62,6 +62,7 @@
 - [max-concurrent-env](plans/2026-06-22-max-concurrent-env.md) / [spec](specs/2026-06-22-max-concurrent-env-design.md) — 最大并发 env
 - [token-caching](specs/2026-06-26-token-caching-design.md) — token 缓存（仅 spec）📐
 - [remove-minimal-fallback-hard-fail](plans/2026-06-24-remove-minimal-fallback-hard-fail.md) / [spec](specs/2026-06-24-remove-minimal-fallback-hard-fail-design.md) — 移除 minimal fallback 硬失败
+- [global-pricing-console](specs/2026-08-28-global-pricing-console-design.md) — 全局 + 工作区两级定价管理 web 控制台（定价分层 内置<profile env<全局表<工作区覆盖 + PricingEditor 复用组件 + 界面保存即接管）📐 仅 spec 未实施
 
 ### resume / rerun
 - [resume](plans/2026-06-18-resume.md) / [spec](specs/2026-06-18-resume-design.md) · [resume-and-rerun](specs/2026-06-19-resume-and-rerun-design.md) — resume/rerun 机制
