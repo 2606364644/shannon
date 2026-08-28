@@ -13,6 +13,9 @@ export type AuthUser = {
   pinned_workspace?: string | null;
   // SSO 用户头像（OA userInfo.avatarUrl；浏览器 <img> 直连加载，服务端不代理）
   avatar_url?: string | null;
+  // per-user UI 主题（2026-08-28）：跟账号走、跨设备一致。null=从未自配
+  //（前端回落 localStorage 首帧缓存 / OS 默认）。经 /auth/me 与 login 响应返回。
+  theme?: string | null;
 };
 export type AuthState = {
   user: AuthUser | null;

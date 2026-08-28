@@ -16,6 +16,10 @@ class User(BaseModel):
     pinned_workspace: str | None = None
     # SSO（OA passport，spec 2026-08-25 §6）：头像 URL（浏览器直连加载；账密用户 None）
     avatar_url: str | None = None
+    # per-user UI 主题（2026-08-28）：跟账号走、跨设备一致、与工作区无关。
+    # 值域 = 前端 theme.ts ThemeId 全集（含 "system"）；None = 从未自配（前端回落
+    # localStorage 缓存 / OS 默认）。写入方唯一：PUT /api/users/me/theme（白名单校验）。
+    theme: str | None = None
     # 'password' | 'sso'——账号来源（信息性；SSO 初建户密码按 nick+@123 设置后仅存 hash）
     auth_provider: str = "password"
 

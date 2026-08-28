@@ -17,6 +17,9 @@ const mockUser = {
 };
 
 vi.mock("@/auth/AuthContext", () => ({
+  // AuthContext 原始 context 也要 mock：theme-context 消费它做 per-user 主题校准
+  //（null=未登录），缺这个导出 import 即崩。
+  AuthContext: { Provider: ({ children }: { children?: unknown }) => children, Consumer: () => null },
   useAuth: () => ({
     user: mockUser,
     loading: false,

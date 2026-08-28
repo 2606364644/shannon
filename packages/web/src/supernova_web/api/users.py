@@ -30,6 +30,30 @@ class PinnedWorkspaceIn(BaseModel):
     workspace: str
 
 
+# per-user UI 主题白名单（2026-08-28）＝前端 theme.ts 的 ThemeId 全集（THEMES + "system"）。
+# 新增主题时须同步：tokens.css/theme.ts/i18n 之外的第 5 处（见 memory 新增主题步骤）。
+# 严格白名单而非宽松存：新主题忘加此处是显式失败（422 可排查），优于脏值静默入库。
+VALID_THEMES = frozenset({
+    "system", "charcoal", "warm-paper", "mac", "midnight", "graphite",
+    "sentry", "arc", "mission", "github", "notion", "kami", "blueprint", "openai",
+})
+
+
+class ThemeIn(BaseModel):
+    theme: str
+
+
+@router.put("/me/theme")
+async def set_theme(body: ThemeIn, request: Request,
+                    user: User = Depends(current_user)):
+    """per-user UI 主题（跟账号走，跨设备一致，与工作区无关）。任何登录用户可自配。"""
+    _check_csrf(request)
+    if body.theme not in VALID_THEMES:
+        raise HTTPException(422, f"invalid theme: {body.theme!r}")
+    request.app.state.auth_store.update_theme(user.id, body.theme)
+    return {"theme": body.theme}
+
+
 @router.put("/me/pinned-workspace")
 async def set_pinned_workspace(body: PinnedWorkspaceIn, request: Request,
                                user: User = Depends(current_user)):

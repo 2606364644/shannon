@@ -156,8 +156,9 @@ export function oppositeBaseTheme(mode: ThemeMode): Exclude<ThemeId, "system"> {
 }
 
 /** 存储值归一：旧 "dark"/"light" → "charcoal"/"warm-paper"；"frost"（改名前旧 id）
-    → "mac"；非法值 → null。 */
-function normalizeStored(v: string | null): ThemeId | null {
+    → "mac"；非法值 → null。导出供 theme-context 校准后端 user.theme 时复用（2026-08-28
+    per-user 主题：后端白名单挡写入，此处归一是脏值防御层）。 */
+export function normalizeStored(v: string | null): ThemeId | null {
   switch (v) {
     case "dark":
       return "charcoal";

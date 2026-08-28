@@ -54,6 +54,10 @@ _ADD_AVATAR_COL = "ALTER TABLE users ADD COLUMN avatar_url TEXT"
 _ADD_PROVIDER_COL = "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'"
 _ADD_AUTH_METHOD_COL = "ALTER TABLE sessions ADD COLUMN auth_method TEXT DEFAULT 'password'"
 
+# theme 列后加（2026-08-28 per-user UI 主题）。同上幂等补列：新库 ALTER 成功建列，
+# 列已存（二次 init / 已升级库）-> OperationalError 吞掉。
+_ADD_THEME_COL = "ALTER TABLE users ADD COLUMN theme TEXT"
+
 _SSO_SCHEMA = """
 CREATE TABLE IF NOT EXISTS sso_whitelist (
   nick TEXT PRIMARY KEY,
@@ -116,6 +120,10 @@ class AuthStore:
                 c.execute(_ADD_AUTH_METHOD_COL)  # 同上：首次 init 建列成功；列已存 -> 吞掉
             except sqlite3.OperationalError:
                 pass
+            try:
+                c.execute(_ADD_THEME_COL)  # per-user 主题（2026-08-28）；幂等补列同上
+            except sqlite3.OperationalError:
+                pass
 
     def create_user(self, username: str, password_hash: str, role: str = "user",
                     must_change: bool = False, auth_provider: str = "password") -> User:
@@ -133,12 +141,13 @@ class AuthStore:
     def get_user_by_username(self, username: str) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role, must_change_password, pinned_workspace, avatar_url, auth_provider FROM users WHERE username=?", (username,)
+                "SELECT id, username, role, must_change_password, pinned_workspace, avatar_url, auth_provider, theme FROM users WHERE username=?", (username,)
             ).fetchone()
         return User(id=row[0], username=row[1], role=row[2],
                     must_change_password=bool(row[3]),
                     pinned_workspace=row[4],
-                    avatar_url=row[5], auth_provider=row[6]) if row else None
+                    avatar_url=row[5], auth_provider=row[6],
+                    theme=row[7]) if row else None
 
     def get_password_hash(self, username: str) -> str | None:
         with self._conn() as c:
@@ -150,12 +159,13 @@ class AuthStore:
     def get_user(self, user_id: int) -> User | None:
         with self._conn() as c:
             row = c.execute(
-                "SELECT id, username, role, must_change_password, pinned_workspace, avatar_url, auth_provider FROM users WHERE id=?", (user_id,)
+                "SELECT id, username, role, must_change_password, pinned_workspace, avatar_url, auth_provider, theme FROM users WHERE id=?", (user_id,)
             ).fetchone()
         return User(id=row[0], username=row[1], role=row[2],
                     must_change_password=bool(row[3]),
                     pinned_workspace=row[4],
-                    avatar_url=row[5], auth_provider=row[6]) if row else None
+                    avatar_url=row[5], auth_provider=row[6],
+                    theme=row[7]) if row else None
 
     def update_password(self, user_id: int, new_hash: str) -> None:
         """改密码：写新 hash 并把 must_change_password 置 0（改密即脱默认密码提醒）。"""
@@ -255,12 +265,12 @@ class AuthStore:
     def list_all_users(self) -> list["User"]:
         with self._conn() as c:
             rows = c.execute(
-                "SELECT id, username, role, must_change_password, created_at, pinned_workspace, avatar_url, auth_provider FROM users ORDER BY id"
+                "SELECT id, username, role, must_change_password, created_at, pinned_workspace, avatar_url, auth_provider, theme FROM users ORDER BY id"
             ).fetchall()
         return [User(id=r[0], username=r[1], role=r[2],
                      must_change_password=bool(r[3]), created_at=r[4],
                      pinned_workspace=r[5], avatar_url=r[6],
-                     auth_provider=r[7]) for r in rows]
+                     auth_provider=r[7], theme=r[8]) for r in rows]
 
     def delete_user(self, user_id: int) -> None:
         """删用户：单事务清 workspace_members + sessions + users。
@@ -319,6 +329,12 @@ class AuthStore:
         """
         with self._conn() as c:
             c.execute("UPDATE users SET avatar_url=? WHERE id=?", (avatar_url, user_id))
+
+    def update_theme(self, user_id: int, theme: str | None) -> None:
+        """per-user UI 主题（2026-08-28）。theme=None 清除（回落 localStorage/默认）。
+        值域校验在 route 层（白名单与前端 theme.ts 同步）。"""
+        with self._conn() as c:
+            c.execute("UPDATE users SET theme=? WHERE id=?", (theme, user_id))
 
     # ── SSO 白名单 / 防重放（spec 2026-08-25 §5.2/§6）─────────────────────────
 

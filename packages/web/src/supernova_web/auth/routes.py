@@ -51,7 +51,8 @@ def _user_out(u: User) -> dict:
             "must_change_password": u.must_change_password,
             "pinned_workspace": u.pinned_workspace,
             "avatar_url": u.avatar_url,
-            "auth_provider": u.auth_provider}
+            "auth_provider": u.auth_provider,
+            "theme": u.theme}
 
 
 def _check_csrf(request: Request) -> None:
