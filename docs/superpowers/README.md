@@ -84,6 +84,7 @@
 - [cross-repo-correlation-web-revival](plans/2026-08-24-cross-repo-correlation-web-revival.md) / [spec](specs/2026-08-24-cross-repo-correlation-web-revival-design.md) — 跨仓关联扫描 web 复活（三段接力 C1 化 + 前端重做）
 - [blackbox-exploit-outcome-field-mapping](plans/2026-06-29-blackbox-exploit-outcome-field-mapping.md) / [spec](specs/2026-06-29-blackbox-exploit-outcome-field-mapping-design.md) — 黑盒 exploit AgentOutcome 字段映射 🔧
 - [blackbox-exploit-structured-output](plans/2026-06-29-blackbox-exploit-structured-output.md) / [spec](specs/2026-06-29-blackbox-exploit-structured-output-design.md) — 黑盒 exploit 产物结构化校验护栏
+- [combined-finalize-run-awareness](specs/2026-08-28-combined-finalize-run-awareness-design.md) — combined 收口感知 run 终态（根级 completed 携带 failed_runs 明细不掩盖 / 全 run 失败降级）📐 仅 spec 未实施
 
 ### 报告增强 / PoC
 - [exploitable-poc-generation](plans/2026-07-02-exploitable-poc-generation.md) / [spec](specs/2026-07-02-exploitable-poc-generation-design.md) — 外部可达漏洞 curl/Burp PoC 自动生成（黑白盒通用）🔧
