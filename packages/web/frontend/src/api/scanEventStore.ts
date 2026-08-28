@@ -5,13 +5,15 @@ export interface SseSnapshot {
   events: NdjsonEvent[];
   status: SseStatus;
   lastEventId?: string;
+  /** 首轮历史回放已追平；stream_ready 之前列表继续显示 API 快照。 */
+  hydrated: boolean;
   version: number;
 }
 
 /** 尾部保留条数（spec §7.1）：LogStream 虚拟化阈值 500 的 10 倍余量。 */
 const CAP = 5000;
 
-const EMPTY_SNAPSHOT: SseSnapshot = { events: [], status: "closed", version: 0 };
+const EMPTY_SNAPSHOT: SseSnapshot = { events: [], status: "closed", hydrated: false, version: 0 };
 
 /** jsdom 无 rAF 时的降级（setTimeout 宏任务）。 */
 const scheduleRaf = (cb: () => void): number =>
@@ -26,6 +28,8 @@ const cancelRaf = (id: number): void => {
 /** useSyncExternalStore 协议的 SSE 外部 store（spec §E）：
  *  - rAF 批量：onmessage 只入 pending 并调度一次，flush 时合并追加 + 重建快照
  *    （两次 flush 之间 getSnapshot 引用恒定——useSyncExternalStore 的硬要求）。
+ *  - 首轮回放边界：后端 stream_ready 到达后才将 hydrated 置 true；列表在此之前
+ *    使用 GET 快照，不把 offset=0 的历史 phase 中间态画成进度跳变。
  *  - 环形缓冲：events 尾部截断至 CAP，消除逐条数组复制与无界增长。
  *  - SSE id 去重：重连/换 URL 重开流时服务端可能重放历史事件（归并流按全源
  *    offset 快照编 id，同事件 id 恒定），按 lastEventId 去重保证幂等。
@@ -36,6 +40,7 @@ class ScanEventStore {
   private events: NdjsonEvent[] = [];
   private status: SseStatus = "closed";
   private lastEventId?: string;
+  private hydrated = false;
   private seenIds = new Set<string>();
   private snapshot: SseSnapshot = EMPTY_SNAPSHOT;
   private es: EventSource | null = null;
@@ -83,6 +88,12 @@ class ScanEventStore {
         this.seenIds.add(e.lastEventId);
         this.lastEventId = e.lastEventId;
       }
+      if (ev.type === "stream_ready") {
+        // 控制帧只负责打开首轮回放闸门，不进入 dashboard 事件历史。
+        this.hydrated = true;
+        this.scheduleFlush();
+        return;
+      }
       if (ev.type === this.stopType) { this.status = "closed"; es.close(); }
       this.pending.push(ev);
       this.scheduleFlush();
@@ -105,6 +116,7 @@ class ScanEventStore {
       events: this.events,
       status: this.status,
       lastEventId: this.lastEventId,
+      hydrated: this.hydrated,
       version: this.snapshot.version + 1,
     };
     for (const cb of this.listeners) cb();

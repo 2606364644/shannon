@@ -72,6 +72,18 @@ function fmtTimeFull(unix?: number | null): string {
   return new Date(unix * 1000).toLocaleString();
 }
 
+/** 在一次任务生命周期内保持进度不回退；续跑/状态切换通过 key 重置。 */
+function useMonotonicPct(key: string, candidate: number): number {
+  const [state, setState] = useState(() => ({ key, value: candidate }));
+  useEffect(() => {
+    setState((prev) => {
+      if (prev.key !== key) return { key, value: candidate };
+      return candidate > prev.value ? { key, value: candidate } : prev;
+    });
+  }, [key, candidate]);
+  return state.key === key ? Math.max(state.value, candidate) : candidate;
+}
+
 /** 从 SSE events 推当前阶段（最后一条 PhaseEvent(start).phase）；无则 null。
  *  列表行粗粒度用：纯白盒/纯黑盒段标签后缀（如「白盒 · recon」）。 */
 function useCurrentPhase(events: { type: string; event?: string; phase?: string }[]): string | null {
@@ -320,15 +332,22 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   // 运行中行按需建 SSE 推实时阶段（粗粒度：段标签后缀）；终态/非运行中不建（url=""）。
   // 列表页粗粒度——精确步级/Agent 在扫描详情页顶部。scan_end → 刷新列表拿终态（漏洞数/状态）。
   const sseUrl = isRunning ? scanEventsUrl(ws, scan.scan_id) : "";
-  const { events } = useEventSource(sseUrl);
+  const { events, hydrated } = useEventSource(sseUrl);
   const currentPhase = useCurrentPhase(events);
+  // 与进度百分比同样等待首轮回放边界，避免列表副标签也随历史 phase 逐帧闪动。
+  const displayedPhase = hydrated ? currentPhase : null;
   // 实时进度（2026-08-27 修复列表进度不动；2026-08-28 组合口径修正）：progress_pct 的
   // 分子 completed_agents 只在 workflow 结束才落盘 session.json，运行中恒定 → 进度条
   // 钉死。改为 fold 已订阅的 SSE 归并流取实时进度——组合扫描按 src 源标记套三阶段
   // 加权（白盒满格=55% 而非 100%，黑盒段 55→100，对齐后端 _compute_progress_pct /
   // spec §9.2），纯白盒/correlation 保持当前 phase 直读（reducer 是当前 phase 口径，
   // 单段即全部/累积网格）。无 src（旧后端流）或 total=0 → null，展示层回退 progress_pct。
-  const livePct = useMemo(() => liveScanPct(events, scan), [events, scan]);
+  // 首轮 SSE 历史回放未追平前，不拿中间 fold 值覆盖 API 快照；否则首次进入列表
+  // 会把历史每个 phase 的临时比例逐个画出来。stream_ready 到达后再切到当前值。
+  const livePct = useMemo(
+    () => (hydrated ? liveScanPct(events, scan) : null),
+    [events, scan, hydrated],
+  );
   useEffect(() => {
     if (events.some((e) => e.type === "scan_end")) onChanged();
   }, [events, onChanged]);
@@ -404,7 +423,12 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
 
   const v = scan.vuln_count ?? 0;
   // SSE 实时进度优先（见上 livePct 注释）；无实时数据回退轮询快照 progress_pct。
-  const pct = livePct ?? Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
+  const fallbackPct = Math.max(0, Math.min(100, Math.round(scan.progress_pct ?? 0)));
+  const candidatePct = livePct ?? fallbackPct;
+  // 进度是单调展示量：PhaseEvent(start) 会让 dashboardReducer 切换到新 phase
+  // 并暂时回到 0；列表不能把已走过的进度倒放。workflow_id 变化（续跑）时重置。
+  const pctKey = `${scan.scan_id}:${scan.workflow_id ?? scan.created_at}:${isRunning ? "running" : scan.status}`;
+  const pct = useMonotonicPct(pctKey, Math.max(0, Math.min(100, candidatePct)));
   const dur = fmtDur(scan.total_duration_ms);
 
   return (
@@ -482,7 +506,7 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
               <div className="flex items-baseline gap-1.5">
                 <span className="font-mono text-[13px] font-semibold leading-none">{pct}%</span>
                 <span className="whitespace-nowrap text-[11px] text-muted-foreground">
-                  {scanSegmentLabel(scan, currentPhase, t)}
+                  {scanSegmentLabel(scan, displayedPhase, t)}
                 </span>
               </div>
               <span

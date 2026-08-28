@@ -26,6 +26,8 @@
   「误写任务级 scan_end 而 run 实际在跑」的场景。负值禁用。
 - **顺序**：每轮 poll 内各源新增行按 ``ts`` 排序输出（解析失败/缺失按源优先级稳定
   兜底：ac < wb < run-K）。各段（认证→白盒→黑盒）时间上不重叠，ts 排序为防御。
+- **首轮边界**：首次 poll 归并完已有文件后发送一次 ``stream_ready`` 控制帧；它不带
+  SSE id、也不进入磁盘事件历史，只告诉前端可以从 GET 快照切换到实时 fold。
 """
 from __future__ import annotations
 
@@ -158,11 +160,23 @@ class MergedEventTailer:
         waited = 0.0
         closable_since: float | None = None
         loop = asyncio.get_running_loop()
+        # 首轮 poll 结束后给前端一个明确的「历史回放已追平」边界。
+        # EventSource 初次连接不会携带 Last-Event-ID，前端会从 offset=0 收到整段
+        # events.ndjson；没有边界时列表会把历史 PhaseEvent 逐条当成实时进度，出现
+        # 5→22→38→5→49… 的回放抖动。ready 本身不带 SSE id，沿用上一条真实事件
+        # 的 Last-Event-ID，避免和同 offset 的真实 scan_end 产生伪重复。
+        stream_ready_sent = False
         while True:
             self._discover(resume)
             for source in self._sources.values():
                 await self._pump(source)
             emitted = await self._drain(on_event)
+            if not stream_ready_sent:
+                await on_event(
+                    {"ts": datetime.now().isoformat(),
+                     "category": "CONTROL", "type": "stream_ready"},
+                    None)
+                stream_ready_sent = True
             if emitted:
                 waited = 0.0
             # 终态判定：wb scan_end 已见（扣住）+ 所有已见 run 源各自见过 scan_end

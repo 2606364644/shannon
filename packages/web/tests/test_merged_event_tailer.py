@@ -37,7 +37,8 @@ class _Collector:
 
     async def cb(self, data: dict, event_id) -> None:
         self.events.append(data)
-        self.ids.append(str(event_id))
+        if event_id is not None:
+            self.ids.append(str(event_id))
         if data.get("type") == "scan_end":
             self.done.set()
 
@@ -87,8 +88,13 @@ async def test_orders_by_ts_across_sources(tmp_path):
             + _line({"type": "scan_end", "ts": "2026-08-17T16:04:21Z", "status": "completed"}))
 
     c = await _collect(MergedEventTailer(scan))
-    # ts 序：认证 → 白盒 → 黑盒；ac 的 scan_end 不出现
+    # ts 序：认证 → 白盒 → 黑盒；ac 的 scan_end 不出现。
+    # stream_ready 位于首轮历史回放之后、最终 scan_end 之前，供前端一次性切换到
+    # 当前进度，不能把回放中的中间 phase 比例逐条画出来。
     assert _msgs(c.events) == ["ac-1", "wb-1", "bb-1"]
+    ready_i = next(i for i, e in enumerate(c.events) if e["type"] == "stream_ready")
+    assert ready_i > 0 and c.events[ready_i].get("src") is None
+    assert c.events[ready_i]["type"] == "stream_ready"
     # run 收尾改写 run_end 并带 run 标签
     run_end = next(e for e in c.events if e["type"] == "run_end")
     assert run_end["run"] == "run-1" and run_end["status"] == "completed"

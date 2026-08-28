@@ -21,10 +21,10 @@ vi.mock("react-router-dom", async () => {
 // 进度条应由 events fold（dashboardReducer，详情页同机制）实时驱动。默认空数组
 // （等价 jsdom 无 EventSource 的现状），既有用例零影响。
 const { sseState } = vi.hoisted(() => ({
-  sseState: { events: [] as unknown[] },
+  sseState: { events: [] as unknown[], hydrated: true },
 }));
 vi.mock("@/api/useEventSource", () => ({
-  useEventSource: () => ({ events: sseState.events, status: "closed" as const }),
+  useEventSource: () => ({ events: sseState.events, status: "closed" as const, hydrated: sseState.hydrated }),
 }));
 
 const running = {
@@ -118,6 +118,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 beforeEach(() => {
   i18n.changeLanguage("zh"); listCalls = 0; navMock.mockClear();
   sseState.events = [];
+  sseState.hydrated = true;
 });
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
@@ -495,6 +496,48 @@ describe("ScanList 运行行实时进度（2026-08-27 修复：列表进度不�
   // 2026-08-28 组合口径修正：reducer 是「当前 phase」口径（PhaseEvent(start) 重置
   // units），白盒最后 phase 收尾后 fold=N/N=100% 而黑盒未跑——列表行按 src 源标记
   // 套三阶段加权（白盒 5+50×ratio / 黑盒 55+45×ratio，对齐后端 _compute_progress_pct）。
+  it("首轮 SSE 回放未追平时保持 API 快照，ready 后再切实时值", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["a", "b"], step_intents: ["", ""] },
+      { type: "StepEvent", name: "a", phase: "recon", event: "complete" },
+    ];
+    sseState.hydrated = false;
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    const view = renderList();
+    expect(await screen.findByText("5%" /* API progress_pct */)).toBeInTheDocument();
+
+    sseState.hydrated = true;
+    view.rerender(
+      <MemoryRouter initialEntries={["/p/ws"]}>
+        <Routes><Route path="/p/:workspace" element={<ScanList />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("历史回放切 phase 时进度不倒退", async () => {
+    sseState.events = [
+      { type: "PhaseEvent", phase: "setup", event: "start", steps: ["a", "b"], step_intents: ["", ""], src: "wb" },
+      { type: "StepEvent", name: "a", phase: "setup", event: "complete", src: "wb" },
+    ];
+    server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([running])));
+    const view = renderList();
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+
+    // 新 phase 的当前 fold 回到 0；列表展示应保持已走过的 50%。
+    sseState.events = [
+      ...sseState.events,
+      { type: "PhaseEvent", phase: "recon", event: "start", steps: ["next"], step_intents: [""], src: "wb" },
+    ];
+    view.rerender(
+      <MemoryRouter initialEntries={["/p/ws"]}>
+        <Routes><Route path="/p/:workspace" element={<ScanList />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  });
+
   it("组合扫描白盒段满格 -> 55% 而非 100%（黑盒未跑不谎报完成）", async () => {
     sseState.events = [
       { type: "PhaseEvent", phase: "recon", event: "start", steps: ["step-a", "step-b"], step_intents: ["", ""], src: "wb" },

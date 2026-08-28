@@ -23,9 +23,11 @@ async def build_scan_events_response(request: Request, scan_dir: Path) -> Stream
 
     scans.py 的 GET /{ws}/scans/{scan_id}/events 调本函数。认证(authcheck)/白盒(任务根
     events)/黑盒(所有 run-K events)按 ts 归并为一条流，SSE id 为全源 offset 快照支持
-    Last-Event-ID 按源断点续传；wb 的 scan_end 扣发直到全 run 终态（防任务级误判提前
-    关流）。孤儿对账 per-scan：scan 非在跑 + 无 scan_end -> 补 scan_end（让 SSE 立即
-    有关流信号 + 失败原因，而非空等 idle_timeout 后关流再被前端重连死循环）。
+    Last-Event-ID 按源断点续传；首轮历史回放完成后发送一次 ``stream_ready`` 控制事件，
+    让列表在回放期间继续使用 GET 快照，避免把历史 phase 中间态画成进度跳变；wb 的
+    scan_end 扣发直到全 run 终态（防任务级误判提前关流）。孤儿对账 per-scan：scan 非
+    在跑 + 无 scan_end -> 补 scan_end（让 SSE 立即有关流信号 + 失败原因，而非空等
+    idle_timeout 后关流再被前端重连死循环）。
     """
     # 判活 per-scan（heartbeat），非 ws 级 pid（C1 容器无本机 pid）。
     from supernova_core.session import SessionManager

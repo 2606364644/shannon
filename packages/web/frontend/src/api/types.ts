@@ -95,6 +95,10 @@ export interface CorrelationProgressEvent extends CommonFields {
   type: "correlation_progress"; node: "repo" | "phase" | "edge"; name: string;
   status: "started" | "completed" | "failed"; detail?: string;
 }
+/** 归并 SSE 的首轮回放边界；不是磁盘事件，不参与 dashboard fold。 */
+export interface StreamReadyEvent extends CommonFields {
+  type: "stream_ready";
+}
 
 // src：归并流源标记（MergedEventTailer 注入：ac=认证预检 / wb=任务根（组合即白盒段）/
 // run-K=黑盒 run；单文件流与旧后端不带）。组合扫描列表进度三阶段加权判段用
@@ -103,7 +107,8 @@ export interface CorrelationProgressEvent extends CommonFields {
 export type NdjsonEvent =
   ((WorkflowHeaderEvent | PhaseEvent | StepEvent | AgentEvent | ToolCallEvent
   | LlmTurnEvent | InfoEvent | ErrorEvent | SummaryEvent | ResumeEvent
-  | GitnexusLlmEvent | ScanEndEvent | RunEndEvent | CorrelationProgressEvent | LogEventEvent
+  | GitnexusLlmEvent | ScanEndEvent | RunEndEvent | CorrelationProgressEvent | StreamReadyEvent
+  | LogEventEvent
   ) & { src?: string });
 
 // === API 响应类型（对齐 backend-design.md）===

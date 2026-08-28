@@ -7,10 +7,12 @@ export interface UseEventSource {
   events: NdjsonEvent[];
   status: SseSnapshot["status"];
   lastEventId?: string;
+  hydrated: boolean;
 }
 
 /** SSE 订阅 hook（spec §E）：scanEventStore 的薄包装。url 为空（scanId 未就绪）时
- *  不连接。快照由 store 维持引用稳定，useSyncExternalStore 不会空转。 */
+ *  不连接。快照由 store 维持引用稳定，useSyncExternalStore 不会空转；hydrated 表示
+ *  首轮 offset=0 历史回放已收到 stream_ready。 */
 export function useEventSource(url: string, stopType: string = "scan_end"): UseEventSource {
   // getScanEventStore 是按 key 幂等的纯 Map 访问（连接在 subscribe 时才建立），
   // 渲染期调用安全；url 为空时不取 store。
@@ -23,5 +25,11 @@ export function useEventSource(url: string, stopType: string = "scan_end"): UseE
     () => (store ? store.getSnapshot() : EMPTY_SNAPSHOT),
     [store],
   );
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return {
+    events: snapshot.events,
+    status: snapshot.status,
+    lastEventId: snapshot.lastEventId,
+    hydrated: snapshot.hydrated,
+  };
 }

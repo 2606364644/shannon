@@ -84,6 +84,19 @@ describe("scanEventStore", () => {
     expect(FakeEventSource.instances[0]!.closed).toBe(true); // 归零关连接
   });
 
+  it("stream_ready：首轮历史回放追平后标记 hydrated", () => {
+    const store = getScanEventStore("/sse", "scan_end");
+    store.subscribe(vi.fn());
+    const es = FakeEventSource.instances[0]!;
+    expect(store.getSnapshot().hydrated).toBe(false);
+    es.onmessage?.({
+      data: JSON.stringify({ type: "stream_ready", ts: "t1", category: "CONTROL" }),
+    });
+    flush();
+    expect(store.getSnapshot().hydrated).toBe(true);
+    expect(store.getSnapshot().events).toHaveLength(0); // 控制帧不进入 dashboard 历史
+  });
+
   it("scan_end：status=closed + 关连接 + 事件仍入列", () => {
     const store = getScanEventStore("/sse", "scan_end");
     store.subscribe(vi.fn());
