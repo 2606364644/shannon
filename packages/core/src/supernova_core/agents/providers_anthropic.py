@@ -659,7 +659,17 @@ class AnthropicProvider(BaseProvider):
         model: str,
     ) -> ClaudeRunResult:
         """处理错误 — 使用 classify_error_for_temporal 进行集中式分类"""
-        error_msg = str(error)
+        # 异常路径可观测性（2026-08-28 NodeGoat-20260828-054537 后续）：type/repr 必须
+        # 落盘——此前该分支无任何日志，而 375ba4c2 的可观测性只覆盖 ResultMessage 路径
+        # （L2 result-failure），异常路径是黑洞：CLI 层静默失败时根因无从定位。
+        logger.warning(
+            "provider exception path: type=%s error=%r duration_ms=%s",
+            type(error).__name__, error, duration,
+        )
+        # 空消息异常兜底：str(e) 为空（如无参 TimeoutError()）时保类型名——
+        # 否则 error=""（falsy）→ executor 侧 `result.error or fallback` 落 fallback
+        # 消息，分类信息（error_code）与原始形态全部丢失（现场实证形态）。
+        error_msg = str(error) or repr(error)
 
         # 检查是否是花费上限错误（Layer 3 异常级检测）
         if self._is_spending_cap_error(error_msg):

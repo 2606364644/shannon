@@ -383,6 +383,16 @@ class AgentExecutor:
             context = _result_cost_context(result)
             if isinstance(result.error_code, str) and not isinstance(result.error_code, ErrorCode):
                 context["provider_error_code"] = result.error_code
+            if not result.error:
+                # 空 error 防漏（2026-08-28 NodeGoat-20260828-054537 后续）：error 在到达
+                # executor 前已丢失（falsy → 落 fallback 消息）——这一事实必须留痕，
+                # 兜住 provider 上游任何再丢 error 的路径（warning 里带定位上下文）。
+                logger.warning(
+                    "agent failure with empty result.error — upstream error lost "
+                    "(agent=%s error_code=%s retryable=%s turns=%s cost=%s stop_reason=%s)",
+                    agent_name.value, result.error_code, result.retryable,
+                    result.turns, result.cost, result.stop_reason,
+                )
             raise PentestError(
                 result.error or f"Agent {agent_name.value} execution failed",
                 "validation",
