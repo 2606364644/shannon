@@ -8,6 +8,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError, CancelledError
 
 from supernova_core.models.agents import AgentName, ALL_VULN_CLASSES
+from supernova_core.runtime.temporal_heartbeat import is_cancellation
 from supernova_core.agents.progress_tool import AUTH_VALIDATION_PROGRESS
 from supernova_core.utils.paths import (
     resolve_deliverables_path,
@@ -431,6 +432,12 @@ class BlackboxScanWorkflow:
                         *[bounded_exploit(task, vt, agent_name) for vt, agent_name, task in exploit_tasks],
                         return_exceptions=True,
                     )
+                    # 取消放行（spec 2026-08-28-temporal-native-cancel-design 修 0）：
+                    # return_exceptions=True 会把 activity 取消的 ActivityError 收进结果
+                    # 列表——不放行则 workflow 继续跑 reporting（幽灵扫描机制，T1 探针钉死）。
+                    for _r in results:
+                        if isinstance(_r, BaseException) and is_cancellation(_r):
+                            raise _r
 
                     # Build AgentOutcome list from results
                     outcomes: list[AgentOutcome] = []
@@ -541,6 +548,13 @@ class BlackboxScanWorkflow:
             self._state.current_phase = None
             return self._state
         except Exception as e:
+            # 取消类异常按 cancelled 语义收尾（spec 2026-08-28 修 0）：cancel 注入丢失时
+            # 取消以 ActivityError(cause=CancelledError) 形态上抛到这——不放行会被标
+            # failed（语义失真）。对齐上方 except CancelledError 分支。
+            if is_cancellation(e):
+                self._state.status = "cancelled"
+                self._state.current_phase = None
+                return self._state
             # session-status 同步(对齐 whitebox):workflow-level 失败 → state.status=failed +
             # return(不 raise,Temporal 标 COMPLETED)。不调 finalize_activity(规避
             # finalize_report 签名依赖);session 落盘靠 blackbox CLI worker.py 正常路径
@@ -714,7 +728,9 @@ class AuthValidationWorkflow:
                 retry_policy=retry_for("log"),
             )
             display_ok = True
-        except Exception:
+        except Exception as exc:
+            if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                raise
             pass  # 验证照跑（无 events），NullAuditSession 兜底后续 log_phase
         try:
             if act_input.host_mappings:
@@ -831,7 +847,9 @@ class BatchAuthValidationWorkflow:
                     retry_policy=retry_for("log"),
                 )
                 display_ok = True
-            except Exception:
+            except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 pass
             result = None
             proxy_url = ""
@@ -864,6 +882,8 @@ class BatchAuthValidationWorkflow:
                     retry_policy=retry_for("auth-validation"),
                 )
             except Exception as e:
+                if is_cancellation(e):  # 取消放行（spec 2026-08-28 修 0）：不转 per-cred 失败
+                    raise
                 # per-cred 异常隔离：某 cred activity 重试耗尽/抛错 → 标 failed，不阻断后续 cred
                 # （对齐 Branch B 非 primary 失败不阻断）。run_auth_validation_probe 自身降级返回不抛，
                 # 此 except 兜底 activity 框架级异常（non_retryable / 重试耗尽）。LLM 引擎失败

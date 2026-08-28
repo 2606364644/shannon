@@ -2,6 +2,7 @@
 测试 run_claude_prompt 函数
 """
 
+import asyncio
 import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -302,3 +303,69 @@ class TestIsSpendingCapBehavior:
             error="rate limit exceeded",
         )
         assert _is_spending_cap_behavior(result) is False
+
+
+class TestRunClaudePromptCancelPropagation:
+    """run_claude_prompt 的取消传递接线（spec 2026-08-28-temporal-native-cancel-design）。
+
+    - activity 上下文内：provider.call 执行期间周期 temporal heartbeat（取消传递
+      的确定性通道——web Cancel 后 activity 本体秒停，不再跑满超时）。
+    - provider.call 被取消：CancelledError 穿透 run_claude_prompt 的
+      ``except Exception``（BaseException）向上传播——workflow 才能翻终态 Canceled。
+    """
+
+    @staticmethod
+    def _fake_activity_ctx(monkeypatch, beats: list):
+        import temporalio.activity as tio_activity
+        monkeypatch.setattr(tio_activity, "info", lambda: object())
+        monkeypatch.setattr(tio_activity, "heartbeat", lambda *a: beats.append(1))
+
+    async def test_heartbeats_during_provider_call_in_activity_ctx(self, monkeypatch):
+        beats: list = []
+        self._fake_activity_ctx(monkeypatch, beats)
+        monkeypatch.setattr(
+            "supernova_core.runtime.temporal_heartbeat._DEFAULT_HEARTBEAT_INTERVAL",
+            0.01)
+
+        async def slow_call(**kwargs):
+            await asyncio.sleep(0.05)  # ~5 个心跳周期
+            return ClaudeRunResult(text="ok", success=True)
+
+        mock_provider = MagicMock()
+        mock_provider.call = AsyncMock(side_effect=slow_call)
+        with patch("supernova_core.agents.providers.create_provider",
+                   return_value=mock_provider):
+            result = await run_claude_prompt("hi", repo_path="/tmp")
+        assert result.success is True
+        assert len(beats) >= 2, f"provider.call 期间应有周期心跳，实际 {len(beats)}"
+
+    async def test_no_heartbeat_outside_activity_ctx(self, monkeypatch):
+        beats: list = []
+        import temporalio.activity as tio_activity
+
+        def _raise():
+            raise RuntimeError("Not in activity context")
+
+        monkeypatch.setattr(tio_activity, "info", _raise)
+        monkeypatch.setattr(tio_activity, "heartbeat", lambda *a: beats.append(1))
+        mock_provider = MagicMock()
+        mock_provider.call = AsyncMock(
+            return_value=ClaudeRunResult(text="ok", success=True))
+        with patch("supernova_core.agents.providers.create_provider",
+                   return_value=mock_provider):
+            result = await run_claude_prompt("hi", repo_path="/tmp")
+        assert result.success is True
+        assert beats == [], "非 activity 上下文不应心跳（CLI/单测路径零行为变化）"
+
+    async def test_cancelled_error_not_swallowed(self):
+        """provider.call 抛 asyncio.CancelledError → 照穿（不被 except Exception 吞）。
+
+        这是「一取消全都取消」的关键一环：SDK cancel activity task 后
+        CancelledError 抛在 provider.call 的 await 点，必须原样向上传播。
+        """
+        mock_provider = MagicMock()
+        mock_provider.call = AsyncMock(side_effect=asyncio.CancelledError())
+        with patch("supernova_core.agents.providers.create_provider",
+                   return_value=mock_provider):
+            with pytest.raises(asyncio.CancelledError):
+                await run_claude_prompt("hi", repo_path="/tmp")

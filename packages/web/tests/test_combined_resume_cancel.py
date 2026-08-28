@@ -483,3 +483,130 @@ async def test_resume_combined_whitebox_segment_passes_completed_agents(
     assert cleaned_with["completed_agents"] == ["pre-recon"]
     inp = mock_client.start_workflow.call_args.args[1]
     assert inp.resume_completed_agents == ["pre-recon"]
+
+
+# ── E1: pending run 竞态窗口兜底——无条件 cancel -bb-{K}（spec 2026-08-28 修 E1）──
+
+@pytest.mark.asyncio
+async def test_cancel_combined_pending_run_also_cancels_bb_workflow(
+        tmp_path, monkeypatch):
+    """latest run(run-1) 非终态但 phase 未及标 running（submit→标 running 竞态窗口）→
+    也必须 best-effort cancel {ws}-{scan_id}-bb-1——否则刚提交的黑盒 workflow 照跑。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    _make_combined_scan_dir(tmp_path, "WS", "s1", status="running")
+    store = ScanStore(tmp_path)
+    store.create_blackbox_run("WS", "s1")  # run-1（status=pending，bb 已 submit 未标 running）
+
+    result = await mgr.cancel("WS", "s1")
+
+    assert result == {"cancelled": "s1"}
+    handled = [c.args[0] for c in mock_client.get_workflow_handle.call_args_list]
+    assert "WS-s1-bb-1" in handled, (
+        "pending run 也应 best-effort cancel -bb-1（submit→标 running 竞态窗口兜底）")
+
+
+# ── E2: terminate 保险丝（spec 2026-08-28 修 E2）──────────────────────────────
+
+def _desc_mock(status_name: str, run_id: str):
+    d = MagicMock()
+    d.status = MagicMock(name=status_name)
+    d.status.name = status_name
+    d.run_id = run_id
+    return d
+
+
+@pytest.mark.asyncio
+async def test_cancel_fuse_terminates_still_running(tmp_path, monkeypatch):
+    """cancel 后 60s 仍 RUNNING 且 run_id 未变 → terminate（对齐 host _do_cancel 语义）。"""
+    import supernova_web.components.scan_manager as sm
+    monkeypatch.setattr(sm, "_CANCEL_FUSE_DELAY", 0.01)
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mock_handle.describe = AsyncMock(side_effect=[_desc_mock("RUNNING", "r1"),
+                                                  _desc_mock("RUNNING", "r1")])
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="pending", status="running")
+
+    await mgr.cancel("WS", "s1")
+    # 等 fire-and-forget 保险丝跑完（describe→sleep→describe→terminate）
+    for _ in range(200):
+        if mock_handle.terminate.await_count:
+            break
+        await asyncio.sleep(0.01)
+    assert mock_handle.terminate.await_count >= 1, "仍 RUNNING 应升级 terminate"
+
+
+@pytest.mark.asyncio
+async def test_cancel_fuse_skips_finished_and_recreated(tmp_path, monkeypatch):
+    """保险丝不误杀：COMPLETED 跳过；同 id 重建（run_id 变化，-corr 固定 id 场景）跳过。"""
+    import supernova_web.components.scan_manager as sm
+    monkeypatch.setattr(sm, "_CANCEL_FUSE_DELAY", 0.01)
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    # 第一次 cancel 场景：COMPLETED → 不 terminate
+    mock_handle.describe = AsyncMock(side_effect=[_desc_mock("RUNNING", "r1"),
+                                                  _desc_mock("COMPLETED", "r9")])
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    _make_combined_scan_dir(tmp_path, "WS", "s1", bb_phase="pending", status="running")
+    await mgr.cancel("WS", "s1")
+    for _ in range(200):
+        if mock_handle.describe.await_count >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert mock_handle.terminate.await_count == 0, "已 COMPLETED 不应 terminate"
+
+    # 第二次：run_id 变化（同 id workflow 被重建）→ 不 terminate
+    mock_handle.reset_mock(return_value=False, side_effect=True)
+    mock_handle.describe = AsyncMock(side_effect=[_desc_mock("RUNNING", "r1"),
+                                                  _desc_mock("RUNNING", "r2")])
+    _make_combined_scan_dir(tmp_path, "WS", "s2", bb_phase="pending", status="running")
+    await mgr.cancel("WS", "s2")
+    for _ in range(200):
+        if mock_handle.describe.await_count >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert mock_handle.terminate.await_count == 0, "run_id 变化（重建）不应误杀 terminate"
+
+
+@pytest.mark.asyncio
+async def test_cancel_track1_spawns_fuse(tmp_path, monkeypatch):
+    """① 轨（web 自起非组合白盒）也挂保险丝：cancel 后 _cancel_fuse_tasks 登记。"""
+    import supernova_web.components.scan_manager as sm
+    monkeypatch.setattr(sm, "_CANCEL_FUSE_DELAY", 0.01)
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    mock_handle = AsyncMock()
+    mock_handle.describe = AsyncMock(side_effect=[_desc_mock("RUNNING", "r1"),
+                                                  _desc_mock("CANCELED", "r1")])
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    monkeypatch.setattr("supernova_web.components.scan_manager.Client.connect",
+                       AsyncMock(return_value=mock_client))
+    # 非组合白盒 scan（无 combined 字段）
+    scan_dir = Path(tmp_path) / "WS" / "scans" / "w1"
+    scan_dir.mkdir(parents=True)
+    (scan_dir / "session.json").write_text(json.dumps({
+        "status": "running", "scan_type": "whitebox", "created_at": time.time(),
+        "web_url": "http://t/", "repo_path": "/code/x", "resumeAttempts": [],
+    }))
+    mgr._handles[("WS", "w1")] = mock_handle
+
+    result = await mgr.cancel("WS", "w1")
+
+    assert result == {"cancelled": "w1"}
+    # 保险丝已 spawn 并跑完（CANCELED → 不 terminate）
+    for _ in range(200):
+        if mock_handle.describe.await_count >= 1:
+            break
+        await asyncio.sleep(0.01)
+    assert mock_handle.describe.await_count >= 1, "① 轨 cancel 后应挂 terminate 保险丝"

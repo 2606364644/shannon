@@ -64,6 +64,11 @@ class ScanRunning(Exception):
 _RUN_TERMINAL_STATUSES = frozenset({
     "completed", "done", "failed", "skipped", "cancelled", "crashed", "killed"})
 
+# terminate 保险丝宽限（spec 2026-08-28-temporal-native-cancel-design 修 E2）：cancel 后
+# 心跳路径预期 ≤~40s 全停；仍 RUNNING 超 60s = 取消链断（activity 不心跳回归等）→ 升级
+# terminate（对齐 host 侧 core/runtime/scan_runner.py _do_cancel 的 grace→terminate 语义）。
+_CANCEL_FUSE_DELAY = 60.0
+
 
 class AuthValidationPending(Exception):
     """认证验证 workflow 仍在运行，结果未就绪（块2：get_result 非阻塞查询）。
@@ -213,6 +218,8 @@ class ScanManager:
         # T3: _handles/_tasks/_active_reqs key = (ws, scan_id)（同 ws 多 scan 不互斥）。
         self._handles: dict[tuple[str, str], Any] = {}
         self._tasks: dict[tuple[str, str], asyncio.Task] = {}
+        # terminate 保险丝 tasks（修 E2）：done 后自动 discard，防 GC。
+        self._cancel_fuse_tasks: set[asyncio.Task] = set()
         # 进行中的 scan 请求快照（(ws, scan_id) -> ScanRequest），供 active_repo_sources() 判引用
         self._active_reqs: dict[tuple[str, str], ScanRequest] = {}
         # P3c 阶段 2：per-ws 配置解析（None=CLI/旧测试兜底，走全局 env）
@@ -2032,6 +2039,9 @@ class ScanManager:
                 await handle.cancel()
             except Exception:
                 pass  # best-effort; temporal 侧 workflow cancel
+            # terminate 保险丝（修 E2）：非 LLM 长 activity（code_index/auth probe/playwright）
+            # 不经 run_claude_prompt 心跳层——「跑完当前 activity」窗口由保险丝兜底收口。
+            self._spawn_cancel_fuse(self._resolve_workflow_id(ws, scan_id))
             await self._mark_cancelled(scan_dir)
             return {"cancelled": scan_id}
         # ②/③ owner=host 或已死:标 cancelled(③ 不写协作式信号)
@@ -2127,6 +2137,32 @@ class ScanManager:
             SessionManager(scan_dir.parent).update_session(
                 scan_dir, {"status": "cancelled", "completed_at": time.time()})
         except Exception:  # noqa: BLE001 - 标记是 best-effort,不阻塞 cancel
+            pass
+
+    def _spawn_cancel_fuse(self, wf_id: str) -> None:
+        """挂 terminate 保险丝（修 E2，fire-and-forget）：cancel 后 _CANCEL_FUSE_DELAY
+        仍 RUNNING 且 run_id 未变 → 升级 terminate。run_id 复查防「cancel 后重建同 id
+        workflow」误杀（-corr 固定 id 场景的硬需求）。"""
+        task = asyncio.create_task(self._cancel_fuse(wf_id))
+        self._cancel_fuse_tasks.add(task)
+        task.add_done_callback(self._cancel_fuse_tasks.discard)
+
+    async def _cancel_fuse(self, wf_id: str) -> None:
+        try:
+            client = await Client.connect(self._temporal_address())
+            handle = client.get_workflow_handle(wf_id)
+            first = await handle.describe()
+            first_run_id = getattr(first, "run_id", None)
+            await asyncio.sleep(_CANCEL_FUSE_DELAY)
+            desc = await handle.describe()
+            status = getattr(desc, "status", None)
+            if getattr(status, "name", str(status)) != "RUNNING":
+                return  # 已停（CANCELED/COMPLETED/...）——原生取消生效
+            if getattr(desc, "run_id", None) != first_run_id:
+                return  # 同 id 重建，不是当初那个执行 → 不误杀
+            await handle.terminate(
+                reason="cancel fuse: workflow still RUNNING after cancel grace")
+        except Exception:  # noqa: BLE001 - 保险丝 best-effort，不阻断
             pass
 
     async def _mark_submission_failed(
@@ -2441,6 +2477,12 @@ class ScanManager:
             wf_id = self._resolve_run_workflow_id(ws, scan_id, active_run_id)
         else:
             wf_id = self._resolve_workflow_id(ws, scan_id)
+        # submit→标 running 竞态窗口兜底（修 E1，2026-08-28）：latest 非终态但 phase 未及
+        # 标 running 时 -bb-{K} 可能已 submit——无条件 best-effort cancel 之（窗口期
+        # events.ndjson 未写 → id 回落公式仍正确；黑盒未提交时 cancel 不存在 workflow
+        # 抛错即忽略）。
+        bb_wf_id = (self._resolve_run_workflow_id(ws, scan_id, active_run_id)
+                    if active_run_id is not None else None)
         # 取消编排 task（fire-and-forget，不再 submit 黑盒 / 不与终态竞争）
         orch = self._orchestrator_tasks.pop(scan_key, None)
         if orch is not None and not orch.done():
@@ -2452,6 +2494,17 @@ class ScanManager:
             await handle.cancel()
         except Exception:  # noqa: BLE001 - best-effort; temporal 不可达仍标 cancelled
             pass
+        if bb_wf_id is not None and bb_wf_id != wf_id:
+            try:
+                client = await Client.connect(self._temporal_address())
+                await client.get_workflow_handle(bb_wf_id).cancel()
+            except Exception:  # noqa: BLE001 - 未提交/不可达均忽略
+                pass
+        # terminate 保险丝（修 E2）：心跳路径预期 ≤~40s 全停；仍 RUNNING 超 grace =
+        # 取消链断 → 升级 terminate（防 activity 不心跳回归烧钱）。
+        self._spawn_cancel_fuse(wf_id)
+        if bb_wf_id is not None and bb_wf_id != wf_id:
+            self._spawn_cancel_fuse(bb_wf_id)
         # precheck workflow（-authcheck）无条件 best-effort 取消：首跑 kickoff 与手动加 run
         # 两条 precheck 路径都用该固定 id；不在跑（不存在/已结束）时 cancel 抛错即忽略。
         try:
@@ -2537,6 +2590,11 @@ class ScanManager:
             except Exception:  # noqa: BLE001 - best-effort; 不可达仍标终态
                 pass
             await self._mark_run(scan_dir, run_id, "cancelled", status="cancelled")
+        # terminate 保险丝（修 E2）：关联 workflow + 活跃黑盒 run 的取消链兜底
+        self._spawn_cancel_fuse(f"{ws}-{scan_id}-corr")
+        if latest and latest.get("status") not in _RUN_TERMINAL_STATUSES:
+            self._spawn_cancel_fuse(
+                self._resolve_run_workflow_id(ws, scan_id, latest["run_id"]))
         # ⑤ 协作式信号兜底（heartbeat fresh，兼容 host 侧协作式取消）+ 主行标 cancelled
         if is_scan_recently_active(scan_dir):
             (scan_dir / "cancel.requested").write_text("", encoding="utf-8")

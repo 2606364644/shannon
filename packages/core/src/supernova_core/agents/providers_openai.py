@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -426,15 +427,19 @@ class OpenAIProvider(BaseProvider):
                 # worker 静默 hang（2026-07-16 trip_1784167551）。超时 raise asyncio.TimeoutError
                 # → 外层 except → _classify_error 判 retryable → activity 重试，不再静默卡死。
                 await asyncio.wait_for(_consume_stream(), timeout=self._call_timeout())
-                await stream_collector.close()
                 run_result = result
             except MaxTurnsExceeded:
-                await stream_collector.close()
                 # result（run_streamed 返回）的 context_wrapper.usage 已累积到超轮数的 token
                 # （SDK 无清零），用它算 cost（弃旧 _MaxTurnsStub 硬编码 0 usage）。
                 mt_usage = streaming.context_wrapper.usage if streaming is not None else None
                 run_result = _MaxTurnsStub(stream_collector.text, mt_usage)
                 stop_reason = "max_turns"
+            finally:
+                # 取消/超时路径也收尾（spec 2026-08-28-temporal-native-cancel-design 修 D）：
+                # close→_flush_turn 非幂等，此处唯一调用点（正常/MaxTurns/cancel/timeout 共用），
+                # suppress 只拦 Exception——CancelledError(BaseException) 照穿不吞。
+                with contextlib.suppress(Exception):
+                    await stream_collector.close()
 
             duration = int((time.time() - start_time) * 1000)
             result = map_run_result(

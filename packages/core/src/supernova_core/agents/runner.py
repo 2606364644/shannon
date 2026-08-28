@@ -210,19 +210,25 @@ async def run_claude_prompt(
         else:
             active_tool_logger = None
 
-        result = await provider.call(
-            prompt=prompt,
-            cwd=repo_path,
-            model_tier=model_tier,
-            output_format=output_format,
-            deliverables_subdir=deliverables_subdir,
-            audit_logger=active_tool_logger,
-            max_turns=max_turns,
-            collector=collector,
-            progress=progress,
-            proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
-            usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
-        )
+        # 取消传递通道（spec 2026-08-28-temporal-native-cancel-design）：白盒/黑盒
+        # 全部 LLM 调用收敛于此——activity 上下文内周期 heartbeat，web Cancel 后
+        # activity 本体经心跳通道秒停（不再跑满超时）。非 activity 上下文（CLI 直调/
+        # 单测）no-op，零行为变化。
+        from ..runtime.temporal_heartbeat import activity_heartbeat
+        async with activity_heartbeat():
+            result = await provider.call(
+                prompt=prompt,
+                cwd=repo_path,
+                model_tier=model_tier,
+                output_format=output_format,
+                deliverables_subdir=deliverables_subdir,
+                audit_logger=active_tool_logger,
+                max_turns=max_turns,
+                collector=collector,
+                progress=progress,
+                proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
+                usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
+            )
 
         # 5. 检查花费上限行为
         if _is_spending_cap_behavior(result):

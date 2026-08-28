@@ -13,6 +13,7 @@ from supernova_core.models.agents import (
     VulnType,
 )
 from supernova_core.models.errors import ErrorCode, PentestError
+from supernova_core.runtime.temporal_heartbeat import is_cancellation
 from supernova_core.config.vuln_selection import select_vuln_classes
 # is_llm_track_enabled() 在 CLI 入口(main.py:77)读 env 一次注入 input.enable_llm_track,
 # workflow 用 input.enable_llm_track 判定(守 Temporal 确定性: workflow code 不直接读 env).
@@ -448,6 +449,12 @@ class WhiteboxScanWorkflow:
                     *[bounded(coro) for _, _, coro in vuln_tasks],
                     return_exceptions=True,
                 )
+                # 取消放行（spec 2026-08-28-temporal-native-cancel-design 修 0）：
+                # return_exceptions=True 会把 activity 取消的 ActivityError 收进结果
+                # 列表——不放行则 workflow 继续下一 phase（幽灵扫描机制，T1 探针钉死）。
+                for _r in results:
+                    if isinstance(_r, BaseException) and is_cancellation(_r):
+                        raise _r
                 for (vt, agent_name, _), result in zip(vuln_tasks, results):
                     if isinstance(result, Exception):
                         self._state.errors.append(f"{agent_name.value}: {result}")
@@ -530,6 +537,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("gitnexus-verdict"),
                 )
             except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）：吞掉=幽灵扫描
+                    raise
                 # Activity registration drift is an infrastructure/deployment error, not
                 # a degradable enrichment failure.  Do not report a falsely completed
                 # scan when the worker cannot execute a required pipeline step.
@@ -558,6 +567,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("gitnexus-verdict"),
                 )
             except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 if _activity_not_registered_hint(exc):
                     raise ApplicationFailure(
                         f"Endpoint enrichment activity is not registered: {exc}",
@@ -583,6 +594,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 await workflow.execute_activity(
                     activities.log_info_activity,
                     ActivityInput(**{**act_input.__dict__,
@@ -621,6 +634,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 # Non-fatal — LLM track 失败时 GitNexus 轨仍可独立产 chains
                 await workflow.execute_activity(
                     activities.log_info_activity,
@@ -637,6 +652,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 # Non-fatal — attack chains 增强报告但不阻塞主流程
                 await workflow.execute_activity(
                     activities.log_info_activity,
@@ -677,7 +694,9 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=20),
                     retry_policy=retry_for("poc"),
                 )
-            except Exception as exc:  # noqa: BLE001 — POC 写回任何失败只降级
+            except Exception as exc:  # noqa: BLE001 — POC 写回任何失败只降级（取消除外）
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）——2026-08-28
+                    raise  # 幽灵扫描事故点：吞掉 ActivityError(cancelled) 多烧 9 分钟
                 if _activity_not_registered_hint(exc):
                     # 部署不一致（worker 未注册新 activity）非可降级富化失败，
                     # fail-fast 显式暴露（b51eb9a4 教训：静默不跑=md 卡全丢 POC 节）。
@@ -723,7 +742,9 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=20),
                     retry_policy=retry_for("standard"),
                 )
-            except Exception as exc:  # noqa: BLE001 — rd 初版兜底已落盘
+            except Exception as exc:  # noqa: BLE001 — rd 初版兜底已落盘（取消除外）
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 if _activity_not_registered_hint(exc):
                     raise ApplicationFailure(
                         f"Report polish activity is not registered: {exc}",
@@ -752,6 +773,8 @@ class WhiteboxScanWorkflow:
                     retry_policy=retry_for("standard"),
                 )
             except Exception as exc:  # noqa: BLE001 — 重抛（fatal），仅加注册失职的显式面
+                if is_cancellation(exc):  # 取消放行（spec 2026-08-28 修 0）
+                    raise
                 if _activity_not_registered_hint(exc):
                     raise ApplicationFailure(
                         f"Export report markdown activity is not registered: {exc}",
@@ -798,6 +821,13 @@ class WhiteboxScanWorkflow:
             self._state.current_phase = None
             return self._state
         except Exception as e:
+            # 取消类异常按 cancelled 语义收尾（spec 2026-08-28 修 0）：cancel 注入丢失时
+            # 取消以 ActivityError(cause=CancelledError) 形态上抛到这——不放行会被标
+            # failed（语义失真）。对齐上方 except CancelledError 分支（设 cancelled return）。
+            if is_cancellation(e):
+                self._state.status = "cancelled"
+                self._state.current_phase = None
+                return self._state
             # session-status 同步:workflow-level 失败(GitNexus fail-fast ApplicationFailure /
             # activity retry 耗尽 / 任何未捕获异常)→ finalize_summary 写 session.status=failed +
             # scan_end,再 raise 让 Temporal 标 FAILED(web _watch describe 兜底依赖此信号)。

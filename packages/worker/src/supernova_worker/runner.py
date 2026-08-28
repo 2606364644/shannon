@@ -38,6 +38,7 @@ from supernova_whitebox.pipeline.activities import (
     write_track_status_activity,
     log_phase_start_activity, log_phase_complete_activity, log_info_activity,
     setup_display, finalize_summary, cleanup_auth_state_activity,
+    persist_completed_agents,
 )
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow, AuthValidationWorkflow, BatchAuthValidationWorkflow
 from supernova_blackbox.pipeline.activities import (
@@ -52,10 +53,15 @@ from supernova_blackbox.pipeline.activities import (
     setup_display as bb_setup_display, finalize_summary as bb_finalize_summary,
     run_host_proxy_setup as bb_run_host_proxy_setup, stop_host_proxy as bb_stop_host_proxy,
     cleanup_auth_state_activity as bb_cleanup_auth_state_activity,
+    persist_completed_agents as bb_persist_completed_agents,
 )
 from supernova_multi.pipeline.workflows import CorrelationScanWorkflow, run_correlation_activity
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
+# 心跳节流收紧（spec 2026-08-28-temporal-native-cancel-design 修 F）：temporalio 默认
+# default_heartbeat_throttle_interval=30s——activity 不设 heartbeat_timeout 时每 30s 才真发
+# 一次心跳 RPC，取消传播上限被拖到 30s+。收紧到 10s → web Cancel 后 ~10s 级送达 activity。
+_HEARTBEAT_THROTTLE = timedelta(seconds=10)
 
 
 async def run_worker(temporal_address: str = "localhost:7233") -> None:
@@ -85,6 +91,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             write_track_status_activity,
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, finalize_summary, cleanup_auth_state_activity,
+            persist_completed_agents,
         ],
         # P3c 阶段 3：AuditSession/LogBus/heartbeat 已 contextvar 化（按 workflow_id 隔离），
         # 多 scan 并发不再串台 → max_concurrent 放开（默认 4，env 可配）。
@@ -92,6 +99,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
         ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
+        default_heartbeat_throttle_interval=_HEARTBEAT_THROTTLE,
     )
     bb_worker = Worker(
         client=client,
@@ -108,6 +116,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             bb_setup_display, bb_finalize_summary,
             bb_run_host_proxy_setup, bb_stop_host_proxy,
             bb_cleanup_auth_state_activity,
+            bb_persist_completed_agents,
             bb_verify_report_vuln_blocks,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
@@ -115,6 +124,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
         ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
+        default_heartbeat_throttle_interval=_HEARTBEAT_THROTTLE,
     )
     corr_worker = Worker(
         client=client,
@@ -126,6 +136,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             os.environ.get("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", "4")
         ),
         graceful_shutdown_timeout=_GRACEFUL_SHUTDOWN,
+        default_heartbeat_throttle_interval=_HEARTBEAT_THROTTLE,
     )
 
     await asyncio.gather(wb_worker.run(), bb_worker.run(), corr_worker.run())

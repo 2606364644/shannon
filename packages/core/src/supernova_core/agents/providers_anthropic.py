@@ -9,6 +9,7 @@ Anthropic Provider 实现
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -393,12 +394,16 @@ class AnthropicProvider(BaseProvider):
         dispatcher = dispatcher or MessageDispatcher(audit_logger=audit_logger)
         final_result: ResultMessage | None = None
 
-        async for event in query(prompt=prompt, options=options):
-            action = await dispatcher.dispatch(event)
-            if isinstance(event, ResultMessage):
-                final_result = event
-            if action == "complete":
-                break
+        # aclosing（spec 2026-08-28-temporal-native-cancel-design 修 C）：cancel 打断
+        # async for 或 complete break 提前退出时显式关闭 SDK query 生成器（GeneratorExit
+        # 进生成器 → SDK 清理 CLI 子进程）；不吞 CancelledError。旧代码靠 GC，不确定。
+        async with contextlib.aclosing(query(prompt=prompt, options=options)) as events:
+            async for event in events:
+                action = await dispatcher.dispatch(event)
+                if isinstance(event, ResultMessage):
+                    final_result = event
+                if action == "complete":
+                    break
 
         if final_result is None:
             final_result = ResultMessage()
