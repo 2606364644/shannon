@@ -990,6 +990,97 @@ class TestBuildSdkEnv:
             assert val != "", f"Empty value for {key}"
 
 
+class TestExecuteQueryCancelCleanup:
+    """cancel 打断 _execute_query 时 CLI 子进程的显式回收。
+
+    根因（2026-08-28 /tmp/cancel_probe.py 假 CLI 实证）：裸 task.cancel()（temporal
+    workflow cancel / start_to_close_timeout / worker shutdown 都是裸 cancel）传不进
+    SDK 内部 anyio shield——query 挂死 + generator 悬挂使 GC finalizer 永不跑 + SDK
+    close() 自述 raw asyncio cancellation 会跳过 SIGTERM escalation → CLI 子进程
+    残留（worker 容器常驻，atexit reaper 也不跑）。修复：SDK 流跑在独立 task，cancel
+    打在外层普通 await 点（必穿）→ except 里先同步杀本调用新起的子进程（diff
+    _ACTIVE_CHILDREN，子进程死 → stdio EOF → 卡在 shield 的内层 task 解卡）再 re-raise。
+    """
+
+    def _fake_children(self, monkeypatch):
+        """替身 _ACTIVE_CHILDREN：返回 (set, p_old, p_new)——p_old 模拟并发他路子进程。"""
+        import claude_agent_sdk._internal.transport.subprocess_cli as sci
+        children = set()
+        p_old = MagicMock()
+        p_new = MagicMock()
+        children.add(p_old)
+        monkeypatch.setattr(sci, "_ACTIVE_CHILDREN", children)
+        return children, p_old, p_new
+
+    @pytest.mark.asyncio
+    async def test_cancel_terminates_new_cli_children_only(self, monkeypatch):
+        """cancel → 只杀本调用新起的子进程（diff），他路并发子进程（pre 快照内）不动。"""
+        import asyncio as _asyncio
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        children, p_old, p_new = self._fake_children(monkeypatch)
+
+        async def mock_query(*, prompt, options):
+            children.add(p_new)          # 模拟 SDK 起本调用的 CLI 子进程
+            await _asyncio.sleep(999)    # 模拟 agent 跑（cancel 打不进 shield 的形态）
+            yield MagicMock()
+
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
+            task = _asyncio.create_task(provider._execute_query(
+                prompt="t", options=ClaudeAgentOptions(model="m", cwd="/tmp")))
+            await _asyncio.sleep(0.05)   # 等 mock_query 起来、p_new 入册
+            task.cancel()
+            with pytest.raises(_asyncio.CancelledError):
+                await task
+
+        p_new.send_signal.assert_called_once()   # 新子进程被 SIGTERM
+        p_old.send_signal.assert_not_called()    # 他路子进程不误杀
+
+    @pytest.mark.asyncio
+    async def test_cancel_kill_failure_still_reraises(self, monkeypatch):
+        """杀进程抛（进程已死/权限）→ best-effort 吞掉，CancelledError 照常上抛。"""
+        import asyncio as _asyncio
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        children, _, p_new = self._fake_children(monkeypatch)
+        p_new.send_signal.side_effect = OSError("already dead")
+
+        async def mock_query(*, prompt, options):
+            children.add(p_new)
+            await _asyncio.sleep(999)
+            yield MagicMock()
+
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
+            task = _asyncio.create_task(provider._execute_query(
+                prompt="t", options=ClaudeAgentOptions(model="m", cwd="/tmp")))
+            await _asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(_asyncio.CancelledError):
+                await task                # 不被 OSError 拦截
+
+    @pytest.mark.asyncio
+    async def test_normal_path_does_not_touch_children(self, monkeypatch):
+        """正常完成不杀（子进程已由 SDK 正常 close 回收）。"""
+        config = ProviderConfig(type="anthropic_api")
+        provider = AnthropicProvider(config)
+        children, _, p_new = self._fake_children(monkeypatch)
+
+        mock_result = ResultMessage(
+            subtype="result", duration_ms=1, duration_api_ms=1, is_error=False,
+            num_turns=1, session_id="s")
+
+        async def mock_query(*, prompt, options):
+            children.add(p_new)
+            yield mock_result
+
+        with patch("supernova_core.agents.providers_anthropic.query", side_effect=mock_query):
+            result = await provider._execute_query(
+                prompt="t", options=ClaudeAgentOptions(model="m", cwd="/tmp"))
+
+        p_new.send_signal.assert_not_called()
+        assert result.subtype == "result"
+
+
 class TestExecuteQueryWithDispatcher:
     """Test _execute_query uses MessageDispatcher for event processing."""
 

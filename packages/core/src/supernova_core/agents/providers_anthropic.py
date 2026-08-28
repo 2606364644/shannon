@@ -9,6 +9,7 @@ Anthropic Provider 实现
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -388,10 +389,42 @@ class AnthropicProvider(BaseProvider):
         dispatcher: MessageDispatcher | None = None,
         audit_logger: ToolAuditLogger | None = None,
     ) -> ResultMessage:
-        """执行 query 调用并返回最终结果"""
+        """执行 query 调用并返回最终结果。
+
+        SDK 流跑在独立 task，本协程只 await 它——裸 task.cancel()（temporal workflow
+        cancel / start_to_close_timeout / worker shutdown 均是裸 cancel）打在普通
+        await 点必进 except；而直接 async for 时 cancel 会打进 SDK 内部 anyio shield
+        传不进去（task 卡死 + CLI 子进程残留，/tmp/cancel_probe.py 假 CLI 实证；SDK
+        close() 自述 raw asyncio cancellation 会跳过 SIGTERM escalation）。
+        """
         from .message_dispatcher import MessageDispatcher
 
         dispatcher = dispatcher or MessageDispatcher(audit_logger=audit_logger)
+        inner = asyncio.ensure_future(
+            self._consume_query_stream(prompt, options, dispatcher))
+        pre = self._snapshot_active_children()
+        try:
+            # 必经 shield 桥：直接 await inner 时，本 task 挂在 inner(fut_waiter)上，
+            # Task.cancel() 会去 cancel fut_waiter=inner 并返回——cancel 被 SDK 内部
+            # anyio shield 吸干后本 task 永收不到 CancelledError（永挂，/tmp/mini_probe3
+            # 实证）。shield 的裸 future 让 cancel 必达本协程且不误伤 inner。
+            return await asyncio.shield(inner)
+        except asyncio.CancelledError:
+            # 先杀本调用新起的子进程（同步动作必达）：子进程死 → stdio EOF → 即使
+            # cancel 传不进的 inner 也会解卡自然回收；inner.cancel 善后（能退则退，
+            # 不 await 强收——except 块内 await wait_for 组合在 py3.13 实测卡死），
+            # 最后原样 re-raise 保持取消语义。
+            self._terminate_new_children(pre)
+            inner.cancel()
+            raise
+
+    async def _consume_query_stream(
+        self,
+        prompt: str,
+        options: ClaudeAgentOptions,
+        dispatcher: "MessageDispatcher",
+    ) -> ResultMessage:
+        """消费 query 事件流（在 _execute_query 的独立 task 里跑）。"""
         final_result: ResultMessage | None = None
 
         # aclosing（spec 2026-08-28-temporal-native-cancel-design 修 C）：cancel 打断
@@ -419,6 +452,40 @@ class AnthropicProvider(BaseProvider):
         final_result.api_error_status = dispatcher.api_error_status
         final_result.result_errors = dispatcher.result_errors
         return final_result
+
+    @staticmethod
+    def _snapshot_active_children() -> frozenset:
+        """快照 SDK 活跃 CLI 子进程集（cancel 清理的 diff 基线）。
+
+        lazy import + 全吞异常：SDK 私有符号（_ACTIVE_CHILDREN）结构变化时降级
+        no-op（杀不了比炸掉 cancel 路径好）。并发他路子进程在快照内 → 不误杀。
+        """
+        try:
+            from claude_agent_sdk._internal.transport.subprocess_cli import (
+                _ACTIVE_CHILDREN,
+            )
+            return frozenset(_ACTIVE_CHILDREN)
+        except Exception:  # noqa: BLE001 - SDK 结构变化降级 no-op
+            return frozenset()
+
+    @staticmethod
+    def _terminate_new_children(pre: frozenset) -> None:
+        """SIGTERM 本调用新起的 CLI 子进程（_ACTIVE_CHILDREN - pre），best-effort。"""
+        try:
+            import signal
+
+            from claude_agent_sdk._internal.transport.subprocess_cli import (
+                _ACTIVE_CHILDREN,
+            )
+        except Exception:  # noqa: BLE001 - SDK 结构变化降级 no-op
+            return
+        for p in list(_ACTIVE_CHILDREN):
+            if p in pre:
+                continue
+            try:
+                p.send_signal(signal.SIGTERM)  # 对齐 SDK atexit reaper 的信号语义
+            except Exception:  # noqa: BLE001 - 进程已死/权限等不拦取消
+                pass
 
     def _extract_result(
         self,

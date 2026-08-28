@@ -121,6 +121,15 @@ async def stop_heartbeat(workflow_id: str | None = None) -> None:
         await mgr.__aexit__(None, None, None)
 
 
+def snapshot_heartbeat_workflows() -> dict[str, Path]:
+    """活跃 heartbeat 注册表快照(workflow_id -> ws_dir)。worker 容器协作取消桥消费
+    (2026-08-28 取消失效治本方案 B)：扫各 ws_dir 的 cancel.requested 转发 temporal
+    cancel。注册表生命周期 = setup_display 起 / finalize_summary 或终态自停 pop，
+    快照天然只含「在跑」的 workflow（此前 session_recovery._sweep_stale_sessions
+    直接读 _HEARTBEATS 私有 dict，本 helper 顺带公开化该访问面）。"""
+    return {wf: mgr._ws_dir for wf, mgr in list(_HEARTBEATS.items())}
+
+
 class HeartbeatManager:
     """async context manager:周期写 heartbeat(daemon 线程,脱离 event loop)+ 周期检测
     cancel.requested(asyncio task)。

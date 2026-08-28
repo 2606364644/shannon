@@ -2044,6 +2044,14 @@ class ScanManager:
             self._spawn_cancel_fuse(self._resolve_workflow_id(ws, scan_id))
             await self._mark_cancelled(scan_dir)
             return {"cancelled": scan_id}
+        # ②/③ 轨补真 cancel（2026-08-28 取消失效治本）：_handles 是 web 进程内存，重启即
+        # 丢——owner=web 的在跑 scan 一旦 handle 丢失即落入此分支，而旧实现 ② 只写
+        # cancel.requested（worker 容器路径的 activity start_heartbeat 不挂 on_cancel，
+        # 协作信号无消费者＝死信）、③ 纯标记，worker 永不停止（NodeGoat-20260827-103736
+        # 跑 25h 实证）。对齐 _cancel_combined 既有模式：re-attach + handle.cancel()
+        # best-effort（temporal 不可达/已终态不阻断标 cancelled）；cancel.requested 照写
+        # （host CLI 路径 HeartbeatManager on_cancel 消费 + worker 容器协作桥兜底）。
+        await self._temporal_cancel_best_effort(ws, scan_id)
         # ②/③ owner=host 或已死:标 cancelled(③ 不写协作式信号)
         if is_scan_recently_active(scan_dir):
             (scan_dir / "cancel.requested").write_text("", encoding="utf-8")
@@ -2125,6 +2133,22 @@ class ScanManager:
             data["submitted_at"] = time.time()
             session_file.write_text(json.dumps(data), encoding="utf-8")
         except (OSError, ValueError):
+            pass
+
+    async def _temporal_cancel_best_effort(self, ws: str, scan_id: str) -> None:
+        """re-attach + handle.cancel()，best-effort（②③ 轨取消传导）。
+
+        _resolve_workflow_id 解析真实 temporal id（events.ndjson 首行 WorkflowHeader，
+        resume -resume-N 后缀），不依赖 web 进程内存 _handles。temporal 不可达 /
+        workflow 不存在或已终态（cancel 抛错）均吞掉——取消标记流程照常走，前端照常
+        翻转 cancelled（对齐 _cancel_combined 的 best-effort 语义）。
+        """
+        try:
+            wf_id = self._resolve_workflow_id(ws, scan_id)
+            client = await Client.connect(self._temporal_address())
+            handle = client.get_workflow_handle(wf_id)
+            await handle.cancel()
+        except Exception:  # noqa: BLE001 - best-effort; 不可达/已终态均不阻断
             pass
 
     async def _mark_cancelled(self, scan_dir: Path) -> None:

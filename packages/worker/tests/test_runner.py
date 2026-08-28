@@ -219,3 +219,98 @@ def test_main_loads_profile_env_before_starting_worker():
     parent.assert_has_calls([call.load_env(), call.asyncio.run(ANY)])
     parent.load_env.assert_called_once()
     parent.asyncio.run.assert_called_once()
+
+
+# ── 协作式取消桥（2026-08-28 取消失效治本，方案 B）──────────────────────────
+# 根因：web cancel ② 轨写 cancel.requested，但 worker 容器路径的 activity
+# start_heartbeat(on_cancel=None) 不消费协作信号（只有 CLI 路径 HeartbeatManager
+# 挂 ctrl._trigger_graceful）——owner=web 扫描的协作通道整个不存在。本桥把文件
+# 信号转回 temporal cancel，复用 temporalio 对 async activity 的 task.cancel 传导。
+
+@pytest.mark.asyncio
+async def test_cancel_bridge_cancels_workflow_on_signal(tmp_path, monkeypatch):
+    """cancel.requested 存在 → 删信号文件 + 对注册表里的 wf_id 发 temporal cancel。"""
+    from supernova_worker import runner
+
+    ws_dir = tmp_path / "scan-1"
+    ws_dir.mkdir()
+    (ws_dir / "cancel.requested").write_text("")
+
+    def _snapshot():
+        return {"WS-scan-1": ws_dir}
+    monkeypatch.setattr(runner, "snapshot_heartbeat_workflows", _snapshot)
+
+    get_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=get_handle)
+
+    await runner._process_cancel_signals(mock_client)
+
+    mock_client.get_workflow_handle.assert_called_once_with("WS-scan-1")
+    get_handle.cancel.assert_awaited_once()
+    assert not (ws_dir / "cancel.requested").exists()  # 删后不重复触发
+
+
+@pytest.mark.asyncio
+async def test_cancel_bridge_ignores_absent_signal(tmp_path, monkeypatch):
+    """无信号文件 → 不发 cancel（活跃 scan 不误伤）。"""
+    from supernova_worker import runner
+
+    ws_dir = tmp_path / "scan-1"
+    ws_dir.mkdir()
+
+    def _snapshot():
+        return {"WS-scan-1": ws_dir}
+    monkeypatch.setattr(runner, "snapshot_heartbeat_workflows", _snapshot)
+
+    mock_client = AsyncMock()
+
+    await runner._process_cancel_signals(mock_client)
+
+    mock_client.get_workflow_handle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_bridge_survives_cancel_error(tmp_path, monkeypatch):
+    """handle.cancel 抛（workflow 不存在/已终态/temporal 抖动）→ 不炸、信号仍删
+    （防下一轮重复触发对已终态 workflow 空转）。"""
+    from supernova_worker import runner
+
+    ws_dir = tmp_path / "scan-1"
+    ws_dir.mkdir()
+    (ws_dir / "cancel.requested").write_text("")
+
+    def _snapshot():
+        return {"WS-scan-1": ws_dir}
+    monkeypatch.setattr(runner, "snapshot_heartbeat_workflows", _snapshot)
+
+    get_handle = AsyncMock()
+    get_handle.cancel = AsyncMock(side_effect=RuntimeError("already terminated"))
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=get_handle)
+
+    await runner._process_cancel_signals(mock_client)  # 不抛
+
+    assert not (ws_dir / "cancel.requested").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_worker_starts_cancel_bridge(monkeypatch):
+    """run_worker 起协作取消桥后台 task（与三 Worker 并行；worker 退出时桥一并取消）。"""
+    from supernova_worker import runner
+
+    monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
+    mock_client = AsyncMock()
+    wb_worker, bb_worker, corr_worker = MagicMock(), MagicMock(), MagicMock()
+    wb_worker.run = AsyncMock()
+    bb_worker.run = AsyncMock()
+    corr_worker.run = AsyncMock()
+
+    with patch("supernova_worker.runner.Client.connect",
+               AsyncMock(return_value=mock_client)), \
+         patch("supernova_worker.runner.Worker",
+               side_effect=[wb_worker, bb_worker, corr_worker]), \
+         patch.object(runner, "_cancel_signal_bridge", new=AsyncMock()) as bridge_mock:
+        await runner.run_worker("temporal:7233")
+
+    bridge_mock.assert_called_once()

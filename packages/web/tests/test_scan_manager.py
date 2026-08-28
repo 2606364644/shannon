@@ -8,6 +8,7 @@ _watch -> tail events.ndjson 直到 scan_end; cancel -> handle.cancel(temporal �
 """
 import asyncio
 import json
+import os
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -279,6 +280,83 @@ async def test_cancel_unknown_scan_returns_none(tmp_path):
     mgr = ScanManager(tmp_path, tmp_path / "r", None)
     _make_scan_dir(tmp_path, "ws", scan_id="s1")
     assert await mgr.cancel("ws", "nope") is None  # scan_id 不存在
+
+
+# ── cancel ②③ 轨补真 temporal cancel（2026-08-28 取消失效治本）───────────────
+# 根因（NodeGoat-20260827-103736 跑 25h 实证）：_handles 是 web 进程内存，重启即丢；
+# 旧 ② 轨只写 cancel.requested——worker 容器路径的 activity start_heartbeat(on_cancel=None)
+# 不消费协作信号；旧 ③ 轨纯标记。web 自起(owner=web)扫描一旦 handle 丢失，取消＝状态
+# 翻转而 worker 永不停。修复对齐 _cancel_combined 既有模式：②③ 轨也 re-attach + 真 cancel。
+
+@pytest.mark.asyncio
+async def test_cancel_host_running_also_sends_temporal_cancel(tmp_path, monkeypatch):
+    """② 轨补真 cancel：heartbeat fresh 且 _handles 无 handle（web 重启后 owner=web 同样
+    落此轨）→ 除写 cancel.requested 外，必须 re-attach 对 {ws}-{scan_id} 发 temporal
+    handle.cancel()——协作式信号此前在 worker 容器路径无消费者，是死信。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_scan_dir(tmp_path, "HOST2", scan_id="s1", status="running")
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh -> ② 轨
+
+    get_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=get_handle)
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.Client.connect",
+        AsyncMock(return_value=mock_client))
+
+    result = await mgr.cancel("HOST2", "s1")
+
+    assert result == {"cancelled": "s1", "via": "signal"}
+    mock_client.get_workflow_handle.assert_called_once_with("HOST2-s1")
+    get_handle.cancel.assert_awaited_once()
+    assert (scan_dir / "cancel.requested").exists()  # 协作式信号保留(host CLI 兼容)
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_dead_also_sends_temporal_cancel(tmp_path, monkeypatch):
+    """③ 轨补真 cancel：heartbeat stale 可能是误判（心跳线程终态自停/写路径异常而 worker
+    活着），同样 re-attach 发 temporal cancel——对真死的 workflow cancel 无害（不存在/已
+    终态即抛错忽略），对误判则是唯一止损。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_scan_dir(tmp_path, "DEAD2", scan_id="s1", status="running")
+    (scan_dir / "heartbeat").write_text("x\n")
+    old = time.time() - 3600
+    os.utime(scan_dir / "heartbeat", (old, old))  # stale -> ③ 轨
+
+    get_handle = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.get_workflow_handle = MagicMock(return_value=get_handle)
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.Client.connect",
+        AsyncMock(return_value=mock_client))
+
+    result = await mgr.cancel("DEAD2", "s1")
+
+    assert result == {"cancelled": "s1", "was_dead": True}
+    mock_client.get_workflow_handle.assert_called_once_with("DEAD2-s1")
+    get_handle.cancel.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_temporal_unreachable_still_marks_cancelled(tmp_path, monkeypatch):
+    """temporal 不可达（Client.connect 抛）→ best-effort：cancel 不阻断标终态
+    （对齐 _cancel_combined 语义，前端照常翻转 cancelled）。"""
+    mgr = ScanManager(tmp_path, tmp_path / "r", None)
+    scan_dir = _make_scan_dir(tmp_path, "HOST3", scan_id="s1", status="running")
+    (scan_dir / "heartbeat").write_text(f"{time.time()}\n")  # fresh -> ② 轨
+
+    async def _boom(*a, **kw):
+        raise RuntimeError("temporal unreachable")
+    monkeypatch.setattr(
+        "supernova_web.components.scan_manager.Client.connect", _boom)
+
+    result = await mgr.cancel("HOST3", "s1")
+
+    assert result == {"cancelled": "s1", "via": "signal"}
+    sess = json.loads((scan_dir / "session.json").read_text())
+    assert sess["status"] == "cancelled"
 
 
 # ── _watch: tail events.ndjson 直到 scan_end ──────────────────────────────

@@ -56,12 +56,54 @@ from supernova_blackbox.pipeline.activities import (
     persist_completed_agents as bb_persist_completed_agents,
 )
 from supernova_multi.pipeline.workflows import CorrelationScanWorkflow, run_correlation_activity
+from supernova_core.runtime.heartbeat import snapshot_heartbeat_workflows
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
 # 心跳节流收紧（spec 2026-08-28-temporal-native-cancel-design 修 F）：temporalio 默认
 # default_heartbeat_throttle_interval=30s——activity 不设 heartbeat_timeout 时每 30s 才真发
 # 一次心跳 RPC，取消传播上限被拖到 30s+。收紧到 10s → web Cancel 后 ~10s 级送达 activity。
 _HEARTBEAT_THROTTLE = timedelta(seconds=10)
+
+# 协作取消桥轮询周期（2026-08-28 取消失效治本方案 B）。exists() 检查极廉，
+# 取短周期换「点取消 → worker 真停」的低延迟。
+_CANCEL_BRIDGE_INTERVAL_SECONDS = 5.0
+
+
+async def _process_cancel_signals(client: Client) -> None:
+    """单轮协作取消桥：扫活跃 heartbeat 注册表各 ws_dir 的 cancel.requested。
+
+    web cancel ② 轨写 cancel.requested，但 worker 容器路径的 activity
+    start_heartbeat(on_cancel=None) 不消费协作信号（只有 CLI 路径 HeartbeatManager
+    挂 ctrl._trigger_graceful）——owner=web 扫描的协作通道整个不存在（死信）。
+    本桥把文件信号转回 temporal cancel，复用 temporalio 对 async activity 的
+    task.cancel 传导（_activity.py:762-764，无需 heartbeat）。
+
+    信号文件先删再 cancel（防下一轮对已终态 workflow 重复触发）；cancel 抛错
+    （workflow 不存在/已终态/temporal 抖动）best-effort 吞掉。CLI 路径不受影响
+    （随机 task queue 隔离，其 HeartbeatManager 自消费信号）。
+    """
+    for wf_id, ws_dir in snapshot_heartbeat_workflows().items():
+        sig = ws_dir / "cancel.requested"
+        if not sig.exists():
+            continue
+        try:
+            sig.unlink()
+        except OSError:
+            continue  # 删失败（权限/竞态）跳过本轮，下轮重试
+        try:
+            await client.get_workflow_handle(wf_id).cancel()
+        except Exception:  # noqa: BLE001 - best-effort；信号已删，不重复触发
+            pass
+
+
+async def _cancel_signal_bridge(client: Client) -> None:
+    """协作取消桥主循环（worker 容器常驻后台 task，进程退出即止）。"""
+    while True:
+        await asyncio.sleep(_CANCEL_BRIDGE_INTERVAL_SECONDS)
+        try:
+            await _process_cancel_signals(client)
+        except Exception:  # noqa: BLE001 - 桥绝不因单轮异常退出
+            pass
 
 
 async def run_worker(temporal_address: str = "localhost:7233") -> None:
@@ -118,6 +160,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             bb_cleanup_auth_state_activity,
             bb_persist_completed_agents,
             bb_verify_report_vuln_blocks,
+            bb_persist_completed_agents,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(
@@ -139,7 +182,13 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
         default_heartbeat_throttle_interval=_HEARTBEAT_THROTTLE,
     )
 
-    await asyncio.gather(wb_worker.run(), bb_worker.run(), corr_worker.run())
+    # 协作取消桥（方案 B）：把 web cancel ② 轨的 cancel.requested 文件信号转发为
+    # temporal cancel（worker 容器路径协作通道的唯一消费者）。worker 全退时一并取消。
+    bridge = asyncio.create_task(_cancel_signal_bridge(client))
+    try:
+        await asyncio.gather(wb_worker.run(), bb_worker.run(), corr_worker.run())
+    finally:
+        bridge.cancel()
 
 
 def main() -> None:
