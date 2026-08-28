@@ -163,6 +163,18 @@ class AnthropicProvider(BaseProvider):
             # L2: result-failure layer — structured failure signals (highest reliability),
             # evaluated before the spending-cap heuristics.
             if not result.success:
+                # 可观测性（2026-08-28 NodeGoat-20260828-054537 injection-exploit 失败调查缺口）：
+                # 原始失败信号必须落盘——error_code/retryable 只是分类结果，subtype/is_error/
+                # api_error_status/errors 才是根因证据（区分 API 401/403 vs turn 限额 vs 执行错误）。
+                # 此前只透传分类不留痕：CLI 安静终止（无 stderr、无崩溃打印）时根因无从定位，
+                # 且 result.error 传输链丢失使 PentestError 落 fallback 消息（"execution failed"）。
+                # 若本日志有 subtype 而 PentestError message 仍为 fallback → error 在下游丢失的实证。
+                logger.warning(
+                    "SDK result failure signals: subtype=%s is_error=%s api_error_status=%s "
+                    "errors=%s stop_reason=%s turns=%s",
+                    subtype, is_error, api_error_status, result_errors,
+                    result.stop_reason, result.turns,
+                )
                 error_code, retryable = self._classify_result_failure(
                     subtype, is_error, api_error_status, result_errors
                 )
