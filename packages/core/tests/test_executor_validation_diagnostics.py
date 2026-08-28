@@ -113,3 +113,34 @@ def test_skipped_queue_write_logs_warning(tmp_path, monkeypatch, caplog):
                 if "NOT written" in r.getMessage()]
     assert len(warnings) == 1
     assert "injection_exploitation_queue.json" in warnings[0].getMessage()
+
+
+def test_exploit_agent_no_structured_output_is_by_design_not_warned(
+        tmp_path, monkeypatch, caplog):
+    """-exploit agent 无 structured_output 是设计态，不得发「queue NOT written」误报。
+
+    黑盒 exploit 的 verdicts 走 add_exploit collector 通道（host 渲染
+    {vc}_exploit_verdicts.json + evidence md），调用侧不传 schema；queue 文件
+    无读方、validators 对 -exploit no-op（TS createExploitValidator 同为 no-op，
+    validators.py「-exploit 不产此文件」）。2026-08-28 NodeGoat-20260828-054537
+    现场实证：每 run 固定 4 条/exploit-agent 误报 WARNING（auth/authz/ssrf/xss）。
+    """
+    import logging
+    from supernova_core.models.agents import AGENTS
+
+    ax, exec_mod, deliverables = _setup_executor(tmp_path, monkeypatch)
+    # -exploit 的 deliverable md 落 blackbox/ 桶内（validators 桶内优先）
+    defn = AGENTS[exec_mod.AgentName.AUTHZ_EXPLOIT]
+    bb = deliverables / "blackbox"
+    bb.mkdir()
+    (bb / defn.deliverable_filename).write_text("placeholder", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="supernova_core.agents.executor"):
+        metrics = _run(ax.execute(
+            agent_name=exec_mod.AgentName.AUTHZ_EXPLOIT,
+            repo_path=str(deliverables), deliverables_path=str(deliverables),
+        ))
+
+    assert metrics.num_turns == 3  # 正常走完（validate 过、commit stub）
+    assert metrics.structured_output is None  # 设计态：-exploit 不走结构化输出通道
+    assert not [r for r in caplog.records if "NOT written" in r.getMessage()]

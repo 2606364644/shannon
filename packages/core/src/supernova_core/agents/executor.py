@@ -505,9 +505,22 @@ class AgentExecutor:
             # spec 2026-08-18 tiering：queue json 下沉桶内 intermediate/（交付物留顶层）。
             queue_path = intermediate_path(deliverables, queue_filename)
             atomic_write_json(queue_path, result.structured_output)
-        elif not skip_artifact_postprocess and queue_filename:
+        elif (
+            not skip_artifact_postprocess
+            and queue_filename
+            and not (
+                isinstance(agent_name, AgentName)
+                and agent_name.value.endswith("-exploit")
+            )
+        ):
             # 诊断（spec 2026-08-19 §3.2）：现状此分支零日志静默跳过，网关断流
             # 排障全靠猜；warning 留第一现场（validate 防线随后 raise 补 context）。
+            # -exploit 排除（2026-08-28 NodeGoat-20260828-054537 误报实证）：黑盒
+            # exploit 的 verdicts 走 add_exploit collector 通道（host 渲染
+            # {vc}_exploit_verdicts.json），调用侧不传 schema、structured_output
+            # 恒 None；queue 文件无读方、validators 对 -exploit no-op（TS
+            # createExploitValidator 同为 no-op）——不排除则每 run 每类必发一条
+            # 误报 WARNING，淹没 -vuln 真静默漏盘信号。
             logger.warning(
                 "agent %s produced no structured output — queue %s NOT written "
                 "(text_len=%d, stop_reason=%r)",
