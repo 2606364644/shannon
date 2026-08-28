@@ -85,6 +85,28 @@ def test_invalid_ws_name_422(app):
 # ---- PUT / DELETE ----
 
 
+def test_put_ws_model_currency_roundtrip(app):
+    """PUT 带模型级 currency → ws 覆盖文件保留 + GET 行兄弟字段透出。"""
+    manager = _login(app, "cara", "user", member_of="ws-a", member_role="manager")
+    r = _put_ws(manager, "ws-a", {"currency": "CNY", "models": {
+        "m-usd": {**_tiers(), "currency": "USD"}, "m-follow": _tiers()}})
+    assert r.status_code == 200
+    data = json.loads(
+        (app.state.config.workspaces_dir / "ws-a" / "pricing.override.json").read_text("utf-8"))
+    assert data["models"]["m-usd"]["currency"] == "USD"
+    body = manager.get("/api/workspaces/ws-a/pricing").json()
+    by_model = {m["model"]: m for m in body["models"]}
+    assert by_model["m-usd"]["currency"] == "USD"
+    assert by_model["m-follow"]["currency"] is None
+
+
+def test_put_ws_bad_model_currency_400(app):
+    manager = _login(app, "gina", "user", member_of="ws-a", member_role="manager")
+    r = _put_ws(manager, "ws-a", {"currency": "CNY", "models": {"m": {**_tiers(), "currency": "EUR"}}})
+    assert r.status_code == 400
+    assert "currency" in r.json()["detail"]
+
+
 def test_manager_put_writes_override_file(app):
     manager = _login(app, "carol", "user", member_of="ws-a", member_role="manager")
     r = _put_ws(manager, "ws-a", {"currency": "CNY", "models": {"glm-5.2": _tiers(9, 30, 3)}})

@@ -247,3 +247,60 @@ def test_resolve_effective_prices_always_four_tiers(store, tmp_path, monkeypatch
     eff = store.resolve_effective()
     by_model = {m["model"]: m for m in eff["models"]}
     assert by_model["glm-5.2"]["prices"]["cache_creation"] == 0.0
+
+
+# ---- 模型级币种（2026-08-28 per-model currency）----
+# 语义：价格对象内可选 currency 键；行输出为 row 兄弟字段（不进 prices）；
+# null = 跟随表级默认，不在 store 侧 resolve 成具体值（保住「跟随」语义，
+# 否则 ws 覆盖快照保存会把每行都写成显式 currency）。
+
+
+def test_write_global_keeps_model_currency_and_strips_null(store, tmp_path):
+    store.write_global("CNY", {
+        "m-usd": {**_tiers(), "currency": "USD"},
+        "m-follow": {**_tiers(), "currency": None},
+    })
+    data = json.loads((tmp_path / "pricing.json").read_text("utf-8"))
+    assert data["models"]["m-usd"]["currency"] == "USD"
+    assert "currency" not in data["models"]["m-follow"]   # None 不落键（旧文件形态）
+
+
+def test_write_ws_override_keeps_model_currency(store, tmp_path):
+    store.write_ws_override("ws-a", "CNY", {"m": {**_tiers(), "currency": "USD"}})
+    assert store.read_ws_override("ws-a")["models"]["m"]["currency"] == "USD"
+
+
+def test_validate_accepts_model_level_currency(store):
+    PricingStore.validate("CNY", {"m": {**_tiers(), "currency": "USD"}})
+    PricingStore.validate("CNY", {"m": {**_tiers(), "currency": "CNY"}})
+    PricingStore.validate("CNY", {"m": {**_tiers(), "currency": None}})   # = 缺省
+    PricingStore.validate("CNY", {"m": _tiers()})                          # 无键
+
+
+@pytest.mark.parametrize("cur", ["cny", "EUR", "", 123, True])
+def test_validate_rejects_bad_model_currency(store, cur):
+    with pytest.raises(ValueError):
+        PricingStore.validate("CNY", {"m": {**_tiers(), "currency": cur}})
+
+
+def test_resolve_effective_row_currency_model_level(store, tmp_path, monkeypatch):
+    p = _write_pricing_file(tmp_path / "env.json", {
+        "currency": "CNY",
+        "models": {"m-usd": {**_tiers(), "currency": "USD"}, "m-follow": _tiers()},
+    })
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", p)
+    eff = store.resolve_effective()
+    by_model = {m["model"]: m for m in eff["models"]}
+    assert by_model["m-usd"]["currency"] == "USD"     # 兄弟字段透出原始值
+    assert by_model["m-follow"]["currency"] is None   # 未指定 → null（不 resolve 成表级）
+    assert by_model["glm-5.2"]["currency"] is None    # builtin 行同样 null
+    assert set(by_model["m-usd"]["prices"]) == {"input", "output", "cache_read", "cache_creation"}  # 不进 prices
+
+
+def test_resolve_effective_row_currency_object_replace(store, tmp_path):
+    # global 层 m 带 USD；ws 层整对象重定义 m（无 currency）→ 模型级丢失（回落表级，core 同语义）
+    store.write_global("CNY", {"m": {**_tiers(), "currency": "USD"}})
+    store.write_ws_override("ws-a", "CNY", {"m": _tiers(9, 9, 9, 9)})
+    eff = store.resolve_effective("ws-a")
+    by_model = {m["model"]: m for m in eff["models"]}
+    assert by_model["m"]["currency"] is None

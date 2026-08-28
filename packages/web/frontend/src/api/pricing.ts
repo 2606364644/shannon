@@ -5,17 +5,21 @@ import { apiGet, apiPut, apiDelete } from "./client";
 export type PricingSource = "builtin" | "profile_env" | "global" | "workspace";
 
 // 4 档价格（单位：本币 / 百万 token）
+// currency（可选，2026-08-28）：模型级币种覆盖；null/缺省 = 跟随表级默认。
 export interface Prices {
   input: number;
   output: number;
   cache_read: number;
   cache_creation: number;
+  currency?: string | null;
 }
 
 export interface PricingRow {
   model: string;
   prices: Prices;
   source: PricingSource;
+  /** 行级币种（兄弟字段，不进 prices）：null = 跟随表级默认（后端不 resolve，保住跟随语义） */
+  currency?: string | null;
 }
 
 /** GET /api/pricing —— 全局视角（不含工作区层）。 */

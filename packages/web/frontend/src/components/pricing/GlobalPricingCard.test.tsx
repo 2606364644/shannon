@@ -57,6 +57,22 @@ describe("GlobalPricingCard", () => {
     expect(puts[0]).toContain("8.5");
   });
 
+  it("行级币种：切换进 PUT payload（模型级 currency 字段）", async () => {
+    const puts: string[] = [];
+    mockFetch({
+      "/api/pricing": (init) => {
+        if (init?.method === "PUT") puts.push(String(init.body));
+        return VIEW;
+      },
+    });
+    render(<GlobalPricingCard />);
+    await waitFor(() => expect(screen.getByTestId("pricing-editor-global")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("pricing-row-currency-glm-5.2-USD"));
+    fireEvent.click(screen.getByTestId("pricing-save"));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toContain('"currency":"USD"');
+  });
+
   it("非 admin：只读（无保存 / 无清除），仍展示生效表与来源", async () => {
     mockUser.role = "user";
     mockFetch({ "/api/pricing": () => VIEW });

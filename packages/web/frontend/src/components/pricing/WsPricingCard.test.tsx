@@ -97,6 +97,22 @@ describe("WsPricingCard", () => {
     expect(puts[0]).toContain('"currency":"CNY"');
   });
 
+  it("行级币种：切换进 PUT payload（模型级 currency 字段）", async () => {
+    const puts: string[] = [];
+    mockFetch({
+      "/api/workspaces/ws1/pricing": (init) => {
+        if (init?.method === "PUT") puts.push(String(init.body));
+        return OVERRIDDEN;
+      },
+    });
+    render(<WsPricingCard />);
+    await waitFor(() => expect(screen.getByTestId("pricing-save")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("pricing-row-currency-glm-5.2-USD"));
+    fireEvent.click(screen.getByTestId("pricing-save"));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toContain('"currency":"USD"');
+  });
+
   it("member（非 manager）：继承态无覆盖按钮；覆盖态只读", async () => {
     vi.spyOn(window, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : (input as Request).url;

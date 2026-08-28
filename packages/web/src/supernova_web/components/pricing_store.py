@@ -14,6 +14,11 @@
 模型 key 落盘前经 normalize_model 归一：core 的 table.update 直接吃层文件 key，
 归一 id 是 compute_cost 的查询形态，存原始形态（如 GLM-5.2[1m]）会 miss 记 0 成本。
 
+模型级币种（2026-08-28）：价格对象内可选 ``currency`` 键（仅 CNY/USD）覆盖表级默认；
+resolve_effective 行输出的 ``currency`` 是**兄弟字段**（null=跟随表级，不 resolve 成
+具体值——保住「跟随」语义，避免 ws 覆盖快照把每行写成显式币种）；写路径 strip
+null/垃圾。整对象替换时高层缺键 → 低层模型级币种丢失（与 core 同语义）。
+
 原子写（tmp → replace）照 branding_store 范本；损坏文件不当机（层视为空 + corrupt 标志）。
 """
 from __future__ import annotations
@@ -34,6 +39,18 @@ WS_OVERRIDE_FILENAME = "pricing.override.json"
 
 _CURRENCIES = ("CNY", "USD")
 _TIER_KEYS = ("input", "output", "cache_read", "cache_creation")
+
+
+def _sanitized_model(prices: dict) -> dict:
+    """价格对象 → 落盘形态：4 档 + 仅当模型级 currency 合法时附带（None/垃圾不落键）。
+
+    与 core `_model_currency` 同判（合法币种白名单）；None = 跟随表级默认。
+    """
+    out = {k: prices[k] for k in _TIER_KEYS}
+    cur = prices.get("currency")
+    if cur in _CURRENCIES:
+        out["currency"] = cur
+    return out
 
 
 def _read_layer_file(path: Path) -> tuple[dict | None, bool]:
@@ -119,7 +136,7 @@ class PricingStore:
         self.validate(currency, models)
         self._atomic_write(self._global_path(), {
             "currency": currency,
-            "models": {normalize_model(k): dict(v) for k, v in models.items()},
+            "models": {normalize_model(k): _sanitized_model(v) for k, v in models.items()},
         })
 
     def clear_global(self) -> None:
@@ -142,7 +159,7 @@ class PricingStore:
         self.validate(currency, models)
         self._atomic_write(self._ws_path(ws), {
             "currency": currency,
-            "models": {normalize_model(k): dict(v) for k, v in models.items()},
+            "models": {normalize_model(k): _sanitized_model(v) for k, v in models.items()},
         })
 
     def clear_ws_override(self, ws: str) -> None:
@@ -169,6 +186,7 @@ class PricingStore:
 
         table: dict[str, dict] = {}
         source_of: dict[str, str] = {}
+        currency_of: dict[str, str | None] = {}  # 模型级币种原始值（null=跟随表级）
         for model, prices in BUILTIN_PRICING_CNY.items():
             table[model] = dict(prices)
             source_of[model] = "builtin"
@@ -189,9 +207,11 @@ class PricingStore:
                 four = {k: float(prices.get(k, 0) or 0) for k in _TIER_KEYS}
                 table[key] = four
                 source_of[key] = name
+                row_cur = prices.get("currency")
+                currency_of[key] = row_cur if row_cur in _CURRENCIES else None
 
         models_out = [
-            {"model": m, "prices": table[m], "source": source_of[m]}
+            {"model": m, "prices": table[m], "source": source_of[m], "currency": currency_of.get(m)}
             for m in sorted(table)
         ]
         return {"currency": currency, "models": models_out}
@@ -213,6 +233,7 @@ class PricingStore:
         - models 非空 dict（清除走 clear_*，不走空表写入）
         - 模型 key 归一后非空且彼此不重复（glm-5.2 与 GLM-5.2[1m] 冲突）
         - 4 档价格齐全、为有限数（拒 bool）且 ≥ 0
+        - 模型级 currency（可选）∈ {CNY, USD}；None/缺省 = 跟随表级
         """
         if currency not in _CURRENCIES:
             raise ValueError(f"currency 必须是 {'/'.join(_CURRENCIES)}，收到 {currency!r}")
@@ -228,6 +249,10 @@ class PricingStore:
             seen.add(normalized)
             if not isinstance(prices, dict):
                 raise ValueError(f"模型 {key!r} 的价格必须是对象")
+            model_cur = prices.get("currency", None)
+            if model_cur is not None and model_cur not in _CURRENCIES:
+                raise ValueError(
+                    f"模型 {key!r} 的 currency 必须是 {'/'.join(_CURRENCIES)}，收到 {model_cur!r}")
             for tier in _TIER_KEYS:
                 v = prices.get(tier)
                 if v is None:

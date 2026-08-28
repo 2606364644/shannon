@@ -1462,7 +1462,7 @@
     },
     "colSource": "Source",
     "colActions": "Actions",
-    "unitNote": "Unit: local currency / million tokens",
+    "unitNote": "Unit: per million tokens; amounts use the default currency unless overridden per row",
     "source": {
       "builtin": "Built-in",
       "profile_env": "Env",
@@ -1470,7 +1470,7 @@
       "workspace": "Workspace",
       "new": "New"
     },
-    "currencyLabel": "Currency",
+    "currencyLabel": "Default currency",
     "dirtyHint": "Unsaved changes",
     "invalidNumber": "Enter a number of at least 0",
     "dupId": "Model id collides with an existing row after normalization (e.g. glm-5.2[1m] and glm-5.2 are the same model)",
@@ -1480,6 +1480,8 @@
     "newModelPlaceholder": "Model id, e.g. glm-5.3",
     "save": "Save pricing",
     "reset": "Reset",
-    "clear": "Clear"
+    "clear": "Clear",
+    "colCurrency": "Currency",
+    "currencyDefault": "Default"
   }
 }

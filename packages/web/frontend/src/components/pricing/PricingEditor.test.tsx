@@ -97,7 +97,7 @@ describe("PricingEditor", () => {
     fireEvent.click(screen.getByTestId("pricing-save"));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const [, models] = onSave.mock.calls[0];
-    expect(models["glm-5.3"]).toEqual(P(8, 28, 2));
+    expect(models["glm-5.3"]).toEqual({ ...P(8, 28, 2), currency: null });
     expect(models["glm-5.2"].output).toBe(28);
   });
 
@@ -121,7 +121,7 @@ describe("PricingEditor", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const [currency, models] = onSave.mock.calls[0];
     expect(currency).toBe("CNY");
-    expect(models["glm-5.4"]).toEqual(P(7, 26, 1, 0));
+    expect(models["glm-5.4"]).toEqual({ ...P(7, 26, 1, 0), currency: null });
   });
 
   it("删除非 builtin 行：从 payload 移除；builtin 行无删除钮", async () => {
@@ -148,6 +148,62 @@ describe("PricingEditor", () => {
     fireEvent.click(screen.getByTestId("pricing-save"));
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0][0]).toBe("USD");
+  });
+
+  it("列序 = 模型|输入|输出|缓存读取|缓存写入|…（输入/输出相邻靠前，对齐官方定价页）", () => {
+    render(
+      <PricingEditor scope="global" currency="CNY" rows={ROWS}
+        builtinDefaults={BUILTIN} canEdit onSave={onSave} />,
+    );
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    // i18n mock（t = key）：列头文本即 key 序。缓存两档靠后成组，不再插在输入/输出中间。
+    expect(heads).toEqual([
+      "pricing.colModel", "pricing.col.input", "pricing.col.output",
+      "pricing.col.cache_read", "pricing.col.cache_creation",
+      "pricing.colCurrency", "pricing.colSource", "pricing.colActions",
+    ]);
+  });
+
+  it("行级币种：切换 USD 成脏 + 进 payload；「默认」钮清除回跟随（null）", async () => {
+    const rows: PricingRow[] = [
+      { model: "glm-5.2", prices: P(8, 28, 2), source: "builtin" },
+      { model: "m-usd", prices: P(1, 2, 0.5), source: "global", currency: "USD" },
+    ];
+    render(
+      <PricingEditor scope="global" currency="CNY" rows={rows}
+        builtinDefaults={BUILTIN} canEdit onSave={onSave} />,
+    );
+    // 显式行：USD 钮初始 pressed；切换 glm-5.2 到 USD → 脏
+    expect(screen.getByTestId("pricing-row-currency-glm-5.2-USD").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByTestId("pricing-row-currency-glm-5.2-USD"));
+    expect(screen.getByTestId("pricing-save")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("pricing-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const [, models] = onSave.mock.calls[0];
+    expect(models["glm-5.2"].currency).toBe("USD");
+    expect(models["m-usd"].currency).toBe("USD");   // 显式行保持
+    // 「默认」钮在显式行上清除覆盖 → null ≠ 初始 USD → 脏，payload 回跟随
+    //（glm-5.2 不能用于此断言：其初始即 null，切回默认 = 回原状不脏）
+    fireEvent.click(screen.getByTestId("pricing-row-currency-m-usd-default"));
+    fireEvent.click(screen.getByTestId("pricing-save"));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave.mock.calls[1][1]["m-usd"].currency).toBeNull();
+  });
+
+  it("只读态：行币种为符号文本；null 行显示表默认符号且带跟随提示", () => {
+    const rows: PricingRow[] = [
+      { model: "m-usd", prices: P(1, 2, 0.5), source: "global", currency: "USD" },
+      { model: "glm-5.2", prices: P(8, 28, 2), source: "builtin" },
+    ];
+    render(
+      <PricingEditor scope="global" currency="CNY" rows={rows}
+        builtinDefaults={BUILTIN} canEdit={false} onSave={onSave} />,
+    );
+    expect(screen.getByTestId("pricing-row-currency-m-usd").textContent).toBe("$");
+    // null（跟随表级 CNY）→ 显示 ¥，title 提示跟随默认
+    const follow = screen.getByTestId("pricing-row-currency-glm-5.2");
+    expect(follow.textContent).toBe("¥");
+    expect(follow.getAttribute("title")).toBe("pricing.currencyDefault");
   });
 
   it("onClear 提供时才渲染清除按钮（确认由挂载点管）", () => {

@@ -1462,7 +1462,7 @@
     },
     "colSource": "来源",
     "colActions": "操作",
-    "unitNote": "单位：本币 / 百万 token",
+    "unitNote": "单位：百万 token；金额币种 = 默认币种，行级可覆盖",
     "source": {
       "builtin": "内置",
       "profile_env": "环境",
@@ -1470,7 +1470,7 @@
       "workspace": "本工作区",
       "new": "新增"
     },
-    "currencyLabel": "币种",
+    "currencyLabel": "默认币种",
     "dirtyHint": "有未保存的修改",
     "invalidNumber": "请输入不小于 0 的数字",
     "dupId": "模型 id 归一后与现有行重复（如 glm-5.2[1m] 与 glm-5.2 视为同一模型）",
@@ -1480,6 +1480,8 @@
     "newModelPlaceholder": "模型 id，如 glm-5.3",
     "save": "保存定价",
     "reset": "重置",
-    "clear": "清除"
+    "clear": "清除",
+    "colCurrency": "币种",
+    "currencyDefault": "默认"
   }
 }

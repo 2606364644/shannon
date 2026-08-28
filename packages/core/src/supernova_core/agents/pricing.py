@@ -8,6 +8,10 @@
 < 工作区覆盖层（ws 的 ``SUPERNOVA_PRICING_OVERRIDE``，经 ``scan_env.ws_override_get``，
 最高）。各层 override 支持新 schema (``{"currency","models"}``) 与旧 flat schema
 （``{model:{...}}``，币种回落 CNY）；币种 = 最高优先非空层的 currency。
+**模型级币种（2026-08-28）**：价格对象内可选 ``currency`` 键（仅 CNY/USD）覆盖表级
+——混合币种表（GLM CNY + 海外模型 USD）可表达；缺省/非法回落表级；整对象替换时
+随价格一起被高层覆盖（高层缺键 → 低层模型级币种丢失，回落表级）。
+session 级聚合（metrics_tracker 等）暂按 last-wins 币种,混合币种 session 仅告警。
 
 返回 ``CostAmount{cost, currency}``：cost 是 ``currency`` 币种的金额（单 session 本币直达，
 不再 ÷ 汇率）；未知模型回落 ``CostAmount(0.0, currency)``（守「不假估算」）。
@@ -40,6 +44,8 @@ BUILTIN_PRICING_CNY: dict[str, dict[str, float]] = {
     "glm-5.2": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
     # glm-5.3 与 glm-5.2 同价（2026-08-19 上线未调价；JPMorgan 研报 + 上线报道双源核对）
     "glm-5.3": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
+    # glm-5.3-flash（2026-08-28 官网核对；normalize_model 不剥 -flash，键即查询形态）
+    "glm-5.3-flash": {"input": 0.8, "output": 2.8, "cache_read": 0.23, "cache_creation": 0.0},
     "glm-4.5-air": {"input": 0.8, "output": 6.0, "cache_read": 0.16, "cache_creation": 0.0},
     # deepseek-v4-flash 官方平时档（2026-08-20；与 .env.profiles.example/deepseek.pricing.json 一致）
     "deepseek-v4-flash": {"input": 1.0, "output": 2.0, "cache_read": 0.02, "cache_creation": 0.0},
@@ -49,6 +55,16 @@ BUILTIN_PRICING_CNY: dict[str, dict[str, float]] = {
 USD_CNY_RATE: float = 7.2
 
 _CURRENCY_SYMBOLS = {"CNY": "¥", "USD": "$"}
+
+# 合法币种（表级 / 模型级共用）
+_CURRENCIES = ("CNY", "USD")
+
+
+def _model_currency(prices: dict, table_currency: str) -> str:
+    """模型级币种：价格对象内可选 ``currency`` 键，仅认 CNY/USD 字符串；
+    缺省 / 非法值回落表级币种。整对象替换时随价格一起被高层覆盖（缺键即丢失）。"""
+    c = prices.get("currency")
+    return c if isinstance(c, str) and c in _CURRENCIES else table_currency
 
 # 去后缀：[1m] / -YYYYMMDD / --xxx；并折叠 claude 日期快照后缀。
 _MODEL_SUFFIX_RE = re.compile(r"\[.*?\]|-\d{8}.*$|--.*$", re.IGNORECASE)
@@ -182,7 +198,7 @@ def compute_cost(model: str, usage) -> CostAmount:
         + cache_read * p["cache_read"]
         + out * p["output"]
     ) / 1_000_000
-    return CostAmount(cost, currency)
+    return CostAmount(cost, _model_currency(p, currency))
 
 
 def compute_cost_usd(model: str, usage) -> float:

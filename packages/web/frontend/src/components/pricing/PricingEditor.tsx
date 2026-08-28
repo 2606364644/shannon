@@ -15,11 +15,16 @@ import type { PricingRow, PricingSource, Prices } from "@/api/pricing";
  * 设计签名 = 来源徽章四态：内置（secondary·muted）/ 环境（outline·muted）/
  * 全局（实底 primary）/ 本工作区（outline·primary）——徽章即优先级链的可见化，
  * 一眼看清每个价来自哪层、被谁覆盖。数字右对齐 tabular-nums（金融表格惯例）。
+ * 列序（2026-08-28 修复「列名和值对不上」）：输入/输出主干档相邻靠前（对齐智谱/
+ * DeepSeek 官方定价页「输入|输出|缓存」序，抄数不再错位），缓存两档靠后成组——
+ * 且缓存写入对 GLM/DeepSeek 恒 0，不再横插在输出之前当噪音。
+ * 行级币种（2026-08-28）：每行可指定 CNY/USD（null = 跟随表级默认）；
+ * 表顶切换语义 = 默认币种（新行 / 未覆盖行的生效值）。
  * canEdit=false 只读纯展示；编辑态提供：改价、恢复默认（builtin 模型）、
  * 删行、新增模型（normalize 感知查重）、币种切换、脏提示 + 保存/重置。
  */
 
-const PRICE_KEYS = ["input", "cache_read", "cache_creation", "output"] as const;
+const PRICE_KEYS = ["input", "output", "cache_read", "cache_creation"] as const;
 type PriceKey = (typeof PRICE_KEYS)[number];
 
 const CURRENCIES = ["CNY", "USD"] as const;
@@ -40,6 +45,7 @@ interface EditRow {
   model: string; // 现有行固定；新行（isNew）可编辑
   draft: Record<PriceKey, string>; // 输入草稿（string，保留输入过程）
   source: PricingSource;
+  currency: string | null; // 行级币种：null = 跟随表级默认
   isNew?: boolean;
 }
 
@@ -92,7 +98,9 @@ export function PricingEditor({
 }: PricingEditorProps) {
   const { t } = useTranslation();
   const [editRows, setEditRows] = useState<EditRow[]>(
-    () => rows.map((r) => ({ model: r.model, draft: toDraft(r.prices), source: r.source })),
+    () => rows.map((r) => ({
+      model: r.model, draft: toDraft(r.prices), source: r.source, currency: r.currency ?? null,
+    })),
   );
   const [cur, setCur] = useState(currency);
   const [saving, setSaving] = useState(false);
@@ -102,7 +110,7 @@ export function PricingEditor({
   const initial = useMemo(
     () => JSON.stringify({
       currency,
-      rows: rows.map((r) => [r.model, toDraft(r.prices), r.source]),
+      rows: rows.map((r) => [r.model, toDraft(r.prices), r.source, r.currency ?? null]),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, currency],
@@ -124,7 +132,7 @@ export function PricingEditor({
 
   const current = JSON.stringify({
     currency: cur,
-    rows: editRows.map((r) => [r.model, r.draft, r.source]),
+    rows: editRows.map((r) => [r.model, r.draft, r.source, r.currency]),
   });
   const dirty = current !== initial;
 
@@ -137,14 +145,18 @@ export function PricingEditor({
       r.model === model ? { ...r, draft: { ...r.draft, [key]: value } } : r));
   }
 
+  function setRowCurrency(model: string, value: string | null) {
+    setEditRows((prev) => prev.map((r) => (r.model === model ? { ...r, currency: value } : r)));
+  }
+
   function addRow() {
     // 一次只挂一行新行：新行 model 从空串起编辑（key 固定 __new__），再点加行无意义
     // 且会撞 key / setCell 按 model 匹配会串行。保存（或删除）后可继续加。
     if (editRows.some((r) => r.isNew)) return;
     setEditRows((prev) => [
       ...prev,
-      { model: "", draft: { input: "", cache_read: "", cache_creation: "", output: "" },
-        source: "builtin", isNew: true },
+      { model: "", draft: { input: "", output: "", cache_read: "", cache_creation: "" },
+        source: "builtin", currency: null, isNew: true },
     ]);
   }
 
@@ -159,7 +171,9 @@ export function PricingEditor({
   }
 
   function reset() {
-    setEditRows(rows.map((r) => ({ model: r.model, draft: toDraft(r.prices), source: r.source })));
+    setEditRows(rows.map((r) => ({
+      model: r.model, draft: toDraft(r.prices), source: r.source, currency: r.currency ?? null,
+    })));
     setCur(currency);
   }
 
@@ -167,9 +181,10 @@ export function PricingEditor({
     if (!canSave) return;
     const models: Record<string, Prices> = {};
     for (const r of editRows) {
-      const parsed = Object.fromEntries(
-        PRICE_KEYS.map((k) => [k, parsePrice(r.draft[k])]),
-      ) as unknown as Prices;
+      const parsed = {
+        ...Object.fromEntries(PRICE_KEYS.map((k) => [k, parsePrice(r.draft[k])])),
+        currency: r.currency,
+      } as unknown as Prices;
       models[r.model.trim()] = parsed;
     }
     setSaving(true);
@@ -221,6 +236,7 @@ export function PricingEditor({
               {PRICE_KEYS.map((k) => (
                 <TableHead key={k} className="text-right">{t(`pricing.col.${k}`)}</TableHead>
               ))}
+              <TableHead className="text-center">{t("pricing.colCurrency")}</TableHead>
               <TableHead>{t("pricing.colSource")}</TableHead>
               {canEdit && <TableHead className="w-px">{t("pricing.colActions")}</TableHead>}
             </TableRow>
@@ -275,6 +291,56 @@ export function PricingEditor({
                       )}
                     </TableCell>
                   ))}
+                  <TableCell className="text-center">
+                    {canEdit ? (
+                      <div
+                        className="flex items-center justify-center gap-0.5"
+                        role="group"
+                        aria-label={`${r.model || t("pricing.newModelPlaceholder")} ${t("pricing.colCurrency")}`}
+                      >
+                        <button
+                          type="button"
+                          data-testid={`pricing-row-currency-${rowId}-default`}
+                          aria-pressed={r.currency === null}
+                          title={t("pricing.currencyDefault")}
+                          onClick={() => setRowCurrency(r.model, null)}
+                          className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                            r.currency === null
+                              ? "border-primary bg-accent/50 text-primary"
+                              : "border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {t("pricing.currencyDefault")}
+                        </button>
+                        {CURRENCIES.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            data-testid={`pricing-row-currency-${rowId}-${c}`}
+                            aria-pressed={r.currency === c}
+                            onClick={() => setRowCurrency(r.model, c)}
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors ${
+                              r.currency === c
+                                ? "border-primary bg-accent/50 text-primary"
+                                : "border-border text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {CURRENCY_SYMBOLS[c]}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <span
+                        data-testid={`pricing-row-currency-${r.model}`}
+                        title={r.currency === null ? t("pricing.currencyDefault") : undefined}
+                        className={`font-mono text-xs tabular-nums${
+                          r.currency === null ? " text-muted-foreground" : ""
+                        }`}
+                      >
+                        {CURRENCY_SYMBOLS[r.currency ?? cur] ?? ""}
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {r.isNew ? (
                       <Badge variant="secondary" className="text-muted-foreground">

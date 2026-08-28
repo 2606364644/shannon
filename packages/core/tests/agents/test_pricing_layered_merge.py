@@ -205,3 +205,59 @@ def test_global_non_dict_top_level_ignored(tmp_path, monkeypatch):
     monkeypatch.setenv("SUPERNOVA_GLOBAL_PRICING", str(bad))
     table, _ = _pricing()
     assert table == BUILTIN_PRICING_CNY
+
+
+# ---- 锚点 7：builtin 新条目 glm-5.3-flash（2026-08-28 官网核对）----
+
+
+def test_builtin_includes_glm_5_3_flash():
+    assert BUILTIN_PRICING_CNY["glm-5.3-flash"] == {
+        "input": 0.8, "output": 2.8, "cache_read": 0.23, "cache_creation": 0.0,
+    }
+    assert compute_cost("glm-5.3-flash", _usage(1_000_000)).cost == pytest.approx(0.8)
+
+
+# ---- 锚点 8：模型级币种（2026-08-28 per-model currency）----
+# 语义：模型对象内可选 currency 键（仅 CNY/USD 认）；缺省/垃圾回落表级币种；
+# 高层整对象替换时 currency 随之覆盖，低层模型级 currency 丢失（与价格替换语义自洽）。
+
+
+def test_model_level_currency_wins_in_compute_cost(tmp_path, monkeypatch):
+    """模型带 currency USD、表级 CNY → CostAmount.currency == USD。"""
+    path = _write_new_schema(tmp_path, "p.json", "CNY", {"m-a": {**_M(1.0), "currency": "USD"}})
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", path)
+    ca = compute_cost("m-a", _usage(1_000_000))
+    assert ca.cost == pytest.approx(1.0)
+    assert ca.currency == "USD"
+
+
+def test_model_level_currency_absent_falls_back_to_table_currency(tmp_path, monkeypatch):
+    path = _write_new_schema(tmp_path, "p.json", "USD", {"m-a": _M(1.0)})
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", path)
+    assert compute_cost("m-a", _usage(1_000_000)).currency == "USD"
+
+
+def test_model_level_currency_object_replace(tmp_path, monkeypatch):
+    """高层重定义模型（无 currency 键）→ 低层模型级 currency 丢失，回落表级。"""
+    pg = _write_new_schema(tmp_path, "g.json", "CNY", {"m-a": {**_M(5.0), "currency": "USD"}})
+    pw = _write_new_schema(tmp_path, "ws.json", "CNY", {"m-a": _M(1.0)})
+    monkeypatch.setenv("SUPERNOVA_GLOBAL_PRICING", pg)
+    set_scan_env({"SUPERNOVA_PRICING_OVERRIDE": pw})
+    assert compute_cost("m-a", _usage(1_000_000)).currency == "CNY"
+
+
+def test_model_level_currency_garbage_ignored(tmp_path, monkeypatch):
+    """非法币种值（"EUR" / 非 str）→ 忽略，回落表级。"""
+    path = _write_new_schema(tmp_path, "p.json", "CNY", {
+        "m-eur": {**_M(1.0), "currency": "EUR"},
+        "m-num": {**_M(1.0), "currency": 123},
+    })
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", path)
+    assert compute_cost("m-eur", _usage(1_000_000)).currency == "CNY"
+    assert compute_cost("m-num", _usage(1_000_000)).currency == "CNY"
+
+
+def test_unknown_model_currency_is_table_default(tmp_path, monkeypatch):
+    path = _write_new_schema(tmp_path, "p.json", "USD", {"m-a": _M(1.0)})
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", path)
+    assert compute_cost("nope", _usage(1)).currency == "USD"

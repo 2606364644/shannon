@@ -133,6 +133,31 @@ def test_put_pricing_validation_400(admin_client, body, detail_part):
     assert detail_part in r.json()["detail"]
 
 
+# ---- 模型级币种（2026-08-28 per-model currency）----
+
+
+def test_put_pricing_model_currency_roundtrip(admin_client):
+    """PUT 带模型级 currency → 落盘保留 + GET 行兄弟字段透出（null=跟随不 resolve）。"""
+    body = {"currency": "CNY", "models": {
+        "m-usd": {**_tiers(), "currency": "USD"},
+        "m-follow": {**_tiers(), "currency": None},
+    }}
+    r = _put(admin_client, body)
+    assert r.status_code == 200
+    g = admin_client.get("/api/pricing").json()
+    by_model = {m["model"]: m for m in g["models"]}
+    assert by_model["m-usd"]["currency"] == "USD"
+    assert by_model["m-follow"]["currency"] is None
+    assert set(by_model["m-usd"]["prices"]) == {"input", "output", "cache_read", "cache_creation"}
+
+
+@pytest.mark.parametrize("cur", ["cny", "EUR", ""])
+def test_put_pricing_bad_model_currency_400(admin_client, cur):
+    r = _put(admin_client, {"currency": "CNY", "models": {"m": {**_tiers(), "currency": cur}}})
+    assert r.status_code == 400
+    assert "currency" in r.json()["detail"]
+
+
 # ---- DELETE /api/pricing ----
 
 

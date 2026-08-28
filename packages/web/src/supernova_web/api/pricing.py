@@ -33,6 +33,9 @@ class PriceTiers(BaseModel):
     output: float | None = None
     cache_read: float | None = None
     cache_creation: float | None = None
+    # 模型级币种（2026-08-28）：None/缺省 = 跟随表级默认。必须显式声明——
+    # pydantic v2 默认 ignore extra，缺此字段前端提交的 currency 会被静默丢弃。
+    currency: str | None = None
 
 
 class PricingBody(BaseModel):

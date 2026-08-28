@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -9,6 +10,8 @@ from .utils import (
     format_timestamp,
     generate_session_json_path,
 )
+
+_log = logging.getLogger(__name__)
 
 
 # 终态集合:与 WorkflowSummary.status Literal["completed","failed","cancelled"] 对齐。
@@ -108,8 +111,24 @@ class MetricsTracker:
         })
 
         self._data["metrics"]["total_duration_ms"] += result.duration_ms
+        # 混合币种 session（per-model currency 2026-08-28 引入的可能）：跨币种直加读数
+        # 失真，warning 可观测（聚合行为不变——last-wins + 直加，分币种聚合另列后续）。
+        # 0 成本 agent（未知模型守「不假估算」）不参与判定。
+        prev_currency = self._data["metrics"].get("cost_currency")
+        prev_cost = self._data["metrics"].get("total_cost_usd") or 0
+        if (
+            prev_currency is not None
+            and prev_cost > 0
+            and result.cost_usd > 0
+            and prev_currency != result.cost_currency
+        ):
+            _log.warning(
+                "session 混合币种计费：agent %s 为 %s，此前累计为 %s；"
+                "total_cost_usd 为跨币种直加，读数需注意",
+                agent_name, result.cost_currency, prev_currency,
+            )
         self._data["metrics"]["total_cost_usd"] += result.cost_usd
-        # session 内币种一致：取 agent 的 cost_currency（spec 2026-07-09）
+        # session 内币种一致：取 agent 的 cost_currency（spec 2026-07-09；混合时 last-wins）
         self._data["metrics"]["cost_currency"] = result.cost_currency
         self._data["metrics"]["total_input_tokens"] += result.input_tokens or 0
         self._data["metrics"]["total_output_tokens"] += result.output_tokens or 0
