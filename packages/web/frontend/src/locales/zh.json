@@ -626,7 +626,8 @@
       "branding": "品牌",
       "personalization": "个人化",
       "system": "系统",
-      "sso": "SSO / OA 登录"
+      "sso": "SSO / OA 登录",
+      "pricing": "定价"
     },
     "themeTitle": "主题",
     "themeSystem": "跟随系统",
@@ -685,6 +686,19 @@
       "invalidConfig": "配置校验失败:启用时域名必填;OA 基址须 https;回跳前缀须 http(s)://;时长 1-168",
       "updatedBy": "最后更新:{{by}} · {{at}}",
       "notUpdated": "尚未修改(初始种子)"
+    },
+    "pricing": {
+      "title": "模型定价",
+      "desc": "全部工作区的默认定价。保存后下一次计费起生效，无需重启；已落盘的历史扫描成本不变。",
+      "noGlobalNote": "当前未建全局定价表，生效价来自 profile env / 内置表；保存一次即由界面接管。",
+      "clearGlobal": "清除全局定价",
+      "clearGlobalConfirm": "清除全局定价表后将回落 profile env / 内置定价，确定？",
+      "corrupt": "价目表文件损坏，重新保存即可修复。",
+      "loadFailed": "定价加载失败",
+      "saved": "定价已保存",
+      "cleared": "已清除全局定价",
+      "saveFailed": "保存失败",
+      "clearFailed": "清除失败"
     }
   },
   "workspaceDetail": {
@@ -1185,7 +1199,23 @@
       "ineffective": "以下为进程级配置，ws 不生效（需在全局 .env 配置）",
       "unknown": "已忽略未知 key"
     },
-    "openSettings": "工作区配置"
+    "openSettings": "工作区配置",
+    "pricing": {
+      "title": "定价",
+      "subtitle": "默认继承全局定价；可为这个工作区单独覆盖模型价格。",
+      "inheritNote": "继承全局定价（下表为当前生效价格与来源）",
+      "overrideBtn": "覆盖本工作区定价",
+      "cancelOverride": "取消，恢复继承",
+      "overriddenBadge": "已覆盖",
+      "clearOverride": "清除覆盖，恢复继承全局",
+      "clearOverrideConfirm": "清除后本工作区恢复继承全局定价，确定？",
+      "cleared": "已恢复继承全局定价",
+      "saved": "工作区定价已保存",
+      "loadFailed": "定价加载失败",
+      "saveFailed": "保存失败",
+      "clearFailed": "清除失败",
+      "corrupt": "价目表文件损坏，重新保存覆盖即可修复。"
+    }
   },
   "users": {
     "manageLink": "用户管理",
@@ -1421,5 +1451,35 @@
     "forkSuccess": "已复制到工作区，可编辑",
     "forkAlready": "已复制到本工作区",
     "forkFailed": "复制失败"
+  },
+  "pricing": {
+    "colModel": "模型",
+    "col": {
+      "input": "输入",
+      "cache_read": "缓存读取",
+      "cache_creation": "缓存写入",
+      "output": "输出"
+    },
+    "colSource": "来源",
+    "colActions": "操作",
+    "unitNote": "单位：本币 / 百万 token",
+    "source": {
+      "builtin": "内置",
+      "profile_env": "环境",
+      "global": "全局",
+      "workspace": "本工作区",
+      "new": "新增"
+    },
+    "currencyLabel": "币种",
+    "dirtyHint": "有未保存的修改",
+    "invalidNumber": "请输入不小于 0 的数字",
+    "dupId": "模型 id 归一后与现有行重复（如 glm-5.2[1m] 与 glm-5.2 视为同一模型）",
+    "restoreDefault": "恢复默认",
+    "deleteRow": "删除",
+    "addModel": "新增模型",
+    "newModelPlaceholder": "模型 id，如 glm-5.3",
+    "save": "保存定价",
+    "reset": "重置",
+    "clear": "清除"
   }
 }

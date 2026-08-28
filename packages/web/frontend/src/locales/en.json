@@ -626,7 +626,8 @@
       "branding": "Branding",
       "personalization": "Personalization",
       "system": "System",
-      "sso": "SSO / OA Login"
+      "sso": "SSO / OA Login",
+      "pricing": "Pricing"
     },
     "themeTitle": "Theme",
     "themeSystem": "Auto",
@@ -685,6 +686,19 @@
       "invalidConfig": "Validation failed: domain required when enabled; passport base must be https; return-url base must be http(s)://; TTL within 1-168",
       "updatedBy": "Last updated: {{by}} · {{at}}",
       "notUpdated": "Not modified (initial seed)"
+    },
+    "pricing": {
+      "title": "Model pricing",
+      "desc": "Default pricing for all workspaces. Takes effect on the next billed call after saving, no restart needed; costs already recorded do not change.",
+      "noGlobalNote": "No global table yet — effective prices come from profile env / built-in defaults. Saving once hands control to this page.",
+      "clearGlobal": "Clear global pricing",
+      "clearGlobalConfirm": "After clearing the global table, pricing falls back to profile env / built-in defaults. Continue?",
+      "corrupt": "The pricing file is damaged. Saving again repairs it.",
+      "loadFailed": "Failed to load pricing",
+      "saved": "Pricing saved",
+      "cleared": "Global pricing cleared",
+      "saveFailed": "Save failed",
+      "clearFailed": "Clear failed"
     }
   },
   "workspaceDetail": {
@@ -1185,7 +1199,23 @@
       "ineffective": "Process-level keys, not effective per-workspace (set in global .env)",
       "unknown": "Ignored unknown keys"
     },
-    "openSettings": "Workspace config"
+    "openSettings": "Workspace config",
+    "pricing": {
+      "title": "Pricing",
+      "subtitle": "Inherits global pricing by default; you can override model prices for this workspace.",
+      "inheritNote": "Inheriting global pricing (table below shows effective prices and sources)",
+      "overrideBtn": "Override pricing for this workspace",
+      "cancelOverride": "Cancel, keep inheriting",
+      "overriddenBadge": "Overridden",
+      "clearOverride": "Clear override, inherit global again",
+      "clearOverrideConfirm": "After clearing, this workspace inherits global pricing again. Continue?",
+      "cleared": "Now inheriting global pricing",
+      "saved": "Workspace pricing saved",
+      "loadFailed": "Failed to load pricing",
+      "saveFailed": "Save failed",
+      "clearFailed": "Clear failed",
+      "corrupt": "The pricing file is damaged. Saving the override again repairs it."
+    }
   },
   "users": {
     "manageLink": "User Management",
@@ -1421,5 +1451,35 @@
     "forkSuccess": "Copied to workspace, editable",
     "forkAlready": "Already copied to this workspace",
     "forkFailed": "Copy failed"
+  },
+  "pricing": {
+    "colModel": "Model",
+    "col": {
+      "input": "Input",
+      "cache_read": "Cache read",
+      "cache_creation": "Cache write",
+      "output": "Output"
+    },
+    "colSource": "Source",
+    "colActions": "Actions",
+    "unitNote": "Unit: local currency / million tokens",
+    "source": {
+      "builtin": "Built-in",
+      "profile_env": "Env",
+      "global": "Global",
+      "workspace": "Workspace",
+      "new": "New"
+    },
+    "currencyLabel": "Currency",
+    "dirtyHint": "Unsaved changes",
+    "invalidNumber": "Enter a number of at least 0",
+    "dupId": "Model id collides with an existing row after normalization (e.g. glm-5.2[1m] and glm-5.2 are the same model)",
+    "restoreDefault": "Restore default",
+    "deleteRow": "Delete",
+    "addModel": "Add model",
+    "newModelPlaceholder": "Model id, e.g. glm-5.3",
+    "save": "Save pricing",
+    "reset": "Reset",
+    "clear": "Clear"
   }
 }

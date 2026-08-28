@@ -269,7 +269,8 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.ws_config_store import WsConfigStore
     from .components.auth_profile_store import AuthProfileStore
     from .components.host_profile_store import HostProfileStore
-    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles, host_profiles
+    from .components.pricing_store import PricingStore
+    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles, host_profiles, pricing
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
@@ -280,6 +281,14 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.state.config_store = MultiRepoConfigStore(cfg.configs_dir)
     # 品牌名运行时覆盖存储(设置页改名):branding.json 落盘,system_status 解析优先读。
     app.state.branding_store = BrandingStore(cfg.workspaces_dir)
+    # 定价两层存储(设置页全局价目表 + ws 覆盖,spec 2026-08-28):<workspaces_dir>/pricing.json
+    # 与 <ws>/pricing.override.json。挂 create_app 同步段(setdefault 注入见下)。
+    app.state.pricing_store = PricingStore(cfg.workspaces_dir)
+    # 全局价目表 env 键:core pricing._pricing 的 global 层读此路径(worker 由 web spawn
+    # 继承 env → 落盘即生效,无需重启)。setdefault 不覆盖显式配置(自定义部署)。
+    import os as _os
+    _os.environ.setdefault(
+        "SUPERNOVA_GLOBAL_PRICING", str(cfg.workspaces_dir / "pricing.json"))
     git_fetcher = GitFetcher(
         cfg.repos_dir, cfg.gitlab_user, cfg.gitlab_token,
         ws_config_store=app.state.ws_config_store,
@@ -312,6 +321,10 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(host_profiles.router, dependencies=_require_auth)
     # branding:GET 需登录(任意角色可看当前名),PUT 需 admin(route 内 require_admin)。
     app.include_router(branding.router, dependencies=_require_auth)
+    # pricing:全局表 GET 全员 / PUT·DELETE admin(route 内 require_admin);
+    # ws 覆盖 member GET / manager PUT·DELETE(依赖内校验)。spec 2026-08-28。
+    app.include_router(pricing.router, dependencies=_require_auth)
+    app.include_router(pricing.ws_router, dependencies=_require_auth)
 
     from .auth import routes as auth_routes
     app.include_router(auth_routes.router)

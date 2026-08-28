@@ -20,6 +20,7 @@ import { BrandMark } from "@/components/layout/BrandMark";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { SsoConfigCard } from "@/components/SsoConfigCard";
 import { SsoWhitelistPanel } from "@/components/SsoWhitelistPanel";
+import { GlobalPricingCard } from "@/components/pricing/GlobalPricingCard";
 
 const MAX_BRAND = 32;
 
@@ -315,6 +316,11 @@ export function SettingsPage() {
           {/* ▍品牌 */}
           <Section eyebrow={t("settings.section.branding")}>
             <BrandingCard />
+          </Section>
+
+          {/* ▍定价（spec 2026-08-28）：全局价目表，admin 编辑 / 全员可看 */}
+          <Section eyebrow={t("settings.section.pricing")}>
+            <GlobalPricingCard />
           </Section>
 
           {/* ▍个人化 */}

@@ -64,5 +64,6 @@ supernova 的 LLM 成本核算**双引擎统一自算**——claude（`providers
 - **4 档计费**：`cost = (input×P_in + cache_creation×P_cc + cache_read×P_cr + output×P_out)/1e6`（本币直达，**不再 ÷ 汇率**——单 session cost 是 cost_currency 币种金额）。**input_tokens 须已归一为不含 cache 命中**（openai mapper 负责 `max(raw-cached, 0)`）。
 - **字段语义不变量**：全链路保留 `cost_usd`/`total_cost_usd` 字段名（值 = cost_currency 币种金额，非真美元），新增 `cost_currency: str`（默认 `"USD"`）。展示层（CLI renderer / Web 前端 `fmtCost`）按 `cost_currency` 显示 ¥/$。旧 session.json（无 cost_currency）读时默认 USD。
 - **未知模型** → `CostAmount(0.0, currency)` + warning（守「不假估算」），可经 `SUPERNOVA_PRICING_OVERRIDE` 补充。
+- **全局价目表 web 管理（2026-08-28）**：定价优先级链 `内置 < profile env（SUPERNOVA_PRICING_OVERRIDE）< 全局表（web 管理）< 工作区覆盖`。全局表 = `<workspaces_dir>/pricing.json`（web 设置页 admin 编辑，`PricingStore` 原子写），web 进程启动 `create_app` 经 `os.environ.setdefault("SUPERNOVA_GLOBAL_PRICING", ...)` 注入路径（worker 子进程继承；CLI 直跑未设 → 零行为变化）；**界面保存全局表 = 完整生效表快照，保存即接管（压过）profile env 层**。工作区覆盖 = `<ws>/pricing.override.json`（SSOT = 文件存在性，**不写 ws config env 段**——env 文本框「文本=完整定义」契约），`scan_manager._resolve_env_overrides` 注入压过 env 文本段手写同键。`pricing.py` 每次现读文件 → 落盘即生效（worker 下一次计费用新价，无需重启；历史 session cost 已落盘不变）。API：`GET/PUT/DELETE /api/pricing`（全员/admin/admin）+ `/api/workspaces/{ws}/pricing`（member/manager/manager）。
 
-详见 spec `docs/superpowers/specs/2026-07-09-per-profile-cost-pricing-design.md`。
+详见 spec `docs/superpowers/specs/2026-07-09-per-profile-cost-pricing-design.md` + `docs/superpowers/specs/2026-08-28-global-pricing-console-design.md`。

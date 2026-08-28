@@ -1900,10 +1900,20 @@ class ScanManager:
         return asdict(build_provider_config())
 
     def _resolve_env_overrides(self, ws: str) -> dict[str, str]:
-        """per-ws 扫描期 env 覆盖（scan_env 覆盖层用）；无 ws_config_store 或空配置返 {}。"""
+        """per-ws 扫描期 env 覆盖（scan_env 覆盖层用）；无配置且无定价覆盖时返 {}。
+
+        定价覆盖（<ws>/pricing.override.json，spec 2026-08-28 §4.2）存在时追加
+        SUPERNOVA_PRICING_OVERRIDE=<该文件路径> 并**压过** env 文本段手写键——
+        覆盖 SSOT = 文件存在性，不写 ws config env 段（「文本=完整定义」回显契约，
+        程序写键会被用户下次保存 env 文本静默清除）。无覆盖文件 → 手写键照常生效。
+        """
+        env: dict[str, str] = {}
         if self._ws_config_store is not None:
-            return self._ws_config_store.resolve_env_overrides(ws)
-        return {}
+            env = self._ws_config_store.resolve_env_overrides(ws)
+        pricing_override = self._workspaces_dir / ws / "pricing.override.json"
+        if pricing_override.exists():
+            env["SUPERNOVA_PRICING_OVERRIDE"] = str(pricing_override)
+        return env
 
     def _resolve_llm_track(self, ws: str) -> bool:
         """enable_llm_track: ws env_overrides 的 LLM_TRACK 优先，否则全局 is_llm_track_enabled()。

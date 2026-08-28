@@ -11,6 +11,7 @@ import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import WsPricingCard from "@/components/pricing/WsPricingCard";
 
 const PLACEHOLDER = [
   "SUPERNOVA_AI_PROVIDER=openai_compatible",
@@ -242,6 +243,7 @@ export default function WsSettingsTab() {
 
   if (!loaded) return null;
   return (
+    <div className="space-y-3">
     <Card>
       <CardHeader>
         <CardTitle className="font-semibold tracking-tight text-base">{t("wsConfig.title")}</CardTitle>
@@ -344,5 +346,8 @@ export default function WsSettingsTab() {
         </div>
       </CardContent>
     </Card>
+    {/* 定价卡（spec 2026-08-28）：继承全局 / 覆盖本工作区，来源徽章展示生效层 */}
+    <WsPricingCard />
+    </div>
   );
 }

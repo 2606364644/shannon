@@ -1,10 +1,13 @@
 """LLM 成本换算——纯函数，无副作用。
 
 双引擎统一自算（spec §4.5）：claude / openai 引擎都经本模块按 token 用量 × 价目表算 cost，
-消除「claude 读 SDK total_cost_usd、openai 自算」的不对称。价目表来源：内置
-``BUILTIN_PRICING_CNY``（GLM + DeepSeek，默认 CNY）∪ ``SUPERNOVA_PRICING_OVERRIDE`` 指向的
-JSON 文件（per-profile，经 env_loader override=True 天然 per-profile）。override 支持新
-schema (``{"currency","models"}``) 与旧 flat schema（``{model:{...}}``，币种回落 CNY）。
+消除「claude 读 SDK total_cost_usd、openai 自算」的不对称。价目表分层合并（低 → 高）：
+内置 ``BUILTIN_PRICING_CNY``（GLM + DeepSeek，默认 CNY）< ``SUPERNOVA_PRICING_OVERRIDE``
+指向的 JSON 文件（process 层，per-profile，经 env_loader override=True 天然 per-profile）
+< ``SUPERNOVA_GLOBAL_PRICING`` 指向的 JSON 文件（全局层，web 控制台管理，压过 process 层）
+< 工作区覆盖层（ws 的 ``SUPERNOVA_PRICING_OVERRIDE``，经 ``scan_env.ws_override_get``，
+最高）。各层 override 支持新 schema (``{"currency","models"}``) 与旧 flat schema
+（``{model:{...}}``，币种回落 CNY）；币种 = 最高优先非空层的 currency。
 
 返回 ``CostAmount{cost, currency}``：cost 是 ``currency`` 币种的金额（单 session 本币直达，
 不再 ÷ 汇率）；未知模型回落 ``CostAmount(0.0, currency)``（守「不假估算」）。
@@ -22,7 +25,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from supernova_core.config.scan_env import ws_getenv
+from supernova_core.config.scan_env import ws_override_get
 
 _log = logging.getLogger(__name__)
 
@@ -98,8 +101,8 @@ def _rate() -> float:
     return USD_CNY_RATE
 
 
-def _load_override() -> dict:
-    path = ws_getenv("SUPERNOVA_PRICING_OVERRIDE")
+def _load_pricing_file(path: str | None) -> dict:
+    """读一份价目表文件；路径空 / 读失败 / 顶层非 dict → {}（容错，该层视为空）。"""
     if not path:
         return {}
     try:
@@ -107,28 +110,40 @@ def _load_override() -> dict:
             data = json.load(f)
         if isinstance(data, dict):
             return data
-        _log.warning("SUPERNOVA_PRICING_OVERRIDE 顶层非 object，忽略覆盖")
+        _log.warning("价目表 %r 顶层非 object，忽略该层", path)
     except (OSError, json.JSONDecodeError) as e:
-        _log.warning("SUPERNOVA_PRICING_OVERRIDE 解析失败（%s），忽略覆盖", e)
+        _log.warning("价目表 %r 解析失败（%s），忽略该层", path, e)
     return {}
 
 
 def _pricing() -> tuple[dict, str]:
-    """合并内置表 + override，返回 (价目表, 币种)。
+    """分层合并内置表 + 三层 override，返回 (价目表, 币种)。
 
-    override 新 schema: {"currency": "CNY"|"USD", "models": {model: {4 档}}}
-    override 旧 flat schema: {model: {input,output,cache_read}}  → 币种回落 CNY
+    优先级（低 → 高，逐层 update，高层同模型压过低层、未覆盖模型继承低层）：
+    内置 < process 层（``SUPERNOVA_PRICING_OVERRIDE``，per-profile）< 全局层
+    （``SUPERNOVA_GLOBAL_PRICING``，web 控制台）< 工作区层（ws 覆盖的
+    ``SUPERNOVA_PRICING_OVERRIDE``）。各层兼容新 schema
+    ``{"currency": "CNY"|"USD", "models": {model: {4 档}}}`` 与旧 flat
+    ``{model: {input,output,cache_read}}``（币种按 CNY）。
+
+    币种 = 最高优先非空层的 currency（缺省/空串回落 CNY，全部层空 → CNY）。
+    兼容不变量：未设 GLOBAL 键且无 ws 覆盖时，输出与拆层前
+    （BUILTIN ∪ ws_getenv 单层混合）逐项等价。
     """
-    override = _load_override()
+    layers = [
+        _load_pricing_file(os.environ.get("SUPERNOVA_PRICING_OVERRIDE")),  # process 层
+        _load_pricing_file(os.environ.get("SUPERNOVA_GLOBAL_PRICING")),  # 全局层（web 注入）
+        _load_pricing_file(ws_override_get("SUPERNOVA_PRICING_OVERRIDE")),  # 工作区层（最高）
+    ]
     table = dict(BUILTIN_PRICING_CNY)
-    if isinstance(override.get("models"), dict):
-        currency = override.get("currency", "CNY")
-        table.update(override["models"])
-    elif override:
-        currency = "CNY"
-        table.update(override)
-    else:
-        currency = "CNY"
+    currency = "CNY"
+    for layer in layers:  # 低 → 高逐层 update
+        if isinstance(layer.get("models"), dict):
+            currency = layer.get("currency", "CNY") or "CNY"
+            table.update(layer["models"])
+        elif layer:  # 旧 flat schema
+            currency = "CNY"
+            table.update(layer)
     return table, currency
 
 

@@ -41,6 +41,17 @@ const okBody = {
 const server = setupServer(
   http.get("/api/system-status", () => HttpResponse.json(okBody)),
   http.get("/api/branding", () => HttpResponse.json({ brand_name: null })),
+  // 全局定价卡（spec 2026-08-28）：默认 handler——页面渲染即 GET /api/pricing
+  http.get("/api/pricing", () => HttpResponse.json({
+    currency: "CNY",
+    models: [
+      { model: "glm-5.2", prices: { input: 8, output: 28, cache_read: 2, cache_creation: 0 }, source: "builtin" },
+    ],
+    has_global_table: false,
+    builtin_defaults: {
+      "glm-5.2": { input: 8, output: 28, cache_read: 2, cache_creation: 0 },
+    },
+  })),
   // SSO section（spec 2026-08-26）：默认 handler——admin 渲染配置卡/白名单面板的初始 fetch
   http.get("/api/auth/sso/admin/config", () => HttpResponse.json({
     enabled: false, auth_domain: "", public_base_url: "",

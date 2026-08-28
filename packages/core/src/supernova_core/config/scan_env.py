@@ -76,6 +76,20 @@ def ws_getenv(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
+def ws_override_get(key: str) -> str | None:
+    """仅读当前扫描的工作区覆盖值；无覆盖层 / 键不在层内 → ``None``（**不回落** ``os.environ``）。
+
+    与 :func:`ws_getenv` 的区别：读取点要「分层合并」（低层基座 + ws 选择性压过）
+    而非「整体替换」时用本函数——如 pricing 工作区层（spec 2026-08-28
+    global-pricing-console §4.1）：ws 覆盖只压过 ws 定义的模型，其余模型继承
+    process / 全局层。
+    """
+    overrides = _SCAN_ENV.get(_resolve_wf_id())
+    if overrides and key in overrides:
+        return overrides[key]
+    return None
+
+
 def ws_getenv_bool(key: str, default: bool) -> bool:
     """布尔版 ws_getenv：``'0'/'false'/'no'/'off'`` → False，其余非空 → True，未设 → default。
 
