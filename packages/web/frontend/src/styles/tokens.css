@@ -931,18 +931,24 @@ html body {
   --muted-foreground: 0 0% 43%;
   --accent: 0 0% 96%;
   --accent-foreground: 0 0% 5%;
-  --destructive: 5 84% 48%;
+  --destructive: 5 84% 40%;
   --destructive-foreground: 0 0% 100%;
   --border: 0 0% 90%;
   --input: 0 0% 90%;
   --ring: 165 82% 35%;
 
   /* 层 B · 语义色（green=深青 --accent-hover 档 AA；danger #ef4146 358°→锁 5°；
-     warn #f5a623 37°→锁 24°；cyan 190° 与 c-green teal 165° 拉 25° 防双绿混淆） */
+     warn #f5a623 37°→锁 24°；cyan 190° 与 c-green teal 165° 拉 25° 防双绿混淆。
+     red 2026-08-28 归队家族亮度阶梯：48%（全家最亮、比 orange 还跳）→40% 深砖红
+     #bc1f10 印泥档——green 26/yellow 30/orange 38/red 40，微升的 L 是 hue 5° 红
+     的感知亮度补偿（同 HSL L 下红比橙视觉更暗，实测 Y red 0.117 < orange 0.154，
+     视觉重量仍红最重），白底 6.3:1 AA 稳过（原 48% 档 4.7:1 勉强过线且在纯白
+     近单色画布上像消防警报，用户实证「不美观」）；hue 5° 纪律不动（severity
+     跨主题统一，只调 sat/lightness） */
   --c-cyan: 190 65% 30%;
   --c-magenta: 278 55% 45%;
   --c-green: 165 85% 26%;
-  --c-red: 5 84% 48%;
+  --c-red: 5 84% 40%;
   --c-orange: 24 85% 38%;
   --c-yellow: 38 85% 30%;
   --c-amber: 36 78% 33%;

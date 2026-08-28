@@ -250,7 +250,10 @@ describe("扩展主题（2026-08-25 OpenDesign 六主题移植）", () => {
     // 层 B：c-green 用深青 #0a7a5e（--accent-hover 真值档，白底 5.3:1 AA；
     // 品牌青 35% 档仅 3.2:1 只配按钮底/链接）。severity hue 锁定 5/24/38
     expect(oaiBlock).toMatch(/--c-green:\s*165 85% 26%;/);
-    expect(oaiBlock).toMatch(/--c-red:\s*5\s/);
+    // red 归队家族亮度阶梯（green 26/yellow 30/orange 38/red 40）：40% 深砖红
+    // 白底 6.3:1 AA 稳过；48% 档曾全场最亮、在纯白近单色画布上刺眼（2026-08-28 修）
+    expect(oaiBlock).toMatch(/--c-red:\s*5 84% 40%;/);
+    expect(oaiBlock).toMatch(/--destructive:\s*5 84% 40%;/);
     expect(oaiBlock).toMatch(/--c-orange:\s*24\s/);
     expect(oaiBlock).toMatch(/--c-yellow:\s*38\s/);
     // GitNexus cyan 与 teal 主色拉开（190° vs 165°）
