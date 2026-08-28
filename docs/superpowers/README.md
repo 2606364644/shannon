@@ -50,6 +50,7 @@
 - [display-ux-polish](plans/2026-06-27-display-ux-polish.md) / [spec](specs/2026-06-27-display-ux-polish-design.md) — 白盒显示 UX 优化 ✅
 - [workflow-info-display-channel](plans/2026-06-28-workflow-info-display-channel.md) / [spec](specs/2026-06-28-workflow-info-display-channel-design.md) — workflow InfoEvent 显示通道 🔧
 - [cli-workflow-failure-friendly-display](plans/2026-06-28-cli-workflow-failure-friendly-display.md) / [spec](specs/2026-06-28-cli-workflow-failure-friendly-display-design.md) — CLI workflow 失败友好展示 🔧
+- [prompt-output-language-core](specs/2026-08-28-prompt-output-language-core-design.md) — 13 个辅助 prompt 补通用语言约束（叙述散文随 LANG、技术标识保英文）📐 仅 spec 未实施
 
 ### 引擎 engine
 - [openai-agents-engine](plans/2026-06-17-openai-agents-engine.md) / [spec](specs/2026-06-17-openai-agents-engine-design.md) — openai-agents 引擎（[smoke](plans/2026-06-17-openai-agents-engine-smoke.md)）
