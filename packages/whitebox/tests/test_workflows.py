@@ -194,3 +194,37 @@ def test_activity_input_has_vuln_classes_field():
     ai = ActivityInput(repo_path="/tmp/x")
     assert hasattr(ai, "vuln_classes")
     assert ai.vuln_classes is None
+
+
+def test_gn_verdict_failure_status_pure_fn():
+    """gn_verdict activity 重试耗尽 → 三类全标 failed 的状态替身（纯函数）。
+
+    供 fail-fast 判定消费：关轨 = DEGRADABLE 全 fail → 终止（与旧路径
+    activity raise 炸 workflow 等价）；开轨 = 标红继续（比直接炸温和——
+    LLM 轨兜底，merger/report 读状态产物）。"""
+    from supernova_whitebox.pipeline.workflows import (
+        _decide_gitnexus_failfast, _gn_verdict_failure_status,
+    )
+
+    stub = _gn_verdict_failure_status(RuntimeError("activity timed out"))
+    assert stub["per_class"] == {}
+    assert set(stub["failed_classes"]) == {"injection", "xss", "ssrf"}
+    assert all("activity timed out" in r for r in stub["fail_reasons"].values())
+    # 联动 fail-fast：按 workflow 实际用法先把 failed_classes 转 statuses
+    statuses = {vc: {"status": "failed", "reason": stub["fail_reasons"][vc]}
+                for vc in stub["failed_classes"]}
+    assert _decide_gitnexus_failfast(statuses, llm_track_enabled=False) == [
+        "injection", "xss", "ssrf"]
+    assert _decide_gitnexus_failfast(statuses, llm_track_enabled=True) == []
+
+
+def test_gn_verdict_concurrent_with_vuln_agents():
+    """防回退锚点：GN 轨 chain-verdict 与 LLM 轨 vuln agents 同批 gather 并发
+    （双轨独立、汇合点在 merge），不再 vuln 全跑完才起 gn_verdict 的串行 await。"""
+    import inspect
+
+    src = inspect.getsource(WhiteboxScanWorkflow.run)
+    assert "_gn_verdict_coro" in src, (
+        "gn_verdict 应以 coro 形式创建（_gn_verdict_coro），与 vuln_tasks "
+        "同批 gather 并发")
+    assert "minutes=45" in src, "gn_verdict 窗口应提至 45min（三类并发满载预算）"
