@@ -69,3 +69,23 @@ def test_prompt_has_branch_path_exhaustion():
     assert "Branch Path Exhaustion" in text
     assert "conditional branches" in text
     assert "trace every branch independently" in text
+
+
+def test_prompt_has_blind_extraction_discipline():
+    """盲信道提取效率纪律（2026-08-28 NodeGoat-20260828-054537 实证：
+    agent 把数值 oracle 布尔化 ?1:0、urllib 无复用、串行逐位、cat maxlen=6000、
+    单条命令 timeout 250s×2 段——脚本范式决定了它必须定长超时。纪律治本：
+    快信道优先 / ETA 算账 / 信道打包 / 传输提速 / 少提取。）"""
+    text = PROMPT.read_text()
+    assert "<blind_extraction_discipline>" in text
+    # 1. 快信道优先：盲注是 fallback 不是默认
+    assert "one-shot exfil" in text
+    assert "fallback, not the default" in text
+    # 2. 算账：ETA 超 2 分钟换策略，不许定长超时硬跑
+    assert "ETA" in text and "Never set a long timeout and grind" in text
+    # 3. 信道打包：数值信道别塌缩成 1-bit
+    assert "Never collapse it to" in text and "1-bit" in text
+    # 4. 传输提速：连接复用 + 删 sleep + 有界并发
+    assert "requests.Session" in text and "gratuitous sleeps" in text
+    # 5. 少提取：元探测一次拿存在性+大小
+    assert "wc -c" in text and "grep -c" in text

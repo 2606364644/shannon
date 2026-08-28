@@ -262,6 +262,16 @@ An **exploitable vulnerability** is a confirmed source-to-sink path where the en
 * Keep these as examples under `witness_payload` in findings; they are not required to classify a path as vulnerable during analysis.
 </witness_inputs_for_later>
 
+<blind_extraction_discipline>
+**When pulling data out through an oracle (boolean / numeric / timing), work smart, not slow:**
+
+1. **Try a faster channel first.** RCE + outbound access → one-shot exfil (curl/wget to your listener). Error messages or stored reflections (write to a field you can read back) beat bitwise extraction. Blind extraction is the fallback, not the default.
+2. **Do the math before you crawl:** bytes × probes/byte × delay/probe = ETA. ETA over ~2 min → change approach (better channel or less data). Never set a long timeout and grind.
+3. **Squeeze bits per request.** Measure what the oracle returns: a numeric/length oracle is multi-bit — return the value directly or pack bytes (`(hi<<8)|lo`). Never collapse it to 1-bit toggles.
+4. **Speed up the loop:** reuse connections (`requests.Session`), drop gratuitous sleeps, probe several positions in parallel (small thread pool — check the target tolerates it first).
+5. **Extract less:** `wc -c` / `grep -c` gives existence + size in ONE probe. Preview 64 bytes before committing. Known open-source configs → diff the template, pull only what varies.
+</blind_extraction_discipline>
+
 
 <false_positives_to_avoid>
 **General:**
