@@ -995,6 +995,8 @@
     "logs": {
       "listLoadError": "Failed to load log file list",
       "contentLoadError": "Failed to load log content",
+      "trackWhitebox": "Whitebox",
+      "trackBlackbox": "Blackbox {{runId}}",
       "emptyTitle": "No log files",
       "emptyHint": "workflow.log etc. will be generated once the scan starts",
       "selectHint": "Select a log file on the left",

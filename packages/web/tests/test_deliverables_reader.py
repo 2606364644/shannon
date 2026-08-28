@@ -42,6 +42,64 @@ def test_summary(tmp_path):
     assert "whitebox/report.md" in names
 
 
+def test_list_logs_includes_logs_subdir_diagnostic(tmp_path):
+    """logs/ 子目录的 diagnostic.log（LogBus DiagnosticLog 落盘的底层引擎诊断流，
+    GitNexus stderr 等确定性轨问题第一现场）须进日志列表且可读回——
+    含子目录前缀（'logs/diagnostic.log'），与 agents/ 前缀约定一致，
+    前端 ?file= 透传即达；CLI 侧 `supernova logs --diagnostic` 同能力。"""
+    ws = tmp_path / "ws"
+    (ws / "logs").mkdir(parents=True)
+    (ws / "workflow.log").write_text("[workflow]")
+    (ws / "agents").mkdir()
+    (ws / "agents" / "1_agent_attempt-1.log").write_text("[] agent_start ")
+    (ws / "logs" / "diagnostic.log").write_text("[ INFO] supernova_core.code_index: Detected 30 rule-based sink call sites")
+
+    files = DeliverablesReader(ws).list_logs()
+    assert "workflow.log" in files
+    assert "agents/1_agent_attempt-1.log" in files
+    assert "logs/diagnostic.log" in files
+
+    content = DeliverablesReader(ws).read_log("logs/diagnostic.log")
+    assert "rule-based sink call sites" in content
+
+
+def test_list_logs_includes_ndjson_and_authcheck(tmp_path):
+    """顶层 *.ndjson(events.ndjson/authcheck-events.ndjson 主事件流原始文件)与
+    .authcheck/*.log(t0 认证预验证子 workflow 日志,隐藏目录——precheck 失败时
+    详细过程只在)也须列出且可读回:「日志页看到本次扫描所有日志」补齐。"""
+    ws = tmp_path / "ws"
+    (ws / "agents").mkdir(parents=True)
+    (ws / ".authcheck").mkdir(parents=True)
+    (ws / "workflow.log").write_text("[workflow]")
+    (ws / "events.ndjson").write_text('{"ts": "t1", "type": "PhaseEvent"}\n')
+    (ws / "authcheck-events.ndjson").write_text('{"ts": "t2"}\n')
+    (ws / ".authcheck" / "workflow.log").write_text("authcheck workflow")
+    (ws / ".authcheck" / "activity_failures.log").write_text("")
+
+    files = DeliverablesReader(ws).list_logs()
+    assert "events.ndjson" in files
+    assert "authcheck-events.ndjson" in files
+    assert ".authcheck/workflow.log" in files
+    assert ".authcheck/activity_failures.log" in files
+    assert DeliverablesReader(ws).read_log(".authcheck/workflow.log") == "authcheck workflow"
+    assert "PhaseEvent" in DeliverablesReader(ws).read_log("events.ndjson")
+
+
+def test_read_log_rejects_path_traversal(tmp_path):
+    """read_log 的 name 来自前端 ?file= query param——路径穿越(../ 越界、绝对路径
+    注入 Path 拼接替换)须拒绝(FileNotFoundError),resolve 后必须仍在 scan 目录内。"""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("top secret")
+    with pytest.raises(FileNotFoundError):
+        DeliverablesReader(ws).read_log("../secret.txt")
+    with pytest.raises(FileNotFoundError):
+        DeliverablesReader(ws).read_log("../../etc/passwd")
+    with pytest.raises(FileNotFoundError):
+        DeliverablesReader(ws).read_log("/etc/passwd")
+
+
 def test_missing_raises(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()

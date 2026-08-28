@@ -144,17 +144,24 @@ class DeliverablesReader:
         return out
 
     def list_logs(self) -> list[str]:
-        """列日志文件:顶层 *.log + agents/*.log(返 'agents/{name}' 含前缀,
-        前端回传 ?file=agents/xxx 经 read_log 解析)。"""
+        """列日志文件:顶层 *.log + *.ndjson + agents|logs|.authcheck/*.log(返相对
+        路径含前缀,前端回传 ?file=xxx 经 read_log 解析)。logs/ 是 diagnostic.log
+        (底层引擎诊断流,GitNexus stderr 等确定性轨问题第一现场,CLI `supernova logs
+        --diagnostic` 同能力);.authcheck/ 是 t0 认证预验证子 workflow 日志(precheck
+        失败详细过程);*.ndjson 是主事件流原始文件(events.ndjson/authcheck-events)。"""
         out: list[str] = []
         for f in sorted(self._ws.glob("*.log")):
             if f.is_file():
                 out.append(f.name)
-        agents_dir = self._ws / "agents"
-        if agents_dir.is_dir():
-            for f in sorted(agents_dir.glob("*.log")):
-                if f.is_file():
-                    out.append(f"agents/{f.name}")
+        for f in sorted(self._ws.glob("*.ndjson")):
+            if f.is_file():
+                out.append(f.name)
+        for sub in ("agents", "logs", ".authcheck"):
+            sub_dir = self._ws / sub
+            if sub_dir.is_dir():
+                for f in sorted(sub_dir.glob("*.log")):
+                    if f.is_file():
+                        out.append(f"{sub}/{f.name}")
         return out
 
     def _display_path(self, f: Path) -> str:
@@ -193,12 +200,18 @@ class DeliverablesReader:
         return text
 
     def read_log(self, name: str = "workflow.log") -> str:
-        p = self._ws / name
-        if not p.exists():
-            p = self._ws / "agents" / name
-        if not p.exists():
-            raise FileNotFoundError(name)
-        return p.read_text("utf-8")
+        """读单日志:name 是 list_logs 返回的相对路径(可含 agents//logs//.authcheck/
+        前缀或裸文件名,裸名回退 agents/ 兼容旧约定)。name 来自前端 ?file= query
+        param——路径穿越(../ 越界/绝对路径注入)须拒绝:候选 resolve 后必须仍在
+        _ws 内,否则 FileNotFoundError(不泄露存在性)。"""
+        ws_root = self._ws.resolve()
+        for cand in (self._ws / name, self._ws / "agents" / name):
+            try:
+                if cand.exists() and cand.resolve().is_relative_to(ws_root):
+                    return cand.read_text("utf-8")
+            except OSError:
+                continue
+        raise FileNotFoundError(name)
 
     def read_poc(self) -> str | None:
         """读 PoC md(exploitable_poc_collection.md),不存在返回 None(不抛,调用方按无 PoC 处理)。

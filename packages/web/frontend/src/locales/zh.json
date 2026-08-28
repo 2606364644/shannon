@@ -995,6 +995,8 @@
     "logs": {
       "listLoadError": "加载日志文件列表失败",
       "contentLoadError": "加载日志内容失败",
+      "trackWhitebox": "白盒",
+      "trackBlackbox": "黑盒 {{runId}}",
       "emptyTitle": "暂无日志文件",
       "emptyHint": "扫描启动后会生成 workflow.log 等",
       "selectHint": "选择左侧日志文件",

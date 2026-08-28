@@ -229,6 +229,12 @@ export const scanLogsPath = (ws: string, scanId: string, file?: string) =>
     ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/logs?file=${encodeURIComponent(file)}`
     : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/logs`;
 
+/** 黑盒 run 日志文件列表（无 file）或单日志内容（带 file）--组合任务 LogsTab 黑盒侧用。 */
+export const blackboxRunLogsPath = (ws: string, scanId: string, runId: string, file?: string) =>
+  file
+    ? `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/logs?file=${encodeURIComponent(file)}`
+    : `/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/blackbox-runs/${encWs(runId)}/logs`;
+
 /** scan events SSE URL（tail scan_dir/events.ndjson）--喂 EventSource，含 /api 前缀。 */
 export const scanEventsUrl = (ws: string, scanId: string) =>
   `/api/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/events`;
