@@ -1995,7 +1995,7 @@ async def _write_agent_pocs(
     - ``only_ids``（回炉）：额外过滤，只处理指定且尚无 report_poc 的卡。
     """
     from supernova_core.collectors.poc import (
-        POC_AGENT_OUTPUT_SCHEMA, validate_pocs,
+        POC_AGENT_OUTPUT_SCHEMA, extract_pocs_payload, validate_pocs,
     )
     from supernova_core.models.queue_schemas import VulnerabilityQueue
     from supernova_whitebox.audit.session_registry import get_audit_session
@@ -2050,10 +2050,10 @@ async def _write_agent_pocs(
             return []
         raw = result.structured_output
         if raw is None and getattr(result, "text", None):
-            try:
-                raw = json.loads(result.text)
-            except (json.JSONDecodeError, ValueError):
-                raw = None
+            # 打捞兜底（2026-08-28 auth 实证：agent 烧满 turn 预算被 SDK 掐断，
+            # structured_output=None 但 text 里常有成型/围栏 pocs JSON）——裸 JSON
+            # → 花括号平衡段纯解析，不改写内容；救不回走诚实缺失。
+            raw = extract_pocs_payload(result.text)
         items = raw.get("pocs") if isinstance(raw, dict) else None
         if not items:
             logger.warning("poc-agent: %s returned no pocs (cards left "
@@ -2942,6 +2942,19 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             # 立即填补并发槽）。
             _verdict_sem = asyncio.Semaphore(get_chain_verdict_concurrency())
 
+            def _verdict_ckpt(label: str):
+                """逐链判定 checkpoint（2026-08-28 事故修）：activity 超时重试 /
+                resume 只补未判链（此前全量重跑——2026-08-27 NodeGoat 27+31 链
+                每条累计判 ~5 遍）。每类一文件防跨 gather 并发写竞争；损坏按空
+                处理（load 语义），缓存命中零 LLM 调用。
+                """
+                from supernova_core.code_index.verdict_checkpoint import (
+                    VerdictCheckpoint,
+                )
+                return VerdictCheckpoint.load(
+                    intermediate_path(
+                        deliverables, f"chain_verdict_checkpoint_{label}.json"))
+
             # Second-order storage-taint findings (子项⑤): compute once, group
             # by vuln class, then merge into the per-class queue inside the
             # builder loop. Guarded on ``index`` being defined (only set when
@@ -2978,6 +2991,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                         source_provider=_second_order_source_provider,
                         progress_cb=_chain_cb,
                         semaphore=_verdict_sem,
+                        verdict_checkpoint=_verdict_ckpt("2nd"),
                     )
                 except NameError:
                     # index undefined — code_index.json absent/failed to parse.
@@ -3007,7 +3021,8 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                                              sink_call_sites=sink_call_sites,
                                              entry_points=entry_point_map,
                                              progress_cb=_chain_cb,
-                                             semaphore=_verdict_sem)
+                                             semaphore=_verdict_sem,
+                                             verdict_checkpoint=_verdict_ckpt(vc))
                     return vc, findings, None
                 except Exception as exc:
                     return vc, None, exc

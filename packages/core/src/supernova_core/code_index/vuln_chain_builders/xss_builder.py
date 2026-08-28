@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
+from supernova_core.code_index.verdict_checkpoint import VerdictCheckpoint
 from supernova_core.code_index.chain_verdict import (
     CandidateChain,
     extract_candidate_chains,
@@ -150,6 +151,7 @@ async def build_xss_findings(
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
     semaphore: "asyncio.Semaphore | None" = None,
+    verdict_checkpoint: "VerdictCheckpoint | None" = None,
 ) -> list[XssVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="xss", sink_call_sites=sink_call_sites,
@@ -176,7 +178,7 @@ async def build_xss_findings(
     # 逐链并行研判（Semaphore 并发 + gather 保序；预算/agent_name/tick 语义不变）
     verdicts = await gather_verdicts_concurrently(
         candidates, vc="xss", llm_client=llm_client, verdict_agent=verdict_agent,
-        emitter=emitter, detail_of=_detail, semaphore=semaphore)
+        emitter=emitter, detail_of=_detail, semaphore=semaphore, checkpoint=verdict_checkpoint)
     findings: list[XssVulnerability] = []
     for i, (chain, verdict) in enumerate(zip(candidates, verdicts), start=1):
         is_stored = chain.flow_id.startswith("stored#")

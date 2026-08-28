@@ -151,3 +151,52 @@ def test_validate_normalizes_mixed_steps_list():
          "self_check": "pass"}
     res = validate_pocs([v], valid_ids={"INJ-1"})
     assert res.accepted[0]["steps"] == ["plain", "from text key"]
+
+
+# ---------- extract_pocs_payload（2026-08-28 打捞兜底） ----------
+
+from supernova_core.collectors.poc import extract_pocs_payload
+
+
+def _poc_dict(vid: str = "AUTH-VULN-01") -> dict:
+    return {"pocs": [{"vulnerability_id": vid, "curl": "curl -i 'http://T/x'",
+                      "self_check": "pass"}]}
+
+
+def test_extract_bare_json_text():
+    import json
+    assert extract_pocs_payload(json.dumps(_poc_dict())) == _poc_dict()
+
+
+def test_extract_fenced_json_block_amid_prose():
+    import json
+    text = ("Here are the PoCs:\n```json\n" + json.dumps(_poc_dict("XSS-VULN-02"))
+            + "\n```\nDone.")
+    assert extract_pocs_payload(text) == _poc_dict("XSS-VULN-02")
+
+
+def test_extract_brace_balanced_segment_without_fence():
+    # 无围栏、前后都是 prose：花括号平衡段提取（含字符串内 {}/引号 状态机）
+    import json
+    payload = _poc_dict("INJ-VULN-03")
+    payload["pocs"][0]["curl"] = "curl 'http://T/x?q={a}&w=\"b\"'"
+    text = " preamble " + json.dumps(payload) + " trailing notes"
+    assert extract_pocs_payload(text) == payload
+
+
+def test_extract_returns_none_when_no_json():
+    assert extract_pocs_payload("no json here at all") is None
+    assert extract_pocs_payload("") is None
+    assert extract_pocs_payload(None) is None
+
+
+def test_extract_returns_none_when_parsed_but_not_pocs_shape():
+    import json
+    # 解析成功但非 {"pocs": list} 形态 → None（宁缺毋错，不猜结构）
+    assert extract_pocs_payload(json.dumps({"items": []})) is None
+    assert extract_pocs_payload(json.dumps([1, 2])) is None
+
+
+def test_extract_unbalanced_brace_returns_none():
+    # 花括号不平衡（agent 被掐断的残文）→ None，不抛
+    assert extract_pocs_payload('{"pocs": [{"vulnerability_id": "X"') is None

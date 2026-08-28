@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Awaitable, Callable
 
+from supernova_core.code_index.verdict_checkpoint import VerdictCheckpoint
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     gather_verdicts_concurrently,
@@ -74,6 +75,7 @@ async def build_second_order_findings(
     source_provider: "Callable[[StorageWritePoint], bytes | None] | None" = None,
     progress_cb: ProgressCb = None,
     semaphore: "asyncio.Semaphore | None" = None,
+    verdict_checkpoint: "VerdictCheckpoint | None" = None,
 ) -> list[InjectionVulnerability]:
     """Emit second-order findings for storage taint pairs.
 
@@ -131,7 +133,7 @@ async def build_second_order_findings(
     verdicts = await gather_verdicts_concurrently(
         candidates, vc="2nd", llm_client=llm_client,
         verdict_agent=verdict_agent, emitter=emitter, detail_of=_detail,
-        chain_of=lambda cand: cand.read_side_chain, semaphore=semaphore)
+        chain_of=lambda cand: cand.read_side_chain, semaphore=semaphore, checkpoint=verdict_checkpoint)
     findings: list[InjectionVulnerability] = []
 
     for i, (cand, read_verdict) in enumerate(zip(candidates, verdicts), start=1):

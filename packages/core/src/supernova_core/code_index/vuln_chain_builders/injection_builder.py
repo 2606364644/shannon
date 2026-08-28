@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
+from supernova_core.code_index.verdict_checkpoint import VerdictCheckpoint
 from supernova_core.code_index.chain_verdict import (
     extract_candidate_chains,
     gather_verdicts_concurrently,
@@ -47,6 +48,7 @@ async def build_injection_findings(
     progress_cb: ProgressCb = None,
     entry_points: dict[str, EntryPoint] | None = None,
     semaphore: "asyncio.Semaphore | None" = None,
+    verdict_checkpoint: "VerdictCheckpoint | None" = None,
 ) -> list[InjectionVulnerability]:
     candidates = extract_candidate_chains(
         pgraph, vuln_class="injection", sink_call_sites=sink_call_sites,
@@ -69,7 +71,7 @@ async def build_injection_findings(
     verdicts = await gather_verdicts_concurrently(
         candidates, vc="injection", llm_client=llm_client,
         verdict_agent=verdict_agent, emitter=emitter, detail_of=_detail,
-        semaphore=semaphore)
+        semaphore=semaphore, checkpoint=verdict_checkpoint)
     findings: list[InjectionVulnerability] = []
     for i, (chain, verdict) in enumerate(zip(candidates, verdicts), start=1):
         concat_note = ""

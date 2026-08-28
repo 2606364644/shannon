@@ -31,6 +31,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+from supernova_core.code_index.verdict_checkpoint import VerdictCheckpoint
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph,
     PropagationStep,
@@ -631,6 +632,7 @@ async def gather_verdicts_concurrently(
     max_agents: int | None = None,
     concurrency: int | None = None,
     semaphore: "asyncio.Semaphore | None" = None,
+    checkpoint: "VerdictCheckpoint | None" = None,
 ) -> list["ChainVerdict"]:
     """逐链并行研判（builder 串行 for 循环的并行替换，四 builder 共用）。
 
@@ -677,7 +679,13 @@ async def gather_verdicts_concurrently(
 
     async def _one(i: int, item) -> "ChainVerdict":
         chain = _chain(item)
-        if i > max_agents:
+        # checkpoint（2026-08-28 事故修）：缓存命中优先——零 LLM 调用，且预算
+        # 闸只约束真判（已判链免费返回，比 unadjudicated 占位更准）。unadjudicated
+        # 是预算护栏的保守占位而非真判定，不落盘（重跑预算放开后应真判）。
+        cached = checkpoint.get(chain) if checkpoint is not None else None
+        if cached is not None:
+            verdict = cached
+        elif i > max_agents:
             logger.warning(
                 "chain-verdict budget exceeded (%d); candidate %d of %d "
                 "left unadjudicated (conservative, in queue)",
@@ -687,6 +695,8 @@ async def gather_verdicts_concurrently(
                        f"left unadjudicated for human review")
         else:
             verdict = await _judge(i, chain)
+            if checkpoint is not None:
+                checkpoint.put(chain, verdict)
         if emitter is not None:
             detail = (detail_of(i, item, verdict)
                       if detail_of is not None else None)

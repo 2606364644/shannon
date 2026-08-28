@@ -113,3 +113,33 @@ def test_prompt_no_deterministic_hints_include():
     assert "@include" not in text or \
         all("static-dataflow-hints" not in line for line in text.splitlines())
     assert "static_dataflow_hints" not in text
+
+
+# ---------- output discipline（2026-08-28 NodeGoat auth 实证：66 轮 JSON 转义搏斗） ----------
+
+def test_prompt_output_discipline_json_quoting_rules():
+    # 值内裸英文双引号是转义地狱源头（"受害者"登录"：... 值内裸 " 全爆）：
+    # 必须显式给出替代（「」/' '）+ 转义规则（\"）+ shell 单引号转义（'\''）
+    text = _prompt()
+    lowered = text.lower()
+    assert "double quote" in lowered
+    assert "escaped" in lowered            # \" 转义规则存在
+    assert "'\\''" in text                 # shell 单引号嵌套写法
+    assert "「」" in text or "single quotes" in lowered   # 值内替代写法
+
+
+def test_prompt_output_discipline_validate_via_python_before_emit():
+    # 终稿先落盘 python3 验证再输出（json.dump 管全部转义，不做字符串手术）
+    text = _prompt()
+    assert "python3 -m json.tool" in text
+    lowered = text.lower()
+    assert "json.dump" in lowered or "json.load" in lowered
+
+
+def test_prompt_output_discipline_budget_bounded():
+    # 预算有限 + 格式修复最多一轮：防 66 轮格式搏斗烧光预算零产出
+    # （护栏：修不好就诚实降级 self_check=fail，不无限循环）
+    text = _prompt()
+    lowered = " ".join(text.split()).lower()   # 折叠换行，防措辞被 wrap 拆断
+    assert "turn budget" in lowered
+    assert "one repair round" in lowered or "1 repair round" in lowered

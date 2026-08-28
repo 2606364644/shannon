@@ -18,6 +18,7 @@ spec 2026-08-27-poc-agent-direct-design：白盒 PoC 去 templated 化——curl
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from supernova_core.collectors.base import CollectorBase, SectionSchema
@@ -216,3 +217,79 @@ def validate_pocs(raw: list[dict], valid_ids: set[str]) -> PocValidation:
         seen.add(v["vulnerability_id"])
         accepted.append(v)
     return PocValidation(accepted=accepted, rejected=rejected)
+
+
+def extract_pocs_payload(text: object) -> dict | None:
+    """result.text 打捞 → {"pocs": [...]} dict；打捞不出返回 None。
+
+    2026-08-28 NodeGoat auth 实证：agent 烧满 turn 预算被 SDK 掐断，
+    structured_output=None 但 result.text 里往往已有成型的 pocs JSON（或
+    围栏块）。此函数把 text 变回可校验的 payload，救回被预算掐断的产出。
+
+    顺序：text 裸 JSON → 花括号平衡段（含围栏块，状态机跳过字符串内的
+    {}/引号）。**纯解析不改写**——对齐 validate_pocs「校验层绝不改写内容」
+    的口径：弯引号/未转义引号的内容级修复不做（改写风险大于收益，宁可
+    诚实缺失）。解析成功但非 {"pocs": list} 形态 → None（不猜结构）。
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    def _ok(data: object) -> dict | None:
+        if isinstance(data, dict) and isinstance(data.get("pocs"), list):
+            return data
+        return None
+
+    try:
+        hit = _ok(json.loads(text))
+        if hit is not None:
+            return hit
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    for segment in _balanced_brace_segments(text):
+        try:
+            hit = _ok(json.loads(segment))
+            if hit is not None:
+                return hit
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
+def _balanced_brace_segments(text: str):
+    """从左到右产出顶层花括号平衡段（字符串内的 {} 与引号不计数）。
+
+    生成器：每段是一个潜在的 JSON object 候选；不平衡到 EOF 则止（残文
+    无完整段，返回空——调用方拿 None 走诚实缺失）。
+    """
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth, j, in_str, esc = 0, i, False, False
+        end = None
+        while j < n:
+            c = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = j
+                        break
+            j += 1
+        if end is None:
+            return  # 不平衡残文：无完整段
+        yield text[i:end + 1]
+        i = end + 1

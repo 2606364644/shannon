@@ -216,3 +216,41 @@ async def test_text_fallback_parses_json(tmp_path, monkeypatch):
         written = await activities._write_agent_pocs(_FakeInput(tmp_path), d)
     assert written == ["XSS-VULN-01"]
     assert _read_queue(d)["vulnerabilities"][0]["report_poc"]["curl"].endswith("/t'")
+
+
+async def test_salvages_pocs_from_text_when_structured_output_missing(tmp_path, monkeypatch):
+    """打捞兜底（2026-08-28 auth 实证）：烧满 turn 预算被掐断 → structured_output
+    =None，但 text 围栏块里有成型 pocs JSON → 照常写回，不进诚实缺失。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [dict(_VULN)])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"pocs": [{
+        "vulnerability_id": "XSS-VULN-01",
+        "curl": "curl -i 'http://TARGET/memos'",
+        "steps": ["plant", "trigger"],
+        "self_check": "pass", "notes": "n"}]}
+    salvaged = SimpleNamespace(structured_output=None,
+                               text="前言\n```json\n" + json.dumps(payload)
+                                    + "\n```\n尾巴", success=False)
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=salvaged):
+        written = await activities._write_agent_pocs(_FakeInput(tmp_path), d)
+    assert written == ["XSS-VULN-01"]
+    poc = _read_queue(d)["vulnerabilities"][0]["report_poc"]
+    assert poc["curl"].startswith("curl -i")
+
+
+async def test_salvage_none_when_text_has_no_json_stays_honest(tmp_path, monkeypatch):
+    """text 无可打捞 JSON → 诚实缺失（不写回），与既有失败语义一致。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [dict(_VULN)])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    dead = SimpleNamespace(structured_output=None,
+                           text="残文无完整 JSON", success=False)
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=dead):
+        written = await activities._write_agent_pocs(_FakeInput(tmp_path), d)
+    assert written == []
+    assert "report_poc" not in _read_queue(d)["vulnerabilities"][0]
