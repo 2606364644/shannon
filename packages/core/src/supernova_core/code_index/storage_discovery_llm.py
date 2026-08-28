@@ -442,12 +442,13 @@ async def discover_storage_reads_llm(
         list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout,
         label="discover_storage_reads_llm", on_skip=_on_skip,
+        skip_stats=(skip_stats := {}),
     )
     all_reads = [s for chunk_reads in per_chunk for s in chunk_reads]
-    skipped = len(chunks) - len(per_chunk)
     gaps = _aggregate_read_gaps(all_reads)
     await emitter.finalize(
-        f"{len(all_reads)} storage reads · {len(gaps)} gaps · {skipped} timeouts")
+        f"{len(all_reads)} storage reads · {len(gaps)} gaps · "
+        f"skipped (timeout={skip_stats['timeout']}, error={skip_stats['error']})")
     return all_reads, gaps
 
 
@@ -538,10 +539,11 @@ async def discover_storage_writes_llm(
         list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout,
         label="discover_storage_writes_llm", on_skip=_on_skip,
+        skip_stats=(skip_stats := {}),
     )
     all_writes = [w for chunk_writes in per_chunk for w in chunk_writes]
-    skipped = len(chunks) - len(per_chunk)
     gaps = _aggregate_write_gaps(all_writes)
     await emitter.finalize(
-        f"{len(all_writes)} storage writes · {len(gaps)} gaps · {skipped} timeouts")
+        f"{len(all_writes)} storage writes · {len(gaps)} gaps · "
+        f"skipped (timeout={skip_stats['timeout']}, error={skip_stats['error']})")
     return all_writes, gaps

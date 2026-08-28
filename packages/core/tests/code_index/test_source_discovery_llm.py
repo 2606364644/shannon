@@ -324,7 +324,9 @@ async def test_discover_sources_per_call_timeout_defaults_to_120(monkeypatch):
 
     captured: list = []
 
-    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip, skip_stats=None):
+        if skip_stats is not None:
+            skip_stats.update({"timeout": 0, "error": 0})
         captured.append(per_call_timeout)
         return []
 
@@ -374,7 +376,9 @@ async def test_discover_sources_per_call_timeout_honors_env_override(monkeypatch
 
     captured: list = []
 
-    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip):
+    async def fake_map(items, fn, *, concurrency, per_call_timeout, label, on_skip, skip_stats=None):
+        if skip_stats is not None:
+            skip_stats.update({"timeout": 0, "error": 0})
         captured.append(per_call_timeout)
         return []
 

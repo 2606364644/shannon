@@ -587,13 +587,13 @@ async def discover_sinks_llm(
     per_chunk = await map_llm_with_bounds(
         list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout, label="discover_sinks_llm",
-        on_skip=_on_skip,
+        on_skip=_on_skip, skip_stats=(skip_stats := {}),
     )
     soft_sinks: list[SinkCallSite] = [s for chunk_sinks in per_chunk for s in chunk_sinks]
-    skipped = len(chunks) - len(per_chunk)   # 超时/失败被 map_llm_with_bounds 丢弃
+    # 超时/失败被 map_llm_with_bounds 丢弃；finalize 报 skip 构成分解（2026-08-28）
     await emitter.finalize(
         f"{len(soft_sinks)} soft sinks · {len(_aggregate_gaps(soft_sinks))} rule gaps"
-        f" · {skipped} timeouts")
+        f" · skipped (timeout={skip_stats['timeout']}, error={skip_stats['error']})")
     return soft_sinks, _aggregate_gaps(soft_sinks)
 
 

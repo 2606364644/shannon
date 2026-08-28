@@ -192,6 +192,7 @@ async def map_llm_with_bounds(
     per_call_timeout: float | None = None,
     label: str = "llm",
     on_skip: OnSkip | None = None,
+    skip_stats: dict | None = None,
 ) -> list[R]:
     """并发跑 fn(item):Semaphore(concurrency) 限并发 + 每个套 wait_for(per_call_timeout)。
 
@@ -230,6 +231,14 @@ async def map_llm_with_bounds(
     raw = await asyncio.gather(*[_bounded(i, x) for i, x in enumerate(items)])
     successes: list[R] = [r for r in raw if not isinstance(r, _Skip)]
     skips: list[_Skip] = [r for r in raw if isinstance(r, _Skip)]
+
+    # skip 构成分解（2026-08-28 文案误导修复）：消费方 finalize 原把 skipped
+    # 合计一律叫 "N timeouts"，agent 执行失败（141s < 300s 地板）被误读为超时、
+    # 排查方向被带偏。传 skip_stats（dict）即得 {"timeout": n, "error": n}；
+    # 不传零破坏。
+    if skip_stats is not None:
+        skip_stats["timeout"] = sum(1 for s in skips if s.kind == "timeout")
+        skip_stats["error"] = sum(1 for s in skips if s.kind == "error")
 
     if not skips:
         return successes

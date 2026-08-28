@@ -440,11 +440,11 @@ async def discover_sources_llm(
     per_chunk = await map_llm_with_bounds(
         list(enumerate(chunks)), _discover_one,
         concurrency=conc, per_call_timeout=effective_timeout, label="discover_sources_llm",
-        on_skip=_on_skip,
+        on_skip=_on_skip, skip_stats=(skip_stats := {}),
     )
     all_sources = [s for chunk_sources in per_chunk for s in chunk_sources]
-    skipped = len(chunks) - len(per_chunk)
     gaps = _aggregate_source_gaps(all_sources)
     await emitter.finalize(
-        f"{len(all_sources)} sources · {len(gaps)} source gaps · {skipped} timeouts")
+        f"{len(all_sources)} sources · {len(gaps)} source gaps · "
+        f"skipped (timeout={skip_stats['timeout']}, error={skip_stats['error']})")
     return all_sources, gaps

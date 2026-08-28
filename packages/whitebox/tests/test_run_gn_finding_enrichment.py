@@ -116,6 +116,35 @@ async def _run(tmp_path, mode="deep", agent_result=None, agent_exc=None):
 
 
 @pytest.mark.asyncio
+async def test_enrichment_default_max_turns_100(tmp_path, monkeypatch):
+    """SUPERNOVA_GN_ENRICH_MAX_TURNS 未设时默认 100（2026-08-28 30→100：
+    与 endpoint enrich 同任务形态——逐卡富化 + task 委派往返，30 耗尽 →
+    ExecutionLimitError 整类 0 富化）。"""
+    captured = {}
+
+    async def fake_agent(**kw):
+        captured.update(kw)
+        return _Result()
+
+    async def noop_ensure(input):
+        return None
+
+    import supernova_whitebox.audit.session_registry as session_registry
+    _write_queue(tmp_path, [_GN_VULN])
+    monkeypatch.delenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", raising=False)
+    with patch.object(activities, "_get_paths",
+                      lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
+         patch.object(activities, "gn_enrich_mode", lambda: "deep"), \
+         patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
+         patch.object(session_registry, "get_audit_session",
+                      lambda: _RecordingSession()), \
+         patch.object(activities, "ensure_audit_session", noop_ensure):
+        await activities.run_gn_finding_enrichment(_FakeInput(tmp_path))
+
+    assert captured["max_turns"] == 100
+
+
+@pytest.mark.asyncio
 async def test_enrichment_skipped_when_mode_not_deep(tmp_path):
     """off/light 档直接跳过——agent 不被调用，queue 原样。"""
     _write_queue(tmp_path, [dict(_GN_VULN)])

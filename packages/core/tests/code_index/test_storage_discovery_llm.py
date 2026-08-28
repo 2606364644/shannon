@@ -248,3 +248,25 @@ def test_discover_storage_writes_agent_path():
         cands, None, discovery_agent=fake_agent))
     assert len(writes) == 1
     assert calls_rec[0]["name"] == "gn-discovery-storage-w-001"
+
+
+def test_discover_storage_writes_summary_breaks_down_skips():
+    """skip 构成分解文案（2026-08-28）：agent 执行失败不再被合计成
+    "N timeouts"——summary 应报 skipped (timeout=X, error=Y)。"""
+    block = _block("H.java", "f", 1, 'void f(String n){ repo.save(n); }\n')
+    cands = [StorageWriteCandidate(block=block)]
+
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        # 模拟 agent 执行失败（success=False → _Skip error，非超时）
+        return _AgentResult(success=False, error="api 401")
+
+    summaries: list[str] = []
+
+    async def cb(sample):
+        if sample.final:
+            summaries.append(sample.detail or "")
+
+    writes, gaps = asyncio.run(discover_storage_writes_llm(
+        cands, None, discovery_agent=fake_agent, progress_cb=cb))
+    assert writes == []
+    assert any("skipped (timeout=0, error=1)" in s for s in summaries), summaries

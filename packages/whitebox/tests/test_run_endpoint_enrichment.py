@@ -302,6 +302,52 @@ async def test_endpoint_enrichment_keeps_existing_problem_points(tmp_path, monke
     assert entry["report_endpoints"][0]["path"] == "/memos"  # endpoints 照常写
 
 
+async def test_endpoint_enrichment_default_max_turns_100(tmp_path, monkeypatch):
+    """SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS 未设时默认 100（2026-08-28 现场：
+    默认 30 对卡多的类不够——auth 11 卡逐卡钉行号链 + task 委派往返，30 turns
+    耗尽 → ExecutionLimitError → 整类 0/11 全灭）。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    monkeypatch.delenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", raising=False)
+    payload = {"vulnerabilities": [
+        {"id": "XSS-VULN-01",
+         "endpoints": [{"method": "POST", "path": "/memos"}]},
+    ]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)) as mock_agent, \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    assert mock_agent.call_args.kwargs["max_turns"] == 100
+
+
+async def test_endpoint_enrichment_passes_schema_for_delivery_rules(tmp_path, monkeypatch):
+    """write_file 通道错配的治本收口（2026-08-28）：交付纪律由
+    run_gitnexus_verdict_agent 按 structured_output_schema 有无统一注入
+    （见 test_verdict_agent_delivery_rules.py），prompt 文件不再自带。
+    本测试锁定注入前提：endpoint enrich 必须传 schema。"""
+    d = _wb(tmp_path)
+    _write_queue(d, [_XSS_VULN])
+    _write_entry_points(d, [_EP])
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    payload = {"vulnerabilities": [
+        {"id": "XSS-VULN-01",
+         "endpoints": [{"method": "POST", "path": "/memos"}]},
+    ]}
+    with patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=_agent_result(payload)) as mock_agent, \
+         patch("supernova_core.config.concurrency.ws_getenv",
+               lambda k, d=None: {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "1"}.get(k, d)):
+        await activities.run_endpoint_enrichment(_FakeInput(tmp_path))
+
+    assert mock_agent.call_args.kwargs["structured_output_schema"] is not None
+
+
 async def test_endpoint_enrichment_disabled_by_env(tmp_path, monkeypatch):
     """SUPERNOVA_ENDPOINT_ENRICH_ENABLED=0 → 跳过（agent 不调用）。"""
     d = _wb(tmp_path)

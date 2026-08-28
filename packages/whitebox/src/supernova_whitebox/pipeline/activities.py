@@ -1293,7 +1293,7 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
 
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
-    max_turns = int(os.getenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", "30"))
+    max_turns = _gn_enrich_max_turns()
     enriched_classes: dict[str, dict] = {}
     total_enriched = 0
     async with get_audit_session().track_step(
@@ -1361,6 +1361,20 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
             "total_enriched": total_enriched}
 
 
+def _gn_enrich_max_turns() -> int:
+    """SUPERNOVA_GN_ENRICH_MAX_TURNS（默认 100，2026-08-28 30→100：与
+    endpoint enrich 同任务形态——逐卡富化 + task 委派往返，30 耗尽 →
+    ExecutionLimitError 整类 0 富化）。enrichment 与 rework 两处共用。"""
+    return int(os.getenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", "100"))
+
+
+def _endpoint_enrich_max_turns() -> int:
+    """SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS（默认 100，2026-08-28 30→100：
+    卡多的类 11 张逐卡钉行号链 + task 委派往返，30 turns 耗尽 →
+    ExecutionLimitError 整类 0 富化）。enrichment 与 rework 两处共用。"""
+    return int(os.getenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", "100"))
+
+
 @activity.defn
 async def run_endpoint_enrichment(input: ActivityInput) -> dict:
     """全卡接口表富化（spec 2026-08-26-report-generation-agent §5.2）。
@@ -1390,7 +1404,7 @@ async def run_endpoint_enrichment(input: ActivityInput) -> dict:
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
     route_table = _load_route_table(deliverables)
-    max_turns = int(os.getenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", "30"))
+    max_turns = _endpoint_enrich_max_turns()
 
     async def _enrich_class(vuln_class: str) -> dict:
         queue_path = resolve_intermediate(
@@ -2441,7 +2455,7 @@ async def _rework_missing_narratives(
                 },
                 audit_session=get_audit_session(),
                 provider_config=input.provider_config,
-                max_turns=int(os.getenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", "30")),
+                max_turns=_gn_enrich_max_turns(),
             )
         except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
             logger.warning("report-polish: narrative rework %s failed: %s",
@@ -2516,7 +2530,7 @@ async def _rework_missing_endpoints(
                 },
                 audit_session=get_audit_session(),
                 provider_config=input.provider_config,
-                max_turns=int(os.getenv("SUPERNOVA_ENDPOINT_ENRICH_MAX_TURNS", "30")),
+                max_turns=_endpoint_enrich_max_turns(),
             )
         except Exception as exc:  # noqa: BLE001 — 回炉失败保 qa.passed=false
             logger.warning("report-polish: rework %s failed: %s", vuln_class, exc)
@@ -2625,6 +2639,24 @@ def _make_track_parity_client(repo_path: str, provider_config: dict | None = Non
     return _client
 
 
+# 交付纪律统一注入（2026-08-28 收口）：全部 JSON 契约多轮 agent 的唯一入口
+# （endpoint/gn enrich、authz judge/explore、chain verdict、discovery 四模板）在此
+# 统一注入，prompt 文件不再各自抄写（单点补丁模式 = 无穷无尽；现场实证见
+# tests/test_verdict_agent_delivery_rules.py 模块 docstring）。注入条件 =
+# structured_output_schema 非 None：有工具的多轮（能写文件）∧ 要收 JSON 的交集；
+# 单次 llm_client（无工具）与无 schema 路径天然不注入。
+_DELIVERY_RULES = """<delivery_rules>
+CRITICAL — violating these voids the entire run (your work is collected from
+your final message, nothing else):
+- Your final message must BE the JSON object itself.
+  Do NOT write the JSON to a file (no write_file, no bash redirection) — the
+  harness never reads files you create.
+- Budget your turns: finish greping/reading early and reserve enough turns to
+  emit the complete JSON object in one single final message. If you run out of
+  turns before emitting it, everything is discarded.
+</delivery_rules>"""
+
+
 async def run_gitnexus_verdict_agent(
     *,
     prompt: str,
@@ -2675,6 +2707,9 @@ async def run_gitnexus_verdict_agent(
     try:
         if tool_audit_logger is not None:
             await tool_audit_logger.initialize()
+        # 交付纪律注入（见 _DELIVERY_RULES docstring）：JSON 契约路径统一收口。
+        if structured_output_schema is not None:
+            prompt = f"{prompt}\n\n{_DELIVERY_RULES}"
         result = await run_claude_prompt(
             prompt=prompt,
             repo_path=repo_path,

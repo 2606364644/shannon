@@ -207,3 +207,31 @@ def test_gn_discovery_agent_timeout_default_and_guard(monkeypatch):
     assert get_gn_discovery_agent_timeout() == 300.0
     monkeypatch.setenv("SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT", "-5")
     assert get_gn_discovery_agent_timeout() == 300.0
+
+
+async def test_skip_stats_breaks_down_timeout_and_error():
+    """skip_stats 传出 timeout/error 分解（2026-08-28 文案误导修复：消费方
+    finalize 原把 skipped 合计一律叫 "N timeouts"，141s<300s 地板的 agent
+    失败被误读为超时）。"""
+    async def fn(x):
+        if x == "slow":
+            await asyncio.sleep(10)
+        if x == "boom":
+            raise ValueError("boom")
+        return x
+
+    stats: dict = {}
+    results = await map_llm_with_bounds(
+        ["ok", "slow", "boom", "ok2"], fn, concurrency=4,
+        per_call_timeout=0.1, skip_stats=stats)
+    assert sorted(results) == ["ok", "ok2"]
+    assert stats == {"timeout": 1, "error": 1}
+
+
+async def test_skip_stats_none_keeps_behavior():
+    """不传 skip_stats：行为不变（零破坏，存量调用方无需改）。"""
+    async def fn(x):
+        return x
+    results = await map_llm_with_bounds(
+        [1, 2], fn, concurrency=2, per_call_timeout=5)
+    assert results == [1, 2]
