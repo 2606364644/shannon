@@ -239,3 +239,51 @@ def get_gn_discovery_agent_timeout() -> float:
                      "falling back to %s", val, _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT)
         return _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT
     return val
+
+
+_TRANSIENT_RETRIES_DEFAULT = 1
+_TRANSIENT_RETRY_DELAY_DEFAULT = 10.0
+
+
+def get_transient_retries() -> int:
+    """SUPERNOVA_LLM_TRANSIENT_RETRIES（默认 1）：map_llm_with_bounds 对 error 类
+    失败（连接错误等瞬时故障）的每 chunk 重试次数。2026-08-29 网关 5s 抖动致
+    discovery 补召回整层丢失（NodeGoat-20260828-162655）后引入——timeout 类
+    不重试（幂等超时重试只是再超时一遍）。0 = 显式关闭；未设 / 畸形 / <0
+    回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_LLM_TRANSIENT_RETRIES")
+    if raw is None:
+        return _TRANSIENT_RETRIES_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_LLM_TRANSIENT_RETRIES=%r not an int; "
+                     "falling back to %s", raw, _TRANSIENT_RETRIES_DEFAULT)
+        return _TRANSIENT_RETRIES_DEFAULT
+    if val < 0:
+        _log.warning("SUPERNOVA_LLM_TRANSIENT_RETRIES=%s must be >=0; "
+                     "falling back to %s", val, _TRANSIENT_RETRIES_DEFAULT)
+        return _TRANSIENT_RETRIES_DEFAULT
+    return val
+
+
+def get_transient_retry_delay() -> float:
+    """SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY（默认 10s）：瞬时错误重试前的 backoff
+    秒数。取 10s 量级盖过典型网关抖动窗口（2026-08-28 实测 5s）；0 = 立即重试
+    （测试提速）。未设 / 畸形 / <0 回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY")
+    if raw is None:
+        return _TRANSIENT_RETRY_DELAY_DEFAULT
+    try:
+        val = float(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY=%r not a float; "
+                     "falling back to %s", raw, _TRANSIENT_RETRY_DELAY_DEFAULT)
+        return _TRANSIENT_RETRY_DELAY_DEFAULT
+    if val < 0:
+        _log.warning("SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY=%s must be >=0; "
+                     "falling back to %s", val, _TRANSIENT_RETRY_DELAY_DEFAULT)
+        return _TRANSIENT_RETRY_DELAY_DEFAULT
+    return val

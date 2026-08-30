@@ -12,6 +12,8 @@ STEP_FAIL = "✗"
 AGENT_START = "▶"
 AGENT_DONE = "✓"
 AGENT_FAIL = "✗"
+# 非致命降级（2026-08-29 gn-discovery 补召回跳过）：区别于 activity 级失败的 ✗
+AGENT_DEGRADED = "⚠"
 
 SUMMARY_OK = "✓"
 SUMMARY_FAIL = "✗"

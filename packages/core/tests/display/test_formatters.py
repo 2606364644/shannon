@@ -389,3 +389,33 @@ def test_truncate_action_cjk_counts_double_display_width():
     result = truncate_action("预" * 40, max_width=60)   # 显示宽 80 > 60
     assert result.endswith("…")
     assert cell_len(result) <= 60
+
+
+# --- gn-discovery-* 语义分层（2026-08-29 网关抖动事故，与 web LogStream 同步）---
+# discovery = code_index activity 内部补召回子调用，失败=跳过该 chunk 走纯规则
+# 降级（无 Temporal 重试、不阻塞主链路），与 activity 级 failed 语义差一个量级，
+# 不再用同款 ✗ 红呈现。
+
+def test_agent_prefix_gn_discovery_series():
+    """gn-discovery-{kind}-NNN 带序号系列 → [GitNexus]（前缀匹配，非精确 key）。"""
+    assert agent_prefix("gn-discovery-sink-001") == "[GitNexus]"
+    assert agent_prefix("gn-discovery-storage-w-012") == "[GitNexus]"
+    assert agent_prefix("pre-recon") == "[Agent]"  # 主 agent 不受影响
+
+
+def test_agent_body_gn_discovery_failed_degrades_not_fail():
+    """gn-discovery 失败 → ⚠ + (recall skipped)，区别于主 agent 的 ✗ failed。"""
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="gn-discovery-source-001",
+                   event="end", attempt=1, duration_ms=600, success=False,
+                   error="Connection error.")
+    assert agent_body(e) == (
+        "⚠ [GitNexus] gn-discovery-source-001 failed (600ms) "
+        "— Connection error. (recall skipped)")
+
+
+def test_agent_body_main_agent_failed_unchanged():
+    """主 agent 失败保持 ✗ failed 现状，不吃 discovery 分流。"""
+    e = AgentEvent(timestamp="t", category="AGENT", agent_name="pre-recon",
+                   event="end", attempt=1, duration_ms=149474, success=False,
+                   error="Connection error.")
+    assert agent_body(e) == "✗ pre-recon failed (2m 29s) — Connection error."

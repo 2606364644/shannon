@@ -14,7 +14,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
-from supernova_core.config.concurrency import get_per_call_timeout
+from supernova_core.config.concurrency import (
+    get_per_call_timeout,
+    get_transient_retries,
+    get_transient_retry_delay,
+)
 
 if TYPE_CHECKING:
     from supernova_core.code_index.models import FuncBlock
@@ -193,6 +197,8 @@ async def map_llm_with_bounds(
     label: str = "llm",
     on_skip: OnSkip | None = None,
     skip_stats: dict | None = None,
+    transient_retries: int | None = None,
+    transient_retry_delay: float | None = None,
 ) -> list[R]:
     """并发跑 fn(item):Semaphore(concurrency) 限并发 + 每个套 wait_for(per_call_timeout)。
 
@@ -201,6 +207,17 @@ async def map_llm_with_bounds(
 
     per_call_timeout=None 时读 SUPERNOVA_LLM_PER_CALL_TIMEOUT(env),未设 = 60s
     (get_per_call_timeout);显式传值(测试 / 调用方覆盖)优先。
+
+    error 类瞬时重试(2026-08-29, NodeGoat-20260828-162655 网关 5s 抖动致
+    discovery 补召回整层丢失——Connection error 600ms 即死永久跳过,而同一错误
+    pre-recon 走 Temporal 重试):error 异常先重试 transient_retries 次(每次前
+    sleep transient_retry_delay)再放弃;timeout 类**不重试**(幂等超时重试只是
+    再超时一遍,juice-shop 3×10min 教训,见 CODE_INDEX_RETRY 注释)。重试期间
+    占住 semaphore 槽(可接受:并发槽本就是为限制同时 LLM 调用,backoff 不发请求)。
+    重试成功 → 正常成功项,skip_stats 不计;耗尽 → 维持 _Skip("error") 语义不变。
+    transient_retries/delay=None 时读 SUPERNOVA_LLM_TRANSIENT_RETRIES(默认 1)/
+    SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY(默认 10s,盖过典型网关抖动窗口);
+    显式传值(测试提速 retries=0/delay=0)优先。0 = 显式关闭。
 
     诊断策略(2026-07-01, 走 dispatcher 通道, 不裸 logger.warning):
     - per-skip 诊断(timeout/error)经 on_skip 回调上报 → 外层 emitter.note →
@@ -217,16 +234,32 @@ async def map_llm_with_bounds(
     """
     if per_call_timeout is None:
         per_call_timeout = get_per_call_timeout()
+    if transient_retries is None:
+        transient_retries = get_transient_retries()
+    if transient_retry_delay is None:
+        transient_retry_delay = get_transient_retry_delay()
     sem = asyncio.Semaphore(concurrency)
 
     async def _bounded(idx: int, item: T) -> R | _Skip:
         async with sem:
-            try:
-                return await asyncio.wait_for(fn(item), timeout=per_call_timeout)
-            except asyncio.TimeoutError:
-                return _Skip("timeout", idx, None)
-            except Exception as exc:
-                return _Skip("error", idx, exc)
+            attempts = 1 + transient_retries
+            for attempt in range(1, attempts + 1):
+                try:
+                    return await asyncio.wait_for(fn(item), timeout=per_call_timeout)
+                except asyncio.TimeoutError:
+                    # timeout 不重试:幂等超时重试只是再超时一遍(juice-shop
+                    # 3×10min 教训,同 CODE_INDEX_RETRY 不放大哲学)。
+                    return _Skip("timeout", idx, None)
+                except Exception as exc:
+                    if attempt < attempts:
+                        logger.debug(
+                            "%s: item %d error on attempt %d/%d, "
+                            "retrying in %.1fs: %s",
+                            label, idx, attempt, attempts,
+                            transient_retry_delay, exc)
+                        await asyncio.sleep(transient_retry_delay)
+                        continue
+                    return _Skip("error", idx, exc)
 
     raw = await asyncio.gather(*[_bounded(i, x) for i, x in enumerate(items)])
     successes: list[R] = [r for r in raw if not isinstance(r, _Skip)]

@@ -34,7 +34,15 @@ const AGENT_PREFIX: Record<string, string> = {
 };
 
 function agentPrefix(name: string): string {
+  if (isGnDiscoveryAgent(name)) return "[GitNexus]";
   return AGENT_PREFIX[name] ?? "[Agent]";
+}
+
+/** gn-discovery-*（code_index 内 LLM 补召回子 agent，gn-discovery-sink-001 等
+ *  带序号）失败=跳过该 chunk 走纯规则降级，非 activity 级失败——渲染分流用
+ *  （2026-08-29 网关抖动事故：同款红色 ✗ 误导用户以为扫描出大问题）。 */
+function isGnDiscoveryAgent(name: string | undefined): boolean {
+  return !!name && name.startsWith("gn-discovery-");
 }
 
 /** 对齐 CLI formatters.py:21-29 format_duration */
@@ -75,6 +83,10 @@ function describe(e: NdjsonEvent): RowDesc {
       }
       if (e.success === false) {
         const err = e.error ? ` — ${e.error}` : "";
+        // discovery 补召回降级（非致命）：⚠ + (recall skipped)，区别于 activity 级红 ✗。
+        if (isGnDiscoveryAgent(e.agent_name)) {
+          return { icon: "⚠", tag: "AGENT", body: `${pfx} ${e.agent_name} failed${err} (recall skipped)`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
+        }
         return { icon: "✗", tag: "AGENT", body: `${pfx} ${e.agent_name} failed${err}`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
       }
       const parts: string[] = [];
@@ -171,7 +183,10 @@ function rowClass(e: NdjsonEvent): string {
   }
   const base = CAT_CLASS[e.category] ?? "text-muted-foreground";
   if (e.type === "AgentEvent" && e.event === "end") {
-    if (e.success === false) return `${base} ev-agent-fail`;
+    if (e.success === false) {
+      // discovery 补召回降级走 warn 色（非致命，区别于 activity 级失败红）。
+      return isGnDiscoveryAgent(e.agent_name) ? `${base} ev-warn` : `${base} ev-agent-fail`;
+    }
     return `${base} ev-agent-ok`;
   }
   return base;

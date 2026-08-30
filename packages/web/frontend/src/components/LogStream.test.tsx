@@ -331,4 +331,40 @@ describe("LogStream", () => {
     expect(rows[1].textContent).toContain("edge frontend->order-svc failed");
     expect(rows[1].textContent).toContain("raw=low");
   });
+
+  // ─── gn-discovery-* agent 失败语义分层（2026-08-29 NodeGoat-20260828-162655）───
+  // discovery 是 code_index activity 内部的补召回子调用：失败=跳过该 chunk 走纯规则
+  // 降级（无 Temporal 重试、不阻塞主链路），与主 agent 的 activity 级 failed（整段
+  // 重跑）语义差一个量级。同款红色 ✗ 呈现误导用户以为扫描出大问题——降级为
+  // ⚠ + ev-warn + [GitNexus] prefix + (recall skipped)，主 agent ✗ 红保持不变。
+  it("gn-discovery agent fail 降级 ⚠ warn + recall skipped；主 agent fail 保持 ✗ 红", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-08-28T16:29:31.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "gn-discovery-source-001", event: "start", attempt: 1 },
+      { ts: "2026-08-28T16:29:32.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "gn-discovery-source-001", event: "end", attempt: 1,
+        success: false, duration_ms: 600, error: "Connection error." },
+      { ts: "2026-08-28T16:29:29.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "pre-recon", event: "end", attempt: 1,
+        success: false, duration_ms: 149474, error: "Connection error." },
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    const rows = container.querySelectorAll(".log-row");
+    expect(rows.length).toBe(3);
+    const [startRow, dRow, mRow] = rows;
+    // start 行：gn-discovery-* 前缀 → [GitNexus]（对齐 CLI _AGENT_PREFIXES 同步约定）
+    expect(startRow.textContent).toMatch(/\[GitNexus\]/);
+    // discovery fail 行：⚠ + ev-warn（非 ev-agent-fail）+ (recall skipped)
+    expect(dRow.className).toContain("ev-warn");
+    expect(dRow.className).not.toContain("ev-agent-fail");
+    expect(dRow.querySelector(".log-icon")?.textContent).toBe("⚠");
+    expect(dRow.textContent).toMatch(/\[GitNexus\] gn-discovery-source-001/);
+    expect(dRow.textContent).toContain("(recall skipped)");
+    expect(dRow.textContent).toContain("Connection error.");
+    // 主 agent fail 行保持现状：✗ + ev-agent-fail + [Agent]，不吃 discovery 分流
+    expect(mRow.className).toContain("ev-agent-fail");
+    expect(mRow.querySelector(".log-icon")?.textContent).toBe("✗");
+    expect(mRow.textContent).toMatch(/\[Agent\]/);
+    expect(mRow.textContent).not.toContain("recall skipped");
+  });
 });

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from rich.cells import cell_len
 
 from supernova_core.display.symbols import (
-    AGENT_DONE, AGENT_FAIL, AGENT_START,
+    AGENT_DEGRADED, AGENT_DONE, AGENT_FAIL, AGENT_START,
     STEP_DONE, STEP_FAIL, STEP_PENDING,
 )
 
@@ -63,7 +63,13 @@ _AGENT_PREFIXES: dict[str, str] = {
 
 
 def agent_prefix(agent_name: str) -> str:
-    """Map an agent name to its display prefix, or '[Agent]' if unknown."""
+    """Map an agent name to its display prefix, or '[Agent]' if unknown.
+
+    gn-discovery-{kind}-NNN（code_index 内 LLM 补召回子 agent，带序号无法精确
+    key）走前缀匹配 → [GitNexus]（2026-08-29 与 web LogStream agentPrefix 同步）。
+    """
+    if agent_name.startswith("gn-discovery-"):
+        return "[GitNexus]"
     return _AGENT_PREFIXES.get(agent_name, "[Agent]")
 
 
@@ -260,6 +266,11 @@ def agent_body(e) -> str:
     if e.success is False:
         dur = format_duration(e.duration_ms) if e.duration_ms is not None else "?"
         err = f" — {e.error}" if e.error else ""
+        # gn-discovery 补召回降级（非致命：跳过该 chunk 走纯规则，无 Temporal
+        # 重试、不阻塞主链路）——⚠ + (recall skipped) 区别于 activity 级 ✗ failed
+        # （2026-08-29 网关抖动事故，与 web LogStream 同步）。
+        if e.agent_name.startswith("gn-discovery-"):
+            return f"{AGENT_DEGRADED} {title} failed ({dur}){err} (recall skipped)"
         return f"{AGENT_FAIL} {title} failed ({dur}){err}"
     parts = []
     if e.duration_ms is not None:
