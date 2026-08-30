@@ -160,7 +160,6 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             bb_cleanup_auth_state_activity,
             bb_persist_completed_agents,
             bb_verify_report_vuln_blocks,
-            bb_persist_completed_agents,
         ],
         # P3c 阶段 3：对齐 wb_worker，contextvar 化后并发放开（默认 4，env 可配）。
         max_concurrent_workflow_tasks=int(

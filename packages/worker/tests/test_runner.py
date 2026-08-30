@@ -127,6 +127,43 @@ async def test_run_worker_registers_all_defined_activities(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_worker_activity_names_unique(monkeypatch):
+    """护栏：同一 Worker 的 activities 列表内名字必须唯一。
+
+    根因(2026-08-28 NodeGoat-20260828-142253「刚开就中断」)：1bd18a44 与 3e99fff1
+    两个提交先后在 bb_worker 注册 bb_persist_completed_agents（同一取消事故的两次
+    follow-up，后者未察觉前者已加）→ temporalio Worker.__init__ 校验 defn 名唯一，
+    "More than one activity named persist_completed_agents" → worker 容器 crash
+    loop，task queue 无消费者，网页发起的扫描 session 落盘后零事件僵死。
+    既有 registers_all_defined_activities 用 set 收集注册名（去重后比对），重复
+    注册不可见 → 补显式唯一性断言（对齐 temporalio _ActivityWorker 的构造校验）。
+    """
+    from supernova_worker.runner import run_worker
+
+    monkeypatch.delenv("SUPERNOVA_WORKER_MAX_CONCURRENT_WF", raising=False)
+    mock_client = AsyncMock()
+    wb_worker, bb_worker, corr_worker = MagicMock(), MagicMock(), MagicMock()
+    wb_worker.run = AsyncMock(return_value=None)
+    bb_worker.run = AsyncMock(return_value=None)
+    corr_worker.run = AsyncMock(return_value=None)
+
+    with (
+        patch("supernova_worker.runner.Client.connect",
+              AsyncMock(return_value=mock_client)),
+        patch("supernova_worker.runner.Worker",
+              side_effect=[wb_worker, bb_worker, corr_worker]) as mock_worker_cls,
+    ):
+        await run_worker("temporal:7233")
+
+    wb_call, bb_call, corr_call = mock_worker_cls.call_args_list
+    for label, wk_call in (("whitebox", wb_call), ("blackbox", bb_call),
+                           ("correlation", corr_call)):
+        names = [getattr(f, "__name__", f) for f in wk_call.kwargs["activities"]]
+        dups = sorted({n for n in names if names.count(n) > 1})
+        assert not dups, f"{label} worker 重复注册 activity：{dups}"
+
+
+@pytest.mark.asyncio
 async def test_run_worker_propagates_connect_failure():
     """temporal 连不上时 run_worker 抛错（fail-fast，不静默吞）。"""
     from supernova_worker.runner import run_worker
