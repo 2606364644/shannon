@@ -1194,6 +1194,7 @@
         "models": "Models",
         "runtime": "Runtime",
         "scanSwitches": "Scan-time switches",
+        "advanced": "Advanced tuning (inject on demand; unset inherits global)",
         "git": "Git access (optional, falls back to global)"
       }
     },

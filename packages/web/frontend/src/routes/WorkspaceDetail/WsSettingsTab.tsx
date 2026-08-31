@@ -22,12 +22,14 @@ const PLACEHOLDER = [
   "SUPERNOVA_OPENAI_SMALL_MODEL=glm-5.2-coder",
 ].join("\n");
 
-type KeyKind = "str" | "int" | "bool";
+type KeyKind = "str" | "int" | "float" | "bool";
 interface CfgKey {
   key: string;
   kind: KeyKind;
   // 注入到左侧编辑框时使用的默认值；凭据类留空字符串（等用户填值）。
   defaultValue: string;
+  // 空值键不一定是凭据（如 MODEL_CONTEXT_OVERRIDE）；凭据用显式标记打点。
+  credential?: boolean;
 }
 interface CfgGroup {
   titleKey: string;
@@ -37,7 +39,7 @@ interface CfgGroup {
   prefill?: boolean;
 }
 
-// 生效类：ws 级覆盖真生效（存 config.yaml）。与后端 ws_env_codec.ENV_TO_FIELD 对齐。
+// 生效类：ws 级覆盖真生效（存 config.yaml）。与后端 ENV_TO_FIELD + SCAN_ENV_KEYS 对齐。
 // 默认值与后端 ws_config_store.DEFAULT_WS_* 对齐；凭据类（API key / token）留空等用户填。
 const EFFECTIVE_GROUPS: CfgGroup[] = [
   {
@@ -45,7 +47,7 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
     keys: [
       { key: "SUPERNOVA_AI_PROVIDER", kind: "str", defaultValue: "openai_compatible" },
       { key: "SUPERNOVA_OPENAI_BASE_URL", kind: "str", defaultValue: "https://llm-proxy.futuoa.com/v1" },
-      { key: "SUPERNOVA_OPENAI_API_KEY", kind: "str", defaultValue: "" },
+      { key: "SUPERNOVA_OPENAI_API_KEY", kind: "str", defaultValue: "", credential: true },
     ],
   },
   {
@@ -83,12 +85,25 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
     ],
   },
   {
+    titleKey: "wsConfig.keys.groups.advanced",
+    // 高级调参默认不进模板：预填会把全局运维值钉死成工作区值；需要时点击注入。
+    prefill: false,
+    keys: [
+      { key: "SUPERNOVA_LLM_PER_CALL_TIMEOUT", kind: "float", defaultValue: "60" },
+      { key: "SUPERNOVA_CHUNK_MAX_CALLS", kind: "int", defaultValue: "100" },
+      { key: "SUPERNOVA_MODEL_CONTEXT_OVERRIDE", kind: "str", defaultValue: "" },
+      { key: "SUPERNOVA_CHUNK_TOKEN_THRESHOLD", kind: "int", defaultValue: "" },
+      { key: "SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", kind: "int", defaultValue: "4" },
+      { key: "SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS", kind: "int", defaultValue: "600" },
+    ],
+  },
+  {
     titleKey: "wsConfig.keys.groups.git",
     // 默认不进入预填模板（多数扫描不依赖 GitLab）；词典仍显示，需要时点击注入。
     prefill: false,
     keys: [
       { key: "GITLAB_USER", kind: "str", defaultValue: "" },
-      { key: "GITLAB_TOKEN", kind: "str", defaultValue: "" },
+      { key: "GITLAB_TOKEN", kind: "str", defaultValue: "", credential: true },
     ],
   },
 ];
@@ -120,7 +135,7 @@ function buildDefaultTemplate(t: (k: string) => string, includeKey?: (key: strin
 }
 
 function kindColor(kind: KeyKind): string | undefined {
-  if (kind === "int") return "hsl(var(--c-cyan))";
+  if (kind === "int" || kind === "float") return "hsl(var(--c-cyan))";
   if (kind === "bool") return "hsl(var(--c-green))";
   return undefined; // str 走 muted
 }
@@ -134,7 +149,7 @@ function KeyRow({
   processLevel?: boolean;
   onInject: (k: CfgKey) => void;
 }) {
-  const isCredential = cfgKey.defaultValue === "";
+  const isCredential = cfgKey.credential === true;
   return (
     <li>
       <button

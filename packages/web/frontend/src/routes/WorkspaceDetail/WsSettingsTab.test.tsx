@@ -56,9 +56,12 @@ describe("WsSettingsTab", () => {
     expect(ta.value).not.toContain("SUPERNOVA_PRICING_OVERRIDE");
     // 凭据行以 # 注释出现（不落盘空串、删 # 填值才生效）
     expect(ta.value).toContain("#SUPERNOVA_OPENAI_API_KEY=");
-    // git 段默认不进入预填模板（prefill=false）；需要时在右侧词典点击注入
+    // git / 高级调参段默认不进入预填模板（prefill=false）；需要时在右侧词典点击注入。
+    // 高级键预填会把全局运维值钉死成工作区值，尤其 timeout/concurrency 这类容量参数。
     expect(ta.value).not.toContain("GITLAB_TOKEN");
     expect(ta.value).not.toContain("GITLAB_USER");
+    expect(ta.value).not.toContain("SUPERNOVA_LLM_PER_CALL_TIMEOUT");
+    expect(ta.value).not.toContain("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY");
   });
 
   it("is_default=false → 显示后端 env_text，不预填模板", async () => {
@@ -160,6 +163,13 @@ describe("WsSettingsTab", () => {
     // GN_ENRICH_MODE 已整键移除（2026-08-31 deep 常开）→ 词典不展示
     expect(screen.queryByText("SUPERNOVA_GN_ENRICH_MODE")).toBeNull();
     expect(screen.getByText("GITLAB_TOKEN")).toBeInTheDocument();
+    // 后端 SCAN_ENV_KEYS 中已有、但此前漏进前端词典的 6 个高级调参键。
+    expect(screen.getByText("SUPERNOVA_LLM_PER_CALL_TIMEOUT")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_CHUNK_MAX_CALLS")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_MODEL_CONTEXT_OVERRIDE")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_CHUNK_TOKEN_THRESHOLD")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS")).toBeInTheDocument();
     // PRICING_OVERRIDE 已移出词典（2026-08-31）：定价四层链最高层,推荐走
     // WsPricingCard 通道;后端白名单仍收（向后兼容手写）
     expect(screen.queryByText("SUPERNOVA_PRICING_OVERRIDE")).toBeNull();
