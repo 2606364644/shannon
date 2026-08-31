@@ -55,8 +55,10 @@ BUILTIN_PRICING_CNY: dict[str, dict[str, float]] = {
     "deepseek-v4-pro": {"input": 24.0, "output": 48.0, "cache_read": 2.0, "cache_creation": 0.0},
     # deepseek-v4-flash 1/2/0.2/0（2026-08-31 用户核对更新，原平时档 1/2/0.02）
     "deepseek-v4-flash": {"input": 1.0, "output": 2.0, "cache_read": 0.2, "cache_creation": 0.0},
+    # deepseek-v4-flash-0731 与 flash 同价（默认表显式支持带日期别名）
+    "deepseek-v4-flash-0731": {"input": 1.0, "output": 2.0, "cache_read": 0.2, "cache_creation": 0.0},
     # deepseek-v4-flash-coder 单列独立价 2/4/0.4/0（2026-08-31 用户核对，2× 基础）；
-    # flash / flash-coder 均与 .env.profiles.example/deepseek.pricing.json 一致
+    # flash / flash-0731 / flash-coder 均与 profile 示例价表一致
     "deepseek-v4-flash-coder": {"input": 2.0, "output": 4.0, "cache_read": 0.4, "cache_creation": 0.0},
 }
 

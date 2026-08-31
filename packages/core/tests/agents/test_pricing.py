@@ -120,6 +120,15 @@ def test_deepseek_v4_flash_builtin_priced():
     assert is_model_priced("deepseek-v4-flash") is True
 
 
+def test_deepseek_v4_flash_0731_priced_same_as_flash():
+    """deepseek-v4-flash-0731 默认显式入表，与 deepseek-v4-flash 同价。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    assert compute_cost("deepseek-v4-flash-0731", usage) == CostAmount(3.2, "CNY")
+    assert compute_cost("DeepSeek-V4-Flash-0731[1m]", usage) == CostAmount(3.2, "CNY")
+    assert is_model_priced("deepseek-v4-flash-0731") is True
+
+
 def test_deepseek_v4_flash_coder_independently_priced():
     """deepseek-v4-flash-coder 单列独立价 2/4/0.4/0（2026-08-31，2× 基础价）：
     lookup 先全名命中独立键，不再剥 -coder 回落 flash（1/2/0.2）。"""
