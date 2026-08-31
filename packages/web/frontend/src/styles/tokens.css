@@ -983,6 +983,33 @@ html body {
   --shadow-toolbar-hover: 0 2px 4px hsl(0 0% 5% / 0.08), 0 8px 20px -8px hsl(0 0% 5% / 0.12);
 }
 
+/* —— 层 G · 代码主题（code theme，2026-08-31 报告页代码块区分度重做）——
+   代码块 ≠ 设计主题的又一个 muted 块：它是「终端证据窗」——独立材质（始终深色的
+   终端面板 + 专属 syntax 配色），与 mode×palette 的 13 套 web 主题解耦，对齐主流
+   Markdown 渲染器的做法：代码块按代码主题渲染，不按 web 设计主题渲染。
+   - 面板永远深色：深色主题里比画布/卡面更深一档（charcoal 15%/18% → 8%）；
+     浅色主题里是纸面上的深色 inset 窗——渗透报告 = 纸面文档 + 终端证据（PoC/
+     Burp 截图本来就是深色的）。区分度不靠各主题的亮度微差（旧方案 pre 接 --muted、
+     卡 18% vs muted 16% 仅 2% 差，正是「分不开」的根因），靠材质切换，全主题一视
+     同仁。
+   - syntax hue 族沿用旧映射不重训（keyword=青 / string=绿 / number=品红 /
+     title=琥珀 / meta=红），与产品语义色（cyan=GitNexus 轨 / magenta=LLM 轨）
+     同族，但亮度/饱和为「深底代码级」且不随主题漂移——代码永远长得像代码。
+   - AA（脚本验证 2026-08-31）：全部 token 对 --code-bg ≥6:1（fg 13.3 / muted 6.1
+     / meta 7.5）；面板对白卡 18.3:1。只定义在 :root、.light 不覆盖——面板不分
+     模式，代码主题全局唯一（浅底打印场景由 report.css @media print 浅色化兜底）。 */
+:root {
+  --code-bg: 30 5% 8%;
+  --code-fg: 30 8% 86%;
+  --code-muted: 30 6% 58%;
+  --code-border: 30 10% 90% / 0.12;
+  --code-hl-keyword: 190 80% 65%;
+  --code-hl-string: 140 45% 68%;
+  --code-hl-number: 290 65% 80%;
+  --code-hl-title: 38 85% 68%;
+  --code-hl-meta: 5 80% 72%;
+}
+
 /* —— severity dot 形状通道（spec 2026-08-27 警报语义层 §2.2，本设计的签名）——
    填充比例编码 rank：Low ○ 空环 / Medium ◑ 半填充 / High ◕ 3/4 / Critical ● 满填充。
    色经 currentColor 继承消费方 pill 的 text-*（text-red 等），色相降级为辅助强化——

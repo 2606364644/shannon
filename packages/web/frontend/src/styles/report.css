@@ -1,5 +1,6 @@
-/* 报告页专属：hljs token 配色（接 DSF --c- 语义色）+ 表格 + scroll-margin + pre 背景。
-   深色（:root 默认）为主，.light 覆盖一套调亮度保 AA 对比。
+/* 报告页专属：代码主题（终端证据窗，tokens.css 层 G）+ 表格 + scroll-margin。
+   代码块按代码主题渲染、不按 web 设计主题渲染（2026-08-31 区分度重做）——
+   面板永远深色，syntax 一套配色全局生效（无 .light 覆盖）。
 
    ★ 80px = sticky 栈总高（TopBar h-12=48px + 详情 Tabs h-9=36px ≈ 84px，取整 80）。
    改 TopBar/Tabs 高度时，须同步以下依赖此常量之处：
@@ -14,18 +15,18 @@ html { scroll-behavior: smooth; }
   html { scroll-behavior: auto; }
 }
 
-/* —— hljs token 配色（深色默认） —— */
+/* —— hljs token 配色（代码主题 --code-hl-*；面板永远深色 → 一套配色全局生效） —— */
 .hljs-keyword,
 .hljs-built_in,
-.hljs-literal { color: hsl(var(--c-cyan)); }
+.hljs-literal { color: hsl(var(--code-hl-keyword)); }
 .hljs-string,
-.hljs-regexp  { color: hsl(var(--c-green)); }
-.hljs-number  { color: hsl(var(--c-magenta)); }
+.hljs-regexp  { color: hsl(var(--code-hl-string)); }
+.hljs-number  { color: hsl(var(--code-hl-number)); }
 .hljs-title,
 .hljs-title.function_,
-.hljs-attr    { color: hsl(var(--c-yellow)); }
-.hljs-meta    { color: hsl(var(--c-red)); }
-.hljs-comment { color: hsl(var(--muted-foreground)); font-style: italic; }
+.hljs-attr    { color: hsl(var(--code-hl-title)); }
+.hljs-meta    { color: hsl(var(--code-hl-meta)); }
+.hljs-comment { color: hsl(var(--code-muted)); font-style: italic; }
 
 /* —— 表格 —— */
 .prose table {
@@ -95,10 +96,22 @@ html { scroll-behavior: smooth; }
   overflow-wrap: anywhere;
 }
 
-/* —— block code 容器：换行不溢出（spec 2026-07-24 §3.3；长 URL / 无空格串也折行，不再横滚）—— */
+/* —— block code = 终端证据窗（tokens.css 层 G 代码主题）——
+   md 路径（.prose pre）与结构化路径（.code-panel，VulnerabilityCard 的
+   problem-point 片段 / POC curl/Burp / verify-step 命令 / evidence 片段）同一
+   终端材质：深底 + alpha 暖白 hairline + 微投影「嵌」进纸面；圆角随主题几何
+   收一档（-2px，编辑器 inset 比卡片更紧）。折行规则不变（长 URL / 无空格串也
+   折行，不横滚）。 */
+.prose pre,
+.code-panel {
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid hsl(var(--code-border));
+  background: hsl(var(--code-bg));
+  color: hsl(var(--code-fg));
+  padding: 0.65rem 0.85rem;
+  box-shadow: 0 1px 2px hsl(30 40% 3% / 0.4), 0 4px 12px -4px hsl(30 40% 3% / 0.3);
+}
 .prose pre {
-  border-radius: var(--radius);
-  background: hsl(var(--muted));
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
@@ -111,17 +124,28 @@ html { scroll-behavior: smooth; }
   overflow-wrap: anywhere;
 }
 
-/* —— 浅色覆盖（保 AA 对比，cyan/green/yellow 提升亮度） —— */
-.light .hljs-keyword,
-.light .hljs-built_in,
-.light .hljs-literal { color: hsl(var(--c-cyan) / 0.92); }
-.light .hljs-string,
-.light .hljs-regexp  { color: hsl(var(--c-green) / 0.92); }
-.light .hljs-title,
-.light .hljs-title.function_,
-.light .hljs-attr    { color: hsl(var(--c-yellow) / 0.95); }
-.light .hljs-meta    { color: hsl(var(--c-red) / 0.9); }
-.light .hljs-comment { color: hsl(var(--muted-foreground)); }
+/* dynamic 实测输出（evidence.dynamic_evidence）：同一终端面板 + 绿语义——
+   「机器真的跑过」的证据窗。绿用代码主题内的 --code-hl-string（浅色主题的
+   --c-green 是压深档，深面板上不够亮）；左缘 3px 绿 inset 交代验证语义。 */
+.code-panel-ok {
+  border-color: hsl(var(--code-hl-string) / 0.5);
+  box-shadow: inset 3px 0 0 hsl(var(--code-hl-string) / 0.85);
+}
+
+/* 面板内工具栏（语言角标 + 复制按钮）随代码主题配色：pre 已设 --code-fg，按钮
+   文字色继承；ghost hover:bg-accent 在深面板上是亮灰 chip，面板内改用 code-fg
+   微透明底（.copy-btn = MarkdownView 工具栏，在 pre 内；code-chrome = 浮动
+   CopyButton，pre 的兄弟节点，见下）。 */
+.prose pre [data-testid="code-lang"] { color: hsl(var(--code-muted)); }
+.prose pre .copy-btn:hover,
+button.code-chrome:hover {
+  background: hsl(var(--code-fg) / 0.12);
+  color: hsl(var(--code-fg));
+}
+
+/* 浮动复制按钮（VulnerabilityCard 的 CopyButton 与 pre 为兄弟节点、absolute 覆盖
+   在面板上，不继承面板色——浅色主题下会变深色图标落在深面板上）：显式跟代码主题。 */
+button.code-chrome { color: hsl(var(--code-fg)); }
 
 /* 打印兜底：所有 sticky 退回 static，避免 PDF 每页重复出现吸顶元素
    （TopBar/Tabs 已有 print:static 变体；本规则兜底未来新增 sticky）。 */
@@ -130,4 +154,24 @@ html { scroll-behavior: smooth; }
   [data-testid="wd-tabs-sticky"],
   [data-testid="findings-bar"],
   [data-testid="toc"] { position: static !important; }
+
+  /* 代码面板打印浅色化：深底浅字在浏览器默认「不打印背景」下会变白纸白字，
+     且深底费墨——退为浅灰底 + 深字，syntax 色同 hue 压深一档，证据窗边界由
+     border 交代（本块在 hljs 规则之后，同特异性下打印态胜出）。 */
+  .prose pre,
+  .code-panel {
+    background: hsl(40 15% 95%);
+    color: hsl(0 0% 10%);
+    border: 1px solid hsl(40 10% 75%);
+    box-shadow: none;
+  }
+  .code-panel-ok { box-shadow: none; border-color: hsl(140 45% 35%); }
+  .prose pre code { color: inherit; }
+  .prose pre [data-testid="code-lang"] { color: hsl(0 0% 45%); }
+  .hljs-keyword, .hljs-built_in, .hljs-literal { color: hsl(195 80% 30%); }
+  .hljs-string, .hljs-regexp { color: hsl(140 45% 28%); }
+  .hljs-number { color: hsl(290 50% 38%); }
+  .hljs-title, .hljs-title.function_, .hljs-attr { color: hsl(35 85% 30%); }
+  .hljs-meta { color: hsl(5 70% 42%); }
+  .hljs-comment { color: hsl(0 0% 42%); }
 }
