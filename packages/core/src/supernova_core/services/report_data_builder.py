@@ -6,6 +6,14 @@
 优先采用；agent 步骤未跑/失败时现有确定性字段照常组装——报告永远完整。
 
 纯数据搬运无渲染：md 导出（report_markdown_exporter）与前端渲染都吃本产物。
+
+GN 卡 dataflow_steps 确定性派生（2026-08-31，零成本兜底层）：queue 的
+dataflow_steps 是 LLM 轨 taint 专属字段，GN builder 不产、GN-only 深度富化
+agent 又不保证回填 → 报告卡数据流整段缺失。组装时对空 steps 的 GN taint 卡
+从 parameter_graph.json 派生 ``source(param) → hops(vars/transformation@file:line)
+→ sink(callee@file:line)``——GN 自有精确形态（真实行号/变量名），不模仿 LLM
+叙事；queue 已有 steps（富化深链）不覆盖，queue SSOT 不写派生值（字段契约
+不破），只落 report_data 供 web / comprehensive md / 分项 findings.md 单源渲染。
 """
 import json
 import logging
@@ -220,7 +228,235 @@ def _evidence(vuln) -> VulnEvidence:
     )
 
 
-def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict) -> ReportVulnerability:
+# ---------------------------------------------------------------------------
+# GN 卡 dataflow_steps 确定性派生（零成本兜底层，见模块 docstring）
+# ---------------------------------------------------------------------------
+
+_TAINT_DERIVE_CLASSES = ("injection", "xss", "ssrf")
+# transformation 的净化提示前缀（chain_propagator 产，如 "sanitize_hint:swig
+# (via consolidate) template engine autoescapes HTML..."）
+_SANITIZE_HINT_PREFIX = "sanitize_hint:"
+# SinkCallSite.id "{file}:{caller}:{callee}:{line}:{col}"（对齐 dataflow_view._parse_sink_id）
+_SINK_ID_RE = re.compile(r"^(.*?):([^:]*):([^:]*):(\d+):\d+$")
+# 2ND finding combined_sources 形如 "write:w.py:7 (users.bio) + read:r.js:3"
+_WRITE_LOC_RE = re.compile(r"write:(\S+?):(\d+)")
+_HOP_LABEL_MAX = 80
+
+
+class _GnDeriveCtx:
+    """parameter_graph + code_index 的派生索引（组装期读一次，全卡复用）。"""
+
+    def __init__(self, pgraph: dict, code_index: dict):
+        self.flows = {f["flow_id"]: f for f in pgraph.get("taint_flows") or []
+                      if isinstance(f, dict) and f.get("flow_id")}
+        self.source_points = [sp for sp in code_index.get("source_points") or []
+                              if isinstance(sp, dict)]
+        self.sinks = {s["id"]: s for s in code_index.get("sink_call_sites") or []
+                      if isinstance(s, dict) and s.get("id")}
+
+
+async def _load_derive_ctx(deliverables_path) -> _GnDeriveCtx | None:
+    """parameter_graph 缺/坏 → None（确定性层失败档：诚实不派生）；code_index
+    仅富化（source file:line / sink 标签），缺则退化不影响主链。"""
+    pg_path = resolve_intermediate(deliverables_path, "parameter_graph.json")
+    if pg_path is None or not await async_path_exists(pg_path):
+        return None
+    try:
+        pgraph = json.loads(await async_read_file(pg_path))
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        logger.warning("report_data: parameter_graph 不可读，跳过 GN 派生（%s）", exc)
+        return None
+    code_index: dict = {}
+    ci_path = resolve_intermediate(deliverables_path, "code_index.json")
+    if ci_path is not None and await async_path_exists(ci_path):
+        try:
+            loaded = json.loads(await async_read_file(ci_path))
+            if isinstance(loaded, dict):
+                code_index = loaded
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass  # 富化产物坏 → 退化派生（source/sink 无 meta 加持）
+    return _GnDeriveCtx(pgraph if isinstance(pgraph, dict) else {}, code_index)
+
+
+def _dataflow_steps(vuln, vuln_class: str, ctx: _GnDeriveCtx | None) -> list[dict]:
+    """queue dataflow_steps 优先（LLM 轨产 / GN 富化深链回填）；GN taint 卡
+    空值时确定性派生；非 taint 类（auth/authz 无 flow 语义）不派生。"""
+    steps = list(getattr(vuln, "dataflow_steps", None) or [])
+    if steps or vuln_class not in _TAINT_DERIVE_CLASSES:
+        return steps
+    return _derive_gn_dataflow_steps(vuln, ctx)
+
+
+def _derive_gn_dataflow_steps(vuln, ctx: _GnDeriveCtx | None) -> list[dict]:
+    """GN 卡派生链：source → hops → sink。产不出 source→sink 两端 → []
+    （诚实交还渲染层 evidence_chain 兜底，不产单点假链）。"""
+    if ctx is None:
+        return []
+    if not (getattr(vuln, "source_track", None) == "gitnexus"
+            or str(getattr(vuln, "ID", "")).startswith("2ND-GN-")):
+        return []
+    flow = ctx.flows.get(getattr(vuln, "flow_id", None) or "")
+    source = _derive_source_step(vuln, flow, ctx)
+    sink = _derive_sink_step(vuln, flow, ctx)
+    if source is None or sink is None:
+        return []
+    steps = [source]
+    for raw in (flow or {}).get("propagation_steps") or []:
+        if not isinstance(raw, dict):
+            continue
+        hop = _derive_hop_step(raw)
+        if hop is not None:
+            steps.append(hop)
+    steps.append(sink)
+    _attach_sanitizer_protections(
+        steps, getattr(vuln, "sanitizer_annotations", None) or [])
+    return steps
+
+
+def _attach_sanitizer_protections(steps: list[dict], annotations: list) -> None:
+    """finding.sanitizer_annotations（CandidateChain 随卡落盘的净化标注）按
+    code_location 的 file:line 匹配挂 step.protection（matched_text 优先，
+    已有 protection 不覆写——sanitize_hint 提示优先）；匹配不到任何步的标注
+    丢弃（兜底层不虚构挂点）。"""
+    for ann in annotations:
+        if not isinstance(ann, dict):
+            continue
+        name = ann.get("matched_text") or ann.get("rule_id")
+        if not name:
+            continue
+        f_, l_ = _derive_parse_loc(ann.get("code_location"))
+        if f_ is None:
+            continue
+        for st in steps:
+            if (st.get("file") == f_ and st.get("line") == l_
+                    and not st.get("protection")):
+                st["protection"] = name
+                break
+
+
+def _derive_source_step(vuln, flow: dict | None, ctx: _GnDeriveCtx):
+    """链首步：2ND=storage 写侧（combined_sources 的 write:file:line 并入
+    label，对齐 dataflow_view 二阶枝口径）；1st=source_point 锚定 param；
+    flow 缺=finding 自述（GN builder source 形如 "param (entry_id)"，剥括号尾巴）。"""
+    if str(getattr(vuln, "ID", "")).startswith("2ND-GN-"):
+        label = getattr(vuln, "source", None) or "stored data"
+        m = _WRITE_LOC_RE.search(getattr(vuln, "combined_sources", None) or "")
+        if m:
+            wfile, wline = m.group(1), int(m.group(2))
+            return {"label": f"{label} (write {wfile}:{wline})",
+                    "file": wfile, "line": wline}
+        return {"label": label}
+    if flow:
+        label = flow.get("source_param")
+        if label:
+            # 入口通道后缀（body/path/query）——对齐 affected_parameters
+            # "email (body)" 惯例，让读者从数据流首步即知污点入口形态
+            stype = flow.get("source_type")
+            if stype:
+                label = f"{label} ({stype})"
+        else:
+            label = (str(vuln.source).rsplit(" (", 1)[0].strip()
+                     if getattr(vuln, "source", None) else None)
+            if not label:
+                return None
+        sp = next((sp for sp in ctx.source_points
+                   if sp.get("entry_point_id") == flow.get("entry_point_id")
+                   and sp.get("param_name") == flow.get("source_param")), None)
+        step = {"label": label}
+        if sp is not None:
+            if sp.get("file_path"):
+                step["file"] = sp.get("file_path")
+            if isinstance(sp.get("line"), int):
+                step["line"] = sp.get("line")
+        return step
+    raw = getattr(vuln, "source", None) or getattr(vuln, "vulnerable_parameter", None)
+    label = str(raw).rsplit(" (", 1)[0].strip() if raw else None
+    return {"label": label} if label else None
+
+
+def _derive_hop_step(raw: dict) -> dict | None:
+    """传播步 → 中间节点：transformation 优先，其次 intermediate_vars 拼接
+    （→ 连接、截长），两者皆无退 basename:line / to_func_id；再无素材 → None
+    （纯透传步不虚构标签——但 code_location 仍在 file/line 保留）。
+
+    transformation 带 ``sanitize_hint:`` 前缀（GN 净化提示——真实数据里非空
+    transformation 主要是它）→ 剥前缀挂 step.protection（web 卡每步「防护」
+    渲染位，LLM 轨 steps[].protection 同位），label 保留全文。"""
+    file_, line = _derive_parse_loc(raw.get("code_location"))
+    trans = raw.get("transformation")
+    vars_ = [str(v) for v in (raw.get("intermediate_vars") or []) if str(v).strip()]
+    label = (str(trans) if trans
+             else (" → ".join(vars_) if vars_ else None))
+    protection = None
+    if trans and str(trans).startswith(_SANITIZE_HINT_PREFIX):
+        protection = str(trans)[len(_SANITIZE_HINT_PREFIX):].strip() or None
+    if label is None:
+        base = (file_ or "").rsplit("/", 1)[-1]
+        label = (f"{base}:{line}" if base and line is not None
+                 else (base or raw.get("to_func_id") or None))
+        if label is None:
+            return None
+    if len(label) > _HOP_LABEL_MAX:
+        label = label[:_HOP_LABEL_MAX - 1] + "…"
+    step = {"label": label}
+    if file_:
+        step["file"] = file_
+    if line is not None:
+        step["line"] = line
+    if protection:
+        step["protection"] = protection
+    return step
+
+
+def _derive_sink_step(vuln, flow: dict | None, ctx: _GnDeriveCtx):
+    """链尾步：sink meta（receiver.callee 如 res.render）优先，缺则从
+    SinkCallSite.id 解 callee，再退 finding.sink_function。"""
+    sink_id = ((flow or {}).get("sink_call_site_id")
+               or getattr(vuln, "sink_call", None) or "")
+    meta = ctx.sinks.get(sink_id) if sink_id else None
+    if meta is not None:
+        callee = meta.get("callee_name")
+        receiver = meta.get("callee_receiver")
+        label = (f"{receiver}.{callee}" if receiver and callee
+                 else (callee or sink_id))
+        step = {"label": label}
+        if meta.get("file_path"):
+            step["file"] = meta.get("file_path")
+        if isinstance(meta.get("line"), int):
+            step["line"] = meta.get("line")
+        return step
+    if sink_id:
+        f_, l_, callee = _derive_sink_parts(sink_id)
+        step = {"label": callee or sink_id}
+        if f_:
+            step["file"] = f_
+        if l_ is not None:
+            step["line"] = l_
+        return step
+    fn = getattr(vuln, "sink_function", None)
+    return {"label": fn} if fn else None
+
+
+def _derive_parse_loc(s: object) -> tuple[str | None, int | None]:
+    """"file:line" → (file, line)（自实现简化版，对齐 dataflow_view 惯例）。"""
+    if not isinstance(s, str) or not s.strip():
+        return (None, None)
+    s = s.strip()
+    file_part, _, line_part = s.rpartition(":")
+    if file_part and line_part.isdigit():
+        return (file_part, int(line_part))
+    return (s, None)
+
+
+def _derive_sink_parts(sink_id: str) -> tuple[str | None, int | None, str | None]:
+    m = _SINK_ID_RE.match(sink_id or "")
+    if m:
+        return (m.group(1), int(m.group(4)), m.group(3))
+    return (None, None, None)
+
+
+def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict,
+                          derive_ctx: "_GnDeriveCtx | None" = None) -> ReportVulnerability:
     auth = getattr(vuln, "authentication_required", None)
     if auth is not None:
         auth = str(auth)
@@ -242,7 +478,7 @@ def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict) -> ReportVulne
         problem_points=_problem_points(vuln, vuln_class),
         endpoints=_endpoint_entries(vuln),
         affected_entries=list(getattr(vuln, "affected_entries", None) or []),
-        dataflow_steps=list(getattr(vuln, "dataflow_steps", None) or []),
+        dataflow_steps=_dataflow_steps(vuln, vuln_class, derive_ctx),
         poc=_poc_block(vuln),
         evidence=_evidence(vuln),
         raw=raw_entry,
@@ -360,6 +596,7 @@ async def build_report_data(
     """读 SSOT queue 组装 ReportData（确定性；无 LLM）。"""
     vulns_by_class: dict[str, list[ReportVulnerability]] = {}
     queue_vulns_by_class: dict[str, list] = {}
+    derive_ctx = await _load_derive_ctx(deliverables_path)
     for vuln_class, cfg in CLASS_CONFIG.items():
         queue_path = resolve_intermediate(deliverables_path, cfg.queue_file)
         if queue_path is None or not await async_path_exists(queue_path):
@@ -386,7 +623,8 @@ async def build_report_data(
                     "dismissed archive has it)", vuln.ID, vuln_class)
                 continue
             raw = vuln.model_dump(exclude_none=True)
-            report_vulns.append(_report_vulnerability(vuln, vuln_class, raw))
+            report_vulns.append(
+                _report_vulnerability(vuln, vuln_class, raw, derive_ctx))
             kept_vulns.append(vuln)
         vulns_by_class[vuln_class] = report_vulns
         queue_vulns_by_class[vuln_class] = kept_vulns
