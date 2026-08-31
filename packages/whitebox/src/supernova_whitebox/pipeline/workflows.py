@@ -524,10 +524,11 @@ class WhiteboxScanWorkflow:
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry_for("standard"),
             )
-            # === GN-only 深度富化（merge 后；non-fatal，spec 2026-08-26 §6.2 deep 档） ===
-            # SUPERNOVA_GN_ENRICH_MODE=deep（默认）时对配对后仍 gitnexus-only 的
-            # taint 条目跑多轮 agent 读码富化（title/impact/remediation/dataflow_steps/
-            # witness_payload 等全字段），写回同一 SSOT；off/light 档 activity 内部跳过。
+            # === GN-only 深度富化（merge 后；non-fatal，spec 2026-08-26 §6.2） ===
+            # 对配对后仍 gitnexus-only 的 taint 条目跑多轮 agent 读码富化
+            # （title/impact/remediation/dataflow_steps/witness_payload 等
+            # 全字段），写回同一 SSOT。常开（档位开关 SUPERNOVA_GN_ENRICH_MODE
+            # 已于 2026-08-31 整键移除，deep 行为常开）。
             # 外层 try/except non-fatal（对齐 dataflow view 套路：timeout 等 runtime
             # cancel 是 activity 内 try 抓不到的，须 workflow 兜）。
             try:

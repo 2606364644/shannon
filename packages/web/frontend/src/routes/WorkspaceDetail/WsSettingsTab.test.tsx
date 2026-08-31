@@ -47,9 +47,10 @@ describe("WsSettingsTab", () => {
     expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=0");
     expect(ta.value).toContain("SUPERNOVA_BROWSER_ENGINE=agent-browser");
     expect(ta.value).toContain("SUPERNOVA_AGENT_NARRATION_LANG=zh");
-    // 2026-08-31 准入的富化档位键（工作区预算×质量取舍）进模板
-    expect(ta.value).toContain("SUPERNOVA_GN_ENRICH_MODE=deep");
+    // 2026-08-31 准入的接口富化开关（工作区预算×质量取舍）进模板；GN 富化
+    // 档位键同日整键移除（deep 常开）→ 模板/词典均不再出现
     expect(ta.value).toContain("SUPERNOVA_ENDPOINT_ENRICH_ENABLED=1");
+    expect(ta.value).not.toContain("SUPERNOVA_GN_ENRICH_MODE");
     // PRICING_OVERRIDE 已移出模板（定价四层链最高层,预填会钉死工作区、全局定价
     // 接管失效）;per-ws 定价走 WsPricingCard(pricing.override.json)
     expect(ta.value).not.toContain("SUPERNOVA_PRICING_OVERRIDE");
@@ -155,8 +156,9 @@ describe("WsSettingsTab", () => {
     expect(screen.getByText("SUPERNOVA_OPENAI_API_KEY")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_MAX_TURNS")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_ADAPTIVE_THINKING")).toBeInTheDocument();
-    expect(screen.getByText("SUPERNOVA_GN_ENRICH_MODE")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_ENDPOINT_ENRICH_ENABLED")).toBeInTheDocument();
+    // GN_ENRICH_MODE 已整键移除（2026-08-31 deep 常开）→ 词典不展示
+    expect(screen.queryByText("SUPERNOVA_GN_ENRICH_MODE")).toBeNull();
     expect(screen.getByText("GITLAB_TOKEN")).toBeInTheDocument();
     // PRICING_OVERRIDE 已移出词典（2026-08-31）：定价四层链最高层,推荐走
     // WsPricingCard 通道;后端白名单仍收（向后兼容手写）

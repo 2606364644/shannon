@@ -266,29 +266,29 @@ def test_parse_chain_verdict_concurrency_to_env_section():
     assert parsed.ineffective == []
 
 
-def test_parse_gn_enrich_keys_to_env_section():
-    """GN 富化档位/接口富化开关是 per-workspace 语义的扫描期键 → 进 env 段（2026-08-31 裁定）。
+def test_parse_endpoint_enrich_key_and_removed_gn_enrich_mode():
+    """接口富化开关是 per-workspace 语义的扫描期键 → 进 env 段（2026-08-31 裁定）。
 
-    同期 ws_getenv 化的运维参数（LLM_TRANSIENT_RETRIES/RETRY_DELAY、
-    GN_DISCOVERY_AGENT_TIMEOUT、CHAIN_VERDICT_MAX_AGENTS）按「全局配置走全局通道
-    （.env / .env.profiles，ws_getenv 回落 os.environ）」原则**有意**留在白名单外——
-    工作区 env 文本写了归 unknown 警告丢弃，不静默半生效。勿无差别补齐。
+    GN 富化档位键 SUPERNOVA_GN_ENRICH_MODE 同日**整键移除**（off/light/deep
+    精简为 deep 常开，读取点 concurrency.gn_enrich_mode 已删）→ 工作区 env
+    文本写了归 unknown 警告丢弃。运维参数（LLM_TRANSIENT_RETRIES/RETRY_DELAY、
+    GN_DISCOVERY_AGENT_TIMEOUT、CHAIN_VERDICT_MAX_AGENTS）按「全局配置走全局
+    通道（.env / .env.profiles，ws_getenv 回落 os.environ）」原则**有意**留在
+    白名单外——工作区写了归 unknown 警告丢弃，不静默半生效。勿无差别补齐。
     """
     parsed = parse_env_text(
-        "SUPERNOVA_GN_ENRICH_MODE=light\n"
+        "SUPERNOVA_GN_ENRICH_MODE=deep\n"
         "SUPERNOVA_ENDPOINT_ENRICH_ENABLED=0\n"
         "SUPERNOVA_LLM_TRANSIENT_RETRIES=3\n"
         "SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY=5\n"
         "SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT=600\n"
         "SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS=400\n"
     )
-    assert parsed.env == {
-        "SUPERNOVA_GN_ENRICH_MODE": "light",
-        "SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "0",
-    }
+    assert parsed.env == {"SUPERNOVA_ENDPOINT_ENRICH_ENABLED": "0"}
     assert sorted(parsed.unknown) == [
         "SUPERNOVA_CHAIN_VERDICT_MAX_AGENTS",
         "SUPERNOVA_GN_DISCOVERY_AGENT_TIMEOUT",
+        "SUPERNOVA_GN_ENRICH_MODE",
         "SUPERNOVA_LLM_TRANSIENT_RETRIES",
         "SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY",
     ]

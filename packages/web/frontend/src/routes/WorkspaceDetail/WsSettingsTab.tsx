@@ -70,10 +70,10 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
       { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "bool", defaultValue: "1" },
       { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "bool", defaultValue: "0" },
       { key: "SUPERNOVA_BROWSER_ENGINE", kind: "str", defaultValue: "agent-browser" },
-      // 2026-08-31 准入（白名单+词典同步）：富化档位 = 工作区预算×质量取舍，
-      // off/light/deep 独立于 GITNEXUS_LLM_ENABLED（判定关省 token 时富化照常）。
-      // 运维参数（TRANSIENT_RETRIES 等）按「全局配置走全局 .env」原则不进词典。
-      { key: "SUPERNOVA_GN_ENRICH_MODE", kind: "str", defaultValue: "deep" },
+      // 2026-08-31 准入（白名单+词典同步）：接口富化开关 = 工作区预算×质量取舍。
+      // GN 富化档位 SUPERNOVA_GN_ENRICH_MODE 同日整键移除（off/light/deep 精简为
+      // deep 常开，后端读取点已删）→ 词典不再展示；运维参数（TRANSIENT_RETRIES
+      // 等）按「全局配置走全局 .env」原则不进词典。
       { key: "SUPERNOVA_ENDPOINT_ENRICH_ENABLED", kind: "bool", defaultValue: "1" },
       { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
       // PRICING_OVERRIDE 已移出词典/模板（2026-08-31）：它是定价四层链的最高层

@@ -217,7 +217,7 @@ async def test_failed_class_logged(tmp_path, monkeypatch, caplog):
 @pytest.mark.asyncio
 async def test_merge_activity_accounts_parity_client(tmp_path, monkeypatch):
     """spec 2026-08-27 §8：track-parity 轻量调用记账——merge activity 构造
-    AccountedLlmClient（enrich_mode 开时），出口 finalize 一次 end_agent
+    AccountedLlmClient（parity 常开），出口 finalize 一次 end_agent
     （agent_name=track-parity，非 per-vc 同名覆盖）。"""
     import json as _json
     from unittest.mock import AsyncMock

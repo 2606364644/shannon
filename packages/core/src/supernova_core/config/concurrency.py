@@ -60,39 +60,17 @@ def is_gitnexus_llm_enabled() -> bool:
     return _is_truthy_env("SUPERNOVA_GITNEXUS_LLM_ENABLED", default=True)
 
 
-# 双轨呈现一致性层（track-parity 配对归并 + GN-only 富化，spec 2026-08-26 §6）
-# 的模式档位。独立于 SUPERNOVA_GITNEXUS_LLM_ENABLED——用户关 chain-verdict 判定
-# 省 token 时，双轨一致性层仍按本档位工作（2026-08-26 用户口径：判定关、富化开）。
-_GN_ENRICH_MODES = ("off", "light", "deep")
-
-
-def gn_enrich_mode() -> str:
-    """SUPERNOVA_GN_ENRICH_MODE（默认 "deep"，经 ws_getenv 支持 per-workspace）：
-
-    - off:   track-parity 整层关闭（确定性 merge 结果直出，无任何 LLM 调用）。
-    - light: 配对归并（每 class 一次单次）+ merge activity 内逐卡轻量补全
-             （title/notes/impact/remediation/cvss/owasp/severity，不读码）。
-    - deep:  配对归并 + 独立深度富化 step（多轮 agent 读码追链，产全字段含
-             dataflow_steps/witness_payload）——merge 内轻量补全跳过避免双重花费。
-    畸形值回退 deep 并 warning（不 crash 扫描）。"""
-    raw = ws_getenv("SUPERNOVA_GN_ENRICH_MODE")
-    if raw is None:
-        return "deep"
-    val = raw.strip().lower()
-    if val in _GN_ENRICH_MODES:
-        return val
-    _log.warning("SUPERNOVA_GN_ENRICH_MODE=%r not in %s; falling back to deep",
-                 raw, _GN_ENRICH_MODES)
-    return "deep"
+# GN 富化档位开关 SUPERNOVA_GN_ENRICH_MODE（off/light/deep）已于 2026-08-31
+# 整键移除：deep 行为常开（light 是升级前旧实现残留、off 从未被真实使用），
+# 省 token 出口在 SUPERNOVA_LLM_TRACK_ENABLED / SUPERNOVA_GITNEXUS_LLM_ENABLED。
 
 
 def endpoint_enrich_enabled() -> bool:
     """SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认 "1"，经 ws_getenv 支持 per-workspace）：
 
-    全卡接口表富化（spec 2026-08-26-report-generation-agent §5.2）——独立于
-    SUPERNOVA_GN_ENRICH_MODE（GN-only 叙事富化档位）：接口富化对两轨全部卡
-    生效（LLM 卡补行号链、GN 卡补接口），关闭时 builder 走确定性 endpoint
-    兜底（无行号）。"""
+    全卡接口表富化（spec 2026-08-26-report-generation-agent §5.2）——接口富化
+    对两轨全部卡生效（LLM 卡补行号链、GN 卡补接口），关闭时 builder 走确定性
+    endpoint 兜底（无行号）。"""
     raw = ws_getenv("SUPERNOVA_ENDPOINT_ENRICH_ENABLED")
     if raw is None:
         return True

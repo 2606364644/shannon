@@ -89,6 +89,12 @@ class AccountedLlmClient:
             await self._ensure_started()
             return None
         await self._ensure_started()
+        if isinstance(result, str):
+            # 已剥 str 的 client（测试 fake / 旧闭包）：原样透传、按零成本记一次
+            # 调用——此前 getattr(result, "text", "") 把整个 str payload 静默吞成
+            # ""（track-parity 配对响应整笔丢失的现场形态，2026-08-31）。
+            self._calls += 1
+            return result
         self._record_success(result)
         so = getattr(result, "structured_output", None)
         if so is not None:

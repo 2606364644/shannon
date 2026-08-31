@@ -29,7 +29,7 @@ from supernova_core.agents.executor import AgentExecutor
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.recon_context_summarizer import summarize_recon_context
 from supernova_core.config.concurrency import (
-    get_chain_verdict_concurrency, gn_enrich_mode, is_gitnexus_llm_enabled,
+    get_chain_verdict_concurrency, is_gitnexus_llm_enabled,
 )
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
@@ -1000,19 +1000,17 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
 
         repo, deliverables, _ = _get_paths(input)
         # track-parity 记账 client（spec 2026-08-27 §8）：轻量调用 cost 此前被
-        # _make_track_parity_client 闭包剥 str 时整笔丢弃——AccountedLlmClient 累计，
-        # 循环外一次 finalize 记总账（agent_name=track-parity 进 phase 汇总）。
+        # client 闭包剥 str 时整笔丢弃——AccountedLlmClient 累计，循环外一次
+        # finalize 记总账（agent_name=track-parity 进 phase 汇总）。包
+        # _make_track_parity_client 工厂（唯一 client 定义，兼测试注入点——
+        # 2026-08-31 修复：曾内联 _parity_runner 绕过工厂，测试 fake 注入失效
+        # 走真 LLM）。
         from supernova_core.agents.llm_accounting import AccountedLlmClient
-        _parity_repo = str(repo) if repo else ""
-
-        async def _parity_runner(prompt, **kw):
-            return await run_claude_prompt(
-                prompt=prompt, repo_path=_parity_repo, model_tier="medium",
-                structured_output_schema=kw.get("output_format"),
-                provider_config=getattr(input, "provider_config", None))
-
         _accounted_parity = AccountedLlmClient(
-            _parity_runner, get_audit_session(), "track-parity")
+            _make_track_parity_client(
+                str(repo) if repo else "",
+                getattr(input, "provider_config", None)),
+            get_audit_session(), "track-parity")
         # GitNexus 轨 per-class 状态(Task 4 写,文件缺/损坏返 {} 容错)。
         # 仅供 merger 标记 gitnexus_status + 报告标红;合并逻辑不读它(failed 类
         # 自然 gitnexus_findings=[] -> llm-only 或 continue 跳过)。
@@ -1090,31 +1088,26 @@ async def run_merge_dual_track_queues(input: ActivityInput) -> dict:
                     mode="verdict",
                 )
                 # 双轨呈现一致性（spec 2026-08-26 §6）：确定性 key 配不上的同洞卡
-                # 由轻量 LLM 配对归并（仅 high 应用），剩余 GN-only 卡补全叙事/评级
-                # 字段——两轨卡片字段同构。LLM 不可用优雅退化（enhance 内部捕获，
+                # 由轻量 LLM 配对归并（仅 high 应用）——两轨卡片呈现同构。配对后
+                # 仍 GN-only 的卡不做 merge 内补全：叙事/评级全字段由 merge 后
+                # 独立深度富化 step（run_gn_finding_enrichment，多轮读码）承担，
+                # 避免同卡双重 LLM 花费。本层常开、独立于
+                # SUPERNOVA_GITNEXUS_LLM_ENABLED（2026-08-26 用户口径「判定关省
+                # token、双轨一致性层开」；档位开关 SUPERNOVA_GN_ENRICH_MODE 已于
+                # 2026-08-31 整键移除）。LLM 不可用优雅退化（enhance 内部捕获，
                 # 维持确定性 merge 结果），报告管线不因增强层阻塞。
-                # 开关 SUPERNOVA_GN_ENRICH_MODE（独立于 SUPERNOVA_GITNEXUS_LLM_ENABLED，
-                # 2026-08-26 用户口径「判定关省 token、双轨一致性层开」）：off 全跳；
-                # light 配对+merge 内轻量补全；deep（默认）只配对——轻量补全让位给
-                # 独立深度富化 step（run_gn_finding_enrichment，多轮读码产全字段），
-                # 避免同卡双重 LLM 花费。
                 both_before = sum(
                     1 for f in merged if f.merge_source == "both")
-                _enrich_mode = gn_enrich_mode()
-                if _enrich_mode != "off":
-                    try:
-                        from supernova_core.services.track_parity import (
-                            enhance_track_parity,
-                        )
-                        _parity_client = _accounted_parity
-                        merged = await enhance_track_parity(
-                            merged, vuln_class, _parity_client,
-                            complete=(_enrich_mode == "light"),
-                        )
-                    except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
-                        logger.warning(
-                            "track-parity skipped for %s (client setup failed): %s",
-                            vuln_class, exc)
+                try:
+                    from supernova_core.services.track_parity import (
+                        enhance_track_parity,
+                    )
+                    merged = await enhance_track_parity(
+                        merged, _accounted_parity)
+                except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
+                    logger.warning(
+                        "track-parity skipped for %s (client setup failed): %s",
+                        vuln_class, exc)
                 parity_paired = sum(
                     1 for f in merged if f.merge_source == "both") - both_before
                 # 合并版写回 intermediate/（SSOT；下游 resolve_intermediate 优先读到合并版）
@@ -1268,8 +1261,8 @@ def _apply_gn_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
 
 @activity.defn
 async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
-    """GN-only 深度富化（spec 2026-08-26 §6.2 deep 档，用户口径 2026-08-26：
-    轻量单次升级为深度多轮——agent 自己 grep/read 追链，产 dataflow_steps/
+    """GN-only 深度富化（spec 2026-08-26 §6.2；2026-08-26 用户口径：轻量单次
+    升级为深度多轮——agent 自己 grep/read 追链，产 dataflow_steps/
     witness_payload 全字段，卡片与 LLM 轨同构）。
 
     位置：merge（run_merge_dual_track_queues，含 track-parity 配对）之后、
@@ -1278,16 +1271,13 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
     auth 无 GN 轨），逐 class 一次 run_gitnexus_verdict_agent 多轮富化，
     按 ID 回填写回同一 SSOT。
 
-    开关：SUPERNOVA_GN_ENRICH_MODE（concurrency.gn_enrich_mode）——仅 "deep"
-    档执行（off/light 跳过：light 已由 merge 内轻量补全承担）；独立于
-    SUPERNOVA_GITNEXUS_LLM_ENABLED（判定关省 token 时富化照常）。失败降级
-    为不富化（保留确定性字段），由 workflow 层 non-fatal 包裹。
+    常开（档位开关 SUPERNOVA_GN_ENRICH_MODE off/light/deep 已于 2026-08-31
+    整键移除——off/light 从未被真实使用，deep 行为常开）；省 token 出口在
+    SUPERNOVA_LLM_TRACK_ENABLED / SUPERNOVA_GITNEXUS_LLM_ENABLED 层面。失败
+    降级为不富化（保留确定性字段），由 workflow 层 non-fatal 包裹。
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等)
-    mode = gn_enrich_mode()
-    if mode != "deep":
-        return {"skipped": mode, "enriched_classes": {}, "total_enriched": 0}
     repo, deliverables, _ = _get_paths(input)
     from supernova_core.models.queue_schemas import VulnerabilityQueue
 
@@ -1389,8 +1379,8 @@ async def run_endpoint_enrichment(input: ActivityInput) -> dict:
     源码原文），独立校验后写回 report_problem_points。
 
     位置：merge 与 run_gn_finding_enrichment 之后、render_findings 之前。
-    开关 SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认开，独立于 GN_ENRICH_MODE——
-    接口富化对两轨全部卡生效）。失败降级为不富化（non-fatal）。
+    开关 SUPERNOVA_ENDPOINT_ENRICH_ENABLED（默认开——接口富化对两轨全部卡
+    生效）。失败降级为不富化（non-fatal）。
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
     await ensure_audit_session(input)  # worker 重启后可观测恢复(幂等)
@@ -2616,27 +2606,24 @@ def _make_verdict_llm_client(repo_path: str, provider_config: dict | None = None
 
 
 def _make_track_parity_client(repo_path: str, provider_config: dict | None = None):
-    """track-parity（配对归并/轻量补全，spec 2026-08-26 §6）专用单次结构化 client。
+    """track-parity（配对归并，spec 2026-08-26 §6）专用单次 runner 工厂。
 
-    与 _make_verdict_llm_client 的差别在开关语义：**不受 SUPERNOVA_GITNEXUS_LLM_ENABLED
-    门控**——用户关 chain-verdict 判定省 token 时（2026-08-26 用户口径：判定关、
-    双轨一致性层开），本层仍由 SUPERNOVA_GN_ENRICH_MODE（concurrency.gn_enrich_mode）
-    独立控制（off 时调用方根本不建 client）。实现同真分支：output_format 透传
-    run_claude_prompt 单次结构化输出，structured_output 优先。"""
-    from supernova_core.agents.runner import run_claude_prompt
+    返回 ClaudeRunResult-like runner（AccountedLlmClient 契约——包装层记
+    cost/tokens/model 并转 str；剥 str 的闭包正是 §8 轻量调用 cost 漏记的
+    根因，2026-08-31 修复回归该契约）。与 _make_verdict_llm_client 的差别
+    在开关语义：**不受 SUPERNOVA_GITNEXUS_LLM_ENABLED 门控**——用户关
+    chain-verdict 判定省 token 时（2026-08-26 用户口径：判定关、双轨一致性
+    层开），配对归并仍工作。output_format 透传 run_claude_prompt（模块级
+    名——测试经 patch activities.run_claude_prompt / patch 本工厂注入 fake）
+    单次结构化输出。"""
 
-    async def _client(prompt: str, **kwargs) -> str:
-        result = await run_claude_prompt(
+    async def _runner(prompt: str, **kwargs):
+        return await run_claude_prompt(
             prompt=prompt, repo_path=repo_path, model_tier="medium",
             structured_output_schema=kwargs.get("output_format"),
             provider_config=provider_config,
         )
-        so = result.structured_output
-        if so is not None:
-            import json as _json
-            return _json.dumps(so)
-        return result.text
-    return _client
+    return _runner
 
 
 # 交付纪律统一注入（2026-08-28 收口）：全部 JSON 契约多轮 agent 的唯一入口

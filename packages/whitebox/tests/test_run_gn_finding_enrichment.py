@@ -90,7 +90,7 @@ class _Result:
         self.text = text
 
 
-async def _run(tmp_path, mode="deep", agent_result=None, agent_exc=None):
+async def _run(tmp_path, agent_result=None, agent_exc=None):
     """跑 run_gn_finding_enrichment；agent mock 控制富化 agent 行为。
 
     get_audit_session/ensure_audit_session 是 activity 函数内 import（对齐
@@ -107,7 +107,6 @@ async def _run(tmp_path, mode="deep", agent_result=None, agent_exc=None):
 
     with patch.object(activities, "_get_paths",
                       lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
-         patch.object(activities, "gn_enrich_mode", lambda: mode), \
          patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
          patch.object(session_registry, "get_audit_session",
                       lambda: _RecordingSession()), \
@@ -134,7 +133,6 @@ async def test_enrichment_default_max_turns_100(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPERNOVA_GN_ENRICH_MAX_TURNS", raising=False)
     with patch.object(activities, "_get_paths",
                       lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
-         patch.object(activities, "gn_enrich_mode", lambda: "deep"), \
          patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
          patch.object(session_registry, "get_audit_session",
                       lambda: _RecordingSession()), \
@@ -142,16 +140,6 @@ async def test_enrichment_default_max_turns_100(tmp_path, monkeypatch):
         await activities.run_gn_finding_enrichment(_FakeInput(tmp_path))
 
     assert captured["max_turns"] == 100
-
-
-@pytest.mark.asyncio
-async def test_enrichment_skipped_when_mode_not_deep(tmp_path):
-    """off/light 档直接跳过——agent 不被调用，queue 原样。"""
-    _write_queue(tmp_path, [dict(_GN_VULN)])
-    result = await _run(tmp_path, mode="light",
-                        agent_exc=AssertionError("light 档不应调 agent"))
-    assert result["skipped"] == "light"
-    assert result["total_enriched"] == 0
 
 
 @pytest.mark.asyncio
@@ -172,7 +160,6 @@ async def test_enrichment_agent_name_per_class(tmp_path):
     _write_queue(tmp_path, [dict(_GN_VULN)])
     with patch.object(activities, "_get_paths",
                       lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
-         patch.object(activities, "gn_enrich_mode", lambda: "deep"), \
          patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
          patch.object(session_registry, "get_audit_session",
                       lambda: _RecordingSession()), \
