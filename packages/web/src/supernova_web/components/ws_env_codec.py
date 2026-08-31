@@ -61,6 +61,12 @@ SCAN_ENV_KEYS: frozenset[str] = frozenset({
     "SUPERNOVA_CHUNK_TOKEN_THRESHOLD",
     "SUPERNOVA_CHAIN_VERDICT_CONCURRENCY",
     "SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS",
+    # 2026-08-31 准入（per-workspace 语义裁定）：富化档位是工作区预算×质量取舍。
+    # 同期 ws_getenv 化的运维参数（LLM_TRANSIENT_RETRIES/RETRY_DELAY、
+    # GN_DISCOVERY_AGENT_TIMEOUT、CHAIN_VERDICT_MAX_AGENTS）有意不进——全局配置走
+    # 全局通道（.env；ws_getenv 回落 os.environ），工作区写了归 unknown 警告丢弃。
+    "SUPERNOVA_GN_ENRICH_MODE",
+    "SUPERNOVA_ENDPOINT_ENRICH_ENABLED",
 })
 
 # 启动期配置（worker main() 启动时读一次，ws 覆盖不生效）→ 警告不阻塞，不进 fields/env。

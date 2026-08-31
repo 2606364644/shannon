@@ -47,6 +47,12 @@ describe("WsSettingsTab", () => {
     expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=0");
     expect(ta.value).toContain("SUPERNOVA_BROWSER_ENGINE=agent-browser");
     expect(ta.value).toContain("SUPERNOVA_AGENT_NARRATION_LANG=zh");
+    // 2026-08-31 准入的富化档位键（工作区预算×质量取舍）进模板
+    expect(ta.value).toContain("SUPERNOVA_GN_ENRICH_MODE=deep");
+    expect(ta.value).toContain("SUPERNOVA_ENDPOINT_ENRICH_ENABLED=1");
+    // PRICING_OVERRIDE 已移出模板（定价四层链最高层,预填会钉死工作区、全局定价
+    // 接管失效）;per-ws 定价走 WsPricingCard(pricing.override.json)
+    expect(ta.value).not.toContain("SUPERNOVA_PRICING_OVERRIDE");
     // 凭据行以 # 注释出现（不落盘空串、删 # 填值才生效）
     expect(ta.value).toContain("#SUPERNOVA_OPENAI_API_KEY=");
     // git 段默认不进入预填模板（prefill=false）；需要时在右侧词典点击注入
@@ -149,7 +155,12 @@ describe("WsSettingsTab", () => {
     expect(screen.getByText("SUPERNOVA_OPENAI_API_KEY")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_MAX_TURNS")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_ADAPTIVE_THINKING")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_GN_ENRICH_MODE")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_ENDPOINT_ENRICH_ENABLED")).toBeInTheDocument();
     expect(screen.getByText("GITLAB_TOKEN")).toBeInTheDocument();
+    // PRICING_OVERRIDE 已移出词典（2026-08-31）：定价四层链最高层,推荐走
+    // WsPricingCard 通道;后端白名单仍收（向后兼容手写）
+    expect(screen.queryByText("SUPERNOVA_PRICING_OVERRIDE")).toBeNull();
     // 进程级（仅全局生效）
     expect(screen.getByText("SUPERNOVA_MAX_CONCURRENT")).toBeInTheDocument();
     // CLAUDE_CODE_MAX_OUTPUT_TOKENS 已从词典移除：后端代码默认 64000（providers_anthropic）

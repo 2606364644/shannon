@@ -70,8 +70,16 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
       { key: "SUPERNOVA_LLM_TRACK_ENABLED", kind: "bool", defaultValue: "1" },
       { key: "SUPERNOVA_GITNEXUS_LLM_ENABLED", kind: "bool", defaultValue: "0" },
       { key: "SUPERNOVA_BROWSER_ENGINE", kind: "str", defaultValue: "agent-browser" },
-      { key: "SUPERNOVA_PRICING_OVERRIDE", kind: "str", defaultValue: ".env.profiles/glm.pricing.json" },
+      // 2026-08-31 准入（白名单+词典同步）：富化档位 = 工作区预算×质量取舍，
+      // off/light/deep 独立于 GITNEXUS_LLM_ENABLED（判定关省 token 时富化照常）。
+      // 运维参数（TRANSIENT_RETRIES 等）按「全局配置走全局 .env」原则不进词典。
+      { key: "SUPERNOVA_GN_ENRICH_MODE", kind: "str", defaultValue: "deep" },
+      { key: "SUPERNOVA_ENDPOINT_ENRICH_ENABLED", kind: "bool", defaultValue: "1" },
       { key: "SUPERNOVA_AGENT_NARRATION_LANG", kind: "str", defaultValue: "zh" },
+      // PRICING_OVERRIDE 已移出词典/模板（2026-08-31）：它是定价四层链的最高层
+      // （工作区层），模板预填/词典推荐会把 profile 定价钉死进工作区——web 全局
+      // 定价界面对该工作区接管失效。per-ws 定价差异走 WsPricingCard
+      // （pricing.override.json）；后端 SCAN_ENV_KEYS 仍收该键（手写向后兼容）。
     ],
   },
   {
