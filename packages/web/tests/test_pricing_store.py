@@ -47,6 +47,34 @@ def test_write_global_roundtrip_and_normalized_keys(store, tmp_path):
     assert store.read_global() == data
 
 
+def test_write_global_preserves_coder_variant_key(store, tmp_path):
+    """-coder 独立定价（2026-08-31 起 glm-5.2-coder 单列 16/56/4/0）：落盘 key
+    保留 -coder 不折叠成基础模型——折叠会吞掉独立价、覆盖基础价。"""
+    store.write_global("CNY", {"glm-5.2-coder": _tiers(16, 56, 4)})
+    data = json.loads((tmp_path / "pricing.json").read_text("utf-8"))
+    assert set(data["models"]) == {"glm-5.2-coder"}
+    assert data["models"]["glm-5.2-coder"]["input"] == 16.0
+
+
+def test_validate_allows_coder_variant_alongside_base(store):
+    """glm-5.2 与 glm-5.2-coder 是两个独立键，不判归一冲突（可同时定价）。"""
+    PricingStore.validate("CNY", {"glm-5.2": _tiers(), "glm-5.2-coder": _tiers(16, 56, 4)})
+
+
+def test_resolve_effective_keeps_coder_variant_rows(store, tmp_path, monkeypatch):
+    """层文件里的 -coder 独立键 resolve 时不折叠——否则 web 定价页把 coder 价
+    显示成基础模型价，保存全局表快照会污染基础价。"""
+    p = _write_pricing_file(tmp_path / "coder.json", {
+        "currency": "CNY",
+        "models": {"glm-5.2-coder": _tiers(16, 56, 4)}})
+    monkeypatch.setenv("SUPERNOVA_PRICING_OVERRIDE", str(p))
+    eff = store.resolve_effective()
+    by_model = {m["model"]: m for m in eff["models"]}
+    assert by_model["glm-5.2-coder"]["prices"]["input"] == 16.0
+    assert by_model["glm-5.2-coder"]["source"] == "profile_env"
+    assert by_model["glm-5.2"]["prices"]["input"] == 8.0  # 基础价不受污染
+
+
 def test_write_global_atomic_no_tmp_leftover(store, tmp_path):
     store.write_global("USD", {"m": _tiers()})
     leftovers = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]

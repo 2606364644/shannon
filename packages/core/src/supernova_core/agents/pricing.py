@@ -34,21 +34,30 @@ from supernova_core.config.scan_env import ws_override_get
 _log = logging.getLogger(__name__)
 
 # 单位：本币（CNY）/ 百万 token。GLM 2026-07-09 已按智谱官网核对（bigmodel.cn/pricing）；
-# DeepSeek 2026-08-20 已按官方定价页核对（api-docs.deepseek.com，平时档）。
-# glm-4.5-air 取代表档（输入<32K / 输出≥0.2K / 缓存命中 0.16）、deepseek-v4-flash 取平时档
-# （高峰时段 2/4）——pricing 单一档位近似，阶梯精确计费需扩展 pricing.py。
+# DeepSeek 2026-08-20 已按官方定价页核对（api-docs.deepseek.com），2026-08-31 用户核对
+# 更新（flash 1/2/0.2、flash-coder 2/4/0.4 单列、pro 24/48/2）。
+# glm-4.5-air 取代表档（输入<32K / 输出≥0.2K / 缓存命中 0.16）——pricing 单一档位近似，
+# 阶梯精确计费需扩展 pricing.py。
 # cache_creation 对 GLM/DeepSeek/openai 协议恒 0（无此概念）。
-# -coder 变体（glm-5.2-coder / deepseek-v4-flash-coder…）不单列：约定与基础模型同价，
-# 由 normalize_model 剥 "-coder" 后缀归一命中。
+# -coder 变体默认与基础模型同价（未单列时 lookup 剥 "-coder" 回落基础价）；
+# 2026-08-31 起 glm-5.2-coder 单列独立价（16/56/4/0，2× 基础），全名键优先命中。
 BUILTIN_PRICING_CNY: dict[str, dict[str, float]] = {
     "glm-5.2": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
+    # glm-5.2-coder 单列独立价（2026-08-31 用户核对，2× 基础 8/28/2）
+    "glm-5.2-coder": {"input": 16.0, "output": 56.0, "cache_read": 4.0, "cache_creation": 0.0},
     # glm-5.3 与 glm-5.2 同价（2026-08-19 上线未调价；JPMorgan 研报 + 上线报道双源核对）
     "glm-5.3": {"input": 8.0, "output": 28.0, "cache_read": 2.0, "cache_creation": 0.0},
     # glm-5.3-flash（2026-08-28 官网核对；normalize_model 不剥 -flash，键即查询形态）
     "glm-5.3-flash": {"input": 0.8, "output": 2.8, "cache_read": 0.23, "cache_creation": 0.0},
     "glm-4.5-air": {"input": 0.8, "output": 6.0, "cache_read": 0.16, "cache_creation": 0.0},
-    # deepseek-v4-flash 官方平时档（2026-08-20；与 .env.profiles.example/deepseek.pricing.json 一致）
-    "deepseek-v4-flash": {"input": 1.0, "output": 2.0, "cache_read": 0.02, "cache_creation": 0.0},
+    # deepseek-v4-pro 24/48/2/0（2026-08-31 用户核对更新，原 profile JSON 旧价 3/6/0.025；
+    # 与 .env.profiles.example/deepseek.pricing.json 一致）
+    "deepseek-v4-pro": {"input": 24.0, "output": 48.0, "cache_read": 2.0, "cache_creation": 0.0},
+    # deepseek-v4-flash 1/2/0.2/0（2026-08-31 用户核对更新，原平时档 1/2/0.02）
+    "deepseek-v4-flash": {"input": 1.0, "output": 2.0, "cache_read": 0.2, "cache_creation": 0.0},
+    # deepseek-v4-flash-coder 单列独立价 2/4/0.4/0（2026-08-31 用户核对，2× 基础）；
+    # flash / flash-coder 均与 .env.profiles.example/deepseek.pricing.json 一致
+    "deepseek-v4-flash-coder": {"input": 2.0, "output": 4.0, "cache_read": 0.4, "cache_creation": 0.0},
 }
 
 # 默认 ¥→$ 汇率；单 session 不再使用（本币直达），仅保留供未来跨 session/跨币种聚合。
@@ -69,8 +78,9 @@ def _model_currency(prices: dict, table_currency: str) -> str:
 # 去后缀：[1m] / -YYYYMMDD / --xxx；并折叠 claude 日期快照后缀。
 _MODEL_SUFFIX_RE = re.compile(r"\[.*?\]|-\d{8}.*$|--.*$", re.IGNORECASE)
 
-# -coder 变体与基础模型同价（2026-08-20 约定）：lookup 前剥 "-coder" 尾缀，
-# glm-5.2-coder → glm-5.2、deepseek-v4-flash-coder → deepseek-v4-flash。
+# -coder 变体默认与基础模型同价（2026-08-20 约定；2026-08-31 起可单列覆盖）：
+# lookup 先查全名键（含 -coder 独立价），未命中再剥 "-coder" 尾缀回落基础模型，
+# deepseek-v4-flash-coder → deepseek-v4-flash。
 _CODER_SUFFIX_RE = re.compile(r"-coder$", re.IGNORECASE)
 
 # 别名 → 归一化 key（按需补充）。
@@ -91,16 +101,31 @@ def currency_symbol(currency: str) -> str:
 
 
 def normalize_model(name: str) -> str:
-    """模型名归一化：小写 + 去后缀 + 别名映射。
+    """模型名归一化：小写 + 去后缀 + 别名映射 + 剥 ``-coder``。
 
     GLM-5.2[1m] → glm-5.2；claude-sonnet-4-5-20251022 → claude-sonnet-4-5；
-    glm-5.2-coder → glm-5.2（-coder 变体与基础模型同价）。
+    glm-5.2-coder → glm-5.2（容量等「变体≈基础」场景用；价目表查键见
+    normalize_pricing_key / _lookup_key——coder 可独立定价，不在此折叠）。
     """
     if not name:
         return ""
     key = name.strip().lower()
     key = _MODEL_SUFFIX_RE.sub("", key).strip()
     key = _CODER_SUFFIX_RE.sub("", key).strip()
+    return _MODEL_ALIASES.get(key, key)
+
+
+def normalize_pricing_key(model: str) -> str:
+    """价目表键归一化：小写 + 去快照后缀 + 别名映射，**保留 ``-coder`` 尾缀**。
+
+    与 normalize_model（剥 -coder）相对：价目表支持 -coder 独立定价
+    （2026-08-31 起 glm-5.2-coder 单列），查表与 web 层落盘 key 都不折叠
+    coder；未单列的 coder 变体由 _lookup_key 回落基础价。
+    """
+    if not model:
+        return ""
+    key = model.strip().lower()
+    key = _MODEL_SUFFIX_RE.sub("", key).strip()
     return _MODEL_ALIASES.get(key, key)
 
 
@@ -168,8 +193,18 @@ def _price_table() -> dict:
     return _pricing()[0]
 
 
+def _lookup_key(model: str, table: dict) -> str:
+    """查表键（两级）：先全名（normalize_pricing_key，保留 ``-coder`` 独立键），
+    未命中再剥 ``-coder`` 回落基础模型——未单列的 coder 变体与基础同价。"""
+    key = normalize_pricing_key(model)
+    if key in table:
+        return key
+    return _CODER_SUFFIX_RE.sub("", key).strip()
+
+
 def is_model_priced(model: str) -> bool:
-    return normalize_model(model) in _price_table()
+    table = _price_table()
+    return _lookup_key(model, table) in table
 
 
 def compute_cost(model: str, usage) -> CostAmount:
@@ -179,8 +214,8 @@ def compute_cost(model: str, usage) -> CostAmount:
 
         cost = ( input*P_in + cache_creation*P_cc + cache_read*P_cr + output*P_out ) / 1e6
     """
-    key = normalize_model(model)
     table, currency = _pricing()
+    key = _lookup_key(model, table)
     if key not in table:
         _log.warning(
             "模型 %r 不在价目表，cost 记 0（守「不假估算」）；可经 SUPERNOVA_PRICING_OVERRIDE 补充定价",

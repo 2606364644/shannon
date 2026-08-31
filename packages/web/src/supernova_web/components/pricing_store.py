@@ -11,8 +11,10 @@
   **不写 ws config env 段**（env 文本框契约「文本=完整定义」，程序写键会被下次
   保存静默清除）；由 scan_manager._resolve_env_overrides 注入压过手写键。
 
-模型 key 落盘前经 normalize_model 归一：core 的 table.update 直接吃层文件 key，
-归一 id 是 compute_cost 的查询形态，存原始形态（如 GLM-5.2[1m]）会 miss 记 0 成本。
+模型 key 落盘前经 normalize_pricing_key 归一（**保留 -coder 尾缀**，coder 变体可
+独立定价）：core 的 table.update 直接吃层文件 key，归一 id 是 compute_cost 的查询
+形态，存原始形态（如 GLM-5.2[1m]）会 miss 记 0 成本；-coder 折叠会吞独立价（如
+glm-5.2-coder 16/56/4 被写成 glm-5.2 基础价）。
 
 模型级币种（2026-08-28）：价格对象内可选 ``currency`` 键（仅 CNY/USD）覆盖表级默认；
 resolve_effective 行输出的 ``currency`` 是**兄弟字段**（null=跟随表级，不 resolve 成
@@ -30,7 +32,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from supernova_core.agents.pricing import BUILTIN_PRICING_CNY, normalize_model
+from supernova_core.agents.pricing import BUILTIN_PRICING_CNY, normalize_pricing_key
 
 _log = logging.getLogger(__name__)
 
@@ -136,7 +138,7 @@ class PricingStore:
         self.validate(currency, models)
         self._atomic_write(self._global_path(), {
             "currency": currency,
-            "models": {normalize_model(k): _sanitized_model(v) for k, v in models.items()},
+            "models": {normalize_pricing_key(k): _sanitized_model(v) for k, v in models.items()},
         })
 
     def clear_global(self) -> None:
@@ -159,7 +161,7 @@ class PricingStore:
         self.validate(currency, models)
         self._atomic_write(self._ws_path(ws), {
             "currency": currency,
-            "models": {normalize_model(k): _sanitized_model(v) for k, v in models.items()},
+            "models": {normalize_pricing_key(k): _sanitized_model(v) for k, v in models.items()},
         })
 
     def clear_ws_override(self, ws: str) -> None:
@@ -201,7 +203,7 @@ class PricingStore:
             if cur is not None:
                 currency = cur
             for raw_key, prices in models.items():
-                key = normalize_model(raw_key)
+                key = normalize_pricing_key(raw_key)
                 if not key or not isinstance(prices, dict):
                     continue  # 手写文件的脏行：跳过该模型，不让整层失效
                 four = {k: float(prices.get(k, 0) or 0) for k in _TIER_KEYS}
@@ -241,7 +243,7 @@ class PricingStore:
             raise ValueError("models 必须是非空对象（清除定价请用删除操作）")
         seen: set[str] = set()
         for key, prices in models.items():
-            normalized = normalize_model(key) if isinstance(key, str) else ""
+            normalized = normalize_pricing_key(key) if isinstance(key, str) else ""
             if not normalized:
                 raise ValueError(f"模型名 {key!r} 无效（归一后为空）")
             if normalized in seen:

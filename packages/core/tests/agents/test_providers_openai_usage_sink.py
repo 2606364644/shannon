@@ -52,9 +52,9 @@ async def test_call_cancelled_writes_sink_and_reraises(monkeypatch):
     assert sink.cache_read_tokens == 500
     assert sink.output_tokens == 200
     assert sink.cache_creation_tokens == 0
-    # deepseek-v4-flash 价（in ¥1/M、out ¥2/M、cache_read ¥0.02/M）：
-    # (500×1 + 500×0.02 + 200×2)/1e6 = 910.0/1e6 → 0.00091
-    assert sink.cost_usd == pytest.approx(0.00091)
+    # deepseek-v4-flash 价（in ¥1/M、out ¥2/M、cache_read ¥0.2/M，2026-08-31 更新）：
+    # (500×1 + 500×0.2 + 200×2)/1e6 = 1000.0/1e6 → 0.001
+    assert sink.cost_usd == pytest.approx(0.001)
     assert sink.cost_currency == "CNY"
     assert sink.model == "deepseek-v4-flash"
 

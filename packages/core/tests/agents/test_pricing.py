@@ -112,12 +112,24 @@ def test_glm_53_priced_same_as_52():
 
 
 def test_deepseek_v4_flash_builtin_priced():
-    """deepseek-v4-flash 入内置表：官方平时档 1/2/0.02（高峰档单一档位近似）。"""
+    """deepseek-v4-flash 入内置表：1/2/0.2/0（2026-08-31 用户核对更新，原平时档 1/2/0.02）。"""
     usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
                        cache_read_input_tokens=1_000_000)
-    # 1M×1 + 1M×0 + 1M×0.02 + 1M×2, /1M = 3.02
-    assert compute_cost("deepseek-v4-flash", usage) == CostAmount(3.02, "CNY")
+    # 1M×1 + 1M×0 + 1M×0.2 + 1M×2, /1M = 3.2
+    assert compute_cost("deepseek-v4-flash", usage) == CostAmount(3.2, "CNY")
     assert is_model_priced("deepseek-v4-flash") is True
+
+
+def test_deepseek_v4_flash_coder_independently_priced():
+    """deepseek-v4-flash-coder 单列独立价 2/4/0.4/0（2026-08-31，2× 基础价）：
+    lookup 先全名命中独立键，不再剥 -coder 回落 flash（1/2/0.2）。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    # 1M×2 + 1M×0 + 1M×0.4 + 1M×4, /1M = 6.4
+    assert compute_cost("deepseek-v4-flash-coder", usage) == CostAmount(6.4, "CNY")
+    assert compute_cost("DeepSeek-V4-Flash-Coder", usage) == CostAmount(6.4, "CNY")
+    # 基础模型价不受影响
+    assert compute_cost("deepseek-v4-flash", usage) == CostAmount(3.2, "CNY")
 
 
 def test_normalize_model_strips_coder_suffix():
@@ -129,12 +141,37 @@ def test_normalize_model_strips_coder_suffix():
 
 
 def test_coder_variant_same_cost_as_base():
-    """-coder 变体与基础模型同价、不再回落 cost 0（回归：曾全程 ¥0.00）。"""
+    """未单列的 -coder 变体与基础模型同价、不再回落 cost 0（回归：曾全程 ¥0.00）。
+
+    2026-08-31 起 glm-5.2-coder / deepseek-v4-flash-coder 单列独立价，不再与
+    基础同价——分别见 test_glm_52_coder_independently_priced /
+    test_deepseek_v4_flash_coder_independently_priced。"""
     usage = TokenUsage(input_tokens=1_000_000, output_tokens=500_000)
-    assert compute_cost("deepseek-v4-flash-coder", usage) == compute_cost("deepseek-v4-flash", usage)
-    assert compute_cost("glm-5.2-coder", usage) == compute_cost("glm-5.2", usage)
-    assert is_model_priced("deepseek-v4-flash-coder") is True
+    assert compute_cost("glm-5.3-coder", usage) == compute_cost("glm-5.3", usage)
+    assert compute_cost("glm-5.3-flash-coder", usage) == compute_cost("glm-5.3-flash", usage)
+    assert is_model_priced("glm-5.3-flash-coder") is True
     assert is_model_priced("glm-5.2-coder") is True
+
+
+def test_glm_52_coder_independently_priced():
+    """glm-5.2-coder 单列独立价 16/56/4/0（2026-08-31，2× 基础价）：
+    lookup 先全名命中独立键，不再剥 -coder 回落 glm-5.2（8/28/2）。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    # 1M×16 + 1M×0 + 1M×4 + 1M×56, /1M = 76.0
+    assert compute_cost("glm-5.2-coder", usage) == CostAmount(76.0, "CNY")
+    assert compute_cost("GLM-5.2-Coder[1m]", usage) == CostAmount(76.0, "CNY")
+    # 基础模型价不受影响
+    assert compute_cost("glm-5.2", usage) == CostAmount(38.0, "CNY")
+
+
+def test_deepseek_v4_pro_builtin_priced():
+    """deepseek-v4-pro 入内置表 24/48/2/0（2026-08-31 用户核对更新，profile JSON 旧价 3/6/0.025）。"""
+    usage = TokenUsage(input_tokens=1_000_000, output_tokens=1_000_000,
+                       cache_read_input_tokens=1_000_000)
+    # 1M×24 + 1M×0 + 1M×2 + 1M×48, /1M = 74.0
+    assert compute_cost("deepseek-v4-pro", usage) == CostAmount(74.0, "CNY")
+    assert is_model_priced("deepseek-v4-pro") is True
 
 
 # ---- currency_symbol ----
