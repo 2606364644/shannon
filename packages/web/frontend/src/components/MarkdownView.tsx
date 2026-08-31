@@ -2,19 +2,7 @@ import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type Re
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
-import rehypeHighlightSubset from "@/lib/rehype-highlight-subset";
-import bash from "highlight.js/lib/languages/bash";
-import json from "highlight.js/lib/languages/json";
-import python from "highlight.js/lib/languages/python";
-import javascript from "highlight.js/lib/languages/javascript";
-import typescript from "highlight.js/lib/languages/typescript";
-import java from "highlight.js/lib/languages/java";
-import sql from "highlight.js/lib/languages/sql";
-import http from "highlight.js/lib/languages/http";
-import yaml from "highlight.js/lib/languages/yaml";
-import xml from "highlight.js/lib/languages/xml";
-import ini from "highlight.js/lib/languages/ini";
-import css from "highlight.js/lib/languages/css";
+import { HIGHLIGHT_PLUGIN } from "@/lib/hljs-langs";
 import GithubSlugger from "github-slugger";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
@@ -37,11 +25,8 @@ import {
 } from "@/lib/report-stats";
 import type { ParsedVulnBlock } from "../api/types";
 
-// 语言子集（spec §4.3）：经 vendored 精简插件（rehype-highlight-subset）注册，
-// 未列出的语法不进 bundle（上游 rehype-highlight 的 common fallback 不可摇树）。
-const HL_LANGS = { bash, json, python, javascript, typescript, java, sql, http, yaml, xml, ini, css };
-// 嵌套元组形态（react-markdown 约定）：rehypePlugins 数组的单个元素 = [plugin, options]。
-const HIGHLIGHT_PLUGIN = [[rehypeHighlightSubset, { languages: HL_LANGS }]] as const;
+// 语言子集 + 高亮插件（spec §4.3）：已提到 src/lib/hljs-langs.ts 与报告主路径
+// （RichText/AttackChainSection/highlight-code）共享——单一事实源，扩语言只改一处。
 
 // 【T6 状态（spec 2026-08-26 §7.2）】报告页主路径已迁 ReportView（report_data.json
 // 纯渲染，见 components/report/）；本组件只剩两个消费方：

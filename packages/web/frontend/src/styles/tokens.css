@@ -1581,6 +1581,13 @@ html body {
   --code-hl-number: 290 65% 80%;
   --code-hl-title: 38 85% 68%;
   --code-hl-meta: 5 80% 72%;
+  /* var / type 族（2026-09-01 token 扩面补）：hljs 全类映射需要——variable/property/
+     params（变量族，冷灰蓝）与 type/selector-*（类型族，青灰）两档中性冷色，
+     区间密度在 keyword(青)/string(绿)/number(品红)/title(琥珀)/meta(红) 五个
+     强 hue 之间做弱化层，词法层级（标识符 vs 字面量）可辨不抢戏；
+     亮度对 --code-bg ~9-10:1（与 muted ~6 档位相容，AA 不降档）。 */
+  --code-hl-var: 220 14% 78%;
+  --code-hl-type: 195 40% 74%;
 }
 
 /* —— severity dot 形状通道（spec 2026-08-27 警报语义层 §2.2，本设计的签名）——

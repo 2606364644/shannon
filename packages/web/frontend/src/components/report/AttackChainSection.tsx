@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown } from "lucide-react";
+import { HIGHLIGHT_PLUGIN } from "@/lib/hljs-langs";
 
 /**
  * 攻击链独立章节（attack-chain agent 产的 `llm-chain-N`，多步利用路径）。
@@ -84,7 +85,12 @@ export function AttackChainSection({ md, count }: { md: string; count: number })
       {/* 引导文字（链标题之前的描述）——原样渲染，不丢 */}
       {preamble && (
         <div className="prose prose-sm max-w-none break-words text-sm text-foreground prose-headings:font-sans">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
+          >
+            {preamble}
+          </ReactMarkdown>
         </div>
       )}
 
@@ -116,7 +122,12 @@ export function AttackChainSection({ md, count }: { md: string; count: number })
             </button>
             {!collapsed && chain.bodyMd && (
               <div className="prose prose-sm mt-3 max-w-none break-words prose-headings:font-sans">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{chain.bodyMd}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
+                >
+                  {chain.bodyMd}
+                </ReactMarkdown>
               </div>
             )}
           </section>

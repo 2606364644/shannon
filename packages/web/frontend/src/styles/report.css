@@ -15,18 +15,57 @@ html { scroll-behavior: smooth; }
   html { scroll-behavior: auto; }
 }
 
-/* —— hljs token 配色（代码主题 --code-hl-*；面板永远深色 → 一套配色全局生效） —— */
+/* —— hljs token 配色（代码主题 --code-hl-*；面板永远深色 → 一套配色全局生效）——
+   全类映射（2026-09-01 token 扩面）：旧版只盖 7 组，hljs 实际产 30+ 类，未覆盖
+   全落单色前景——观感「不像主流 Markdown 工具」的根因之一。现对齐上游主题的
+   类清单做 hue 族归并（非逐类调色）：强 hue 五族（keyword 青 / string 绿 /
+   number 品红 / title 琥珀 / meta 红）+ 弱化两族（var 冷灰蓝 / type 青灰）+
+   标点运算符走 muted。裸 pre（结构化代码块经 highlightCode）与 md 路径共用。 */
+.hljs-comment,
+.hljs-quote { color: hsl(var(--code-muted)); font-style: italic; }
+/* keyword 族（青）：关键字 / 内建 / 字面量 / xml 标签名 */
 .hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag,
+.hljs-name,
 .hljs-built_in,
-.hljs-literal { color: hsl(var(--code-hl-keyword)); }
+.hljs-literal,
+.hljs-doctag,
+.hljs-formula { color: hsl(var(--code-hl-keyword)); }
+/* string 族（绿）：字符串 / 正则 / diff 新增 */
 .hljs-string,
-.hljs-regexp  { color: hsl(var(--code-hl-string)); }
-.hljs-number  { color: hsl(var(--code-hl-number)); }
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string { color: hsl(var(--code-hl-string)); }
+.hljs-number { color: hsl(var(--code-hl-number)); }
+/* title 族（琥珀）：函数/类名 / 属性名 / md 章节 */
 .hljs-title,
 .hljs-title.function_,
-.hljs-attr    { color: hsl(var(--code-hl-title)); }
-.hljs-meta    { color: hsl(var(--code-hl-meta)); }
-.hljs-comment { color: hsl(var(--code-muted)); font-style: italic; }
+.hljs-title.class_,
+.hljs-attr,
+.hljs-attribute,
+.hljs-section { color: hsl(var(--code-hl-title)); }
+/* meta 族（红）：shebang / meta / 符号 / diff 删除 */
+.hljs-meta,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-deletion { color: hsl(var(--code-hl-meta)); }
+/* var 族（冷灰蓝）：变量 / 模板变量 / 属性 / 形参 */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property,
+.hljs-params { color: hsl(var(--code-hl-var)); }
+/* type 族（青灰）：类型 / css+xml 选择器 */
+.hljs-type,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo { color: hsl(var(--code-hl-type)); }
+/* 标点/运算符：muted 弱化（词法层级，不与语义 token 抢注意力） */
+.hljs-operator,
+.hljs-punctuation,
+.hljs-subst { color: hsl(var(--code-muted)); }
 
 /* —— 表格 —— */
 .prose table {
@@ -119,7 +158,9 @@ html { scroll-behavior: smooth; }
      2026-08-31 回归修复）；深色=窗梃条 + 代码间隙。 */
   padding-top: 1.75rem;
   white-space: pre-wrap;
-  word-break: break-all;
+  /* 折行策略（2026-09-01 放宽）：去掉 word-break:break-all（任意字符硬折，
+     encodeURIComp/onent 式断词）——overflow-wrap:anywhere 已够防溢出（长 URL/
+     无空格 token 必要时强制折），且优先词边界，对齐主流 Markdown 工具的折行观感。 */
   overflow-wrap: anywhere;
 }
 
@@ -151,7 +192,6 @@ html { scroll-behavior: smooth; }
   background: transparent;
   padding: 0;
   white-space: pre-wrap;
-  word-break: break-all;
   overflow-wrap: anywhere;
 }
 
@@ -208,4 +248,8 @@ button.code-chrome { color: hsl(var(--code-fg)); }
   .hljs-title, .hljs-title.function_, .hljs-attr { color: hsl(35 85% 30%); }
   .hljs-meta { color: hsl(5 70% 42%); }
   .hljs-comment { color: hsl(0 0% 42%); }
+  /* 2026-09-01 token 扩面配套：var/type/标点浅色打印档 */
+  .hljs-variable, .hljs-template-variable, .hljs-property, .hljs-params { color: hsl(220 15% 32%); }
+  .hljs-type, .hljs-selector-id, .hljs-selector-class, .hljs-selector-attr, .hljs-selector-pseudo { color: hsl(195 50% 32%); }
+  .hljs-operator, .hljs-punctuation, .hljs-subst { color: hsl(0 0% 40%); }
 }
