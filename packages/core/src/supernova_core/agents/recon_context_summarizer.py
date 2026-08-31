@@ -17,6 +17,9 @@ from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
+# Digest 缓存指纹的一部分：摘要 prompt 语义变化时递增，强制旧 digest 失效。
+RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION = 1
+
 _SUMMARY_PROMPT = """You are a compact summarizer for a static-recon deliverable.
 Given the recon markdown, extract ONLY:
 1. Every endpoint from Section 4 (API Endpoint Inventory): METHOD /path (required role,
@@ -48,18 +51,30 @@ def _extract_sections(recon_md: str) -> str:
     return "\n".join(out).strip() or recon_md[:2000]
 
 
+def extract_recon_context_sections(recon_md: str) -> str:
+    """Public deterministic fallback for the shared recon-context digest."""
+    return _extract_sections(recon_md)
+
+
 async def summarize_recon_context(
     recon_md: str,
     llm_client: Callable[[str], Awaitable[str]],
+    *,
+    fallback_on_error: bool = True,
 ) -> str:
     """Summarize recon md into a structured context string for {{RECON_CONTEXT}}.
 
-    Falls back to raw §4/§8 extraction if the LLM call fails (non-fatal).
+    By default falls back to raw §4/§8 extraction if the LLM call fails
+    (legacy per-agent behavior). Shared-digest generation passes
+    ``fallback_on_error=False`` so it can mark the artifact as degraded and
+    retry the LLM upgrade on resume.
     """
     if not recon_md or not recon_md.strip():
         return "(no recon deliverable available)"
     try:
         return await llm_client(_SUMMARY_PROMPT.format(recon_md=recon_md[:8000]))
     except Exception as e:  # noqa: BLE001 — graceful degradation
+        if not fallback_on_error:
+            raise
         logger.warning("recon_context summarizer LLM failed, falling back to raw extract: %s", e)
         return _extract_sections(recon_md)

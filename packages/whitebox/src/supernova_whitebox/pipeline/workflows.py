@@ -46,6 +46,25 @@ def _activity_not_registered_hint(exc: Exception) -> str:
     return ""
 
 
+def _needs_recon_context_digest(
+    selected_classes: list[VulnType],
+    completed_agents: list[str],
+    llm_track_enabled: bool,
+) -> bool:
+    """Whether any pending vuln agent will consume the shared recon digest.
+
+    Pure workflow-safe helper. Resume skips digest generation when every selected
+    vuln agent already completed; a degraded digest remains retriable whenever a
+    pending agent exists.
+    """
+    for vuln_class in selected_classes:
+        if not llm_track_enabled and vuln_class in DEGRADABLE_VULN_CLASSES:
+            continue
+        if AgentName(f"{vuln_class}-vuln").value not in completed_agents:
+            return True
+    return False
+
+
 def _decide_gitnexus_failfast(statuses: dict, llm_track_enabled: bool) -> list[str]:
     """Task 4 fail-fast 决策(纯函数, 单测可达, 无 Temporal 依赖).
 
@@ -346,6 +365,18 @@ class WhiteboxScanWorkflow:
                     ActivityInput(**{**act_input.__dict__, "phase": "recon"}),
                     start_to_close_timeout=timedelta(seconds=10),
                     retry_policy=retry_for("log"),
+                )
+
+            # Shared recon digest: generate once before the vuln-agent fan-out.
+            # This removes the former N-times-per-scan recon-summary LLM calls and
+            # guarantees every pending vuln agent receives the same LLM-track context.
+            if _needs_recon_context_digest(
+                    selected_classes, self._state.completed_agents,
+                    input.enable_llm_track):
+                await workflow.execute_activity(
+                    activities.run_recon_context_digest, act_input,
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry_for("standard"),
                 )
 
             # Risk scoring — produce tiered audit plan

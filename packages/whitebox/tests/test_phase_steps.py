@@ -24,7 +24,7 @@ def test_step_names_matches_phase_steps_order():
         "code-index", "pre-recon", "merge-sinks", "entry-point-fusion",
         "adjudication", "framework-analysis", "frontend-mapping", "route-chain-building",
     )
-    assert step_names("recon") == ("recon",)
+    assert step_names("recon") == ("recon", "recon-context-digest")
     assert step_names("risk-scoring") == ("risk-scoring", "dataflow-hints")
     assert step_names("attack-chain") == ("attack-chain-assembly",)
     assert step_names("reporting") == (

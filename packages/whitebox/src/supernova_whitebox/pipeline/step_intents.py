@@ -34,6 +34,7 @@ PHASE_STEPS: dict[str, tuple[StepSpec, ...]] = {
     ),
     "recon": (
         StepSpec("recon", "侦察目标运行时与外部信息"),
+        StepSpec("recon-context-digest", "为全部漏洞 agent 生成一份共享侦察摘要"),
     ),
     "risk-scoring": (
         StepSpec("risk-scoring",   "打分与风险排序"),

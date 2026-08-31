@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -27,7 +28,11 @@ from supernova_core.logging import create_activity_logger
 from supernova_core.logging.log_bus import LogBus
 from supernova_core.agents.executor import AgentExecutor
 from supernova_core.agents.runner import run_claude_prompt
-from supernova_core.agents.recon_context_summarizer import summarize_recon_context
+from supernova_core.agents.recon_context_summarizer import (
+    RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION,
+    extract_recon_context_sections,
+    summarize_recon_context,
+)
 from supernova_core.config.concurrency import (
     get_chain_verdict_concurrency, is_gitnexus_llm_enabled,
 )
@@ -299,33 +304,182 @@ def _make_recon_summary_llm_client(repo_path: str, provider_config: dict | None 
     return AccountedLlmClient(_runner, audit_session, "recon-summary")
 
 
+def _recon_narration_language(input: ActivityInput) -> str:
+    """Resolve the digest cache's language dimension without mutating process env."""
+    return (input.env_overrides or {}).get(
+        "SUPERNOVA_AGENT_NARRATION_LANG",
+        os.getenv("SUPERNOVA_AGENT_NARRATION_LANG", "zh"),
+    )
+
+
+def _load_recon_context_digest(
+    deliverables: Path,
+    *,
+    source_hash: str,
+    language: str,
+    require_llm: bool = False,
+) -> dict | None:
+    """Load a compatible shared recon-context digest, or return None as a miss."""
+    path = resolve_intermediate(deliverables, "recon_context_digest.json")
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("text"), str):
+        return None
+    if data.get("schema_version") != 1:
+        return None
+    if data.get("source_hash") != source_hash:
+        return None
+    if data.get("summarizer_prompt_version") != RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION:
+        return None
+    if data.get("language") != language:
+        return None
+    if require_llm and data.get("source") != "llm-summary":
+        return None
+    return data
+
+
+def _write_recon_context_digest(
+    deliverables: Path,
+    *,
+    source_hash: str,
+    language: str,
+    text: str,
+    source: str,
+) -> None:
+    atomic_write_json(
+        intermediate_path(deliverables, "recon_context_digest.json"),
+        {
+            "schema_version": 1,
+            "source": source,
+            "source_hash": source_hash,
+            "summarizer_prompt_version": RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION,
+            "language": language,
+            "text": text,
+        },
+    )
+
+
+@activity.defn
+async def run_recon_context_digest(input: ActivityInput) -> dict:
+    """Generate the LLM-track recon context once for all vuln agents.
+
+    Previously every vuln activity independently summarized the same
+    ``recon_deliverable.md``.  This activity moves that call ahead of the vuln
+    fan-out and persists an atomically-written digest.  The input remains an
+    LLM-track product only; no GitNexus deterministic artifacts are consumed.
+    """
+    from supernova_whitebox.audit.session_registry import get_audit_session
+
+    await ensure_audit_session(input)
+    repo, deliverables, _ = _get_paths(input)
+    recon_md_path = deliverables / "recon_deliverable.md"
+    try:
+        recon_md = recon_md_path.read_text(encoding="utf-8") if recon_md_path.exists() else ""
+    except OSError as exc:
+        logger.warning("recon-context-digest: read recon failed, using empty context: %s", exc)
+        recon_md = ""
+
+    source_hash = hashlib.sha256(recon_md.encode("utf-8")).hexdigest()
+    language = _recon_narration_language(input)
+
+    async with get_audit_session().track_step(
+            "recon", "recon-context-digest",
+            intent=intent_for("recon-context-digest")):
+        cached = _load_recon_context_digest(
+            deliverables, source_hash=source_hash, language=language,
+            require_llm=bool(recon_md.strip()))
+        if cached is not None:
+            return {
+                "source": cached["source"],
+                "cache_hit": True,
+                "recon_context_chars": len(cached["text"]),
+            }
+
+        digest_text = ""
+        digest_source = "deterministic-extract"
+        llm_client = None
+        if recon_md.strip():
+            try:
+                llm_client = _make_recon_summary_llm_client(
+                    str(repo), provider_config=input.provider_config,
+                    audit_session=get_audit_session())
+                digest_text = await summarize_recon_context(
+                    recon_md, llm_client, fallback_on_error=False)
+                digest_source = "llm-summary"
+                # Empty/blank output is not a clean LLM digest. Fall back so all
+                # five agents receive a usable shared context rather than nothing.
+                if not digest_text.strip():
+                    digest_text = extract_recon_context_sections(recon_md)
+                    digest_source = "deterministic-extract"
+            except Exception as exc:  # noqa: BLE001 — summary is non-fatal
+                logger.warning(
+                    "recon-context-digest: LLM summary failed, deterministic fallback: %s", exc)
+                digest_text = extract_recon_context_sections(recon_md)
+                digest_source = "deterministic-extract"
+            finally:
+                if llm_client is not None:
+                    try:
+                        await llm_client.finalize()
+                    except Exception:  # noqa: BLE001 — accounting must not block context
+                        pass
+        else:
+            digest_text = "(no recon deliverable available)"
+            digest_source = "empty-recon"
+
+        _write_recon_context_digest(
+            deliverables,
+            source_hash=source_hash,
+            language=language,
+            text=digest_text,
+            source=digest_source,
+        )
+        return {
+            "source": digest_source,
+            "cache_hit": False,
+            "recon_context_chars": len(digest_text),
+        }
+
+
 async def _build_vuln_prompt_variables(
     input: ActivityInput, base: dict
 ) -> dict:
-    """Inject structured recon prior knowledge into vuln prompt_variables.
+    """Inject shared recon prior knowledge into vuln prompt_variables.
 
-    - RECON_CONTEXT: LLM-summarized §4/§8 of recon_deliverable.md (always injected;
-      degrades to raw extract if LLM unavailable). Source = LLM-track recon output.
+    - RECON_CONTEXT: read from the once-per-scan digest generated by
+      ``run_recon_context_digest``. Missing digest retains the deterministic
+      §4/§8 extraction compatibility path (no per-agent LLM call).
     - FRAMEWORK_ANALYSIS: from framework_analysis.json — injected ONLY when
       inferred_endpoints is non-empty (whitebox samples are often empty).
     Both sources are LLM-track / code-layer pre-recon output — NEVER GitNexus
     deterministic-layer (CLAUDE.md §1 ironclad rule).
     """
-    repo, deliverables, _ = _get_paths(input)
-    from supernova_whitebox.audit.session_registry import get_audit_session
+    _, deliverables, _ = _get_paths(input)
 
-    # RECON_CONTEXT: summarize recon_deliverable.md §4/§8
     recon_md_path = deliverables / "recon_deliverable.md"
-    recon_md = recon_md_path.read_text("utf-8") if recon_md_path.exists() else ""
-    llm_client = _make_recon_summary_llm_client(
-        str(repo), provider_config=input.provider_config,
-        audit_session=get_audit_session())   # P3c 阶段 1 + spec 2026-08-27 §8
-    recon_context = await summarize_recon_context(recon_md, llm_client)
     try:
-        await llm_client.finalize()  # 记账出口（no-op when session=None）
-    except Exception:
-        pass  # best-effort：记账失败不影响 prompt 变量注入
-    base["RECON_CONTEXT"] = recon_context
+        recon_md = recon_md_path.read_text("utf-8") if recon_md_path.exists() else ""
+    except OSError:
+        recon_md = ""
+
+    digest = _load_recon_context_digest(
+        deliverables,
+        source_hash=hashlib.sha256(recon_md.encode("utf-8")).hexdigest(),
+        language=_recon_narration_language(input),
+    )
+    if digest is not None:
+        base["RECON_CONTEXT"] = digest["text"]
+    else:
+        # Compatibility path for direct activity invocation / deployment drift.
+        # This is deterministic and never triggers a per-agent LLM summary.
+        base["RECON_CONTEXT"] = (
+            extract_recon_context_sections(recon_md)
+            if recon_md.strip()
+            else "(no recon deliverable available)"
+        )
 
     # FRAMEWORK_ANALYSIS: conditional — only when inferred_endpoints non-empty
     fw_path = resolve_intermediate(deliverables, "framework_analysis.json")  # tiering 双路径
