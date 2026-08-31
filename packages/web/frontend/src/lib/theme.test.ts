@@ -83,10 +83,12 @@ describe("theme lib", () => {
     expect(cl.contains("light")).toBe(false);
   });
 
-  it("THEMES 覆盖 13 主题；palette id 与 paletteClass 一一对应；基础对 charcoal/warm-paper 各组在前", () => {
+  it("THEMES 覆盖 22 主题；palette id 与 paletteClass 一一对应；基础对 charcoal/warm-paper 各组在前", () => {
     expect(THEMES.map((t) => t.id)).toEqual([
-      "charcoal", "midnight", "graphite", "sentry", "arc", "mission",
+      "charcoal", "midnight", "graphite", "sentry", "arc", "mission", "ember",
+      "catppuccin", "rose-pine", "gruvbox", "dracula",
       "warm-paper", "mac", "github", "notion", "kami", "blueprint", "openai",
+      "catppuccin-latte", "rose-pine-dawn", "gruvbox-light", "solarized-light",
     ]);
     expect(getThemeDef("charcoal")?.paletteClass).toBeNull();
     expect(getThemeDef("mac")?.paletteClass).toBe("theme-mac");
@@ -101,6 +103,18 @@ describe("theme lib", () => {
     expect(getThemeDef("blueprint")?.paletteClass).toBe("theme-blueprint");
     // 2026-08-27 OpenAI 主题（OpenDesign design-system-openai 移植）
     expect(getThemeDef("openai")?.paletteClass).toBe("theme-openai");
+    // 2026-08-31 余烬主题（暖褐炉膛，暗色组唯一显性暖调）
+    expect(getThemeDef("ember")?.paletteClass).toBe("theme-ember");
+    // 2026-08-31 四款主流编辑器主题（气质层 primary 本色）
+    expect(getThemeDef("catppuccin")?.paletteClass).toBe("theme-catppuccin");
+    expect(getThemeDef("rose-pine")?.paletteClass).toBe("theme-rose-pine");
+    expect(getThemeDef("gruvbox")?.paletteClass).toBe("theme-gruvbox");
+    expect(getThemeDef("dracula")?.paletteClass).toBe("theme-dracula");
+    // 2026-08-31 亮色四款（前三为暗色四款的官方亮色对 + Solarized Light）
+    expect(getThemeDef("catppuccin-latte")?.paletteClass).toBe("theme-catppuccin-latte");
+    expect(getThemeDef("rose-pine-dawn")?.paletteClass).toBe("theme-rose-pine-dawn");
+    expect(getThemeDef("gruvbox-light")?.paletteClass).toBe("theme-gruvbox-light");
+    expect(getThemeDef("solarized-light")?.paletteClass).toBe("theme-solarized-light");
     expect(getThemeDef("system")).toBeNull();
   });
 
@@ -111,7 +125,7 @@ describe("theme lib", () => {
   });
 
   it("applyTheme(sentry/arc/mission): dark + 各自 palette class", () => {
-    for (const id of ["sentry", "arc", "mission"] as const) {
+    for (const id of ["sentry", "arc", "mission", "ember", "catppuccin", "rose-pine", "gruvbox", "dracula"] as const) {
       applyTheme(id);
       const cl = document.documentElement.classList;
       expect(cl.contains("dark")).toBe(true);
@@ -120,7 +134,7 @@ describe("theme lib", () => {
   });
 
   it("applyTheme(github/notion/kami/blueprint/openai): light + 各自 palette class", () => {
-    for (const id of ["github", "notion", "kami", "blueprint", "openai"] as const) {
+    for (const id of ["github", "notion", "kami", "blueprint", "openai", "catppuccin-latte", "rose-pine-dawn", "gruvbox-light", "solarized-light"] as const) {
       applyTheme(id);
       const cl = document.documentElement.classList;
       expect(cl.contains("light")).toBe(true);
@@ -137,17 +151,32 @@ describe("theme lib", () => {
     expect(getInitialTheme()).toBe("blueprint");
     localStorage.setItem(THEME_KEY, "openai");
     expect(getInitialTheme()).toBe("openai");
+    localStorage.setItem(THEME_KEY, "ember");
+    expect(getInitialTheme()).toBe("ember");
+    for (const id of ["catppuccin", "rose-pine", "gruvbox", "dracula", "catppuccin-latte", "rose-pine-dawn", "gruvbox-light", "solarized-light"] as const) {
+      localStorage.setItem(THEME_KEY, id);
+      expect(getInitialTheme()).toBe(id);
+    }
   });
 
   it("resolveEffectiveTheme: 新主题查 def.mode 正确", () => {
     expect(resolveEffectiveTheme("sentry")).toBe("dark");
     expect(resolveEffectiveTheme("arc")).toBe("dark");
     expect(resolveEffectiveTheme("mission")).toBe("dark");
+    expect(resolveEffectiveTheme("ember")).toBe("dark");
+    expect(resolveEffectiveTheme("catppuccin")).toBe("dark");
+    expect(resolveEffectiveTheme("rose-pine")).toBe("dark");
+    expect(resolveEffectiveTheme("gruvbox")).toBe("dark");
+    expect(resolveEffectiveTheme("dracula")).toBe("dark");
     expect(resolveEffectiveTheme("github")).toBe("light");
     expect(resolveEffectiveTheme("notion")).toBe("light");
     expect(resolveEffectiveTheme("kami")).toBe("light");
     expect(resolveEffectiveTheme("blueprint")).toBe("light");
     expect(resolveEffectiveTheme("openai")).toBe("light");
+    expect(resolveEffectiveTheme("catppuccin-latte")).toBe("light");
+    expect(resolveEffectiveTheme("rose-pine-dawn")).toBe("light");
+    expect(resolveEffectiveTheme("gruvbox-light")).toBe("light");
+    expect(resolveEffectiveTheme("solarized-light")).toBe("light");
   });
 });
 

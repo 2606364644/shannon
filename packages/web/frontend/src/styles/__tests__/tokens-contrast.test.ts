@@ -121,8 +121,8 @@ function effectiveText(raw: RGB, mode: "dark" | "light"): RGB {
 describe("severity AA 对比度 × 全主题（spec 2026-08-27 §4 自动化验证器）", () => {
   const cases = themeCases();
 
-  it("解析到全部 13 个主题（2 基准 + 11 扩展）——解析器失效即报警", () => {
-    expect(cases.length).toBe(13);
+  it("解析到全部 22 个主题（2 基准 + 20 扩展）——解析器失效即报警", () => {
+    expect(cases.length).toBe(22);
   });
 
   it("文本步 token 双模式齐备（--sev-text-strength / --sev-text-toward）", () => {

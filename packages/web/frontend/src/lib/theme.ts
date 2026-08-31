@@ -21,10 +21,19 @@
    新增 blueprint（浅 · 白盒蓝图——绘图网格画布，spec 2026-08-26-light-theme-material）。
    2026-08-27 增至 13 主题：+openai（浅 · OpenAI 近单色研究室——纯白画布 +
    深青黑墨色 + 墨黑主 CTA（teal 仅焦点/链接/成功），移植自 OpenDesign
-   design-system-openai，spec 2026-08-27-openai-theme）。 */
+   design-system-openai，spec 2026-08-27-openai-theme）。
+   2026-08-31 增至 14 主题：+ember（深 · 余烬——暖褐炉膛 + coral 火种 + 底缘
+   余烬辉光；暗色组唯一显性暖调，补「蓝色少一点」谱系空缺）。
+   2026-08-31（同日二扩）增至 18 主题：+catppuccin / rose-pine / gruvbox /
+   dracula（用户裁定 4 主流编辑器主题全上——预览页对照后判定「都挺有特色」；
+   暗色组 11 款，走气质层路线 primary 用主题本色，sentry/mission 先例）。
+   2026-08-31（同日三扩）增至 22 主题：+catppuccin-latte / rose-pine-dawn /
+   gruvbox-light / solarized-light（亮色四款——前三为暗色四款的官方成对
+   亮色 flavor + Solarized Light 经典；用户预览 theme-preview-light.html
+   裁定全上；浅色组 11 款）。 */
 
 export type ThemeMode = "dark" | "light";
-export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite" | "sentry" | "arc" | "mission" | "github" | "notion" | "kami" | "blueprint" | "openai";
+export type ThemeId = "system" | "charcoal" | "warm-paper" | "mac" | "midnight" | "graphite" | "sentry" | "arc" | "mission" | "ember" | "catppuccin" | "rose-pine" | "gruvbox" | "dracula" | "github" | "notion" | "kami" | "blueprint" | "openai" | "catppuccin-latte" | "rose-pine-dawn" | "gruvbox-light" | "solarized-light";
 /** @deprecated 语义由 ThemeMode 取代；保留别名避免存量导入破坏。 */
 export type EffectiveTheme = ThemeMode;
 export type Theme = ThemeId;
@@ -84,6 +93,41 @@ export const THEMES: readonly ThemeDef[] = [
     preview: { bg: "hsl(223 49% 8%)", card: "hsl(221 39% 11%)", primary: "hsl(43 100% 50%)", border: "hsl(214 52% 25%)" },
   },
   {
+    id: "ember",
+    mode: "dark",
+    paletteClass: "theme-ember",
+    // 2026-08-31 余烬：暖褐炉膛（24°/8%）+ coral 火种 + 底缘余烬辉光——暗色组唯一显性暖调
+    preview: { bg: "hsl(24 8% 9%)", card: "hsl(24 7% 12%)", primary: "hsl(15 60% 56%)", border: "hsl(24 12% 88% / 0.12)" },
+  },
+  {
+    id: "catppuccin",
+    mode: "dark",
+    paletteClass: "theme-catppuccin",
+    // 2026-08-31 Catppuccin Mocha：柔紫粉彩，primary=mauve 薰衣草（气质层）
+    preview: { bg: "hsl(243 21% 15%)", card: "hsl(234 17% 23%)", primary: "hsl(267 84% 81%)", border: "hsl(230 15% 60% / 0.22)" },
+  },
+  {
+    id: "rose-pine",
+    mode: "dark",
+    paletteClass: "theme-rose-pine",
+    // 2026-08-31 Rosé Pine：夜紫墨 + 玫瑰金 primary（辨识核心）
+    preview: { bg: "hsl(249 22% 12%)", card: "hsl(247 23% 15%)", primary: "hsl(2 55% 83%)", border: "hsl(246 25% 50% / 0.25)" },
+  },
+  {
+    id: "gruvbox",
+    mode: "dark",
+    paletteClass: "theme-gruvbox",
+    // 2026-08-31 Gruvbox：亮暗色档（L16%）复古棕 + 亮黄 primary
+    preview: { bg: "hsl(0 0% 16%)", card: "hsl(20 6% 22%)", primary: "hsl(42 95% 58%)", border: "hsl(40 15% 70% / 0.16)" },
+  },
+  {
+    id: "dracula",
+    mode: "dark",
+    paletteClass: "theme-dracula",
+    // 2026-08-31 Dracula：紫蓝灰 + 多巴胺高饱和，primary=purple
+    preview: { bg: "hsl(231 15% 18%)", card: "hsl(230 15% 24%)", primary: "hsl(265 90% 78%)", border: "hsl(226 30% 55% / 0.30)" },
+  },
+  {
     id: "warm-paper",
     mode: "light",
     // 2026-08-26 亮色材质升级：材质专用 palette class（只挂 --canvas-material 纸纹；
@@ -133,6 +177,34 @@ export const THEMES: readonly ThemeDef[] = [
     // #e5e5e5（与 tokens.css openai 块同步维护）
     preview: { bg: "hsl(0 0% 100%)", card: "hsl(0 0% 96%)", primary: "hsl(0 0% 5%)", border: "hsl(0 0% 90%)" },
   },
+  {
+    id: "catppuccin-latte",
+    mode: "light",
+    paletteClass: "theme-catppuccin-latte",
+    // 2026-08-31 Catppuccin Latte：catppuccin(Mocha) 的官方亮色对，mauve 深紫 primary
+    preview: { bg: "hsl(220 23% 95%)", card: "hsl(220 26% 98%)", primary: "hsl(266 85% 58%)", border: "hsl(229 12% 60% / 0.25)" },
+  },
+  {
+    id: "rose-pine-dawn",
+    mode: "light",
+    paletteClass: "theme-rose-pine-dawn",
+    // 2026-08-31 Rosé Pine Dawn：rose-pine 的官方亮色对，米杏底 + 玫瑰金 primary
+    preview: { bg: "hsl(33 57% 95%)", card: "hsl(24 100% 98%)", primary: "hsl(343 35% 55%)", border: "hsl(20 25% 55% / 0.25)" },
+  },
+  {
+    id: "gruvbox-light",
+    mode: "light",
+    paletteClass: "theme-gruvbox-light",
+    // 2026-08-31 Gruvbox Light：gruvbox 的官方亮色对，奶油黄底（深度画布档）+ 琥珀 primary 深字
+    preview: { bg: "hsl(48 87% 88%)", card: "hsl(45 50% 95%)", primary: "hsl(40 69% 49%)", border: "hsl(40 20% 40% / 0.18)" },
+  },
+  {
+    id: "solarized-light",
+    mode: "light",
+    paletteClass: "theme-solarized-light",
+    // 2026-08-31 Solarized Light：米黄底 + 青灰正文（独有气质）+ 压深 blue primary
+    preview: { bg: "hsl(44 87% 94%)", card: "hsl(46 55% 93%)", primary: "hsl(205 70% 42%)", border: "hsl(40 25% 45% / 0.20)" },
+  },
 ];
 
 const PALETTE_CLASSES = THEMES.map((t) => t.paletteClass).filter((c): c is string => c !== null);
@@ -175,11 +247,20 @@ export function normalizeStored(v: string | null): ThemeId | null {
     case "sentry":
     case "arc":
     case "mission":
+    case "ember":
+    case "catppuccin":
+    case "rose-pine":
+    case "gruvbox":
+    case "dracula":
     case "github":
     case "notion":
     case "kami":
     case "blueprint":
     case "openai":
+    case "catppuccin-latte":
+    case "rose-pine-dawn":
+    case "gruvbox-light":
+    case "solarized-light":
       return v;
     default:
       return null;

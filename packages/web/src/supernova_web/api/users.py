@@ -35,7 +35,10 @@ class PinnedWorkspaceIn(BaseModel):
 # 严格白名单而非宽松存：新主题忘加此处是显式失败（422 可排查），优于脏值静默入库。
 VALID_THEMES = frozenset({
     "system", "charcoal", "warm-paper", "mac", "midnight", "graphite",
-    "sentry", "arc", "mission", "github", "notion", "kami", "blueprint", "openai",
+    "sentry", "arc", "mission", "ember",
+    "catppuccin", "rose-pine", "gruvbox", "dracula",
+    "github", "notion", "kami", "blueprint", "openai",
+    "catppuccin-latte", "rose-pine-dawn", "gruvbox-light", "solarized-light",
 })
 
 

@@ -499,6 +499,316 @@ html body {
   --shadow-toolbar-hover: 0 0 0 1px hsl(214 52% 40% / 0.3), 0 2px 4px hsl(223 60% 2% / 0.4), 0 24px 72px hsl(223 60% 2% / 0.42);
 }
 
+/* 余烬 Ember（深 · 暖褐炉膛，2026-08-31 用户诉求「蓝色少一点的暗色主题」）：
+   supernova = 超新星——爆发冷却后的余烬。暗色组此前谱系：charcoal 微暖 sat3%
+   几乎无感 / graphite 纯中性 / 其余四款全蓝紫，「蓝少一点」的空缺是显性暖调：
+   深烟褐底 24°/8%（暖意可感知、不红不脏——暖色暗底 sat>10% 即发闷）、暖白文本、
+   coral 火种与底色同色温族（15° vs 24°，全暗色主题里 primary×底色最融洽的一对，
+   「余烬发暖光」的材质逻辑）。签名 = 底缘余烬辉光（body 块，见后）。severity
+   继承基础块值（底 L9% 比 :root 15% 更深，AA 只更宽裕）；coral/ring/prose-links
+   品牌纪律不动；层 G 代码主题独立（勿加 --code-* 覆盖）。 */
+.dark.theme-ember {
+  /* 层 A · shadcn token（bg≈#150f0d / card +3%L / 抬升面序列对齐基础块幅度） */
+  --background: 24 8% 9%;
+  --foreground: 36 14% 91%;
+  --card: 24 7% 12%;
+  --card-foreground: 36 14% 91%;
+  --popover: 24 7% 14%;
+  --popover-foreground: 36 14% 91%;
+  --primary: 15 60% 56%;
+  --primary-foreground: 40 4% 12%;
+  --secondary: 24 6% 15%;
+  --secondary-foreground: 36 14% 91%;
+  --muted: 24 6% 15%;
+  --muted-foreground: 30 8% 64%;
+  --accent: 24 6% 18%;
+  --accent-foreground: 36 14% 91%;
+  --destructive: 5 62% 56%;
+  --destructive-foreground: 40 4% 12%;
+  /* alpha 暖白 hairline（材质杠杆①）：hue 对齐底色 24°，边线也渗暖 */
+  --border: 24 12% 88% / 0.12;
+  --input: 24 12% 88% / 0.12;
+  --ring: 15 60% 56%;
+
+  /* 层 B · 语义色（低饱和暖底近中性，语义色沿用基础块值；cyan 在暖底上互补醒目微提亮） */
+  --c-cyan: 190 68% 62%;
+  --c-magenta: 280 68% 78%;
+  --c-green: 142 48% 56%;
+  --c-red: 5 62% 60%;
+  --c-orange: 24 72% 62%;
+  --c-yellow: 38 72% 60%;
+  --c-amber: 36 75% 58%;
+
+  /* 层 C · 圆角（炉膛温和但不软塌，10px 为谱系空档：8 利落/12 软之间） */
+  --radius: 10px;
+
+  /* 层 D · prose（暖褐底暖白文；links coral 纪律） */
+  --prose-body: 36 14% 90%;
+  --prose-headings: 38 18% 94%;
+  --prose-links: 15 72% 66%;
+  --prose-bold: 38 18% 94%;
+  --prose-code: 192 85% 62%;
+  --prose-code-bg: 24 7% 15%;
+  --prose-quotes: 36 10% 62%;
+  --prose-bullets: 36 10% 62%;
+  --prose-hr: 24 12% 90% / 0.12;
+
+  /* 层 E · elevation（暖黑落影 + coral 光晕比基础块略强——余烬辉光是主题灵魂） */
+  --shadow-card: inset 0 1px 0 hsl(36 20% 100% / 0.05), 0 0 0 1px hsl(24 12% 80% / 0.05), 0 8px 24px -10px hsl(20 30% 3% / 0.55);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.2), 0 1px 2px hsl(20 30% 3% / 0.4), 0 6px 18px -6px hsl(15 75% 48% / 0.4);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.24), 0 2px 4px hsl(20 30% 3% / 0.4), 0 12px 26px -6px hsl(15 80% 52% / 0.5);
+  --shadow-toolbar: 0 1px 2px hsl(20 30% 3% / 0.35);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(36 20% 100% / 0.05), 0 2px 4px hsl(20 30% 3% / 0.4), 0 10px 24px -8px hsl(20 30% 3% / 0.6);
+}
+
+/* ember 余烬辉光层：屏幕下缘一线暖光——炉膛深处 / 超新星遗迹的余辉从地平线透上来。
+   刻意压到 alpha 0.07（arc 环境光 0.12-0.16 的约一半）：安全工具的克制，光在
+   下缘不在视野中心。(0,2,1) 特异性压过 html body 的 canvas-material 消费
+   （ember 未定义该 var，无冲突）；fixed 随滚动驻留地平线。 */
+.dark.theme-ember body {
+  background-image: radial-gradient(60rem 22rem at 50% 112%, hsl(16 70% 48% / 0.07), transparent 65%);
+  background-attachment: fixed;
+}
+
+/* Catppuccin（深 · Mocha 柔紫粉彩，2026-08-31 用户裁定 4 主流方向全上）：
+   官方 Mocha 真值——画布 base #1E1E2E、卡 surface0（+8%L 特征性跳档分层，Catppuccin
+   层级 crust→mantle→base→surface0/1/2 本就比别家跨档大）、浮层 surface1、text #CDD6F4
+   冷白。primary=mauve 薰衣草（气质层路线，sentry/mission 先例——品牌 coral 留在
+   基准主题对）。severity hue 锁定 5/24/38 + 粉彩档 L/S（官方 red/peach/yellow 锁
+   hue 后视觉几乎同）。圆润 14px；柔影 + mauve 光晕。cyan=teal / magenta=pink
+   （官方 accent 生态本色）。 */
+.dark.theme-catppuccin {
+  /* 层 A · shadcn token */
+  --background: 243 21% 15%;
+  --foreground: 227 68% 88%;
+  --card: 234 17% 23%;
+  --card-foreground: 227 68% 88%;
+  --popover: 234 14% 31%;
+  --popover-foreground: 227 68% 88%;
+  --primary: 267 84% 81%;
+  --primary-foreground: 243 21% 12%;
+  --secondary: 234 15% 27%;
+  --secondary-foreground: 227 68% 88%;
+  --muted: 234 15% 27%;
+  --muted-foreground: 229 34% 72%;
+  --accent: 233 14% 34%;
+  --accent-foreground: 227 68% 88%;
+  --destructive: 5 65% 74%;
+  --destructive-foreground: 243 21% 12%;
+  --border: 230 15% 60% / 0.22;
+  --input: 230 15% 60% / 0.22;
+  --ring: 267 84% 81%;
+
+  /* 层 B · 语义色（severity hue 锁定 + 粉彩档；green 本色 122°；cyan=teal / magenta=pink） */
+  --c-cyan: 170 57% 73%;
+  --c-magenta: 316 72% 86%;
+  --c-green: 122 62% 76%;
+  --c-red: 5 65% 74%;
+  --c-orange: 24 85% 74%;
+  --c-yellow: 38 80% 78%;
+  --c-amber: 36 83% 76%;
+
+  /* 层 C · 圆角（Catppuccin 官方 UI 柔软） */
+  --radius: 14px;
+
+  /* 层 D · prose（冷白文 + mauve 链接 + teal 行内码） */
+  --prose-body: 227 40% 86%;
+  --prose-headings: 226 50% 91%;
+  --prose-links: 267 84% 84%;
+  --prose-bold: 226 50% 91%;
+  --prose-code: 170 57% 75%;
+  --prose-code-bg: 234 15% 27%;
+  --prose-quotes: 229 20% 60%;
+  --prose-bullets: 229 20% 60%;
+  --prose-hr: 230 15% 60% / 0.18;
+
+  /* 层 E · elevation（柔影 + mauve 光晕——粉彩主题的 CTA 辉光） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 0 0 1px hsl(230 20% 50% / 0.10), 0 10px 30px -12px hsl(245 40% 4% / 0.55);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 2px hsl(245 40% 4% / 0.4), 0 6px 18px -6px hsl(267 84% 70% / 0.35);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.22), 0 2px 4px hsl(245 40% 4% / 0.4), 0 12px 26px -6px hsl(267 88% 74% / 0.45);
+  --shadow-toolbar: 0 1px 2px hsl(245 40% 4% / 0.35);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(245 40% 4% / 0.4), 0 10px 24px -8px hsl(245 40% 4% / 0.6);
+}
+
+/* Rosé Pine（深 · 夜紫墨 + 玫瑰金，2026-08-31 移植同名官方 palette）：
+   base #191724 夜紫墨 / surface 卡 / overlay 浮层（官方三层面）；text #E0DEF4
+   月光白。primary=rose 玫瑰金 #EBBCBA——高亮度暖粉金，与库内所有主题的 primary
+   （coral/紫/琥珀/黄）都不同，本主题的辨识核心。severity hue 锁定 + 柔档
+   （love 锁 5、gold 锁 38；Rosé Pine 无亮绿，green 柔绿造值）。cyan=foam /
+   magenta=iris（官方 accent 本色）。静谧文艺：柔影 + rose 光晕收敛。 */
+.dark.theme-rose-pine {
+  /* 层 A · shadcn token */
+  --background: 249 22% 12%;
+  --foreground: 246 50% 91%;
+  --card: 247 23% 15%;
+  --card-foreground: 246 50% 91%;
+  --popover: 248 25% 18%;
+  --popover-foreground: 246 50% 91%;
+  --primary: 2 55% 83%;
+  --primary-foreground: 249 22% 12%;
+  --secondary: 248 22% 17%;
+  --secondary-foreground: 246 50% 91%;
+  --muted: 248 22% 17%;
+  --muted-foreground: 244 15% 61%;
+  --accent: 248 25% 20%;
+  --accent-foreground: 246 50% 91%;
+  --destructive: 343 76% 68%;
+  --destructive-foreground: 249 22% 12%;
+  --border: 246 25% 50% / 0.25;
+  --input: 246 25% 50% / 0.25;
+  --ring: 2 55% 83%;
+
+  /* 层 B · 语义色（severity hue 锁定 + 柔档；cyan=foam / magenta=iris） */
+  --c-cyan: 189 44% 73%;
+  --c-magenta: 267 57% 78%;
+  --c-green: 150 25% 70%;
+  --c-red: 5 70% 70%;
+  --c-orange: 24 80% 70%;
+  --c-yellow: 38 85% 74%;
+  --c-amber: 36 88% 72%;
+
+  /* 层 C · 圆角（官方 UI 中等偏柔） */
+  --radius: 12px;
+
+  /* 层 D · prose（月光白文 + rose 链接 + foam 行内码） */
+  --prose-body: 246 35% 87%;
+  --prose-headings: 246 45% 92%;
+  --prose-links: 2 55% 83%;
+  --prose-bold: 246 45% 92%;
+  --prose-code: 189 44% 73%;
+  --prose-code-bg: 248 22% 17%;
+  --prose-quotes: 244 10% 55%;
+  --prose-bullets: 244 10% 55%;
+  --prose-hr: 246 25% 50% / 0.20;
+
+  /* 层 E · elevation（静谧：柔黑影 + 玫瑰金微光晕） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 0 0 1px hsl(246 25% 50% / 0.10), 0 10px 30px -12px hsl(250 45% 3% / 0.6);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 2px hsl(250 45% 3% / 0.4), 0 6px 18px -6px hsl(2 55% 75% / 0.28);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.22), 0 2px 4px hsl(250 45% 3% / 0.4), 0 12px 26px -6px hsl(2 60% 80% / 0.38);
+  --shadow-toolbar: 0 1px 2px hsl(250 45% 3% / 0.4);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 2px 4px hsl(250 45% 3% / 0.45), 0 10px 24px -8px hsl(250 45% 3% / 0.65);
+}
+
+/* Gruvbox（深 · 复古棕 + 亮黄，2026-08-25 同代终端复古经典，2026-08-31 移植）：
+   「亮暗色」档——画布 dark0 #282828（L16%，比库内其余深色主题亮一档，本身即是
+   区分度）；卡 dark1 暖棕 / 浮层 dark2；fg1 #EBDBB2 复古米白。primary=bright
+   yellow #FABD2F（Gruvbox 灵魂色；与 mission 琥珀邻近——用户预览后裁定接受）。
+   severity 本色即纪律（红 6/橙 27/黄 42 锁到 5/24/38 仅微调）。cyan=bright aqua
+   （Gruvbox 的 aqua 偏绿是其特色）/ magenta=bright purple（官方即偏粉紫）。
+   复古方硬：6px 圆角、轻朴素影（无大光晕，CTA 黄光晕除外）。 */
+.dark.theme-gruvbox {
+  /* 层 A · shadcn token */
+  --background: 0 0% 16%;
+  --foreground: 43 59% 81%;
+  --card: 20 6% 22%;
+  --card-foreground: 43 59% 81%;
+  --popover: 22 7% 29%;
+  --popover-foreground: 43 59% 81%;
+  --primary: 42 95% 58%;
+  --primary-foreground: 20 6% 10%;
+  --secondary: 20 5% 18%;
+  --secondary-foreground: 43 59% 81%;
+  --muted: 20 5% 18%;
+  --muted-foreground: 39 22% 66%;
+  --accent: 22 7% 29%;
+  --accent-foreground: 43 59% 81%;
+  --destructive: 6 97% 60%;
+  --destructive-foreground: 20 6% 10%;
+  --border: 40 15% 70% / 0.16;
+  --input: 40 15% 70% / 0.16;
+  --ring: 42 95% 58%;
+
+  /* 层 B · 语义色（severity 锁 hue 微调本色；green=bright green / cyan=aqua / magenta=bright purple。
+     red 提亮到 68%（62% 药丸底实测 4.10 差 AA，2026-08-31 验证器驱动修值） */
+  --c-cyan: 104 35% 62%;
+  --c-magenta: 344 47% 68%;
+  --c-green: 61 60% 48%;
+  --c-red: 5 90% 68%;
+  --c-orange: 24 98% 60%;
+  --c-yellow: 38 92% 60%;
+  --c-amber: 36 94% 58%;
+
+  /* 层 C · 圆角（复古方硬） */
+  --radius: 6px;
+
+  /* 层 D · prose（米白文 + 亮黄链接 + aqua 行内码） */
+  --prose-body: 43 50% 78%;
+  --prose-headings: 45 55% 84%;
+  --prose-links: 42 95% 62%;
+  --prose-bold: 45 55% 84%;
+  --prose-code: 104 35% 65%;
+  --prose-code-bg: 20 5% 18%;
+  --prose-quotes: 39 15% 58%;
+  --prose-bullets: 39 15% 58%;
+  --prose-hr: 40 15% 70% / 0.14;
+
+  /* 层 E · elevation（复古朴素：轻落影、无花哨，CTA 黄光晕是唯一彩色辉光） */
+  --shadow-card: inset 0 1px 0 hsl(40 30% 100% / 0.03), 0 0 0 1px hsl(40 15% 70% / 0.07), 0 6px 20px -10px hsl(30 20% 3% / 0.5);
+  --shadow-cta: inset 0 1px 0 hsl(40 30% 100% / 0.15), 0 1px 2px hsl(30 20% 3% / 0.45), 0 6px 18px -6px hsl(42 95% 48% / 0.32);
+  --shadow-cta-hover: inset 0 1px 0 hsl(40 30% 100% / 0.2), 0 2px 4px hsl(30 20% 3% / 0.45), 0 12px 26px -6px hsl(42 95% 54% / 0.42);
+  --shadow-toolbar: 0 1px 2px hsl(30 20% 3% / 0.4);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(40 30% 100% / 0.03), 0 2px 4px hsl(30 20% 3% / 0.45), 0 10px 24px -8px hsl(30 20% 3% / 0.55);
+}
+
+/* Dracula（深 · 经典紫多巴胺，2026-08-31 移植同名官方 palette）：
+   官方真值——background #282A36 紫蓝灰 / 卡 #343746（官方 Pro 面）/ 浮层+hover
+   面=selection #44475A（Dracula 的 hover 即 current-line，双层足够）；fg #F8F8F2
+   纯白、comment #6272A4 次级。primary=purple #BD93F9（标志色）。severity 官方
+   red/orange/yellow 锁 hue 到 5/24/38 + 高饱和亮档（yellow 65° 柠檬绿感锁回 38°）。
+   cyan=官方 cyan / magenta=官方 pink。10px 圆角；官方官网式的柔和 glow。 */
+.dark.theme-dracula {
+  /* 层 A · shadcn token */
+  --background: 231 15% 18%;
+  --foreground: 240 30% 96%;
+  --card: 230 15% 24%;
+  --card-foreground: 240 30% 96%;
+  --popover: 232 14% 31%;
+  --popover-foreground: 240 30% 96%;
+  --primary: 265 90% 78%;
+  --primary-foreground: 231 15% 12%;
+  --secondary: 232 13% 22%;
+  --secondary-foreground: 240 30% 96%;
+  --muted: 232 13% 22%;
+  --muted-foreground: 226 27% 62%;
+  --accent: 232 14% 31%;
+  --accent-foreground: 240 30% 96%;
+  --destructive: 0 100% 67%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 226 30% 55% / 0.30;
+  --input: 226 30% 55% / 0.30;
+  --ring: 265 90% 78%;
+
+  /* 层 B · 语义色（severity 锁 hue + 高饱和亮档；green 本色 75° 春绿 / cyan / pink） */
+  --c-cyan: 191 97% 77%;
+  --c-magenta: 326 100% 74%;
+  --c-green: 75 94% 65%;
+  --c-red: 5 100% 70%;
+  --c-orange: 24 100% 70%;
+  --c-yellow: 38 95% 74%;
+  --c-amber: 36 98% 72%;
+
+  /* 层 C · 圆角（官方 UI 中等） */
+  --radius: 10px;
+
+  /* 层 D · prose（纯白文 + purple 链接 + cyan 行内码） */
+  --prose-body: 240 25% 90%;
+  --prose-headings: 240 30% 95%;
+  --prose-links: 265 90% 80%;
+  --prose-bold: 240 30% 95%;
+  --prose-code: 191 97% 77%;
+  --prose-code-bg: 232 13% 22%;
+  --prose-quotes: 226 20% 58%;
+  --prose-bullets: 226 20% 58%;
+  --prose-hr: 226 30% 55% / 0.22;
+
+  /* 层 E · elevation（官网式柔和 glow：细描边环 + 深紫黑氛围 + purple 光晕） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 1px hsl(226 40% 60% / 0.10), 0 10px 30px -10px hsl(240 45% 4% / 0.6);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 2px hsl(240 45% 4% / 0.4), 0 6px 18px -6px hsl(265 90% 68% / 0.35);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.22), 0 2px 4px hsl(240 45% 4% / 0.4), 0 12px 26px -6px hsl(265 95% 72% / 0.45);
+  --shadow-toolbar: 0 1px 2px hsl(240 45% 4% / 0.4);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 2px 4px hsl(240 45% 4% / 0.45), 0 10px 24px -8px hsl(240 45% 4% / 0.65);
+}
+
 /* Mac（浅 · Apple HIG 系统级对齐，2026-08-24 由霜白 frost 全面升级改名；
    2026-08-25 质感修订——按 OpenDesign Apple 真值转向「apple.com 编辑式」语言；
    2026-08-26 材质补课——从「带光斑的玻璃」纠偏到「macOS 系统设置」）：
@@ -981,6 +1291,251 @@ html body {
   --shadow-cta-hover: 0 2px 6px hsl(0 0% 5% / 0.24);
   --shadow-toolbar: 0 1px 2px hsl(0 0% 5% / 0.05);
   --shadow-toolbar-hover: 0 2px 4px hsl(0 0% 5% / 0.08), 0 8px 20px -8px hsl(0 0% 5% / 0.12);
+}
+
+/* —— 亮色四款（2026-08-31 二扩，暗色四款的官方成对亮色版 + 经典 Solarized；
+   用户预览 theme-preview-light.html 裁定「都加上」。前三是同日暗色
+   catppuccin/rose-pine/gruvbox 的官方亮色 flavor（Latte / Dawn / Light），
+   同品牌深浅配对；Solarized Light 独立经典。均走气质层（primary 用主题
+   本色）。severity hue 锁定 5/24/38 只调 L/S——亮底黄系天然难压，值以
+   tokens-contrast 验证器实测为准。—— */
+
+/* Catppuccin Latte（浅 · 柔紫灰，catppuccin Mocha 的官方亮色对）：
+   base #EFF1F5 冷紫灰白画布（与 mac 灰白邻近，靠 accent 体系拉开）+
+   近白微冷卡 + text #4C4F69。primary=mauve 深紫 #8839EF（Latte 档 accent
+   是粉彩的加深版，浅底对比稳）；severity 用 Latte 深档。圆润 14px 同 Mocha。
+   cyan=teal / magenta=pink。 */
+.light.theme-catppuccin-latte {
+  /* 层 A · shadcn token */
+  --background: 220 23% 95%;
+  --foreground: 234 16% 36%;
+  --card: 220 26% 98%;
+  --card-foreground: 234 16% 36%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 234 16% 36%;
+  --primary: 266 85% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 16% 91%;
+  --secondary-foreground: 234 16% 36%;
+  --muted: 220 16% 91%;
+  --muted-foreground: 234 12% 48%;
+  --accent: 222 15% 89%;
+  --accent-foreground: 234 16% 36%;
+  --destructive: 5 85% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 229 12% 60% / 0.25;
+  --input: 229 12% 60% / 0.25;
+  --ring: 266 85% 58%;
+
+  /* 层 B · 语义色（severity hue 锁定 + Latte 深档；teal/pink 本色压深。
+     orange/yellow 按验证器压深（48/42 → 40/32：浅底黄橙系 L 需 29-34 档，
+     与基准浅色主题同档，2026-08-31 实测修值） */
+  --c-cyan: 183 74% 35%;
+  --c-magenta: 316 73% 60%;
+  --c-green: 109 58% 36%;
+  --c-red: 5 85% 46%;
+  --c-orange: 24 90% 40%;
+  --c-yellow: 38 80% 32%;
+  --c-amber: 36 85% 45%;
+
+  /* 层 C · 圆角（同 Mocha 柔软） */
+  --radius: 14px;
+
+  /* 层 D · prose（text 冷紫黑 + mauve 链接 + teal 行内码） */
+  --prose-body: 234 12% 34%;
+  --prose-headings: 234 18% 26%;
+  --prose-links: 266 85% 50%;
+  --prose-bold: 234 18% 26%;
+  --prose-code: 183 74% 32%;
+  --prose-code-bg: 220 16% 91%;
+  --prose-quotes: 234 10% 46%;
+  --prose-bullets: 234 10% 46%;
+  --prose-hr: 234 12% 40% / 0.14;
+
+  /* 层 E · elevation（浅三层制 + mauve 光晕） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.8), 0 1px 2px hsl(234 16% 30% / 0.06), 0 8px 24px -8px hsl(234 16% 30% / 0.10);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.25), 0 1px 2px hsl(234 16% 30% / 0.12), 0 6px 18px -6px hsl(266 85% 45% / 0.28);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.3), 0 2px 4px hsl(234 16% 30% / 0.14), 0 12px 26px -6px hsl(266 88% 52% / 0.36);
+  --shadow-toolbar: 0 1px 2px hsl(234 16% 30% / 0.08);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.7), 0 2px 4px hsl(234 16% 30% / 0.10), 0 10px 24px -8px hsl(234 16% 30% / 0.18);
+}
+
+/* Rosé Pine Dawn（浅 · 米杏玫瑰金，rose-pine 的官方亮色对）：
+   base #FAF4ED 米杏画布（暖而柔，与 kami 米黄邻近但 accent 完全不同）+
+   白杏卡 + text #575279。primary=rose 深档 #B4637A（Dawn 的玫瑰金压深
+   适配浅底）；severity 柔档。cyan=foam / magenta=iris。12px 静谧圆角。 */
+.light.theme-rose-pine-dawn {
+  /* 层 A · shadcn token */
+  --background: 33 57% 95%;
+  --foreground: 248 19% 40%;
+  --card: 24 100% 98%;
+  --card-foreground: 248 19% 40%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 248 19% 40%;
+  --primary: 343 35% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 28 40% 92%;
+  --secondary-foreground: 248 19% 40%;
+  --muted: 28 40% 92%;
+  --muted-foreground: 248 11% 52%;
+  --accent: 28 30% 90%;
+  --accent-foreground: 248 19% 40%;
+  --destructive: 5 40% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 20 25% 55% / 0.25;
+  --input: 20 25% 55% / 0.25;
+  --ring: 343 35% 55%;
+
+  /* 层 B · 语义色（severity hue 锁定 + 柔档；foam/iris 压深，green 造柔绿。
+     yellow 按验证器压深（46 → 31）：Dawn 浅杏卡上黄系余量小，2026-08-31 实测修值） */
+  --c-cyan: 189 30% 42%;
+  --c-magenta: 268 21% 55%;
+  --c-green: 150 20% 38%;
+  --c-red: 5 40% 48%;
+  --c-orange: 24 55% 48%;
+  --c-yellow: 38 72% 31%;
+  --c-amber: 36 78% 44%;
+
+  /* 层 C · 圆角（同 rose-pine 静谧） */
+  --radius: 12px;
+
+  /* 层 D · prose（text 暖紫黑 + rose 链接 + foam 行内码） */
+  --prose-body: 248 15% 38%;
+  --prose-headings: 248 20% 28%;
+  --prose-links: 343 35% 48%;
+  --prose-bold: 248 20% 28%;
+  --prose-code: 189 30% 38%;
+  --prose-code-bg: 28 40% 92%;
+  --prose-quotes: 248 8% 48%;
+  --prose-bullets: 248 8% 48%;
+  --prose-hr: 248 15% 40% / 0.12;
+
+  /* 层 E · elevation（暖三层制 + 玫瑰金微光晕） */
+  --shadow-card: inset 0 1px 0 hsl(0 0% 100% / 0.8), 0 1px 2px hsl(30 20% 30% / 0.05), 0 8px 24px -8px hsl(30 20% 30% / 0.08);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.25), 0 1px 2px hsl(30 20% 30% / 0.10), 0 6px 18px -6px hsl(343 35% 50% / 0.25);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.3), 0 2px 4px hsl(30 20% 30% / 0.12), 0 12px 26px -6px hsl(343 40% 55% / 0.33);
+  --shadow-toolbar: 0 1px 2px hsl(30 20% 30% / 0.07);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.7), 0 2px 4px hsl(30 20% 30% / 0.09), 0 10px 24px -8px hsl(30 20% 30% / 0.16);
+}
+
+/* Gruvbox Light（浅 · 奶油黄复古，gruvbox 的官方亮色对）：
+   亮色组的「深度画布」档——light0 #FBF1C7 奶油黄（L88，比浅色组其余
+   93-97% 深一档，本身就是区分度）+ 近白奶油卡 + fg=dark1 深棕。
+   primary=faded yellow #D79921 + **深字按钮**（黄底白字 AA 天生不行，
+   深棕字反而更「复古票据」——Gruvbox light UI 的惯用做法）。
+   cyan=aqua（Gruvbox 的 aqua 偏绿是其特色）/ magenta=bright purple 系。
+   6px 方硬圆角 + 轻朴素影同暗版。 */
+.light.theme-gruvbox-light {
+  /* 层 A · shadcn token */
+  --background: 48 87% 88%;
+  --foreground: 20 5% 22%;
+  --card: 45 50% 95%;
+  --card-foreground: 20 5% 22%;
+  --popover: 45 55% 96%;
+  --popover-foreground: 20 5% 22%;
+  --primary: 40 69% 49%;
+  --primary-foreground: 30 30% 12%;
+  --secondary: 45 40% 90%;
+  --secondary-foreground: 20 5% 22%;
+  --muted: 45 40% 90%;
+  --muted-foreground: 39 20% 42%;
+  --accent: 43 35% 88%;
+  --accent-foreground: 20 5% 22%;
+  --destructive: 5 85% 42%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 20% 40% / 0.18;
+  --input: 40 20% 40% / 0.18;
+  --ring: 40 69% 49%;
+
+  /* 层 B · 语义色（severity hue 锁定 + 官方 faded 档压深；aqua/purple 本色。
+     yellow 按验证器压深（42 → 32）：奶油黄卡上黄系余量最小，2026-08-31 实测修值） */
+  --c-cyan: 97 30% 37%;
+  --c-magenta: 322 39% 40%;
+  --c-green: 60 79% 30%;
+  --c-red: 5 85% 42%;
+  --c-orange: 24 97% 40%;
+  --c-yellow: 38 78% 32%;
+  --c-amber: 36 84% 40%;
+
+  /* 层 C · 圆角（复古方硬同暗版） */
+  --radius: 6px;
+
+  /* 层 D · prose（深棕文 + 琥珀压深链接 + aqua 行内码） */
+  --prose-body: 20 8% 28%;
+  --prose-headings: 20 10% 20%;
+  --prose-links: 40 80% 38%;
+  --prose-bold: 20 10% 20%;
+  --prose-code: 97 30% 34%;
+  --prose-code-bg: 45 40% 90%;
+  --prose-quotes: 39 15% 40%;
+  --prose-bullets: 39 15% 40%;
+  --prose-hr: 40 20% 40% / 0.14;
+
+  /* 层 E · elevation（复古朴素：轻落影，CTA 琥珀光晕是唯一彩色辉光） */
+  --shadow-card: inset 0 1px 0 hsl(50 40% 100% / 0.6), 0 1px 2px hsl(30 20% 20% / 0.06), 0 6px 18px -8px hsl(30 20% 20% / 0.09);
+  --shadow-cta: inset 0 1px 0 hsl(50 60% 100% / 0.35), 0 1px 2px hsl(30 20% 20% / 0.14), 0 6px 16px -6px hsl(40 69% 42% / 0.3);
+  --shadow-cta-hover: inset 0 1px 0 hsl(50 60% 100% / 0.45), 0 2px 4px hsl(30 20% 20% / 0.16), 0 12px 24px -6px hsl(40 69% 48% / 0.38);
+  --shadow-toolbar: 0 1px 2px hsl(30 20% 20% / 0.08);
+  --shadow-toolbar-hover: inset 0 1px 0 hsl(50 40% 100% / 0.5), 0 2px 4px hsl(30 20% 20% / 0.10), 0 10px 22px -8px hsl(30 20% 20% / 0.16);
+}
+
+/* Solarized Light（浅 · 米黄靛蓝，独立经典无暗色对）：
+   Ethan Schoonover Lab 科学色系——base3 #FDF6E3 米黄画布 + base2 邻做卡 +
+   **正文带青灰**（fg=base01 #586E75，「内容文本有色」是 Solarized 独有气质，
+   全库唯一）。primary=blue 压深档（官方 #268BD2 L49 白字不稳，压 42%——
+   与 blueprint 墨蓝相邻，靠米黄底/青灰文本拉开）。severity 官方四色锁
+   hue。cyan=#2AA198（GitNexus 青绿天然贴）/ magenta=#D33682。8px 印刷感。 */
+.light.theme-solarized-light {
+  /* 层 A · shadcn token */
+  --background: 44 87% 94%;
+  --foreground: 185 14% 40%;
+  --card: 46 55% 93%;
+  --card-foreground: 185 14% 40%;
+  --popover: 44 70% 96%;
+  --popover-foreground: 185 14% 40%;
+  --primary: 205 70% 42%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 46 40% 89%;
+  --secondary-foreground: 185 14% 40%;
+  --muted: 46 40% 89%;
+  --muted-foreground: 180 13% 46%;
+  --accent: 46 35% 87%;
+  --accent-foreground: 185 14% 40%;
+  --destructive: 5 72% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 25% 45% / 0.20;
+  --input: 40 25% 45% / 0.20;
+  --ring: 205 70% 42%;
+
+  /* 层 B · 语义色（severity 官方色锁 hue 5/24/38 压深；cyan/magenta 本色） */
+  --c-cyan: 174 60% 38%;
+  --c-magenta: 329 58% 48%;
+  --c-green: 68 100% 29%;
+  --c-red: 5 72% 46%;
+  --c-orange: 24 76% 44%;
+  --c-yellow: 38 100% 36%;
+  --c-amber: 36 90% 38%;
+
+  /* 层 C · 圆角（印刷感方正） */
+  --radius: 8px;
+
+  /* 层 D · prose（青灰正文是身份 + blue 链接 + cyan 行内码） */
+  --prose-body: 185 12% 36%;
+  --prose-headings: 185 16% 26%;
+  --prose-links: 205 64% 42%;
+  --prose-bold: 185 16% 26%;
+  --prose-code: 174 60% 36%;
+  --prose-code-bg: 46 40% 89%;
+  --prose-quotes: 180 8% 46%;
+  --prose-bullets: 180 8% 46%;
+  --prose-hr: 185 14% 40% / 0.14;
+
+  /* 层 E · elevation（印刷轻影 + blue 光晕） */
+  --shadow-card: 0 1px 2px hsl(40 30% 30% / 0.06), 0 6px 18px -8px hsl(40 30% 30% / 0.09);
+  --shadow-cta: 0 1px 2px hsl(205 40% 25% / 0.18), 0 4px 14px -4px hsl(205 70% 38% / 0.28);
+  --shadow-cta-hover: 0 2px 4px hsl(205 40% 25% / 0.22), 0 8px 20px -6px hsl(205 70% 44% / 0.36);
+  --shadow-toolbar: 0 1px 2px hsl(40 30% 30% / 0.07);
+  --shadow-toolbar-hover: 0 2px 4px hsl(40 30% 30% / 0.10), 0 8px 20px -8px hsl(40 30% 30% / 0.15);
 }
 
 /* —— 层 G · 代码主题（code theme，2026-08-31 报告页代码块区分度重做）——
