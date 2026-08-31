@@ -105,6 +105,7 @@ html { scroll-behavior: smooth; }
    （长 URL / 无空格串也折行，不横滚）。 */
 .prose pre,
 .code-panel {
+  position: relative;
   border-radius: calc(var(--radius) - 2px);
   border: 1px solid hsl(var(--code-border));
   background: hsl(var(--code-bg));
@@ -113,9 +114,38 @@ html { scroll-behavior: smooth; }
   box-shadow: inset 0 1px 3px hsl(222 40% 2% / 0.6), 0 1px 2px hsl(220 40% 3% / 0.4), 0 4px 12px -4px hsl(220 40% 3% / 0.3);
 }
 .prose pre {
+  /* 顶部 1.75rem 预留：浅色=浮动工具栏（语言角标+复制）的空间（TSX pt-7 曾被上方
+     padding shorthand 覆盖致工具栏压首行——unlayered 规则胜出 layered 工具类，
+     2026-08-31 回归修复）；深色=窗梃条 + 代码间隙。 */
+  padding-top: 1.75rem;
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
+}
+
+/* —— 窗梃条（terminal 标题条，深色专属）：结构自足通道 ——
+   石墨（纯中性灰阶，色温差=0）与 arc（同冷色族 + 满屏 alpha 白 hairline，框线
+   撞色）下底色/色温/单框线通道逐个失效（2026-08-31 用户反馈+视觉模型确诊）——
+   代码块的「窗对象」轮廓改由面板自绘的标题条承载：比屏幕亮一档的石板条 + 自身
+   border-bottom 成窗框上缘，与外框构成双线窗结构，不依赖任何主题上下文。
+   md 路径的语言角标/复制按钮（absolute top-1 right-1）正好骑在条上；结构化路径
+   的浮动 CopyButton 同理。浅色主题不加（18:1 材质差已一步到位，克制即身份）。 */
+:root:not(.light) .prose pre::before,
+:root:not(.light) .code-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--code-chrome-h);
+  background: hsl(var(--code-chrome-bg));
+  border-bottom: 1px solid hsl(var(--code-border));
+  border-radius: calc(var(--radius) - 3px) calc(var(--radius) - 3px) 0 0;
+  pointer-events: none;
+}
+:root:not(.light) .code-panel {
+  /* 窗梃 24px + 代码间隙 8px（.prose pre 用上方 1.75rem 固定预留） */
+  padding-top: calc(var(--code-chrome-h) + 0.5rem);
 }
 .prose pre code {
   background: transparent;
@@ -165,7 +195,10 @@ button.code-chrome { color: hsl(var(--code-fg)); }
     color: hsl(0 0% 10%);
     border: 1px solid hsl(40 10% 75%);
     box-shadow: none;
+    padding-top: 0.65rem;
   }
+  .prose pre::before,
+  .code-panel::before { display: none; }
   .code-panel-ok { box-shadow: none; border-color: hsl(140 45% 35%); }
   .prose pre code { color: inherit; }
   .prose pre [data-testid="code-lang"] { color: hsl(0 0% 45%); }

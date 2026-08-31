@@ -41,4 +41,23 @@ describe("report.css", () => {
     expect(printBlock).toMatch(/\.prose pre,/);
     expect(printBlock).not.toMatch(/var\(--code-bg\)/);
   });
+
+  it("窗梃条（深色结构自足通道）：仅 :root:not(.light) 生效，浅色不加", () => {
+    // 石墨（纯中性）/arc（同冷色族+hairline 撞色）下底色/色温/单框线逐个失效，
+    // 深色区分度由面板自绘标题条承载——选择器必须深色限定
+    expect(css).toMatch(/:root:not\(\.light\)\s+\.prose pre::before,/);
+    expect(css).toMatch(/:root:not\(\.light\)\s+\.code-panel::before\s*\{/);
+    // 浅色不得出现无条件窗梃
+    expect(css).not.toMatch(/^\.prose pre::before/m);
+    expect(css).not.toMatch(/^\.code-panel::before\s*\{/m);
+    // 打印态窗梃关闭
+    const printBlock = /@media print\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(printBlock).toMatch(/::before\s*\{\s*display:\s*none/);
+  });
+
+  it(".prose pre 顶部预留工具栏/窗梃空间（padding-top ≥ 1.75rem）", () => {
+    // 回归守卫：TSX pt-7（28px）曾被子级 unlayered padding shorthand 覆盖，
+    // 浮动工具栏压首行代码——顶部预留必须在 CSS 显式声明
+    expect(css).toMatch(/\.prose pre\s*\{[^}]*padding-top:\s*1\.75rem/s);
+  });
 });
