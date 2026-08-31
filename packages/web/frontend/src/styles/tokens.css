@@ -62,9 +62,14 @@
   --c-yellow: 38 75% 60%;
   --c-amber: 36 78% 58%;
 
-  /* 层 C · 字体 / 圆角 */
+  /* 层 C · 字体 / 圆角（2026-08-31 字体清晰度修正：sans 从 IBM Plex Sans 换
+     系统栈——原栈是「Plex 拉丁 webfont + 系统中文」混排，x-height/字重失衡
+     主观发糊，且内网 Google Fonts 断供时字体跳变；系统栈每平台最优渲染、
+     恒定可用（与 mac 主题 SF 栈同哲学）。Plex 个性保留在角色位：mono=代码
+     数据、serif=kami 衬线。配套：index.css 全局 antialiased + Google Fonts
+     链删 Plex Sans 并为 Mono/Serif/Inter 补 700 杜绝合成粗体） */
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-sans: system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", Georgia, serif;
   --radius: 12px;
 

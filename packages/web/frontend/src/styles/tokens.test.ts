@@ -37,10 +37,11 @@ describe("tokens.css 漂移护栏", () => {
   it("radius = 12px", () => {
     expect(tokens).toContain("--radius: 12px;");
   });
-  it("Plex 三族字体保留", () => {
+  it("字体角色位：sans=系统栈（2026-08-31 清晰度修正）/ mono·serif=Plex", () => {
     expect(tokens).toContain("IBM Plex Mono");
-    expect(tokens).toContain("IBM Plex Sans");
     expect(tokens).toContain("IBM Plex Serif");
+    // sans 从 Plex 换系统栈：混排失衡 + 内网 webfont 断供跳变（详见 tokens.css 层 C 注释）
+    expect(tokens).toMatch(/--font-sans:\s*system-ui/);
   });
 });
 

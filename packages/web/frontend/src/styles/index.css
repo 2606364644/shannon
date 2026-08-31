@@ -17,6 +17,15 @@
   * {
     @apply border-border;
   }
+
+  /* 字体清晰度（2026-08-31 用户反馈「字体不清晰」修正）：深底浅字无
+     antialiased 会渗光发糊（subpixel 彩边），浅底混排文本边缘毛糙。
+     shadcn/tailwind preflight 均不含 font-smoothing，须显式声明——
+     GitHub/Linear/Vercel 全局同款组合。 */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 /* prose 覆盖层：把 @tailwindcss/typography 的 --tw-prose-* 接到双主题 --prose-* channel */
