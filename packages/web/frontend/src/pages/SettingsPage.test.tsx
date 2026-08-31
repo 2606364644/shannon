@@ -89,9 +89,10 @@ afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
 describe("SettingsPage", () => {
-  it("渲染各分区 eyebrow（品牌/个人化/系统）", async () => {
+  it("渲染布局域头（个人偏好/部署管理/系统）", async () => {
     renderWithTheme(<SettingsPage />);
-    expect(await screen.findByText("个人化")).toBeInTheDocument();
+    expect(await screen.findByText("个人偏好")).toBeInTheDocument();
+    expect(screen.getByText("部署管理")).toBeInTheDocument();
     expect(screen.getByText("系统")).toBeInTheDocument();
     expect(screen.queryByText("关于")).not.toBeInTheDocument();
   });
@@ -118,7 +119,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：点 Mac → <html>.light + theme-mac + localStorage=mac", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     fireEvent.click(screen.getByRole("button", { name: /Mac/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("theme-mac")).toBe(true);
@@ -127,7 +128,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：渲染 Claude 双主题新标签（charcoal/warm-paper 改名后）", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     expect(screen.getByRole("button", { name: /Claude 深色/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Claude 浅色/ })).toBeInTheDocument();
     // 旧名不再出现（改名闭环）
@@ -137,7 +138,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：材质升级主题渲染——蓝图（2026-08-26 新增）点击 → light + theme-blueprint", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     expect(screen.getByRole("button", { name: /蓝图/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /蓝图/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
@@ -147,7 +148,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：OpenAI 主题（2026-08-27 新增）渲染并点击 → light + theme-openai", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     expect(screen.getByRole("button", { name: /OpenAI/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
     expect(document.documentElement.classList.contains("light")).toBe(true);
@@ -157,7 +158,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：点午夜 → <html>.dark + theme-midnight + localStorage=midnight", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     fireEvent.click(screen.getByRole("button", { name: /午夜/ }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("theme-midnight")).toBe(true);
@@ -167,7 +168,7 @@ describe("SettingsPage", () => {
   it("主题选择器：点跟随系统 → localStorage=system 且 palette 切到默认深色 graphite", async () => {
     localStorage.setItem("supernova-theme", "midnight");
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     expect(document.documentElement.classList.contains("theme-midnight")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /跟随系统/ }));
     expect(localStorage.getItem("supernova-theme")).toBe("system");
@@ -178,7 +179,7 @@ describe("SettingsPage", () => {
 
   it("主题选择器：新六主题全部渲染 + 点 kami → light + theme-kami", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
+    await screen.findByText("个人偏好");
     for (const label of ["Sentry 紫黑", "Arc 玻璃", "指挥中心", "GitHub", "Notion 暖灰", "kami 纸质"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
     }
@@ -212,18 +213,18 @@ describe("SettingsPage i18n", () => {
   it("中文渲染页标题与各分区 eyebrow", async () => {
     renderWithTheme(<SettingsPage />);
     expect(await screen.findByText("设置")).toBeInTheDocument();
-    expect(screen.getByText("个人化")).toBeInTheDocument();
+    expect(screen.getByText("个人偏好")).toBeInTheDocument();
     expect(screen.getByText("系统")).toBeInTheDocument();
     expect(screen.queryByText("关于")).not.toBeInTheDocument();
   });
 
-  it("切英文后 eyebrow 变 Personalization/System", async () => {
+  it("切英文后域头变 Personal/System", async () => {
     renderWithTheme(<SettingsPage />);
     await screen.findByText("设置");
     await act(async () => {
       await i18n.changeLanguage("en");
     });
-    expect(await screen.findByText("Personalization")).toBeInTheDocument();
+    expect(await screen.findByText("Personal")).toBeInTheDocument();
     expect(screen.getByText("System")).toBeInTheDocument();
     expect(screen.queryByText("About")).not.toBeInTheDocument();
   });
@@ -237,9 +238,9 @@ describe("SettingsPage 品牌名编辑", () => {
     });
   });
 
-  it("渲染品牌区 eyebrow + 预览字标", async () => {
+  it("渲染品牌卡（部署管理域内）+ 预览字标", async () => {
     renderWithTheme(<SettingsPage />);
-    expect(await screen.findByText("品牌")).toBeInTheDocument();
+    expect(await screen.findByText("平台名称")).toBeInTheDocument();
     // 预览框内显示当前品牌名 Supernova
     expect(screen.getAllByText("Supernova").length).toBeGreaterThan(0);
   });
@@ -255,7 +256,7 @@ describe("SettingsPage 品牌名编辑", () => {
       }),
     );
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("品牌");
+    await screen.findByText("平台名称");
     const input = await screen.findByLabelText("名称");
     fireEvent.change(input, { target: { value: "Acme Sec" } });
     // 预览即时反映输入
@@ -266,14 +267,14 @@ describe("SettingsPage 品牌名编辑", () => {
 
   it("admin: 空名/同名时 Save 禁用", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("品牌");
+    await screen.findByText("平台名称");
     // 初始 draft=当前名 → dirty=false → 禁用
     expect(screen.getByTestId("brand-save")).toBeDisabled();
   });
 
   it("admin: 超长(>32)显示计数为红 + Save 禁用", async () => {
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("品牌");
+    await screen.findByText("平台名称");
     const input = await screen.findByLabelText("名称");
     fireEvent.change(input, { target: { value: "x".repeat(33) } });
     expect(screen.getByTestId("brand-save")).toBeDisabled();
@@ -291,7 +292,7 @@ describe("SettingsPage 品牌名编辑", () => {
       }),
     );
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("品牌");
+    await screen.findByText("平台名称");
     // reset 按钮是第二个 ghost 按钮(title=恢复默认);初始无覆盖 → 禁用
     const resetBtn = screen.getByTitle("恢复默认");
     await waitFor(() => expect(resetBtn).toBeDisabled());
@@ -304,7 +305,7 @@ describe("SettingsPage 品牌名编辑", () => {
   it("非 admin: 只读(无保存按钮 + 锁标) + 显示当前名", async () => {
     mockUser.role = "user";
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("品牌");
+    await screen.findByText("平台名称");
     expect(screen.getByText("仅管理员可改名")).toBeInTheDocument();
     expect(screen.queryByTestId("brand-save")).not.toBeInTheDocument();
   });
@@ -324,9 +325,9 @@ describe("SettingsPage SSO 配置（spec 2026-08-26 运行时化）", () => {
     updated_at: "2026-08-26T01:00:00+00:00", updated_by: "seed",
   };
 
-  it("admin: SSO section 渲染——eyebrow + 配置卡回显 + 白名单面板迁入", async () => {
+  it("admin: SSO 挂载于部署管理域——配置卡回显 + 白名单面板迁入", async () => {
     renderWithTheme(<SettingsPage />);
-    expect(await screen.findByText("SSO / OA 登录")).toBeInTheDocument();
+    expect(await screen.findByText("部署管理")).toBeInTheDocument();
     // 配置卡异步加载完成(msw 默认 handler 回默认配置)
     const card = await screen.findByTestId("sso-config-card");
     expect(card).toBeInTheDocument();
@@ -373,8 +374,7 @@ describe("SettingsPage SSO 配置（spec 2026-08-26 运行时化）", () => {
   it("非 admin: SSO section 整体不渲染", async () => {
     mockUser.role = "user";
     renderWithTheme(<SettingsPage />);
-    await screen.findByText("个人化");
-    expect(screen.queryByText("SSO / OA 登录")).not.toBeInTheDocument();
+    await screen.findByText("个人偏好");
     expect(screen.queryByTestId("sso-config-card")).not.toBeInTheDocument();
     expect(screen.queryByTestId("sso-whitelist-panel")).not.toBeInTheDocument();
   });

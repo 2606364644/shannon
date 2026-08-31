@@ -621,13 +621,15 @@
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "Appearance, platform name, and account",
-    "section": {
-      "branding": "Branding",
-      "personalization": "Personalization",
+    "subtitle": "Your preferences and deployment-wide settings",
+    "domain": {
+      "personal": "Personal",
+      "personalDesc": "Affects only your interface and account",
+      "deployment": "Deployment",
+      "deploymentDesc": "Applies to the whole deployment — name, model pricing, and login",
+      "deploymentReadonlyBadge": "Read-only",
       "system": "System",
-      "sso": "SSO / OA Login",
-      "pricing": "Pricing"
+      "systemDesc": "Runtime status and dependencies"
     },
     "themeTitle": "Theme",
     "themeSystem": "Auto",

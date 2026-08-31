@@ -24,16 +24,18 @@ import { GlobalPricingCard } from "@/components/pricing/GlobalPricingCard";
 
 const MAX_BRAND = 32;
 
-/** 分区：coral 竖条 + eyebrow 小标题（uppercase tracking-wider）拉层次。 */
-function Section({ eyebrow, children }: { eyebrow: string; children: ReactNode }) {
+/** 布局域头：受众域（个人偏好 / 部署管理 / 系统）标题行——标题 + 一句描述 + 可选权限徽章 + hairline。
+    替代旧五段同质 eyebrow：页面内容天然分两个受众域（改给自己的 vs 改给整个部署的），
+    域头把这层归属显式化；非 admin 时部署域头右侧「只读」徽章一眼说明权限（admin 不需自我提示）。 */
+function DomainHeader({
+  title, desc, badge,
+}: { title: string; desc: string; badge?: ReactNode }) {
   return (
-    <section className="space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="h-3.5 w-1 rounded-full bg-primary" aria-hidden />
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{eyebrow}</h2>
-      </div>
-      {children}
-    </section>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border pb-2">
+      <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+      <p className="text-xs text-muted-foreground">{desc}</p>
+      {badge && <span className="ml-auto self-center">{badge}</span>}
+    </div>
   );
 }
 
@@ -127,7 +129,9 @@ function ThemePicker() {
 
       <div className="space-y-1.5">
         <div className="text-xs text-muted-foreground">{t("settings.themeGroupDark")}</div>
-        <div className="grid grid-cols-3 gap-2">
+        {/* auto-fill 自适应列数：主题卡随容器宽伸缩（单列窄屏 ~2 格 → 全宽卡 5 格），
+            替代固定 grid-cols-3（2026-08-31 布局重组后主题卡宽度随断点大变） */}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
           {darks.map((d) => (
             <ThemeOption key={d.id} d={d} active={theme === d.id} onSelect={() => setTheme(d.id)} />
           ))}
@@ -136,7 +140,7 @@ function ThemePicker() {
 
       <div className="space-y-1.5">
         <div className="text-xs text-muted-foreground">{t("settings.themeGroupLight")}</div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
           {lights.map((d) => (
             <ThemeOption key={d.id} d={d} active={theme === d.id} onSelect={() => setTheme(d.id)} />
           ))}
@@ -308,24 +312,21 @@ export function SettingsPage() {
   const isAdmin = user?.role === "admin";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
-        <div className="space-y-5">
-          {/* ▍品牌 */}
-          <Section eyebrow={t("settings.section.branding")}>
-            <BrandingCard />
-          </Section>
-
-          {/* ▍定价（spec 2026-08-28）：全局价目表，admin 编辑 / 全员可看 */}
-          <Section eyebrow={t("settings.section.pricing")}>
-            <GlobalPricingCard />
-          </Section>
-
-          {/* ▍个人化 */}
-          <Section eyebrow={t("settings.section.personalization")}>
-            <div className="grid gap-3 sm:grid-cols-2">
+      {/* ▍布局（2026-08-31 重组）：主列 + 侧栏，宽度按内容分配。
+          - xl(1280) 以下全单列：定价 8 列表格在 ~950px 仍舒展（旧 lg 双栏把表格挤进
+            55% 次栏，1100px 视口左栏仅 590px 不可用）；
+          - 主列 = 可操作内容，按受众域分两段（个人偏好 → 部署管理），SSO 自页底沉没区
+            提升进部署管理域；
+          - 侧栏 = 只读系统状态，sticky 常驻（TopBar h-12 + 间隙 → top-16）。 */}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-7">
+          {/* ▍个人偏好：改给自己的（主题 / 账户安全），全员同构 */}
+          <section className="space-y-4" aria-label={t("settings.domain.personal")}>
+            <DomainHeader title={t("settings.domain.personal")} desc={t("settings.domain.personalDesc")} />
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
               <Card>
                 <CardHeader className="p-4 pb-3">
                   <CardTitle className="font-semibold tracking-tight text-base">{t("settings.themeTitle")}</CardTitle>
@@ -339,22 +340,53 @@ export function SettingsPage() {
                 <CardHeader className="p-4 pb-3">
                   <CardTitle className="font-semibold tracking-tight text-base">{t("settings.accountSecurityTitle")}</CardTitle>
                 </CardHeader>
-                <CardContent className="flex flex-wrap items-center gap-3 p-4 pt-0 text-sm">
-                  <span className="text-muted-foreground">{t("settings.accountSecurityHint")}</span>
-                  {user?.must_change_password && (
-                    <Badge variant="outline" className="border-amber/50 text-amber">{t("auth.mustChange.badgeShort")}</Badge>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => setCpOpen(true)} className="ml-auto">
+                <CardContent className="space-y-3 p-4 pt-0 text-sm">
+                  <div className="space-y-2">
+                    <span className="block text-muted-foreground">{t("settings.accountSecurityHint")}</span>
+                    {user?.must_change_password && (
+                      <Badge variant="outline" className="border-amber/50 text-amber">{t("auth.mustChange.badgeShort")}</Badge>
+                    )}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setCpOpen(true)}>
                     {t("settings.changePasswordBtn")}
                   </Button>
                 </CardContent>
               </Card>
             </div>
-          </Section>
+          </section>
+
+          {/* ▍部署管理：改给整个部署的（品牌 / 定价 / SSO），全员可看、admin 可改 */}
+          <section className="space-y-4" aria-label={t("settings.domain.deployment")}>
+            <DomainHeader
+              title={t("settings.domain.deployment")}
+              desc={t("settings.domain.deploymentDesc")}
+              badge={!isAdmin && (
+                <Badge variant="outline" className="border-border text-muted-foreground">
+                  <Lock className="size-3" /> {t("settings.domain.deploymentReadonlyBadge")}
+                </Badge>
+              )}
+            />
+            <div className="space-y-4">
+              <BrandingCard />
+
+              {/* 定价（spec 2026-08-28）：全局价目表，admin 编辑 / 全员可看。
+                  8 列表格占主列全宽——宽度分配的首要受益者。 */}
+              <GlobalPricingCard />
+
+              {/* SSO / OA 登录（admin-only；spec 2026-08-26：配置运行时化 + 白名单面板自 /users 迁入） */}
+              {isAdmin && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SsoConfigCard />
+                  <SsoWhitelistPanel />
+                </div>
+              )}
+            </div>
+          </section>
         </div>
 
-        {/* ▍系统 */}
-        <Section eyebrow={t("settings.section.system")}>
+        {/* ▍系统：只读运行状态，侧栏 sticky 常驻 */}
+        <aside className="space-y-4 xl:sticky xl:top-16" aria-label={t("settings.domain.system")}>
+          <DomainHeader title={t("settings.domain.system")} desc={t("settings.domain.systemDesc")} />
           <Card>
             <CardHeader className="p-4 pb-3">
               <CardTitle className="font-semibold tracking-tight text-base">{t("settings.statusTitle")}</CardTitle>
@@ -391,18 +423,8 @@ export function SettingsPage() {
               )}
             </CardContent>
           </Card>
-        </Section>
+        </aside>
       </div>
-
-      {/* ▍SSO / OA 登录（admin-only；spec 2026-08-26：配置运行时化 + 白名单面板自 /users 迁入） */}
-      {isAdmin && (
-        <Section eyebrow={t("settings.section.sso")}>
-          <div className="grid gap-3 md:grid-cols-2">
-            <SsoConfigCard />
-            <SsoWhitelistPanel />
-          </div>
-        </Section>
-      )}
 
       <ChangePasswordDialog open={cpOpen} onOpenChange={setCpOpen} onChanged={refreshUser} />
     </div>

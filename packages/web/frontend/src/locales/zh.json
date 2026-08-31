@@ -621,13 +621,15 @@
   },
   "settings": {
     "title": "设置",
-    "subtitle": "平台外观、名称与账户",
-    "section": {
-      "branding": "品牌",
-      "personalization": "个人化",
+    "subtitle": "外观与账户偏好，以及部署级配置",
+    "domain": {
+      "personal": "个人偏好",
+      "personalDesc": "只影响你自己的界面与账户",
+      "deployment": "部署管理",
+      "deploymentDesc": "对整个部署生效——平台名称、模型定价与登录方式",
+      "deploymentReadonlyBadge": "只读",
       "system": "系统",
-      "sso": "SSO / OA 登录",
-      "pricing": "定价"
+      "systemDesc": "部署运行状态与依赖"
     },
     "themeTitle": "主题",
     "themeSystem": "跟随系统",

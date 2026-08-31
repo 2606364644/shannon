@@ -228,7 +228,9 @@ export function PricingEditor({
         )}
       </div>
 
-      <div className="rounded-lg border">
+      {/* 表格外框横向滚动兜底：8 列在窄视口（<xl 单列 ~950px 以下）仍可能超宽，
+          优先舒展、不够则滚动，不挤压数字输入框 */}
+      <div className="overflow-x-auto rounded-lg border">
         <Table className="text-sm">
           <TableHeader>
             <TableRow>
