@@ -372,6 +372,57 @@ async def test_polish_reworks_missing_pocs(tmp_path, monkeypatch):
     assert checks["poc_complete"] == []
 
 
+async def test_polish_reworks_missing_titles(tmp_path, monkeypatch):
+    """title 缺失也走 narrative 深富化回炉（原始 QA 契约：必填缺口回炉一次）。
+
+    回归背景：NodeGoat-20260831-041040 中 SSRF-VULN-01/02 仅缺 title，
+    narrative/POC/endpoints 均完整；旧实现只检查不回炉，qa.passed=false。
+    """
+    d = _wb(tmp_path)
+    _write_queue(d, [{
+        "ID": "SSRF-VULN-01", "vulnerability_type": "SSRF",
+        "externally_exploitable": True, "confidence": "high",
+        "merge_source": "llm-only", "severity": "high",
+        "notes": "成因", "impact": "危害", "remediation": "修复",
+        "report_endpoints": [{"method": "GET", "path": "/research",
+                              "params": ["url"], "sink_location": "app.js:9"}],
+        "report_problem_points": [{"location": "app.js:9",
+                                   "description": "d", "snippet": "s"}],
+        "report_poc": {"curl": "curl http://t", "self_check": "pass"},
+    }], name="ssrf_exploitation_queue.json")
+    monkeypatch.setattr(activities, "_get_paths",
+                        lambda inp: (tmp_path, d, tmp_path))
+    enrich_payload = {"vulnerabilities": [{
+        "ID": "SSRF-VULN-01",
+        "title": "SSRF：GET /research 的 url 参数可请求内网地址",
+    }]}
+
+    with patch.object(activities, "run_claude_prompt",
+                      return_value=SimpleNamespace(
+                          structured_output={"narrative": "s",
+                                             "risk_level": "高",
+                                             "top_risks": [],
+                                             "remediation_order": None},
+                          text=None)), \
+         patch.object(activities, "run_gitnexus_verdict_agent",
+                      return_value=SimpleNamespace(
+                          structured_output=enrich_payload, text=None)) as m_agent:
+        result = await activities.run_report_polish(_FakeInput(tmp_path))
+
+    assert m_agent.call_count == 1
+    assert m_agent.call_args.kwargs["agent_name"] == "gn-enrich-rework-ssrf"
+    assert result["reworked"] == ["SSRF-VULN-01"]
+    queue = json.loads(d.joinpath("intermediate", "ssrf_exploitation_queue.json")
+                       .read_text(encoding="utf-8"))
+    assert queue["vulnerabilities"][0]["title"] == \
+        "SSRF：GET /research 的 url 参数可请求内网地址"
+    data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
+    checks = {c["check"]: c["failed_ids"] for c in data["qa"]["checks"]}
+    assert checks["title_present"] == []
+    assert checks["narrative_complete"] == []
+    assert data["qa"]["passed"] is True
+
+
 async def test_polish_reworks_missing_narratives(tmp_path, monkeypatch):
     """§6 回炉：narrative 缺段 → GN 深富化路径（gn_finding_enrichment prompt
     + 白名单仅补空缺）→ queue 写回 → 重建后 narrative_complete 过。"""

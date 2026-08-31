@@ -2208,9 +2208,10 @@ async def run_report_polish(input: ActivityInput) -> dict:
 
         # --- ⑤QA（§6 扩展）：七节覆盖率缺口分组 → 回炉一次（多路）→ 复检 ---
         # 分组口径：taint 专属（endpoints/params/problem_points/行号链走接口
-        # 富化 agent——产出三兄弟同源）；全卡（POC 走结构化写回路径；narrative
-        # 缺段走 GN 深富化路径，白名单仅补空缺）。单轮回炉，失败保产物 +
-        # qa.passed=false 显式呈现。
+        # 富化 agent——产出三兄弟同源）；全卡（POC 走结构化写回路径；title 或
+        # narrative 缺段走 GN 深富化路径，白名单仅补空缺）。单轮回炉，失败保
+        # 产物 + qa.passed=false 显式呈现。severity/isomorphic 属工程 invariant，
+        # 不交给 LLM 回炉。
         def _poc_incomplete(v) -> bool:
             p = v.poc
             return p is None or not (p.curl or p.raw_http or p.steps)
@@ -2223,10 +2224,18 @@ async def run_report_polish(input: ActivityInput) -> dict:
             return (v.type in _TAINT_CLASSES and v.endpoints
                     and not any(e.sink_location for e in v.endpoints))
 
+        def _title_missing(v) -> bool:
+            return not (v.title or "").strip()
+
         def _narrative_missing(v) -> bool:
             return (v.narrative is None
                     or not (v.narrative.cause and v.narrative.impact
                             and v.narrative.remediation))
+
+        def _narrative_rework_missing(v) -> bool:
+            # title 与 narrative 三段同属 reader-facing 深富化产物；title 单独
+            # 缺失也必须回炉（2026-08-26 QA 契约：必填缺口回炉一次）。
+            return _title_missing(v) or _narrative_missing(v)
 
         missing_endpoints = [v for v in rd.vulnerabilities
                              if v.type in _TAINT_CLASSES and not v.endpoints]
@@ -2237,7 +2246,10 @@ async def run_report_polish(input: ActivityInput) -> dict:
             + [v for v in rd.vulnerabilities if _params_missing(v)]
             + [v for v in rd.vulnerabilities if _locs_missing(v)])
         missing_poc = [v for v in rd.vulnerabilities if _poc_incomplete(v)]
-        missing_narr = [v for v in rd.vulnerabilities if _narrative_missing(v)]
+        # 变量名保留 missing_narr：这里表示 narrative 深富化 route 的目标集，
+        # 该 route 负责 title + cause/impact/remediation。
+        missing_narr = [v for v in rd.vulnerabilities
+                        if _narrative_rework_missing(v)]
 
         reworked: set[str] = set()
         if enrich_targets:
@@ -2259,7 +2271,7 @@ async def run_report_polish(input: ActivityInput) -> dict:
                          if v.type in _TAINT_CLASSES and not v.endpoints]
         checks.append(QACheck(check="taint_endpoints_present",
                               failed_ids=taint_missing))
-        no_title = [v.id for v in rd.vulnerabilities if not (v.title or "").strip()]
+        no_title = [v.id for v in rd.vulnerabilities if _title_missing(v)]
         checks.append(QACheck(check="title_present", failed_ids=no_title))
         bad_sev = [v.id for v in rd.vulnerabilities
                    if v.severity not in SEVERITY_ORDER]
@@ -2405,8 +2417,8 @@ async def _rework_missing_narratives(
     input: ActivityInput, deliverables: Path, repo: Path,
     missing, prompt_manager,
 ) -> list[str]:
-    """§6 回炉：narrative 缺段 → GN 深富化路径（gn_finding_enrichment agent，
-    白名单字段仅补空缺——已有段不覆写）。"""
+    """§6 回炉：title/narrative 缺段 → GN 深富化路径（gn_finding_enrichment
+    agent，白名单字段仅补空缺——已有段不覆写）。"""
     from supernova_core.models.queue_schemas import VulnerabilityQueue
     from supernova_whitebox.audit.session_registry import get_audit_session
 
@@ -2462,13 +2474,18 @@ async def _rework_missing_narratives(
                 queue_path,
                 {"vulnerabilities": [f.model_dump() for f in findings]},
             )
-            # _apply_gn_enrichment 是整对象替换（非原地）——从 findings 重查
+            # _apply_gn_enrichment 是整对象替换（非原地）——从 findings 重查。
+            # title 与 narrative 三段同属本 route 的修复契约；只写回 notes 但
+            # title 仍缺时不能记为 reworked。
             by_id_after = {f.ID: f for f in findings}
-            fixed = [i for i in card_ids
-                     if (by_id_after.get(i) is not None
-                         and getattr(by_id_after[i], "notes", None)
-                         and getattr(by_id_after[i], "impact", None)
-                         and getattr(by_id_after[i], "remediation", None))]
+            fixed = [
+                i for i in card_ids
+                if by_id_after.get(i) is not None
+                and (getattr(by_id_after[i], "title", None) or "").strip()
+                and getattr(by_id_after[i], "notes", None)
+                and getattr(by_id_after[i], "impact", None)
+                and getattr(by_id_after[i], "remediation", None)
+            ]
             reworked.extend(sorted(fixed))
     return reworked
 
