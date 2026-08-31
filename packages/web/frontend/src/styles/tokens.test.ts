@@ -21,6 +21,15 @@ describe("tokens.css 漂移护栏", () => {
   it("含全部语义色 token（--c- 前缀避开 events.css hex 同名变量）", () => {
     for (const t of SEMANTIC) expect(tokens, `missing ${t}`).toContain(t);
   });
+  it("含代码主题 token（层 G：代码块按代码主题渲染，与 web 主题解耦）", () => {
+    for (const t of [
+      "--code-bg", "--code-fg", "--code-muted", "--code-border",
+      "--code-hl-keyword", "--code-hl-string", "--code-hl-number",
+      "--code-hl-title", "--code-hl-meta",
+    ]) expect(tokens, `missing ${t}`).toContain(t);
+    // 深色区亮度差被 gamma 压扁，实色窗框是边界主载体——不得回退 alpha 发丝线
+    expect(tokens).toMatch(/--code-border:\s*[\d.]+ [\d.]+% [\d.]+%;/);
+  });
   it("含 :root（深）与 .light（浅）两组", () => {
     expect(tokens).toMatch(/:root\s*\{/);
     expect(tokens).toMatch(/\.light\s*\{/);

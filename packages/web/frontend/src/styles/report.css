@@ -99,9 +99,10 @@ html { scroll-behavior: smooth; }
 /* —— block code = 终端证据窗（tokens.css 层 G 代码主题）——
    md 路径（.prose pre）与结构化路径（.code-panel，VulnerabilityCard 的
    problem-point 片段 / POC curl/Burp / verify-step 命令 / evidence 片段）同一
-   终端材质：深底 + alpha 暖白 hairline + 微投影「嵌」进纸面；圆角随主题几何
-   收一档（-2px，编辑器 inset 比卡片更紧）。折行规则不变（长 URL / 无空格串也
-   折行，不横滚）。 */
+   终端材质：冷黑屏 + 实色石板窗框 + 顶部 inset 阴影（屏幕内凹进窗框的深度感，
+   深色主题里是可见的第三线索——亮度差在深色区被 gamma 压扁，框线扛边界）；
+   圆角随主题几何收一档（-2px，编辑器 inset 比卡片更紧）。折行规则不变
+   （长 URL / 无空格串也折行，不横滚）。 */
 .prose pre,
 .code-panel {
   border-radius: calc(var(--radius) - 2px);
@@ -109,7 +110,7 @@ html { scroll-behavior: smooth; }
   background: hsl(var(--code-bg));
   color: hsl(var(--code-fg));
   padding: 0.65rem 0.85rem;
-  box-shadow: 0 1px 2px hsl(30 40% 3% / 0.4), 0 4px 12px -4px hsl(30 40% 3% / 0.3);
+  box-shadow: inset 0 1px 3px hsl(222 40% 2% / 0.6), 0 1px 2px hsl(220 40% 3% / 0.4), 0 4px 12px -4px hsl(220 40% 3% / 0.3);
 }
 .prose pre {
   white-space: pre-wrap;
@@ -129,7 +130,7 @@ html { scroll-behavior: smooth; }
    --c-green 是压深档，深面板上不够亮）；左缘 3px 绿 inset 交代验证语义。 */
 .code-panel-ok {
   border-color: hsl(var(--code-hl-string) / 0.5);
-  box-shadow: inset 3px 0 0 hsl(var(--code-hl-string) / 0.85);
+  box-shadow: inset 3px 0 0 hsl(var(--code-hl-string) / 0.85), inset 0 1px 3px hsl(222 40% 2% / 0.6);
 }
 
 /* 面板内工具栏（语言角标 + 复制按钮）随代码主题配色：pre 已设 --code-fg，按钮
