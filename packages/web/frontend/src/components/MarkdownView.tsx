@@ -1,6 +1,5 @@
-import { useMemo, useState, useEffect, useRef, Children, type ReactNode, type ReactElement, type MouseEvent, type ElementType } from "react";
+import { useMemo, useState, useEffect, useRef, type ReactNode, type ReactElement, type MouseEvent, type ElementType } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
 import { HIGHLIGHT_PLUGIN } from "@/lib/hljs-langs";
 import GithubSlugger from "github-slugger";
@@ -8,9 +7,8 @@ import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import { toString } from "hast-util-to-string";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-import { copyToClipboard } from "@/lib/clipboard";
 import { SEV_PILL, SEV_DOT, SEV_EDGE } from "@/lib/severity-visual";
+import { copyableMarkdownCodeComponents } from "@/components/markdown/CopyableMarkdownCode";
 import { ChevronDown, ChevronRight, ListCollapse, List, LayoutPanelTop, LayoutGrid } from "lucide-react";
 import { AttackChainSection } from "./report/AttackChainSection";
 import { ThreatOverview } from "./report/ThreatOverview";
@@ -271,10 +269,9 @@ function h2Block({ children, ...props }: { children?: ReactNode; [k: string]: un
   return <h2 {...props}>{children}</h2>;
 }
 
-/** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / pre 复制按钮）。
- *  工厂接收 t：复制按钮文案随语言切换（react-markdown 的 components 项不订阅 i18n，
- *  靠外层 MarkdownView 的 useTranslation 触发重渲染、传入最新 t）。 */
-function makeProseComponents(t: TFunction) {
+/** prose 段共享的 react-markdown 组件覆写（kv-row li / inline code / 可复制 pre）。
+ *  代码块复制反馈在 CopyButton 内部随 i18n 重渲染；这里无需接收 t。 */
+function makeProseComponents() {
   return {
   // KV 行（冒号守卫：`- **key:** value` → kv-row；编号列表 `1. **RCE**…` 不匹配）
   li: ({ children, ...props }: { children?: ReactNode; [k: string]: unknown }) => {
@@ -327,57 +324,9 @@ function makeProseComponents(t: TFunction) {
   h4: notesBlockFor("h4"),
   h5: notesBlockFor("h5"),
   h6: notesBlockFor("h6"),
-  // block code：仅渲染 <code>（含 hljs language-xxx class），装饰交给 pre
-  code: ({ className, children, ...props }: { className?: string; children?: ReactNode; [k: string]: unknown }) => (
-    <code {...props} className={`font-mono ${className ?? ""}`}>{children}</code>
-  ),
-  // pre：只包 block code → 加语言角标 + 复制按钮
-  pre: ({ children, ...props }: { children?: ReactNode; [k: string]: unknown }) => {
-    const codeChild = Children.toArray(children)[0] as ReactElement<{
-      className?: string;
-      children?: ReactNode;
-    }>;
-    const cls = (codeChild?.props as { className?: string } | undefined)?.className ?? "";
-    const lang = /language-(\w+)/.exec(cls)?.[1] ?? "";
-    const text = flatten(codeChild?.props?.children);
-    return (
-      <pre {...props} data-testid="code-block" className="group relative pt-7">
-        {/* 工具栏：语言角标 + 复制按钮并排右上角（同一 flex 容器水平排列）。
-            旧实现一上一下绝对定位（top-1 / bottom-1），单行 http/bash 矮代码块时
-            二者垂直区间交叠 → 重叠。改水平并排后矮代码块也不重叠；pt-7 给工具栏
-            腾顶部空间，代码首行不被遮挡。语言角标弱化（辅助信息，eyebrow 风格），
-            复制按钮 hover 整块 pre 时才完全显形。 */}
-        <div className="absolute right-1 top-1 flex items-center gap-1">
-          {lang && (
-            <span
-              data-testid="code-lang"
-              className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70"
-            >
-              {lang}
-            </span>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            data-testid="copy-btn"
-            className="copy-btn h-6 px-2 text-xs opacity-50 transition-opacity group-hover:opacity-100"
-            onClick={async (e) => {
-              // copyToClipboard：Clipboard API 不可用（http://IP 非安全上下文）时 fallback
-              // execCommand；旧 `clipboard?.writeText` 静默无操作还把按钮改成 ✓（假成功）。
-              // currentTarget 须 await 前捕获（React 合成事件传播结束后置 null）。
-              const btn = e.currentTarget;
-              const ok = await copyToClipboard(text);
-              if (ok) btn.textContent = "✓";
-              else toast.error(t("common.copyFailed"));
-            }}
-          >
-            {t("markdown.copy")}
-          </Button>
-        </div>
-        {children}
-      </pre>
-    );
-  },
+  // block code / pre：全报告 Markdown 共享“语言角标 + 可复制”协议（含结构化报告
+  // RichText / AttackChainSection 与 md 降级路径），避免只出现在部分代码块上。
+  ...copyableMarkdownCodeComponents,
   };
 }
 
@@ -439,7 +388,7 @@ export function MarkdownView({ markdown }: { markdown: string }) {
       else next.add(id);
       return next;
     });
-  const proseComponents = useMemo(() => makeProseComponents(t), [t]);
+  const proseComponents = useMemo(() => makeProseComponents(), []);
   const { headings, topRisks, typeSummaries } = useMemo(() => parseStructure(markdown), [markdown]);
   const execH2 = headings.find((h) => h.text.includes("执行摘要"));
   const showHero = !!execH2 && topRisks.length > 0;

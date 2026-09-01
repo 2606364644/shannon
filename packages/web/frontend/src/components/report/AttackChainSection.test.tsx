@@ -44,4 +44,24 @@ describe("AttackChainSection", () => {
     const { container } = render(<AttackChainSection md={MD} count={1} />);
     expect(container.querySelector("ol")).not.toBeNull();
   });
+
+  it("攻击链 preamble 与正文的 Markdown 代码块都可复制", () => {
+    const md = [
+      "前置说明",
+      "",
+      "```bash",
+      "curl http://x/one",
+      "```",
+      "",
+      ...MD.split("\n"),
+      "",
+      "```http",
+      "GET /two HTTP/1.1",
+      "```",
+    ].join("\n");
+    const { container } = render(<AttackChainSection md={md} count={1} />);
+    const blocks = container.querySelectorAll('pre[data-testid="code-block"] .copy-btn');
+    expect(blocks).toHaveLength(2);
+    expect([...container.querySelectorAll('[data-testid="code-lang"]')].map((el) => el.textContent)).toEqual(["bash", "http"]);
+  });
 });

@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown } from "lucide-react";
 import { HIGHLIGHT_PLUGIN } from "@/lib/hljs-langs";
+import { copyableMarkdownCodeComponents } from "@/components/markdown/CopyableMarkdownCode";
 
 /**
  * 攻击链独立章节（attack-chain agent 产的 `llm-chain-N`，多步利用路径）。
@@ -88,6 +89,7 @@ export function AttackChainSection({ md, count }: { md: string; count: number })
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
+            components={copyableMarkdownCodeComponents}
           >
             {preamble}
           </ReactMarkdown>
@@ -125,7 +127,8 @@ export function AttackChainSection({ md, count }: { md: string; count: number })
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[...HIGHLIGHT_PLUGIN] as never}
-                >
+                components={copyableMarkdownCodeComponents}
+              >
                   {chain.bodyMd}
                 </ReactMarkdown>
               </div>

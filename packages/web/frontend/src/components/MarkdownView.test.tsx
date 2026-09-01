@@ -393,8 +393,10 @@ body.
       fireEvent.click(container.querySelector(".copy-btn")!);
       expect(exec).toHaveBeenCalledWith("copy");
       expect(captured).toBe("exit 0\n");
-      // 复制成功 → 按钮文字切 ✓（真实成功）
-      await waitFor(() => expect(container.querySelector(".copy-btn")?.textContent).toBe("✓"));
+      // 复制成功 → 受控状态把 aria-label 切到“已复制”（图标反馈，不手改 DOM 文本）
+      await waitFor(() =>
+        expect(container.querySelector<HTMLButtonElement>(".copy-btn")?.getAttribute("aria-label")).toBe("已复制"),
+      );
     } finally {
       delete (document as { execCommand?: unknown }).execCommand;
     }
@@ -661,7 +663,7 @@ describe("MarkdownView i18n", () => {
     expect(container.querySelector('[data-testid="exec-summary-hero"]')?.textContent).toContain("最高风险发现");
     // prose block code 复制按钮
     const { container: c2 } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
-    expect(c2.querySelector(".copy-btn")?.textContent).toBe("复制");
+    expect(c2.querySelector(".copy-btn")).toHaveAccessibleName("复制");
   });
 
   it("切英文渲染英文 chrome(Contents / Top risk findings / Copy)", () => {
@@ -672,7 +674,7 @@ describe("MarkdownView i18n", () => {
     expect(toc?.getAttribute("aria-label")).toBe("Table of contents");
     expect(container.querySelector('[data-testid="exec-summary-hero"]')?.textContent).toContain("Top risk findings");
     const { container: c2 } = render(<MarkdownView markdown={"```bash\nexit 0\n```\n"} />);
-    expect(c2.querySelector(".copy-btn")?.textContent).toBe("Copy");
+    expect(c2.querySelector(".copy-btn")).toHaveAccessibleName("Copy");
   });
 
   it("报告 Markdown 正文不随语言切换(仍是中文 fixture)", () => {
