@@ -133,6 +133,43 @@ describe("ReportView（JSON 纯渲染集成）", () => {
     expect(screen.getByText(/QA 校验未通过/)).toBeInTheDocument();
   });
 
+  it("结构化报告所有可见代码块（Markdown 与原生面板）都带复制按钮", () => {
+    const withCode: ReportData = {
+      ...data,
+      executive_summary: {
+        ...data.executive_summary!,
+        remediation_order: "优先执行：\n\n```bash\nnpm audit fix\n```",
+      },
+      vulnerabilities: [
+        {
+          ...vuln,
+          narrative: {
+            cause: "成因：\n\n```javascript\nrender(input)\n```",
+            impact: "影响",
+            remediation: "修复：\n\n```javascript\nescape(input)\n```",
+          },
+          evidence: {
+            ...vuln.evidence!,
+            dynamic_evidence: "HTTP/1.1 200 OK\nok",
+            steps: [{ action: "Verify", command: "curl http://t/health", result: "200" }],
+          },
+        },
+      ],
+      attack_chains: [
+        { id: "llm-chain-1", narrative: "链路：\n\n```http\nGET /x\n```", steps: [] },
+      ],
+    };
+    const { container } = render(<ReportView data={withCode} />);
+    const blocks = [...container.querySelectorAll("pre")];
+    expect(blocks.length).toBeGreaterThan(5);
+    blocks.forEach((block) => {
+      expect(
+        block.querySelector("button.copy-btn, button.code-chrome"),
+        `code block without copy button: ${block.outerHTML}`,
+      ).toBeTruthy();
+    });
+  });
+
   it("目录（ReportToc）：条目镜像区块，点击精准定位（scrollTo smooth）+ 目标卡描边闪烁", () => {
     const scrollTo = vi.fn();
     window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
