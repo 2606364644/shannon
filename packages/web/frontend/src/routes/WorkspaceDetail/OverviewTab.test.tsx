@@ -123,6 +123,72 @@ describe("OverviewTab", () => {
   });
 });
 
+describe("OverviewTab 成败显式化（2026-09-01）", () => {
+  // 三档 phase：旧数据（无 failed_agent_count）= 现行为青 / 部分失败黄 / 全失败红。
+  const failSession = {
+    ...session,
+    metrics: {
+      ...session.metrics,
+      phases: {
+        "pre-recon": { duration_ms: 805974, duration_percentage: 13.68, cost_usd: 3.75, agent_count: 1 },
+        "recon": { duration_ms: 433714, duration_percentage: 7.36, cost_usd: 0.48, agent_count: 2, failed_agent_count: 1 },
+        "vulnerability-analysis": { duration_ms: 2667580, duration_percentage: 45.25, cost_usd: 2.47, agent_count: 4, failed_agent_count: 4 },
+      },
+      agents: {
+        ...session.metrics.agents,
+        "xss-vuln": { duration_ms: 1000, cost_usd: 0.1, success: false, attempt_number: 3, model: "GLM-5.2[1m]", error: "timeout" },
+        "auth-vuln": { duration_ms: 2000, cost_usd: 0.2, success: true, attempt_number: 1, model: "GLM-5.2[1m]" },
+      },
+    },
+  };
+
+  it("阶段瀑布按成败着色：全失败红 / 部分失败黄 / 旧数据默认青（现行为回归）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(failSession)));
+    const { container } = renderAt("/p/ws/scans/scan1/overview");
+    await waitFor(() => expect(screen.getByText(/vulnerability-analysis/)).toBeInTheDocument());
+    const red = container.querySelector(".bg-red");
+    const yellow = container.querySelector(".bg-yellow");
+    const cyan = container.querySelector(".bg-cyan");
+    expect(red?.textContent).toContain("✗4/4");
+    expect(yellow?.textContent).toContain("✗1/2");
+    expect(cyan?.textContent).toContain("pre-recon");
+    expect(cyan?.textContent).not.toContain("✗");
+  });
+
+  it("失败块 title 悬浮含失败计数说明", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(failSession)));
+    const { container } = renderAt("/p/ws/scans/scan1/overview");
+    await waitFor(() => expect(screen.getByText(/vulnerability-analysis/)).toBeInTheDocument());
+    expect(container.querySelector('div[title*="个代理失败"]')).toBeInTheDocument();
+  });
+
+  it("agent 尝试列显式字形：✗ 失败红 / ⚠ 重试黄 / ✓ 一次成功绿", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(failSession)));
+    renderAt("/p/ws/scans/scan1/overview");
+    await waitFor(() => expect(screen.getByText(/xss-vuln/)).toBeInTheDocument());
+    const failedCell = screen.getByText(/✗ 3\(/).closest("td");
+    expect(failedCell?.className).toMatch(/text-red/);
+    const okCell = screen.getByText("✓ 1").closest("td");
+    expect(okCell?.className).toMatch(/text-green/);
+    // 重试后成功仍是黄（现行为）
+    const retryCell = screen.getByText(/⚠ 2\(/).closest("td");
+    expect(retryCell?.className).toMatch(/text-yellow/);
+  });
+
+  it("台账头部图例渲染（✓/⚠/✗ 三态说明）", async () => {
+    server.use(http.get("/api/workspaces/:ws/scans/:scanId", () => HttpResponse.json(failSession)));
+    renderAt("/p/ws/scans/scan1/overview");
+    const legend = await waitFor(() => {
+      const el = screen.getByTestId("agent-table-legend");
+      expect(el).toBeInTheDocument();
+      return el;
+    });
+    expect(legend.textContent).toContain("成功");
+    expect(legend.textContent).toContain("重试后成功");
+    expect(legend.textContent).toContain("失败");
+  });
+});
+
 describe("OverviewTab i18n", () => {
   afterEach(async () => {
     await act(async () => { await i18n.changeLanguage("zh"); });

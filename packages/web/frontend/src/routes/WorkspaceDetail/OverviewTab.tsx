@@ -105,19 +105,29 @@ function PhaseWaterfall({ phases, fmt }: { phases: SessionMetrics["phases"]; fmt
     <Card className="p-4">
       <CardTitle className="mb-2 font-semibold tracking-tight text-base">{t("workspaceDetail.overview.phaseWaterfall")}</CardTitle>
       <div className="flex items-end gap-0.5 h-20">
-        {entries.map(([name, p]) => (
-          <div
-            key={name}
-            className="bg-cyan min-w-[60px] p-1 text-background rounded-t-sm overflow-hidden"
-            style={{ width: `${p.duration_percentage}%` }}
-            title={`${name}: ${p.duration_percentage}%`}
-          >
-            <div className="text-xs font-bold truncate">{name}</div>
-            <div className="text-[0.7rem] opacity-85 font-mono">
-              {p.duration_percentage}% · {fmt(p.duration_ms)} · {fmtCost(p.cost_usd, p.cost_currency)} · {t("workspaceDetail.overview.phaseAgents", { count: p.agent_count })}
+        {entries.map(([name, p]) => {
+          // 阶段成败（2026-09-01）：agent 最终失败 → 着色（全失败红 / 部分失败黄，
+          // 与 ScanProgressOverview 语义色同源）；旧 session 无字段 → ?? 0 = 现行为。
+          const failed = p.failed_agent_count ?? 0;
+          const barCls =
+            failed > 0 && failed >= p.agent_count ? "bg-red"
+            : failed > 0 ? "bg-yellow"
+            : "bg-cyan";
+          return (
+            <div
+              key={name}
+              className={`${barCls} min-w-[60px] p-1 text-background rounded-t-sm overflow-hidden`}
+              style={{ width: `${p.duration_percentage}%` }}
+              title={`${name}: ${p.duration_percentage}%${failed > 0 ? ` · ${t("workspaceDetail.overview.phaseFailedTitle", { failed, count: p.agent_count })}` : ""}`}
+            >
+              <div className="text-xs font-bold truncate">{name}</div>
+              <div className="text-[0.7rem] opacity-85 font-mono">
+                {failed > 0 && <span className="font-bold">✗{failed}/{p.agent_count} · </span>}
+                {p.duration_percentage}% · {fmt(p.duration_ms)} · {fmtCost(p.cost_usd, p.cost_currency)} · {t("workspaceDetail.overview.phaseAgents", { count: p.agent_count })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );
@@ -129,6 +139,14 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <CardTitle className="font-semibold tracking-tight text-sm">{t("workspaceDetail.overview.agentLedger")}</CardTitle>
+        {/* 尝试列图例（2026-09-01 显式化）：字形取代纯颜色隐式语义 */}
+        <span className="font-mono text-[0.7rem] text-muted-foreground" data-testid="agent-table-legend">
+          <span className="text-green">✓</span> {t("workspaceDetail.overview.agentTable.legendSuccess")}
+          <span aria-hidden className="opacity-40"> · </span>
+          <span className="text-yellow">⚠</span> {t("workspaceDetail.overview.agentTable.legendRetried")}
+          <span aria-hidden className="opacity-40"> · </span>
+          <span className="text-red">✗</span> {t("workspaceDetail.overview.agentTable.legendFailed")}
+        </span>
       </div>
       <Table>
         <TableHeader>
@@ -142,12 +160,12 @@ function AgentTable({ agents, fmt }: { agents: SessionMetrics["agents"]; fmt: (m
         </TableHeader>
         <TableBody>
           {Object.entries(agents ?? {}).map(([name, a]) => {
+            const failed = a.success === false;
             const warned = a.attempt_number > 1 || !!a.error;
-            // 失败红、重试/出错黄（语义化颜色，不再用 .ev-* 事件类）
-            const attemptCls = a.success === false ? "text-red" : warned ? "text-yellow" : "";
-            const attemptText = warned
-              ? `⚠ ${a.attempt_number}${a.error ? `(${a.error.slice(0, 20)})` : ""}`
-              : a.attempt_number;
+            // 显式字形（2026-09-01）：✗ 最终失败（红）/ ⚠ 重试后成功（黄）/ ✓ 一次成功（绿）
+            const attemptCls = failed ? "text-red" : warned ? "text-yellow" : "text-green";
+            const glyph = failed ? "✗" : warned ? "⚠" : "✓";
+            const attemptText = `${glyph} ${a.attempt_number}${a.error ? `(${a.error.slice(0, 20)})` : ""}`;
             return (
               <TableRow key={name}>
                 <TableCell className="font-mono">{name}</TableCell>

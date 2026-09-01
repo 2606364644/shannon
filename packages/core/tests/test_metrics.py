@@ -83,6 +83,7 @@ def test_phase_metrics_defaults():
     assert pm.duration_percentage == 0.0
     assert pm.cost_usd == 0.0
     assert pm.agent_count == 0
+    assert pm.failed_agent_count == 0
 
 
 def test_phase_metrics_with_values():

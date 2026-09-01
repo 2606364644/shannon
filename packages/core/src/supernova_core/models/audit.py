@@ -99,3 +99,6 @@ class PhaseMetrics(BaseModel):
     duration_percentage: float = 0.0
     cost_usd: float = 0.0
     agent_count: int = 0
+    # 最终态失败的 unique agent 数（2026-09-01 聚合含失败 agent；写盘路径
+    # metrics_tracker 手写 dict，此模型仅类型文档）。
+    failed_agent_count: int = 0

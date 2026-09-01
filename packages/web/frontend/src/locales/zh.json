@@ -907,12 +907,16 @@
       "bigAgents": "代理数",
       "phaseAgents_one": "{{count}} 个代理",
       "phaseAgents_other": "{{count}} 个代理",
+      "phaseFailedTitle": "{{failed}}/{{count}} 个代理失败",
       "agentTable": {
         "agent": "代理",
         "duration": "时长",
         "cost": "花费",
         "attempt": "尝试",
-        "model": "模型"
+        "model": "模型",
+        "legendSuccess": "成功",
+        "legendRetried": "重试后成功",
+        "legendFailed": "失败"
       }
     },
     "report": {

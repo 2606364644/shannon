@@ -215,6 +215,9 @@ export interface SessionMetrics {
   // 阶段集动态（NodeGoat: pre-recon/recon/vulnerability-analysis/reporting）
   phases?: Record<string, {
     duration_ms: number; duration_percentage: number; cost_usd: number; agent_count: number;
+    // 最终态失败的 unique agent 数（2026-09-01 聚合含失败 agent）；旧 session
+    // 无此字段 → ?? 0 = 全成功展示（现行为）。
+    failed_agent_count?: number;
     cost_currency?: string;
     input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number;
   }>;

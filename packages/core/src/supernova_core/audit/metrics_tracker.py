@@ -135,9 +135,11 @@ class MetricsTracker:
         self._data["metrics"]["total_cache_read_tokens"] += result.cache_read_tokens or 0
         self._data["metrics"]["total_cache_creation_tokens"] += result.cache_creation_tokens or 0
 
-        # Phase aggregation — only for successful agents
-        if result.success:
-            self._aggregate_phase(agent_name, result)
+        # Phase aggregation — 无论成败都聚合（2026-09-01 概览可观测性）：
+        # 旧版只在 success 时聚合 → 失败 agent 对 phase 零贡献，「阶段全失败」在
+        # 瀑布上直接缺席；且失败 attempt 的 cost/duration 进 total 不进 phase，
+        # Σphase < total 口径分裂。改后与 total 同口径（无条件累加）。
+        self._aggregate_phase(agent_name, result)
 
         await self._atomic_write()
 
@@ -157,20 +159,36 @@ class MetricsTracker:
                 "cost_usd": 0.0,
                 "cost_currency": "USD",
                 "agent_count": 0,
+                "failed_agent_count": 0,
+                "agent_states": {},
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "cache_read_tokens": 0,
                 "cache_creation_tokens": 0,
             }
+        # 旧 schema phase（无 agent_states/failed_agent_count）兼容初始化：
+        # agent_count 历史基数保留；resume 后同 agent 重跑会因 map 空被视作
+        # 「首次出现」而 agent_count +1 虚高一次——展示性字段，可容忍。
+        phase = phases[phase_name]
+        phase.setdefault("failed_agent_count", 0)
+        phase.setdefault("agent_states", {})
 
-        phases[phase_name]["duration_ms"] += result.duration_ms
-        phases[phase_name]["cost_usd"] += result.cost_usd
-        phases[phase_name]["cost_currency"] = result.cost_currency
-        phases[phase_name]["agent_count"] += 1
-        phases[phase_name]["input_tokens"] += result.input_tokens or 0
-        phases[phase_name]["output_tokens"] += result.output_tokens or 0
-        phases[phase_name]["cache_read_tokens"] += result.cache_read_tokens or 0
-        phases[phase_name]["cache_creation_tokens"] += result.cache_creation_tokens or 0
+        first_seen = agent_name not in phase["agent_states"]
+        # 最终态 last-wins：重试场景每次 end 都覆盖，末次即最终态。
+        phase["agent_states"][agent_name] = result.success
+        if first_seen:
+            phase["agent_count"] += 1
+        phase["failed_agent_count"] = sum(
+            1 for ok in phase["agent_states"].values() if ok is False
+        )
+
+        phase["duration_ms"] += result.duration_ms
+        phase["cost_usd"] += result.cost_usd
+        phase["cost_currency"] = result.cost_currency
+        phase["input_tokens"] += result.input_tokens or 0
+        phase["output_tokens"] += result.output_tokens or 0
+        phase["cache_read_tokens"] += result.cache_read_tokens or 0
+        phase["cache_creation_tokens"] += result.cache_creation_tokens or 0
 
         self._recalculate_phase_percentages()
 
