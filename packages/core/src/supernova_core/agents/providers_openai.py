@@ -148,6 +148,13 @@ def _wrap_client_for_argument_sanitize(
     该 provider 所有请求（多轮 agent / 单次调用 / subagent，共用同一 client）
     统一生效。对齐 anthropic 引擎 ProviderConfig.adaptive_thinking 语义：
     False=显式禁用，True/None=模型默认（见 OpenAIProvider._get_client）。
+
+    注意必须经 ``extra_body`` 注入而非顶层 kwargs：openai SDK 的 create() 是显式
+    签名（不接受任意 kwarg），顶层传 ``thinking`` 在客户端本地即 TypeError
+    ``AsyncCompletions.create() got an unexpected keyword argument 'thinking'``
+    （2026-09-01 NodeGoat-20260901-060640 真机回归：gn-discovery 31ms 全灭）；
+    ``extra_body`` 是 SDK 官方逃生舱，合并进 request JSON body 顶层——与直连
+    curl 顶层参数等效。
     """
     original_create = client.chat.completions.create
 
@@ -159,7 +166,9 @@ def _wrap_client_for_argument_sanitize(
         if tools is not None:
             kwargs["tools"] = _strip_tools_strict(tools)
         if disable_thinking:
-            kwargs.setdefault("thinking", {"type": "disabled"})
+            extra_body = kwargs.get("extra_body") or {}
+            extra_body.setdefault("thinking", {"type": "disabled"})
+            kwargs["extra_body"] = extra_body
         return await original_create(*args, **kwargs)
 
     completions_proxy = _AttrProxy(client.chat.completions, {"create": _sanitized_create})

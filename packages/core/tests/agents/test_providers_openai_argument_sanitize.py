@@ -193,6 +193,11 @@ async def test_wrap_client_strips_strict_preserves_messages_sanitization():
 # chat_template_kwargs 风格被网关忽略），单轮 19s→7s、completion -73%、reasoning 归零。
 # 注入做在 client 包装层（所有 chat.completions.create 必经）= 整个扫描全部 LLM
 # 请求统一生效（多轮 agent / 单次调用 / subagent 共用同一 client）。
+#
+# ⚠ 必须经 extra_body 注入（2026-09-01 NodeGoat-20260901-060640 真机回归）：
+# openai SDK create() 是显式签名（不接受任意 kwarg），顶层传 thinking 在客户端
+# 本地即 TypeError "unexpected keyword argument 'thinking'"——gn-discovery 31ms
+# 全灭；单测 AsyncMock 接受一切掩盖了签名不匹配，故有下方真签名校验测试。
 
 
 @pytest.mark.asyncio
@@ -201,8 +206,10 @@ async def test_wrap_client_injects_thinking_disabled_when_flag_set():
     raw.chat.completions.create = AsyncMock(return_value="resp")
     wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
     await wrapped.chat.completions.create(model="m", messages=[])
-    assert raw.chat.completions.create.call_args.kwargs["thinking"] == {
-        "type": "disabled"}
+    kw = raw.chat.completions.create.call_args.kwargs
+    assert kw["extra_body"]["thinking"] == {"type": "disabled"}
+    # 顶层不得出现 thinking（SDK 显式签名不接受，本地 TypeError）
+    assert "thinking" not in kw
 
 
 @pytest.mark.asyncio
@@ -212,19 +219,59 @@ async def test_wrap_client_no_thinking_injection_by_default():
     raw.chat.completions.create = AsyncMock(return_value="resp")
     wrapped = _wrap_client_for_argument_sanitize(raw)
     await wrapped.chat.completions.create(model="m", messages=[])
-    assert "thinking" not in raw.chat.completions.create.call_args.kwargs
+    kw = raw.chat.completions.create.call_args.kwargs
+    assert "extra_body" not in kw and "thinking" not in kw
 
 
 @pytest.mark.asyncio
 async def test_wrap_client_thinking_not_overridden_when_explicit():
-    """调用方显式传 thinking 时不覆盖（setdefault 语义，防御未来细粒度控制）。"""
+    """调用方已在 extra_body 显式设 thinking 时不覆盖（防御未来细粒度控制）。"""
     raw = MagicMock()
     raw.chat.completions.create = AsyncMock(return_value="resp")
     wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
     await wrapped.chat.completions.create(
-        model="m", messages=[], thinking={"type": "adaptive"})
-    assert raw.chat.completions.create.call_args.kwargs["thinking"] == {
+        model="m", messages=[], extra_body={"thinking": {"type": "adaptive"}})
+    assert raw.chat.completions.create.call_args.kwargs["extra_body"]["thinking"] == {
         "type": "adaptive"}
+
+
+@pytest.mark.asyncio
+async def test_wrap_client_thinking_merges_into_existing_extra_body():
+    """调用方已带 extra_body 其他键时合并不清空（extra_body 是共享逃生舱）。"""
+    raw = MagicMock()
+    raw.chat.completions.create = AsyncMock(return_value="resp")
+    wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
+    await wrapped.chat.completions.create(
+        model="m", messages=[], extra_body={"user_trace": "abc"})
+    eb = raw.chat.completions.create.call_args.kwargs["extra_body"]
+    assert eb["thinking"] == {"type": "disabled"} and eb["user_trace"] == "abc"
+
+
+@pytest.mark.asyncio
+async def test_wrap_client_injected_kwargs_accepted_by_real_sdk_signature():
+    """真签名校验（回归 2026-09-01 NodeGoat-20260901-060640）：
+
+    注入后的全部 kwargs 必须被 openai SDK 真实 create() 签名接受——
+    AsyncMock 接受一切，测不出签名不匹配；本测试对真签名静态校验，
+    防止未来再往顶层塞 SDK 不认识的参数（本地 TypeError、agent 秒灭类事故）。
+    """
+    import inspect
+    from openai.resources.chat import completions as _chat_mod
+
+    raw = MagicMock()
+    raw.chat.completions.create = AsyncMock(return_value="resp")
+    wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
+    await wrapped.chat.completions.create(
+        model="m", messages=[{"role": "user", "content": "hi"}])
+    kw = raw.chat.completions.create.call_args.kwargs
+
+    sig_params = inspect.signature(_chat_mod.AsyncCompletions.create).parameters
+    accepted = {p for p, v in sig_params.items()
+                if v.kind is not inspect.Parameter.POSITIONAL_ONLY}
+    unexpected = set(kw) - accepted
+    assert not unexpected, (
+        f"包装层注入了 SDK create() 不接受的顶层 kwargs: {unexpected}——"
+        f"自定义 body 参数必须走 extra_body")
 
 
 @pytest.mark.asyncio
@@ -257,8 +304,8 @@ async def test_provider_wires_disable_thinking_from_config(monkeypatch):
     client = provider._get_client()
     # 经包装代理发一次请求，断言 thinking 注入
     await client.chat.completions.create(model="m", messages=[])
-    assert fake_client.chat.completions.create.call_args.kwargs["thinking"] == {
-        "type": "disabled"}
+    kw = fake_client.chat.completions.create.call_args.kwargs
+    assert kw["extra_body"]["thinking"] == {"type": "disabled"}
 
 
 @pytest.mark.asyncio
