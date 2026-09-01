@@ -38,6 +38,15 @@ export function StatsRow({ stats }: { stats: ReportStatsData }) {
                   <span>{ts.severity_range}</span>
                 )}
               </div>
+              {ts.whitebox_count != null && ts.blackbox_count != null && (
+                <div data-testid={`stat-tracks-${key}`}
+                     className="mb-2 font-mono text-[10.5px] text-muted-foreground">
+                  {t("report.trackCounts", {
+                    whitebox: ts.whitebox_count,
+                    blackbox: ts.blackbox_count,
+                  })}
+                </div>
+              )}
               {ts.key_findings && (
                 <p className="border-t border-dashed border-border pt-2 text-[11.5px] leading-snug text-foreground/85">
                   {ts.key_findings}

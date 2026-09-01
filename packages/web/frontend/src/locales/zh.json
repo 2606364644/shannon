@@ -1115,6 +1115,7 @@
     "remediationOrder": "修复优先级",
     "riskLevel": "风险等级",
     "byType": "按漏洞类型汇总",
+    "trackCounts": "白盒 {{whitebox}} · 黑盒 {{blackbox}}",
     "endpoints": "相关接口",
     "colMethod": "Method",
     "colPath": "Path",

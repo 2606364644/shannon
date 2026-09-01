@@ -5,7 +5,7 @@ import { ReportView } from "./ReportView";
 import { ExecutiveSummary } from "./ExecutiveSummary";
 import { StatsRow } from "./StatsRow";
 import { VulnerabilityCard, buildRawHttp } from "./VulnerabilityCard";
-import type { ReportData, ReportVulnerability } from "@/api/types";
+import type { ReportData, ReportStatsData, ReportVulnerability } from "@/api/types";
 
 // ── fixture：对齐 core pydantic schema（models/report_data.py）snake_case 直传 ──
 
@@ -182,6 +182,27 @@ describe("StatsRow", () => {
     const sev = screen.getByTestId("stat-severity");
     expect(within(sev).getByText(/Critical/i)).toBeInTheDocument();
     expect(within(sev).getAllByText("1").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("融合轨（分列数非 null）：count 下呈现「白盒 N · 黑盒 M」；单轨不渲染", () => {
+    const fusionStats: ReportStatsData = {
+      by_type: {
+        xss: { count: 1, severity_range: "high",
+               whitebox_count: 1, blackbox_count: 1 },
+        ssrf: { count: 1, severity_range: "critical",
+                whitebox_count: 1, blackbox_count: 0 },
+      },
+      by_severity: { critical: 1, high: 1 },
+    };
+    const { unmount } = render(<StatsRow stats={fusionStats} />);
+    const xss = screen.getByTestId("stat-type-xss");
+    expect(within(xss).getByText(/白盒 1 · 黑盒 1/)).toBeInTheDocument();
+    const ssrf = screen.getByTestId("stat-type-ssrf");
+    expect(within(ssrf).getByText(/白盒 1 · 黑盒 0/)).toBeInTheDocument();
+    // 单轨（分列数缺省）：无分列小字
+    unmount();
+    render(<StatsRow stats={data.stats!} />);
+    expect(screen.queryByText(/白盒 \d/)).toBeNull();
   });
 });
 

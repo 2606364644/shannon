@@ -11,14 +11,31 @@ import logging
 
 from supernova_core.models.report_data import (
     ExecutiveSummary,
+    QuickReferenceRow,
     ReportData,
     ReportVulnerability,
     ScanMeta,
     TopRisk,
     VulnEvidence,
 )
+from supernova_core.services.findings_renderer import CLASS_CONFIG
+# 聚合/标题口径复用白盒 builder（勿抄逻辑——与白盒报告同口径；
+# 同包跨模块复用私有函数沿 report_data_builder 复用 report_assembler
+# 单元格函数的先例）
+from supernova_core.services.report_data_builder import _build_stats
+from supernova_core.services.report_assembler import _type_title
+from supernova_core.services.severity_rules import SEVERITY_ORDER
 
 logger = logging.getLogger(__name__)
+
+# cross_verification → 速查表 verification 列中文标签（行级承载
+# 「黑盒验证后情况」；failed 类在卡片 evidence.notes 另有失败说明）
+_CROSS_LABELS = {
+    "verified": "已实证",
+    "failed-to-verify": "复验失败",
+    "untested": "未覆盖",
+    "blackbox-only": "黑盒独有",
+}
 
 
 def _endpoint_key(v: ReportVulnerability) -> tuple[str, str] | None:
@@ -78,6 +95,67 @@ def _deterministic_fusion_summary(fused: list[ReportVulnerability],
                                               "再补测 untested 缺口。")
 
 
+def _group_by_type(
+        fused: list[ReportVulnerability]) -> dict[str, list[ReportVulnerability]]:
+    """融合卡按类分组，类序对齐 CLASS_CONFIG（白盒 _quick_reference 口径），
+    未知类按首现序追加。"""
+    groups: dict[str, list[ReportVulnerability]] = {}
+    for v in fused:
+        groups.setdefault(v.type, []).append(v)
+    ordered = {c: groups[c] for c in CLASS_CONFIG if c in groups}
+    ordered.update({c: vs for c, vs in groups.items() if c not in CLASS_CONFIG})
+    return ordered
+
+
+def _fusion_stats(fused: list[ReportVulnerability],
+                  whitebox_rd: ReportData,
+                  blackbox_rd: ReportData):
+    """融合统计（2026-09-01 用户反馈「融合报告缺漏洞数预览」）：
+    count/severity_range/key_findings/by_severity 复用白盒 _build_stats 同口径
+    ——渲染端（前端 StatsRow / md 类型汇总）零改动即亮；另填每类
+    whitebox_count/blackbox_count 分列数（两侧报告该类卡数——含黑盒独有类
+    /黑盒未测类自然为 0，从 vulnerabilities 现数不依赖输入 stats 是否已填）。"""
+    from collections import Counter
+    stats = _build_stats(_group_by_type(fused))
+    wb_counts = Counter(v.type for v in whitebox_rd.vulnerabilities)
+    bb_counts = Counter(v.type for v in blackbox_rd.vulnerabilities)
+    for vuln_class, ts in stats.by_type.items():
+        ts.whitebox_count = wb_counts.get(vuln_class, 0)
+        ts.blackbox_count = bb_counts.get(vuln_class, 0)
+    return stats
+
+
+def _fusion_quick_reference(
+        fused: list[ReportVulnerability]) -> list[QuickReferenceRow]:
+    """融合速查表：融合卡确定性派生；类序对齐 CLASS_CONFIG + 类内
+    severity 降序（白盒口径）；verification 列 = cross_verification 中文
+    标签；params/endpoints 取结构化 endpoints 表展平去重。"""
+    rows: list[QuickReferenceRow] = []
+    for vs in _group_by_type(fused).values():
+        ranked = sorted(
+            vs, key=lambda v: -SEVERITY_ORDER.get(v.severity or "", 0))
+        for v in ranked:
+            params: list[str] = []
+            endpoints: list[str] = []
+            for e in v.endpoints:
+                if e.path and e.path not in endpoints:
+                    endpoints.append(e.path)
+                for p in e.params:
+                    if p and p not in params:
+                        params.append(p)
+            rows.append(QuickReferenceRow(
+                id=v.id,
+                title=v.title or _type_title(v),
+                params=params,
+                endpoints=endpoints,
+                severity=v.severity,
+                verification=_CROSS_LABELS.get(v.cross_verification,
+                                               v.cross_verification),
+                confidence=v.confidence,
+            ))
+    return rows
+
+
 def fuse_report_data(whitebox_rd: ReportData, blackbox_rd: ReportData,
                      llm_fn=None) -> ReportData:
     """确定性融合（+可选 LLM 叙事增强）。核心交叉验证永不依赖 LLM。"""
@@ -117,9 +195,10 @@ def fuse_report_data(whitebox_rd: ReportData, blackbox_rd: ReportData,
     rd = ReportData(
         scan=scan,
         executive_summary=_deterministic_fusion_summary(fused, len(gaps)),
-        stats=None,
+        stats=_fusion_stats(fused, whitebox_rd, blackbox_rd),
         vulnerabilities=fused,
         attack_chains=whitebox_rd.attack_chains,
         verification_gaps=gaps,
+        quick_reference=_fusion_quick_reference(fused),
     )
     return rd

@@ -133,3 +133,61 @@ def test_fuse_carries_blackbox_verification_steps():
     # 黑盒独有卡同样携带（未与白盒融合、原样透传）
     bb_only = by_id["INJ-VULN-07"].evidence
     assert bb_only is not None and bb_only.steps == []
+
+
+def test_fuse_stats_by_type_with_track_counts():
+    """融合 stats（2026-09-01 用户反馈「融合报告缺漏洞数预览」）：每类
+    count / severity_range / key_findings + 白盒/黑盒分列数（取两侧报告
+    该类卡数）+ by_severity——统计层只两列数，三态留行级速查表。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    fused = fuse_report_data(_wb_rd(), _bb_rd())
+    assert fused.stats is not None
+    bt = fused.stats.by_type
+    assert bt["xss"].count == 1
+    assert (bt["xss"].whitebox_count, bt["xss"].blackbox_count) == (1, 1)
+    assert (bt["ssrf"].whitebox_count, bt["ssrf"].blackbox_count) == (1, 0)
+    assert (bt["injection"].whitebox_count,
+            bt["injection"].blackbox_count) == (0, 1)
+    assert bt["xss"].severity_range == "high"
+    assert bt["xss"].key_findings == "XSS-VULN-01 存储型 XSS"
+    assert fused.stats.by_severity == {"high": 1, "critical": 2}
+
+
+def test_fuse_quick_reference_rows_with_cross_state():
+    """融合速查表：融合卡确定性派生，verification 列 = cross_verification
+    中文标签（行级承载「黑盒验证后情况」）；类序对齐 CLASS_CONFIG。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    fused = fuse_report_data(_wb_rd(), _bb_rd())
+    assert [r.id for r in fused.quick_reference] == [
+        "INJ-VULN-07", "XSS-VULN-01", "SSRF-VULN-01"]
+    by_id = {r.id: r for r in fused.quick_reference}
+    assert by_id["XSS-VULN-01"].verification == "已实证"
+    assert by_id["XSS-VULN-01"].endpoints == ["/memos"]
+    assert by_id["XSS-VULN-01"].severity == "high"
+    assert by_id["SSRF-VULN-01"].verification == "未覆盖"
+    assert by_id["INJ-VULN-07"].verification == "黑盒独有"
+
+
+def test_fuse_quick_reference_failed_to_verify_label():
+    """failed-to-verify（黑盒测了但未实证，如 blocked_by_security）→
+    速查表标「复验失败」。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    from supernova_core.models.report_data import (
+        ReportData, ReportVulnerability, ScanMeta,
+    )
+    wb = ReportData(
+        scan=ScanMeta(id="s1", track="whitebox"),
+        vulnerabilities=[ReportVulnerability(
+            id="SSRF-VULN-01", type="ssrf", severity="critical",
+            endpoints=[{"method": "GET", "path": "/research"}])])
+    bb = ReportData(
+        scan=ScanMeta(id="s1", track="blackbox"),
+        vulnerabilities=[ReportVulnerability(
+            id="SSRF-VULN-01", type="ssrf",
+            endpoints=[{"method": "GET", "path": "/research"}],
+            evidence={"verification": "dynamic",
+                      "verdict": "blocked_by_security",
+                      "notes": "WAF 拦截"})])
+    fused = fuse_report_data(wb, bb)
+    assert fused.vulnerabilities[0].cross_verification == "failed-to-verify"
+    assert fused.quick_reference[0].verification == "复验失败"

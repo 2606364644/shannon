@@ -355,3 +355,47 @@ def test_export_report_markdown_verification_steps_section():
             id="INJ-1", type="injection", severity="high", title="SQLi")],
     )
     assert "验证步骤" not in export_report_markdown(wb)
+
+
+def test_export_combined_type_summary_with_track_counts():
+    """融合轨类型汇总（2026-09-01 用户反馈）：类标题带「白盒 N · 黑盒 M」
+    分列数 + 速查表 verification 列；单轨 stats 无分列数 → 标题零变化。"""
+    from supernova_core.services.report_markdown_exporter import (
+        export_report_markdown,
+    )
+    from supernova_core.models.report_data import (
+        QuickReferenceRow, ReportData, ReportStats, ReportVulnerability,
+        ScanMeta, TypeStats,
+    )
+    rd = ReportData(
+        scan=ScanMeta(id="s1", track="combined"),
+        stats=ReportStats(
+            by_type={"xss": TypeStats(
+                count=1, severity_range="high",
+                whitebox_count=1, blackbox_count=1)},
+            by_severity={"high": 1}),
+        vulnerabilities=[ReportVulnerability(
+            id="XSS-VULN-01", type="xss", severity="high",
+            title="存储型 XSS")],
+        quick_reference=[QuickReferenceRow(
+            id="XSS-VULN-01", title="存储型 XSS", endpoints=["/memos"],
+            severity="high", verification="已实证")],
+    )
+    md = export_report_markdown(rd)
+    assert "### 跨站脚本 (XSS)（1）" in md
+    assert "白盒 1 · 黑盒 1" in md
+    assert "已实证" in md            # 速查表 verification 列
+
+    # 单轨（无分列数）：类标题不带后缀——零回归
+    wb = ReportData(
+        scan=ScanMeta(id="s1", track="whitebox"),
+        stats=ReportStats(
+            by_type={"xss": TypeStats(count=1, severity_range="high")},
+            by_severity={"high": 1}),
+        vulnerabilities=[ReportVulnerability(
+            id="XSS-VULN-01", type="xss", severity="high",
+            title="存储型 XSS")],
+    )
+    wb_md = export_report_markdown(wb)
+    assert "### 跨站脚本 (XSS)（1）" in wb_md
+    assert "白盒" not in wb_md

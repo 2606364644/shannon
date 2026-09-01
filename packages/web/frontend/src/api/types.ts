@@ -461,6 +461,10 @@ export interface ReportTypeStats {
   count: number;
   severity_range?: string | null;
   key_findings?: string | null;
+  /** 融合轨分列数（该类白盒/黑盒报告各自卡数）；单轨为 null——
+   *  两字段都非 null 才渲染「白盒 N · 黑盒 M」。 */
+  whitebox_count?: number | null;
+  blackbox_count?: number | null;
 }
 
 export interface ReportStatsData {

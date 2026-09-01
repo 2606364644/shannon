@@ -180,6 +180,11 @@ class TypeStats(BaseModel):
     count: int = 0
     severity_range: str | None = None
     key_findings: str | None = None
+    # 融合轨分列数（2026-09-01 用户反馈「融合报告缺漏洞数预览」）：该类
+    # 白盒/黑盒报告各自的卡数（统计层只两列数，三态留行级速查表）；
+    # 单轨产物为 None——渲染端按「两字段都非 None」判定融合轨。
+    whitebox_count: int | None = None
+    blackbox_count: int | None = None
 
 
 class ReportStats(BaseModel):

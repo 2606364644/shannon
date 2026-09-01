@@ -33,6 +33,10 @@ _M = Messages({
     "top_risks_h3": {"zh": "### 最高风险", "en": "### Top Risks"},
     "type_summary_h2": {"zh": "## 漏洞类型汇总",
                         "en": "## Vulnerability Type Summary"},
+    # 融合轨类标题分列后缀（2026-09-01）：TypeStats 两轨分列数都非 None
+    # 才拼——单轨零变化
+    "track_counts_suffix": {"zh": "（白盒 {whitebox} · 黑盒 {blackbox}）",
+                            "en": " (whitebox {whitebox} · blackbox {blackbox})"},
     "severity_range_label": {"zh": "- **严重度范围:**",
                              "en": "- **Severity Range:**"},
     "key_findings_label": {"zh": "- **关键发现:**", "en": "- **Key Findings:**"},
@@ -223,7 +227,12 @@ def _type_summary_lines(report_data: ReportData) -> str | None:
     lines: list[str] = [_M.get("type_summary_h2"), ""]
     for vuln_class, ts in stats.by_type.items():
         heading = _type_class_heading(vuln_class)
-        lines.extend((f"### {heading}（{ts.count}）", ""))
+        title = f"### {heading}（{ts.count}）"
+        if ts.whitebox_count is not None and ts.blackbox_count is not None:
+            title += _M.get("track_counts_suffix",
+                            whitebox=ts.whitebox_count,
+                            blackbox=ts.blackbox_count)
+        lines.extend((title, ""))
         if ts.severity_range:
             lines.append(f"{_M.get('severity_range_label')} {ts.severity_range}")
         if ts.key_findings:

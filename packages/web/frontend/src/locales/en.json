@@ -1115,6 +1115,7 @@
     "remediationOrder": "Remediation order",
     "riskLevel": "Risk level",
     "byType": "Summary by vulnerability type",
+    "trackCounts": "whitebox {{whitebox}} · blackbox {{blackbox}}",
     "endpoints": "Related Endpoints",
     "colMethod": "Method",
     "colPath": "Path",
