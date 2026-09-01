@@ -66,7 +66,8 @@ export const THEMES: readonly ThemeDef[] = [
     id: "midnight",
     mode: "dark",
     paletteClass: "theme-midnight",
-    preview: { bg: "hsl(230 20% 8%)", card: "hsl(230 18% 11%)", primary: "hsl(16 70% 62%)", border: "hsl(230 30% 80% / 0.14)" },
+    // 2026-09-02 靛蓝显化：底 sat 20→28（深区 gamma 压扁靛蓝感，与 graphite 难分）
+    preview: { bg: "hsl(230 28% 8%)", card: "hsl(230 25% 11%)", primary: "hsl(16 70% 62%)", border: "hsl(230 30% 80% / 0.14)" },
   },
   {
     id: "graphite",
@@ -96,8 +97,9 @@ export const THEMES: readonly ThemeDef[] = [
     id: "ember",
     mode: "dark",
     paletteClass: "theme-ember",
-    // 2026-08-31 余烬：暖褐炉膛（24°/8%）+ coral 火种 + 底缘余烬辉光——暗色组唯一显性暖调
-    preview: { bg: "hsl(24 8% 9%)", card: "hsl(24 7% 12%)", primary: "hsl(15 60% 56%)", border: "hsl(24 12% 88% / 0.12)" },
+    // 2026-08-31 余烬（2026-09-02 重做）：暖褐炉膛显化（20°/16%）+ 炭火橙 primary（28°，
+    // 气质层本色）+ 底缘余烬辉光——暗色组唯一显性暖调，与 charcoal 拉开色温族
+    preview: { bg: "hsl(20 16% 9%)", card: "hsl(20 14% 12%)", primary: "hsl(28 72% 58%)", border: "hsl(20 16% 88% / 0.12)" },
   },
   {
     id: "catppuccin",
@@ -147,7 +149,8 @@ export const THEMES: readonly ThemeDef[] = [
     id: "github",
     mode: "light",
     paletteClass: "theme-github",
-    preview: { bg: "hsl(0 0% 100%)", card: "hsl(210 29% 97%)", primary: "hsl(16 64% 44%)", border: "hsl(210 18% 84%)" },
+    // 2026-09-02 primary coral 赤褐→Primer 蓝（系统对齐层本色纪律，mac 先例；与 notion 撞款解）
+    preview: { bg: "hsl(0 0% 100%)", card: "hsl(210 29% 97%)", primary: "hsl(212 92% 44%)", border: "hsl(210 18% 84%)" },
   },
   {
     id: "notion",

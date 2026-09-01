@@ -25,7 +25,19 @@
    github / mac 的纯影/线框/玻璃三极不动（克制即身份；2026-08-27 mac 果味修订
    例外——蓝饱和回真值 + Apple 蓝主色 + 天光画布 + 分段白片，反「太灰」反馈）。
    画布材质统一走 --canvas-material / --canvas-material-size /
-   --canvas-material-attachment token + html body 消费点（.light 块后）。 */
+   --canvas-material-attachment token + html body 消费点（.light 块后）。
+   2026-09-01 主题色存在感（用户反馈「主题太同质化」）：主题色此前只活在
+   CTA/链接/焦点环（<2% 面积），大面积中性面 + 深色区底色色温被 gamma 压扁
+   → 切主题 ≈ 换按钮色。解法 = 主题色渗透到「交互确认」的语义位：
+   ① --accent 主题色 tint 化（hover/选中面，hue 跟随各主题底色家族、L 持平
+   保 AA、深色 sat 18-28% / 浅色 22-32%）——例外：graphite（Geist 精确灰阶）、
+   openai（颜色的缺席）、notion（极简灰 hover）保持无彩，无彩即其身份，
+   公式硬套反而失真；已彩主题（sentry/mission/blueprint/rose-pine 系/
+   gruvbox-light/solarized-light）不动。② ::selection 主题色（一条公式
+   hsl(var(--primary)/0.3) 全主题自适应，见 html body 消费点后）。
+   ③ TopBar 底缘 2px 主题色 hairline（TopBar.tsx，--primary/0.55——
+   openai 自动得墨黑线、gruvbox 琥珀线，每主题锚点=身份色）。severity/
+   双轨语义色/primary 值本身不动。 */
 
 :root {
   /* 层 A · shadcn token（深 · Claude 深色；2026-08-24 精确对齐 claude.ai 暗色真值：
@@ -44,7 +56,7 @@
   --secondary-foreground: 36 10% 90%;
   --muted: 60 3% 16%;
   --muted-foreground: 36 5% 62%;
-  --accent: 60 3% 21%;
+  --accent: 15 22% 21%;
   --accent-foreground: 36 10% 90%;
   --destructive: 5 62% 56%;
   --destructive-foreground: 40 4% 12%;
@@ -69,7 +81,11 @@
      数据、serif=kami 衬线。配套：index.css 全局 antialiased + Google Fonts
      链删 Plex Sans 并为 Mono/Serif/Inter 补 700 杜绝合成粗体） */
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --font-sans: system-ui, sans-serif;
+  /* 2026-09-02 字体全库加强：基准对（charcoal/warm-paper）用 Space Grotesk
+     （Anthropic 品牌 Styrene 的开源几何怪诞同族，fonts.css 自托管）。中文回落
+     system-ui（中文 webfont 单字重 5-8MB 不可打包——拉丁个性化+中文系统栈，
+     kami/mac 先例路径）。 */
+  --font-sans: "Space Grotesk Variable", system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", Georgia, serif;
   --radius: 12px;
 
@@ -122,7 +138,7 @@
   --secondary-foreground: 40 4% 17%;
   --muted: 40 12% 95%;
   --muted-foreground: 40 4% 42%;
-  --accent: 40 12% 92%;
+  --accent: 15 24% 93%;
   --accent-foreground: 40 4% 17%;
   --destructive: 5 58% 46%;
   --destructive-foreground: 0 0% 100%;
@@ -189,6 +205,15 @@ html body {
   background-attachment: var(--canvas-material-attachment, scroll);
 }
 
+/* 主题色选区（2026-09-01 主题色存在感 ②）：一条公式全主题自适应——每主题的
+   文本选区自动跟随其 primary（charcoal/warm-paper 珊瑚、mission 琥珀、mac/
+   blueprint 蓝、gruvbox 黄、openai 墨灰……）。0.3 alpha 混底后均为中低明度
+   tint，未设 color → 文字保持原前景色，可读性不降。选区是「系统适配」感最强
+   的主题色信号位（OS/编辑器的 selection 都带 accent）。 */
+::selection {
+  background: hsl(var(--primary) / 0.3);
+}
+
 /* —— 扩展主题（2026-08-24 新增并材质升级，只增不删：charcoal/warm-paper 基础主题即上方 :root/.light 原样保留；
    2026-08-26 起 warm-paper 另有材质专用块 .light.theme-warm-paper——只挂画布纸纹，色 token 仍单源于 .light）——
    双类选择器 .dark.theme-* / .light.theme-*（特异性 (0,2,0)）严格高于 :root/.light，覆盖不依赖源顺序。
@@ -204,23 +229,26 @@ html body {
 
 /* 午夜 Midnight（深 · 靛蓝 SOC，2026-08-24 材质升级对标 Linear 深色）：
    近黑靛底 + 浮层顶部 hairline 发光（Linear 深色浮层的质感灵魂）+ 高饱和语义色。
-   coral 与靛蓝近乎互补（15° vs 230°）提亮到 62% 做高对比强调；
-   边框用 alpha 白（实色深边框发闷，alpha 白随底色透出蓝色调）。 */
+   2026-09-02 靛蓝显化：底/抬升面 sat 20/18/16→28/25/22——深区 gamma 压扁使
+   初版靛蓝感几乎不可感知（与 graphite 深底难分），提饱和让「靛蓝 SOC」身份可见
+   （底亮度不动，AA 不变）。coral 与靛蓝近乎互补（15° vs 230°）提亮到 62% 做
+   高对比强调（底更蓝后对比更成立）；边框用 alpha 白（实色深边框发闷，
+   alpha 白随底色透出蓝色调）。 */
 .dark.theme-midnight {
   /* 层 A · shadcn token */
-  --background: 230 20% 8%;
+  --background: 230 28% 8%;
   --foreground: 228 24% 93%;
-  --card: 230 18% 11%;
+  --card: 230 25% 11%;
   --card-foreground: 228 24% 93%;
-  --popover: 230 18% 12%;
+  --popover: 230 25% 12%;
   --popover-foreground: 228 24% 93%;
   --primary: 16 70% 62%;
   --primary-foreground: 230 25% 8%;
-  --secondary: 230 16% 16%;
+  --secondary: 230 22% 16%;
   --secondary-foreground: 228 24% 93%;
-  --muted: 230 16% 16%;
+  --muted: 230 22% 16%;
   --muted-foreground: 228 12% 64%;
-  --accent: 230 16% 18%;
+  --accent: 230 28% 18%;
   --accent-foreground: 228 24% 93%;
   --destructive: 4 72% 60%;
   --destructive-foreground: 230 20% 8%;
@@ -237,7 +265,8 @@ html body {
   --c-yellow: 45 85% 60%;
   --c-amber: 40 85% 58%;
 
-  /* 层 C · 圆角（Linear 中等） */
+  /* 层 C · 圆角（Linear 中等）+ 字体（Inter——Linear 官网真身，自托管 variable） */
+  --font-sans: "Inter Variable", system-ui, sans-serif;
   --radius: 12px;
 
   /* 层 D · prose（深靛底） */
@@ -246,7 +275,7 @@ html body {
   --prose-links: 16 74% 68%;
   --prose-bold: 228 26% 94%;
   --prose-code: 192 90% 64%;
-  --prose-code-bg: 230 18% 16%;
+  --prose-code-bg: 230 24% 16%;
   --prose-quotes: 228 14% 60%;
   --prose-bullets: 228 14% 60%;
   --prose-hr: 230 20% 90% / 0.12;
@@ -293,7 +322,8 @@ html body {
   --c-yellow: 45 72% 58%;
   --c-amber: 40 75% 56%;
 
-  /* 层 C · 圆角（Geist 利落小圆角） */
+  /* 层 C · 圆角（Geist 利落小圆角）+ 字体（Geist——Vercel 官方开源真身本尊） */
+  --font-sans: "Geist Variable", system-ui, sans-serif;
   --radius: 8px;
 
   /* 层 D · prose（纯中性炭底） */
@@ -350,7 +380,9 @@ html body {
   --c-yellow: 38 85% 58%;
   --c-amber: 36 78% 58%;
 
-  /* 层 C · 圆角（Sentry 按钮/卡 8px） */
+  /* 层 C · 圆角（Sentry 按钮/卡 8px）+ 字体（IBM Plex Sans——工程工具气质，库内
+     旧 webfont 回归自托管） */
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --radius: 8px;
 
   /* 层 D · prose（紫底白文 + Sentry 紫链接） */
@@ -394,7 +426,7 @@ html body {
   --secondary-foreground: 0 0% 98%;
   --muted: 240 8% 16% / 0.65;
   --muted-foreground: 240 3% 56%;
-  --accent: 240 8% 20% / 0.72;
+  --accent: 240 18% 20% / 0.72;
   --accent-foreground: 0 0% 98%;
   --destructive: 5 62% 60%;
   --destructive-foreground: 240 13% 9%;
@@ -411,7 +443,8 @@ html body {
   --c-yellow: 38 75% 60%;
   --c-amber: 36 78% 58%;
 
-  /* 层 C · 圆角（squircle 最软） */
+  /* 层 C · 圆角（squircle 最软）+ 字体（Figtree——圆润现代贴 Arc 软玻璃） */
+  --font-sans: "Figtree Variable", system-ui, sans-serif;
   --radius: 16px;
 
   /* 层 D · prose（玻璃底近中性，prose 同品牌深色微调） */
@@ -482,7 +515,8 @@ html body {
   --c-yellow: 38 90% 58%;
   --c-amber: 40 95% 58%;
 
-  /* 层 C · 圆角（功能性不友好，硬朗封顶） */
+  /* 层 C · 圆角（功能性不友好，硬朗封顶）+ 字体（Barlow——加州公路牌血统，工程硬朗） */
+  --font-sans: "Barlow", system-ui, sans-serif;
   --radius: 4px;
 
   /* 层 D · prose（海军蓝底 + 琥珀链接 + 青代码色） */
@@ -504,38 +538,40 @@ html body {
   --shadow-toolbar-hover: 0 0 0 1px hsl(214 52% 40% / 0.3), 0 2px 4px hsl(223 60% 2% / 0.4), 0 24px 72px hsl(223 60% 2% / 0.42);
 }
 
-/* 余烬 Ember（深 · 暖褐炉膛，2026-08-31 用户诉求「蓝色少一点的暗色主题」）：
-   supernova = 超新星——爆发冷却后的余烬。暗色组此前谱系：charcoal 微暖 sat3%
-   几乎无感 / graphite 纯中性 / 其余四款全蓝紫，「蓝少一点」的空缺是显性暖调：
-   深烟褐底 24°/8%（暖意可感知、不红不脏——暖色暗底 sat>10% 即发闷）、暖白文本、
-   coral 火种与底色同色温族（15° vs 24°，全暗色主题里 primary×底色最融洽的一对，
-   「余烬发暖光」的材质逻辑）。签名 = 底缘余烬辉光（body 块，见后）。severity
-   继承基础块值（底 L9% 比 :root 15% 更深，AA 只更宽裕）；coral/ring/prose-links
-   品牌纪律不动；层 G 代码主题独立（勿加 --code-* 覆盖）。 */
+/* 余烬 Ember（深 · 炉膛炭火，2026-08-31 「蓝色少一点」暗色暖调；2026-09-02 重做）：
+   supernova = 超新星——爆发冷却后的余烬。初版问题：底 sat 8% 被深区 gamma 压扁、
+   primary 沿用品牌 coral——与 charcoal 撞成「暖表亲」。重做（用户「主题色加强特色」）：
+   ① 底色暖褐显化 24°/8%→20°/16%——真炉膛（mission 底 sat 49 / sentry 40 先例；
+   「sat>10% 发闷」是对无彩色相底的经验，16% 暖相深底是暖木炭不是闷）；② primary
+   换炭火橙 28°/72%/58%——气质层本色纪律（mission 琥珀 / sentry 紫先例），余烬的
+   本色是炭火不是珊瑚，与 charcoal 15° coral 拉开色温族；③ 签名余烬辉光 0.07→0.13
+   （arc 环境光档位，从理论变可见）。severity 继承基础块（28° 与 orange severity
+   24° 相邻但场景不同——实底 CTA vs 文本药丸，mission 43°×yellow 38° 先例）；
+   层 G 代码主题独立（勿加 --code-* 覆盖）。 */
 .dark.theme-ember {
-  /* 层 A · shadcn token（bg≈#150f0d / card +3%L / 抬升面序列对齐基础块幅度） */
-  --background: 24 8% 9%;
+  /* 层 A · shadcn token（bg≈#181210 暖木炭 / card +3%L 抬升面同步暖褐显化） */
+  --background: 20 16% 9%;
   --foreground: 36 14% 91%;
-  --card: 24 7% 12%;
+  --card: 20 14% 12%;
   --card-foreground: 36 14% 91%;
-  --popover: 24 7% 14%;
+  --popover: 20 14% 14%;
   --popover-foreground: 36 14% 91%;
-  --primary: 15 60% 56%;
-  --primary-foreground: 40 4% 12%;
-  --secondary: 24 6% 15%;
+  --primary: 28 72% 58%;
+  --primary-foreground: 20 50% 10%;
+  --secondary: 20 12% 15%;
   --secondary-foreground: 36 14% 91%;
-  --muted: 24 6% 15%;
-  --muted-foreground: 30 8% 64%;
-  --accent: 24 6% 18%;
+  --muted: 20 12% 15%;
+  --muted-foreground: 30 10% 64%;
+  --accent: 22 30% 19%;
   --accent-foreground: 36 14% 91%;
   --destructive: 5 62% 56%;
-  --destructive-foreground: 40 4% 12%;
-  /* alpha 暖白 hairline（材质杠杆①）：hue 对齐底色 24°，边线也渗暖 */
-  --border: 24 12% 88% / 0.12;
-  --input: 24 12% 88% / 0.12;
-  --ring: 15 60% 56%;
+  --destructive-foreground: 20 50% 10%;
+  /* alpha 暖白 hairline：hue 对齐底色 20°，边线也渗暖 */
+  --border: 20 16% 88% / 0.12;
+  --input: 20 16% 88% / 0.12;
+  --ring: 28 72% 58%;
 
-  /* 层 B · 语义色（低饱和暖底近中性，语义色沿用基础块值；cyan 在暖底上互补醒目微提亮） */
+  /* 层 B · 语义色（暖底显化后语义色仍沿用基础块值；cyan 在暖底上互补醒目） */
   --c-cyan: 190 68% 62%;
   --c-magenta: 280 68% 78%;
   --c-green: 142 48% 56%;
@@ -544,34 +580,37 @@ html body {
   --c-yellow: 38 72% 60%;
   --c-amber: 36 75% 58%;
 
-  /* 层 C · 圆角（炉膛温和但不软塌，10px 为谱系空档：8 利落/12 软之间） */
+  /* 层 C · 圆角（炉膛温和但不软塌，10px 为谱系空档：8 利落/12 软之间）
+     + 字体（Cabin——人文温暖，炉膛手作感） */
+  --font-sans: "Cabin Variable", system-ui, sans-serif;
   --radius: 10px;
 
-  /* 层 D · prose（暖褐底暖白文；links coral 纪律） */
+  /* 层 D · prose（暖褐底暖白文；links 炭火橙） */
   --prose-body: 36 14% 90%;
   --prose-headings: 38 18% 94%;
-  --prose-links: 15 72% 66%;
+  --prose-links: 28 78% 66%;
   --prose-bold: 38 18% 94%;
   --prose-code: 192 85% 62%;
-  --prose-code-bg: 24 7% 15%;
+  --prose-code-bg: 20 12% 15%;
   --prose-quotes: 36 10% 62%;
   --prose-bullets: 36 10% 62%;
-  --prose-hr: 24 12% 90% / 0.12;
+  --prose-hr: 20 16% 90% / 0.12;
 
-  /* 层 E · elevation（暖黑落影 + coral 光晕比基础块略强——余烬辉光是主题灵魂） */
-  --shadow-card: inset 0 1px 0 hsl(36 20% 100% / 0.05), 0 0 0 1px hsl(24 12% 80% / 0.05), 0 8px 24px -10px hsl(20 30% 3% / 0.55);
-  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.2), 0 1px 2px hsl(20 30% 3% / 0.4), 0 6px 18px -6px hsl(15 75% 48% / 0.4);
-  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.24), 0 2px 4px hsl(20 30% 3% / 0.4), 0 12px 26px -6px hsl(15 80% 52% / 0.5);
+  /* 层 E · elevation（暖黑落影 + 炭火橙光晕——余烬辉光是主题灵魂） */
+  --shadow-card: inset 0 1px 0 hsl(36 20% 100% / 0.05), 0 0 0 1px hsl(20 16% 80% / 0.05), 0 8px 24px -10px hsl(20 30% 3% / 0.55);
+  --shadow-cta: inset 0 1px 0 hsl(0 0% 100% / 0.2), 0 1px 2px hsl(20 30% 3% / 0.4), 0 6px 18px -6px hsl(28 80% 48% / 0.42);
+  --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.24), 0 2px 4px hsl(20 30% 3% / 0.4), 0 12px 26px -6px hsl(28 85% 52% / 0.5);
   --shadow-toolbar: 0 1px 2px hsl(20 30% 3% / 0.35);
   --shadow-toolbar-hover: inset 0 1px 0 hsl(36 20% 100% / 0.05), 0 2px 4px hsl(20 30% 3% / 0.4), 0 10px 24px -8px hsl(20 30% 3% / 0.6);
 }
 
 /* ember 余烬辉光层：屏幕下缘一线暖光——炉膛深处 / 超新星遗迹的余辉从地平线透上来。
-   刻意压到 alpha 0.07（arc 环境光 0.12-0.16 的约一半）：安全工具的克制，光在
-   下缘不在视野中心。(0,2,1) 特异性压过 html body 的 canvas-material 消费
-   （ember 未定义该 var，无冲突）；fixed 随滚动驻留地平线。 */
+   alpha 0.13（2026-09-02 从 0.07 提到 arc 环境光档位——初版过弱不可感知，「签名」
+   从理论变可见；仍在下缘不在视野中心，安全工具的克制）。(0,2,1) 特异性压过
+   html body 的 canvas-material 消费（ember 未定义该 var，无冲突）；fixed 随滚动
+   驻留地平线。 */
 .dark.theme-ember body {
-  background-image: radial-gradient(60rem 22rem at 50% 112%, hsl(16 70% 48% / 0.07), transparent 65%);
+  background-image: radial-gradient(60rem 22rem at 50% 112%, hsl(22 78% 50% / 0.13), transparent 65%);
   background-attachment: fixed;
 }
 
@@ -596,7 +635,7 @@ html body {
   --secondary-foreground: 227 68% 88%;
   --muted: 234 15% 27%;
   --muted-foreground: 229 34% 72%;
-  --accent: 233 14% 34%;
+  --accent: 234 20% 34%;
   --accent-foreground: 227 68% 88%;
   --destructive: 5 65% 74%;
   --destructive-foreground: 243 21% 12%;
@@ -613,7 +652,8 @@ html body {
   --c-yellow: 38 80% 78%;
   --c-amber: 36 83% 76%;
 
-  /* 层 C · 圆角（Catppuccin 官方 UI 柔软） */
+  /* 层 C · 圆角（Catppuccin 官方 UI 柔软）+ 字体（Nunito——全圆端点，粉彩柔） */
+  --font-sans: "Nunito Variable", system-ui, sans-serif;
   --radius: 14px;
 
   /* 层 D · prose（冷白文 + mauve 链接 + teal 行内码） */
@@ -672,7 +712,8 @@ html body {
   --c-yellow: 38 85% 74%;
   --c-amber: 36 88% 72%;
 
-  /* 层 C · 圆角（官方 UI 中等偏柔） */
+  /* 层 C · 圆角（官方 UI 中等偏柔）+ 字体（Mulish——细长优雅，静谧文艺） */
+  --font-sans: "Mulish Variable", system-ui, sans-serif;
   --radius: 12px;
 
   /* 层 D · prose（月光白文 + rose 链接 + foam 行内码） */
@@ -715,7 +756,7 @@ html body {
   --secondary-foreground: 43 59% 81%;
   --muted: 20 5% 18%;
   --muted-foreground: 39 22% 66%;
-  --accent: 22 7% 29%;
+  --accent: 20 18% 29%;
   --accent-foreground: 43 59% 81%;
   --destructive: 6 97% 60%;
   --destructive-foreground: 20 6% 10%;
@@ -733,7 +774,8 @@ html body {
   --c-yellow: 38 92% 60%;
   --c-amber: 36 94% 58%;
 
-  /* 层 C · 圆角（复古方硬） */
+  /* 层 C · 圆角（复古方硬）+ 字体（Zilla Slab——Mozilla slab，复古电报感） */
+  --font-sans: "Zilla Slab", system-ui, sans-serif;
   --radius: 6px;
 
   /* 层 D · prose（米白文 + 亮黄链接 + aqua 行内码） */
@@ -775,7 +817,7 @@ html body {
   --secondary-foreground: 240 30% 96%;
   --muted: 232 13% 22%;
   --muted-foreground: 226 27% 62%;
-  --accent: 232 14% 31%;
+  --accent: 232 20% 31%;
   --accent-foreground: 240 30% 96%;
   --destructive: 0 100% 67%;
   --destructive-foreground: 0 0% 98%;
@@ -792,7 +834,8 @@ html body {
   --c-yellow: 38 95% 74%;
   --c-amber: 36 98% 72%;
 
-  /* 层 C · 圆角（官方 UI 中等） */
+  /* 层 C · 圆角（官方 UI 中等）+ 字体（Rubik——圆润多巴胺） */
+  --font-sans: "Rubik Variable", system-ui, sans-serif;
   --radius: 10px;
 
   /* 层 D · prose（纯白文 + purple 链接 + cyan 行内码） */
@@ -812,6 +855,18 @@ html body {
   --shadow-cta-hover: inset 0 1px 0 hsl(0 0% 100% / 0.22), 0 2px 4px hsl(240 45% 4% / 0.4), 0 12px 26px -6px hsl(265 95% 72% / 0.45);
   --shadow-toolbar: 0 1px 2px hsl(240 45% 4% / 0.4);
   --shadow-toolbar-hover: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 2px 4px hsl(240 45% 4% / 0.45), 0 10px 24px -8px hsl(240 45% 4% / 0.65);
+}
+
+/* dracula 紫色氛围光层（2026-09-02 主题色强化补课）：四款编辑器主题原本是纯
+   token 移植零画布签名——库内成熟主题的材质语言（纸纹/网格/环境光/辉光）在
+   它们身上缺位。四款里只有 dracula 的源气质适合补光：官网 hero 就是紫色渐变、
+   高饱和多巴胺本就吃光；catppuccin「干净柔」/ rose-pine「静谧」/ gruvbox 复古
+   scanline（可读性风险）均不补。顶部紫光（官网光源方向）与 ember 底缘余光
+   错位；alpha 0.10 比 ember 0.13 / arc 0.12-0.16 更克制——dracula 底 L18 比
+   它们亮，光效更显瘦。(0,2,1) 特异性压过 html body 通用消费点。 */
+.dark.theme-dracula body {
+  background-image: radial-gradient(50rem 24rem at 50% -8%, hsl(265 90% 60% / 0.10), transparent 60%);
+  background-attachment: fixed;
 }
 
 /* Mac（浅 · Apple HIG 系统级对齐，2026-08-24 由霜白 frost 全面升级改名；
@@ -862,7 +917,7 @@ html body {
   --secondary-foreground: 240 5% 12%;
   --muted: 240 20% 95%;
   --muted-foreground: 240 8% 40%;
-  --accent: 240 18% 93%;
+  --accent: 240 26% 93%;
   --accent-foreground: 240 5% 12%;
   --destructive: 2 100% 42%;
   --destructive-foreground: 0 0% 100%;
@@ -885,7 +940,7 @@ html body {
      --radius-cta 980px 胶囊主操作（button cta 变体消费，未定义主题零影响）。 */
   --radius: 12px;
   --radius-cta: 980px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", Inter, "Segoe UI", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Inter Variable", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
 
   /* 层 D · prose（Apple label 近黑 + 链接蓝 #0066CC 深档保 AA） */
@@ -952,8 +1007,10 @@ html body {
 
 /* GitHub（浅 · Primer，2026-08-25 移植自 OpenDesign design-system-github）：
    代码优先的蓝白画布精准——实色细线边框哲学（非 alpha hairline）、信息密度即
-   品牌、阴影极轻（ring + 微影）。primary=coral 赤褐 16 64% 44%（2026-08-25
-   身份色归业务，材质/密度保留 Primer 哲学）。字体共享（system-ui 是 GitHub
+   品牌、阴影极轻（ring + 微影）。primary=Primer 蓝 212 92% 44%（#0969DA 真值，
+   2026-09-02 从 coral 赤褐改——mac 2026-08-27「系统对齐层本色纪律回归」同一
+   先例：GitHub 真身的链接/主按钮就是这支蓝，白字 AA 4.6；此前与 notion 陶土
+   coral 几乎同色构成纯白双胞胎撞款）。字体共享（system-ui 是 GitHub
    哲学，气质靠色/线/密度承载）。 */
 .light.theme-github {
   /* 层 A · shadcn token（纯白画布 + 白卡抬升靠边框 + subtle #f6f8fa / inset #eaeef2） */
@@ -963,19 +1020,19 @@ html body {
   --card-foreground: 213 13% 14%;
   --popover: 0 0% 100%;
   --popover-foreground: 213 13% 14%;
-  --primary: 16 64% 44%;
+  --primary: 212 92% 44%;
   --primary-foreground: 0 0% 100%;
   --secondary: 210 29% 97%;
   --secondary-foreground: 213 13% 14%;
   --muted: 210 29% 97%;
   --muted-foreground: 212 8% 43%;
-  --accent: 210 24% 93%;
+  --accent: 212 32% 93%;
   --accent-foreground: 213 13% 14%;
   --destructive: 5 72% 47%;
   --destructive-foreground: 0 0% 100%;
   --border: 210 18% 84%;
   --input: 210 18% 84%;
-  --ring: 16 64% 44%;
+  --ring: 212 92% 44%;
   /* 2026-08-26 材质补课：TopBar 灰带（GitHub 全局头 subtle #f6f8fa——最强 Primer
      结构信号；TopBar 经 --topbar-bg 消费，其他主题未定义回落 popover） */
   --topbar-bg: 210 29% 97%;
@@ -989,13 +1046,14 @@ html body {
   --c-yellow: 38 100% 30%;
   --c-amber: 36 73% 34%;
 
-  /* 层 C · 圆角（GitHub 按钮/卡 6px） */
+  /* 层 C · 圆角（GitHub 按钮/卡 6px）+ 字体（Mona Sans——GitHub 设计团队官方开源真身） */
+  --font-sans: "Mona Sans Variable", system-ui, sans-serif;
   --radius: 6px;
 
   /* 层 D · prose（GitHub 文档阅读气质：coral 链接 + 灰底代码块） */
   --prose-body: 213 13% 17%;
   --prose-headings: 213 14% 12%;
-  --prose-links: 16 64% 38%;
+  --prose-links: 212 92% 40%;
   --prose-bold: 213 14% 12%;
   --prose-code: 190 65% 30%;
   --prose-code-bg: 210 29% 94%;
@@ -1006,8 +1064,8 @@ html body {
   /* 层 E · elevation（2026-08-26 减影：边框类已画线（card 的 border=同色），卡影
      只留 Primer 式 1px 微投影 + 远距极淡——Primer 靠线不靠影，无玻璃无大阴影） */
   --shadow-card: 0 1px 0 hsl(213 13% 14% / 0.05), 0 8px 24px hsl(212 12% 32% / 0.07);
-  --shadow-cta: 0 1px 0 hsl(213 13% 14% / 0.1), 0 1px 2px hsl(16 60% 25% / 0.2);
-  --shadow-cta-hover: 0 1px 0 hsl(213 13% 14% / 0.1), 0 2px 6px hsl(16 60% 25% / 0.3);
+  --shadow-cta: 0 1px 0 hsl(213 13% 14% / 0.1), 0 1px 2px hsl(212 80% 28% / 0.25);
+  --shadow-cta-hover: 0 1px 0 hsl(213 13% 14% / 0.1), 0 2px 6px hsl(212 80% 32% / 0.32);
   --shadow-toolbar: 0 1px 0 hsl(213 13% 14% / 0.08);
   --shadow-toolbar-hover: 0 0 0 1px hsl(210 18% 84%), 0 1px 3px hsl(213 13% 14% / 0.12), 0 8px 24px hsl(212 12% 32% / 0.16);
 }
@@ -1049,7 +1107,8 @@ html body {
   --c-yellow: 38 70% 29%;
   --c-amber: 36 73% 34%;
 
-  /* 层 C · 圆角（按钮 4 / 卡 12 的折中） */
+  /* 层 C · 圆角（按钮 4 / 卡 12 的折中）+ 字体（Public Sans——中性克制极简） */
+  --font-sans: "Public Sans Variable", system-ui, sans-serif;
   --radius: 6px;
 
   /* 层 D · prose（暖墨文字 + coral 陶土链接） */
@@ -1102,7 +1161,7 @@ html body {
   --secondary-foreground: 60 3% 23%;
   --muted: 50 21% 89%;
   --muted-foreground: 43 5% 30%;
-  --accent: 50 18% 92%;
+  --accent: 48 26% 92%;
   --accent-foreground: 60 3% 8%;
   --destructive: 5 48% 36%;
   --destructive-foreground: 48 33% 97%;
@@ -1185,7 +1244,9 @@ html body {
   --c-yellow: 38 70% 29%;
   --c-amber: 36 73% 34%;
 
-  /* 层 C · 圆角（技术制图利落，与 mission 4px 同档） */
+  /* 层 C · 圆角（技术制图利落，与 mission 4px 同档）+ 字体（Titillium Web——
+     为航天工程界面设计，制图气质） */
+  --font-sans: "Titillium Web", system-ui, sans-serif;
   --radius: 4px;
 
   /* 层 D · prose（冷墨文字 + 墨蓝链接 + 青代码色 + 冷灰代码底） */
@@ -1272,7 +1333,7 @@ html body {
      Inter webfont 兜底即实际渲染字体；行动按钮 12px 矩形圆角——不定义
      --radius-cta 胶囊（芯片才用 9999px，非 mac 全胶囊语言）） */
   --radius: 12px;
-  --font-sans: "Söhne", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Söhne", "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Söhne Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
 
   /* 层 D · prose（正文石墨 #3c3c3c（DESIGN.md 正文阅读色）/ 标题柔黑 #1a1a1a /
@@ -1324,7 +1385,7 @@ html body {
   --secondary-foreground: 234 16% 36%;
   --muted: 220 16% 91%;
   --muted-foreground: 234 12% 48%;
-  --accent: 222 15% 89%;
+  --accent: 222 22% 89%;
   --accent-foreground: 234 16% 36%;
   --destructive: 5 85% 46%;
   --destructive-foreground: 0 0% 100%;
@@ -1343,7 +1404,8 @@ html body {
   --c-yellow: 38 80% 32%;
   --c-amber: 36 85% 45%;
 
-  /* 层 C · 圆角（同 Mocha 柔软） */
+  /* 层 C · 圆角（同 Mocha 柔软）+ 字体（Nunito 同品牌） */
+  --font-sans: "Nunito Variable", system-ui, sans-serif;
   --radius: 14px;
 
   /* 层 D · prose（text 冷紫黑 + mauve 链接 + teal 行内码） */
@@ -1401,7 +1463,8 @@ html body {
   --c-yellow: 38 72% 31%;
   --c-amber: 36 78% 44%;
 
-  /* 层 C · 圆角（同 rose-pine 静谧） */
+  /* 层 C · 圆角（同 rose-pine 静谧）+ 字体（Mulish 同品牌） */
+  --font-sans: "Mulish Variable", system-ui, sans-serif;
   --radius: 12px;
 
   /* 层 D · prose（text 暖紫黑 + rose 链接 + foam 行内码） */
@@ -1462,7 +1525,8 @@ html body {
   --c-yellow: 38 78% 32%;
   --c-amber: 36 84% 40%;
 
-  /* 层 C · 圆角（复古方硬同暗版） */
+  /* 层 C · 圆角（复古方硬同暗版）+ 字体（Zilla Slab 同品牌） */
+  --font-sans: "Zilla Slab", system-ui, sans-serif;
   --radius: 6px;
 
   /* 层 D · prose（深棕文 + 琥珀压深链接 + aqua 行内码） */
@@ -1521,7 +1585,8 @@ html body {
   --c-yellow: 38 100% 36%;
   --c-amber: 36 90% 38%;
 
-  /* 层 C · 圆角（印刷感方正） */
+  /* 层 C · 圆角（印刷感方正）+ 字体（Fira Sans——2012 开源人文经典，同年代气质） */
+  --font-sans: "Fira Sans", system-ui, sans-serif;
   --radius: 8px;
 
   /* 层 D · prose（青灰正文是身份 + blue 链接 + cyan 行内码） */
@@ -1588,6 +1653,72 @@ html body {
      亮度对 --code-bg ~9-10:1（与 muted ~6 档位相容，AA 不降档）。 */
   --code-hl-var: 220 14% 78%;
   --code-hl-type: 195 40% 74%;
+}
+
+/* —— 层 G' · 编辑器主题 syntax 真值覆盖（2026-09-02 方向 A：代码块配色编辑器主题化）——
+   四款编辑器主题（gruvbox/catppuccin/rose-pine/dracula）的用户心智本源就是「我编辑器
+   里的配色」——web 主题切了 gruvbox 而代码块仍是全局五色，是身份断裂。此处在不动
+   2026-08-31「终端证据窗」面板结构（底色/窗梃/框线全局统一深色）的前提下，只把
+   7 个 syntax token 覆盖为各家官方语法色板真值（来源：各家官方 VSCode/vim 主题的
+   通行映射）。亮色 flavor（latte/dawn/gruvbox-light）继承其暗色对的 syntax——同品牌
+   同代码色，面板本就永远深色。AA：全 token 对 --code-bg ≥4.5 由下方注释档位保障
+   （gruvbox red keyword 官方 L59 压线，验后提亮到 64）。 */
+
+/* Dracula 官方语法：keyword=Pink #FF79C6 / string=Yellow #F1FA8C / number=title=Purple
+   #BD93F9（官方 function 与 number 本同色）/ type=Cyan #8BE9FD / var=Foreground
+   #F8F8F2 / meta=Comment #6272A4（对深底微提亮 51→56 保 4.5） */
+.dark.theme-dracula {
+  --code-hl-keyword: 326 100% 74%;
+  --code-hl-string: 65 92% 76%;
+  --code-hl-number: 265 89% 78%;
+  --code-hl-title: 265 89% 78%;
+  --code-hl-meta: 226 27% 56%;
+  --code-hl-var: 60 27% 96%;
+  --code-hl-type: 191 97% 77%;
+}
+
+/* Catppuccin Mocha 官方语法惯例（style guide）：keywords=mauve / strings=green /
+   functions(title)=blue / types=yellow / numbers=peach / variables=text /
+   meta(diff deletion)=red */
+.dark.theme-catppuccin,
+.light.theme-catppuccin-latte {
+  --code-hl-keyword: 267 84% 81%;
+  --code-hl-string: 116 54% 76%;
+  --code-hl-number: 23 92% 75%;
+  --code-hl-title: 217 91% 76%;
+  --code-hl-meta: 343 81% 75%;
+  --code-hl-var: 226 64% 88%;
+  --code-hl-type: 41 87% 83%;
+}
+
+/* Gruvbox 官方 bright 系（vim/VSCode 通行映射）：Statement(keyword)=bright red /
+   String=green / Function(title)=yellow / Type=blue / Number=purple / var=fg1 /
+   meta(doctag)=orange（red 位让给 keyword——官方 diff removed 虽是 red，与 keyword
+   同 hue 难分，meta 橙在报告代码块的可读性更佳）。keyword 官方 L59 对深底 4.1 压线
+   → 64。 */
+.dark.theme-gruvbox,
+.light.theme-gruvbox-light {
+  --code-hl-keyword: 6 96% 64%;
+  --code-hl-string: 61 66% 44%;
+  --code-hl-number: 344 47% 68%;
+  --code-hl-title: 42 95% 58%;
+  --code-hl-meta: 27 99% 55%;
+  --code-hl-var: 43 57% 81%;
+  --code-hl-type: 157 16% 58%;
+}
+
+/* Rosé Pine 官方语法（VSCode 版）：control-flow keywords=iris / strings=gold /
+   functions(title)=rose / types=foam / numbers=gold 提亮变体（官方 string/number 同
+   gold 系不可分，微提亮换信息层级）/ variables=text / meta(deletion)=love */
+.dark.theme-rose-pine,
+.light.theme-rose-pine-dawn {
+  --code-hl-keyword: 267 57% 78%;
+  --code-hl-string: 35 87% 72%;
+  --code-hl-number: 35 87% 80%;
+  --code-hl-title: 2 55% 83%;
+  --code-hl-meta: 343 76% 68%;
+  --code-hl-var: 246 50% 91%;
+  --code-hl-type: 189 44% 73%;
 }
 
 /* —— severity dot 形状通道（spec 2026-08-27 警报语义层 §2.2，本设计的签名）——

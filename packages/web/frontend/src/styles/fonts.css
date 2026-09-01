@@ -1,0 +1,46 @@
+/* —— 自托管字体（2026-09-02 主题字体全库加强：22 主题逐款拉丁字体身份）——
+   全部 fontsource 本地 woff2，内网零外链（替代 index.html 的 Google Fonts link——
+   外链断供时字体跳变是 2026-08-31 换系统栈的根因，本次自托管根治）。
+   - variable 包（wght 可变单文件全字重，family 名带 " Variable" 后缀——tokens.css
+     消费处须带后缀）；无 variable 版的老字体用 static 400/600/700 三档。
+   - 按需下载：@font-face unicode-range 分包，浏览器只拉当前主题消费的 family
+     文件（未用主题零下载）。
+   - 中文回落系统栈（tokens.css 各 --font-sans 尾部 system-ui）——中文 webfont
+     单字重 5-8MB 不可打包，「拉丁个性化 + 中文系统栈」是既定路径（kami/mac 先例）。
+   - mono / serif 为全局默认（--font-mono/--font-serif），family 名与旧外链一致，
+     自托管无缝换源。选型表与依据见 tokens.css 各主题块。 */
+
+/* variable 版（wght 单文件全字重） */
+@import "@fontsource-variable/space-grotesk";  /* charcoal / warm-paper（基准对） */
+@import "@fontsource-variable/inter";          /* midnight（Linear 真身）+ mac/openai 回落 */
+@import "@fontsource-variable/geist";          /* graphite（Vercel 真身本尊） */
+@import "@fontsource-variable/mona-sans";      /* github（GitHub 官方开源真身） */
+@import "@fontsource-variable/figtree";        /* arc（圆润软玻璃） */
+@import "@fontsource-variable/cabin";          /* ember（人文暖，炉膛手作） */
+@import "@fontsource-variable/nunito";         /* catppuccin / latte（全圆端点粉彩柔） */
+@import "@fontsource-variable/mulish";         /* rose-pine / dawn（细长静谧文艺） */
+@import "@fontsource-variable/rubik";          /* dracula（圆润多巴胺） */
+@import "@fontsource-variable/public-sans";    /* notion（中性克制极简） */
+
+/* static 版（官方无 variable） */
+@import "@fontsource/barlow/400.css";          /* mission（加州公路牌血统，工程硬朗） */
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow/700.css";
+@import "@fontsource/zilla-slab/400.css";      /* gruvbox / gruvbox-light（Mozilla slab 复古电报） */
+@import "@fontsource/zilla-slab/600.css";
+@import "@fontsource/zilla-slab/700.css";
+@import "@fontsource/ibm-plex-sans/400.css";   /* sentry（Plex 工程工具气质回归） */
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/titillium-web/400.css";   /* blueprint（为航天工程界面设计，制图） */
+@import "@fontsource/titillium-web/600.css";
+@import "@fontsource/titillium-web/700.css";
+@import "@fontsource/fira-sans/400.css";       /* solarized-light（2012 开源人文经典同年代） */
+@import "@fontsource/fira-sans/600.css";
+@import "@fontsource/fira-sans/700.css";
+
+/* mono / serif：全局默认字体自托管（family 名不变，替代外链） */
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/ibm-plex-serif/400.css";
+@import "@fontsource/ibm-plex-serif/700.css";

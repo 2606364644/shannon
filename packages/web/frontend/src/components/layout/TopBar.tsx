@@ -37,7 +37,7 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
   // nav 统一 4 项（概览/工作区/扫描/设置），所有角色一致——WorkspaceListPage 已下线（spec 2026-07-27）。
   const items: NavItem[] = NAV;
   return (
-    <header data-testid="topbar" className="sticky top-0 z-40 border-b border-border bg-[hsl(var(--topbar-bg,var(--popover)))] [backdrop-filter:var(--backdrop-float,none)] print:static">
+    <header data-testid="topbar" className="sticky top-0 z-40 border-b-2 border-b-[hsl(var(--primary)/0.55)] bg-[hsl(var(--topbar-bg,var(--popover)))] [backdrop-filter:var(--backdrop-float,none)] print:border-transparent print:static">
       <div className="mx-auto flex h-12 w-full max-w-[2400px] items-center gap-6 px-7">
         <Link to="/" className="flex items-center gap-1.5 font-semibold tracking-tight text-base">
           <BrandMark className="h-[1.15em] w-[1.15em] text-foreground" />
