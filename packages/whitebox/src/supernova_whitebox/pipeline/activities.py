@@ -29,8 +29,13 @@ from supernova_core.logging.log_bus import LogBus
 from supernova_core.agents.executor import AgentExecutor
 from supernova_core.agents.runner import run_claude_prompt
 from supernova_core.agents.recon_context_summarizer import (
+    DIGEST_SECTION_ORDER,
     RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION,
+    UNPARSED_SECTION,
+    build_deterministic_sections,
+    build_summarizer_input,
     extract_recon_context_sections,
+    parse_sections,
     summarize_recon_context,
 )
 from supernova_core.config.concurrency import (
@@ -264,7 +269,7 @@ async def run_vuln_agent(input: ActivityInput) -> dict:
 
 # ── vuln prompt_variables 注入（Task 7 / SharedKnowledge 接通） ──────────
 # 5 个 vuln agent（INJECTION_VULN/XSS_VULN/SSRF_VULN/AUTHZ_VULN/AUTH_VULN）专用：在 vuln prompt
-# 渲染前注入 {{RECON_CONTEXT}}（LLM 摘要 recon_deliverable.md §4+§8）+
+# 渲染前注入 {{RECON_CONTEXT}}（LLM 摘要 recon_deliverable.md，六节视图）+
 # {{FRAMEWORK_ANALYSIS}}（条件：framework_analysis.json inferred_endpoints 非空）。
 # 守铁律（CLAUDE.md §1）：注入源仅限 LLM 轨产物（recon md + pre-recon 代码层推断），
 # 绝不引 GitNexus 确定性层产物。
@@ -288,7 +293,7 @@ def _make_recon_summary_llm_client(repo_path: str, provider_config: dict | None 
     Always attempts an LLM call (not gated by GitNexus-LLM toggle, since the
     summarizer belongs to the LLM track, not GitNexus). When the LLM provider
     itself is unavailable, run_claude_prompt raises and the summarizer degrades
-    gracefully to raw §4/§8 extraction (non-fatal).
+    gracefully to the deterministic six-section extraction (non-fatal).
 
     spec 2026-08-27 §8：AccountedLlmClient 包装——cost/tokens 此前被闭包剥 str
     时整笔丢弃；调用方用完须 ``await client.finalize()``（agent_name=
@@ -312,6 +317,11 @@ def _recon_narration_language(input: ActivityInput) -> str:
     )
 
 
+# 端点对账降级阈值（spec 2026-09-01 §4.3）：digest endpoints 行数 / §4 表行数
+# 低于此值 → degraded(coverage_low)，resume 自动重试升级。模块级常量，不进 env。
+_COVERAGE_LOW_THRESHOLD = 0.8
+
+
 def _load_recon_context_digest(
     deliverables: Path,
     *,
@@ -319,7 +329,12 @@ def _load_recon_context_digest(
     language: str,
     require_llm: bool = False,
 ) -> dict | None:
-    """Load a compatible shared recon-context digest, or return None as a miss."""
+    """Load a compatible shared recon-context digest, or return None as a miss.
+
+    ``require_llm=True``（resume 升级路径）只拒绝 degraded digest——
+    ``coverage_low`` / ``unsectioned`` 的 llm-summary 不认（重新生成升级）；
+    deterministic-extract 是非 degraded 有效终态（spec 2026-09-01 §4.4/§4.6）。
+    """
     path = resolve_intermediate(deliverables, "recon_context_digest.json")
     if path is None:
         return None
@@ -329,7 +344,9 @@ def _load_recon_context_digest(
         return None
     if not isinstance(data, dict) or not isinstance(data.get("text"), str):
         return None
-    if data.get("schema_version") != 1:
+    if not isinstance(data.get("sections"), dict):
+        return None
+    if data.get("schema_version") != 2:
         return None
     if data.get("source_hash") != source_hash:
         return None
@@ -337,7 +354,7 @@ def _load_recon_context_digest(
         return None
     if data.get("language") != language:
         return None
-    if require_llm and data.get("source") != "llm-summary":
+    if require_llm and data.get("degraded"):
         return None
     return data
 
@@ -349,16 +366,28 @@ def _write_recon_context_digest(
     language: str,
     text: str,
     source: str,
+    sections: dict[str, str],
+    degraded: bool,
+    degraded_reason: str | None,
+    coverage: dict,
+    missing_sections: list[str],
+    input_meta: dict,
 ) -> None:
     atomic_write_json(
         intermediate_path(deliverables, "recon_context_digest.json"),
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "source": source,
+            "degraded": degraded,
+            "degraded_reason": degraded_reason,
             "source_hash": source_hash,
             "summarizer_prompt_version": RECON_CONTEXT_SUMMARIZER_PROMPT_VERSION,
             "language": language,
+            "input_meta": input_meta,
+            "coverage": coverage,
+            "missing_sections": missing_sections,
             "text": text,
+            "sections": sections,
         },
     )
 
@@ -369,8 +398,10 @@ async def run_recon_context_digest(input: ActivityInput) -> dict:
 
     Previously every vuln activity independently summarized the same
     ``recon_deliverable.md``.  This activity moves that call ahead of the vuln
-    fan-out and persists an atomically-written digest.  The input remains an
-    LLM-track product only; no GitNexus deterministic artifacts are consumed.
+    fan-out and persists an atomically-written digest (schema v2: six-section
+    views + endpoint-coverage reconciliation + degraded/resume-upgrade,
+    spec 2026-09-01).  The input remains an LLM-track product only; no GitNexus
+    deterministic artifacts are consumed.
     """
     from supernova_whitebox.audit.session_registry import get_audit_session
 
@@ -397,10 +428,18 @@ async def run_recon_context_digest(input: ActivityInput) -> dict:
                 "source": cached["source"],
                 "cache_hit": True,
                 "recon_context_chars": len(cached["text"]),
+                "degraded": cached.get("degraded", False),
+                "degraded_reason": cached.get("degraded_reason"),
             }
 
         digest_text = ""
         digest_source = "deterministic-extract"
+        degraded = False
+        degraded_reason: str | None = None
+        sections: dict[str, str] = {}
+        coverage: dict = {"digest_endpoint_rows": None, "coverage_ratio": None}
+        # 对账仅对 llm-summary 生效（spec §4.4）；deterministic 模式 coverage 不适用。
+        _, input_meta = build_summarizer_input(recon_md)
         llm_client = None
         if recon_md.strip():
             try:
@@ -409,17 +448,36 @@ async def run_recon_context_digest(input: ActivityInput) -> dict:
                     audit_session=get_audit_session())
                 digest_text = await summarize_recon_context(
                     recon_md, llm_client, fallback_on_error=False)
-                digest_source = "llm-summary"
-                # Empty/blank output is not a clean LLM digest. Fall back so all
-                # five agents receive a usable shared context rather than nothing.
                 if not digest_text.strip():
-                    digest_text = extract_recon_context_sections(recon_md)
-                    digest_source = "deterministic-extract"
+                    # Empty/blank output is not a clean LLM digest — deterministic
+                    # fallback so all five agents get a usable shared context.
+                    raise ValueError("empty llm summary output")
+                digest_source = "llm-summary"
+                sections = parse_sections(digest_text)
+                if not sections:
+                    degraded, degraded_reason = True, "unsectioned"
+                digest_rows = sum(
+                    1 for ln in sections.get("endpoints", "").splitlines()
+                    if ln.strip())
+                ratio = digest_rows / max(input_meta["source_endpoint_rows"], 1)
+                coverage = {
+                    "digest_endpoint_rows": digest_rows,
+                    "coverage_ratio": ratio,
+                }
+                if not degraded and ratio < _COVERAGE_LOW_THRESHOLD:
+                    degraded, degraded_reason = True, "coverage_low"
+                    logger.warning(
+                        "recon-context-digest: endpoint coverage %.2f below %.2f, "
+                        "marked degraded (resume will retry)", ratio,
+                        _COVERAGE_LOW_THRESHOLD)
             except Exception as exc:  # noqa: BLE001 — summary is non-fatal
                 logger.warning(
                     "recon-context-digest: LLM summary failed, deterministic fallback: %s", exc)
-                digest_text = extract_recon_context_sections(recon_md)
                 digest_source = "deterministic-extract"
+                degraded, degraded_reason = False, None
+                sections = build_deterministic_sections(recon_md)
+                digest_text = extract_recon_context_sections(recon_md)
+                coverage = {"digest_endpoint_rows": None, "coverage_ratio": None}
             finally:
                 if llm_client is not None:
                     try:
@@ -430,18 +488,45 @@ async def run_recon_context_digest(input: ActivityInput) -> dict:
             digest_text = "(no recon deliverable available)"
             digest_source = "empty-recon"
 
+        missing_sections = [n for n in DIGEST_SECTION_ORDER if n not in sections]
         _write_recon_context_digest(
             deliverables,
             source_hash=source_hash,
             language=language,
             text=digest_text,
             source=digest_source,
+            sections=sections,
+            degraded=degraded,
+            degraded_reason=degraded_reason,
+            coverage=coverage,
+            missing_sections=missing_sections,
+            input_meta=input_meta,
         )
         return {
             "source": digest_source,
             "cache_hit": False,
             "recon_context_chars": len(digest_text),
+            "degraded": degraded,
+            "degraded_reason": degraded_reason,
         }
+
+
+def _render_digest_context(digest: dict) -> str:
+    """digest → {{RECON_CONTEXT}}：sections 非空按固定节序重组，否则退 text 全文。
+
+    第一期不按 agent_name 路由——五个 vuln agent 拿同一份完整分节摘要
+    （spec 2026-09-01 §4.4；分发差异化是二期期权）。
+    """
+    sections = digest.get("sections") or {}
+    if not sections:
+        return digest["text"]
+    parts = [
+        f"## {name}\n{sections[name].strip()}"
+        for name in DIGEST_SECTION_ORDER if name in sections
+    ]
+    if UNPARSED_SECTION in sections:
+        parts.append(f"## additional\n{sections[UNPARSED_SECTION].strip()}")
+    return "\n\n".join(parts)
 
 
 async def _build_vuln_prompt_variables(
@@ -451,7 +536,7 @@ async def _build_vuln_prompt_variables(
 
     - RECON_CONTEXT: read from the once-per-scan digest generated by
       ``run_recon_context_digest``. Missing digest retains the deterministic
-      §4/§8 extraction compatibility path (no per-agent LLM call).
+      six-section deterministic extraction compatibility path (no per-agent LLM call).
     - FRAMEWORK_ANALYSIS: from framework_analysis.json — injected ONLY when
       inferred_endpoints is non-empty (whitebox samples are often empty).
     Both sources are LLM-track / code-layer pre-recon output — NEVER GitNexus
@@ -471,7 +556,7 @@ async def _build_vuln_prompt_variables(
         language=_recon_narration_language(input),
     )
     if digest is not None:
-        base["RECON_CONTEXT"] = digest["text"]
+        base["RECON_CONTEXT"] = _render_digest_context(digest)
     else:
         # Compatibility path for direct activity invocation / deployment drift.
         # This is deterministic and never triggers a per-agent LLM summary.
@@ -2714,20 +2799,6 @@ async def _rework_missing_endpoints(
     return reworked
 
 
-async def _gitnexus_verdict_llm_client(prompt: str, **kwargs) -> str:
-    """GitNexus-track chain-verdict LLM pass client.
-
-    Production: reuses the same LLM client pool as run_agent. This stub is the
-    injection point -- when not configured, callers must pass their own client
-    (tests do). Default raises so judge_chain_verdict takes its conservative
-    needs_review path (does NOT silently clear).
-    """
-    raise RuntimeError(
-        "GitNexus-track chain-verdict LLM client not configured; "
-        "judge_chain_verdict will mark candidates needs_review"
-    )
-
-
 def _make_verdict_agent_runner(repo_path: str, provider_config: dict | None = None,
                                audit_session=None):
     """多轮 verdict agent runner 工厂（spec 2026-08-27 §3，生产主线）。
@@ -2751,42 +2822,18 @@ def _make_verdict_agent_runner(repo_path: str, provider_config: dict | None = No
     return runner
 
 
-def _make_verdict_llm_client(repo_path: str, provider_config: dict | None = None):   # P3c 阶段 1：透传 run_claude_prompt
-    """接通后: 真 client; env 关时返回 raise-client(降级)。
-
-    output_format（JSON Schema）透传 run_claude_prompt -> CLI --json-schema，强制模型
-    吐合法 JSON + SDK structured_output（对齐 TS outputFormat，根因治本 GLM Markdown 崩）。
-    优先返回 structured_output（json.dumps 还原 str 契约），空则回退 result.text 走 extract。
-    """
-    if not is_gitnexus_llm_enabled():
-        return _gitnexus_verdict_llm_client  # 模块级 raise 兜底
-    from supernova_core.agents.runner import run_claude_prompt
-
-    async def _client(prompt: str, **kwargs) -> str:
-        result = await run_claude_prompt(
-            prompt=prompt, repo_path=repo_path, model_tier="medium",
-            structured_output_schema=kwargs.get("output_format"),
-            provider_config=provider_config,
-        )
-        so = result.structured_output
-        if so is not None:
-            import json as _json
-            return _json.dumps(so)
-        return result.text
-    return _client
-
-
 def _make_track_parity_client(repo_path: str, provider_config: dict | None = None):
     """track-parity（配对归并，spec 2026-08-26 §6）专用单次 runner 工厂。
 
     返回 ClaudeRunResult-like runner（AccountedLlmClient 契约——包装层记
     cost/tokens/model 并转 str；剥 str 的闭包正是 §8 轻量调用 cost 漏记的
-    根因，2026-08-31 修复回归该契约）。与 _make_verdict_llm_client 的差别
-    在开关语义：**不受 SUPERNOVA_GITNEXUS_LLM_ENABLED 门控**——用户关
-    chain-verdict 判定省 token 时（2026-08-26 用户口径：判定关、双轨一致性
-    层开），配对归并仍工作。output_format 透传 run_claude_prompt（模块级
-    名——测试经 patch activities.run_claude_prompt / patch 本工厂注入 fake）
-    单次结构化输出。"""
+    根因，2026-08-31 修复回归该契约）。开关语义：**不受
+    SUPERNOVA_GITNEXUS_LLM_ENABLED 门控**——用户关 chain-verdict 判定省
+    token 时（2026-08-26 用户口径：判定关、双轨一致性层开），配对归并仍
+    工作（chain verdict 的判定路径 2026-09-01 起只有多轮 agent 一种形态，
+    本工厂做的是配对归并非漏洞判定）。output_format 透传
+    run_claude_prompt（模块级名——测试经 patch
+    activities.run_claude_prompt / patch 本工厂注入 fake）单次结构化输出。"""
 
     async def _runner(prompt: str, **kwargs):
         return await run_claude_prompt(
@@ -2828,8 +2875,9 @@ async def run_gitnexus_verdict_agent(
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
     max_turns 显式参数优先；None 走 SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。
-    返回完整 ClaudeRunResult（含 turns/cost/structured_output），不截断为 str——区别于
-    _make_verdict_llm_client 的单次薄包装。GN-only 深度富化（run_gn_finding_enrichment）
+    返回完整 ClaudeRunResult（含 turns/cost/structured_output），不截断为 str——
+    chain verdict 判定的唯一通道（单次 llm_client 路径已拆，2026-09-01）。
+    GN-only 深度富化（run_gn_finding_enrichment）
     传 SUPERNOVA_GN_ENRICH_MAX_TURNS 走此参数，不污染 authz 深判的 env。
 
     audit_session 非 None 时构造 SessionToolAuditLogger（对齐 run_agent :167/183/198），多轮
@@ -3116,17 +3164,14 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             intent=None,
         ):
             # 判定通道（spec 2026-08-27 §3）：env 开 → 逐条多轮 verdict agent
-            # （grep/read 自主验证，agent_name 唯一化记账）；env 关 → 单次
-            # llm_client 兼容路径（生产走模块级 raise 兜底 → unadjudicated
-            # 保守；测试经 _gitnexus_verdict_llm_client 注入 fake）。
+            # （grep/read 自主验证，agent_name 唯一化记账）；env 关 → 通道不配置
+            # （verdict_agent=None → judge 落 unadjudicated 保守。单次判定路径
+            # 已拆，2026-09-01——不存在「无 agent 时退单次」的形态）。
             _verdict_agent = None
-            llm = None
             if is_gitnexus_llm_enabled():
                 _verdict_agent = _make_verdict_agent_runner(
                     str(repo), provider_config=input.provider_config,
                     audit_session=get_audit_session())
-            else:
-                llm = _make_verdict_llm_client(str(repo), provider_config=input.provider_config)   # P3c 阶段 1
             _chain_cb = _make_gitnexus_progress_cb(get_audit_session())
             # 类间并发共享预算：三类单跳 builder + second_order 并发跑、共用
             # 同一信号量——总并发恒为 SUPERNOVA_CHAIN_VERDICT_CONCURRENCY
@@ -3178,7 +3223,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                             return None
 
                     return await build_second_order_findings(
-                        storage_writes, pgraph, llm_client=llm,
+                        storage_writes, pgraph,
                         verdict_agent=_verdict_agent,
                         sink_call_sites=sink_call_sites, reads_by_id=reads_by_id,
                         source_provider=_second_order_source_provider,
@@ -3209,7 +3254,7 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
             # 收进结果元组，gather 后逐类分流）。
             async def _run_builder(vc, builder):
                 try:
-                    findings = await builder(pgraph, llm_client=llm,
+                    findings = await builder(pgraph,
                                              verdict_agent=_verdict_agent,
                                              sink_call_sites=sink_call_sites,
                                              entry_points=entry_point_map,

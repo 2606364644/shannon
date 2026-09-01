@@ -53,7 +53,7 @@ auto-REST handlers often lack parameterization.
 **Structured Recon Context (prior knowledge):**
 {{RECON_CONTEXT}}
 
-(Auto-summarized from `{{DELIVERABLES_PATH}}/recon_deliverable.md` §4 + §8. If empty,
+(Auto-summarized from `{{DELIVERABLES_PATH}}/recon_deliverable.md`. If empty,
 the recon deliverable is the source of truth — read it directly.)
 {{FRAMEWORK_ANALYSIS}}
 
