@@ -2246,12 +2246,12 @@ async def _write_agent_pocs(
 
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
-    # turn 预算默认 100（2026-08-28 NodeGoat-20260828-022720 实证：30 turns 下
-    # auth/xss 两轮均顶格打满被 SDK 掐断——找 repo~8 turns + 逐卡读码 + curl 实测
-    # + 结构化产出，30 明显不够；100 turns 线性外推 ~9min，write_agent_poc 的
-    # 20min 窗口容得下 5 类并行各独立满跑。容量铁律对齐 chain_verdict：改判定
-    # 形态/预算时同步评估窗口）。
-    max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "100"))
+    # turn 预算默认 180（2026-09-01 上调，NodeGoat 三扫实证：auth/ssrf/authz/
+    # injection 14-42 turns 宽裕，xss 类 78/129/89——129 为自然满跑非掐断（存储
+    # 型 plant+trigger 两步 + DOM 渲染追码单卡验证贵），100 无余量。180 × 最慢
+    # 实测 6s/turn ≈ 18min，20min 窗口内收尾不撞线（用户口径：宁 180 不动窗口，
+    # 撞线再升窗口）。容量铁律对齐 chain_verdict：改判定形态/预算时同步评估窗口。
+    max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "180"))
     classes = [vc for vc in (input.vuln_classes or list(ALL_VULN_CLASSES))
                if vc in _QUEUE_FILES]
 

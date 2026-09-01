@@ -182,8 +182,9 @@ async def test_only_ids_reflow_filters(tmp_path, monkeypatch):
 
 
 async def test_max_turns_default_and_env_override(tmp_path, monkeypatch):
-    """turn 预算：默认 100（NodeGoat-20260828-022720 实证：auth/xss 两轮均 30
-    turns 顶格打满被 SDK 掐断、结构化产出未落地 → 卡无 report_poc），env 可覆盖。"""
+    """turn 预算：默认 180（2026-09-01 上调：NodeGoat 三扫实测 xss 类 78/129/89
+    turns——129 为自然满跑非掐断，100 无余量；180×6s/turn≈18min 不撞 20min 窗口），
+    env 可覆盖。"""
     d = _wb(tmp_path)
     _write_queue(d, [dict(_VULN)])
     monkeypatch.setattr(activities, "_get_paths",
@@ -192,7 +193,7 @@ async def test_max_turns_default_and_env_override(tmp_path, monkeypatch):
     with patch.object(activities, "run_gitnexus_verdict_agent",
                       return_value=_agent_result({"pocs": []})) as mock_agent:
         await activities._write_agent_pocs(_FakeInput(tmp_path), d)
-    assert mock_agent.call_args.kwargs["max_turns"] == 100
+    assert mock_agent.call_args.kwargs["max_turns"] == 180
 
     monkeypatch.setenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "7")
     with patch.object(activities, "run_gitnexus_verdict_agent",
