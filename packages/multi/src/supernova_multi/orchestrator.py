@@ -179,6 +179,7 @@ async def run_correlation_phase(
         dismissed_by_service[service] = dm_entries
         artifacts_by_service[service] = ServiceArtifacts(
             service=service, role=spec.role if spec else "backend",
+            roles=sorted(spec.effective_roles) if spec else ["backend"],
             repo_path=spec.path if spec else None, deliverables=dlv,
             queue_files=list(queue_files.values()),
             entry_points=ep_path if ep_path.exists() else None,
@@ -202,7 +203,12 @@ async def run_correlation_phase(
     await heartbeat.__aenter__()
 
     # 3. per-edge 关联 Agent(asyncio.Semaphore 限并发, B5)
-    role_map = {s: spec.role for s, spec in config.repos.items()}
+    role_map = {
+        service: sorted(spec.effective_roles, key=("entrypoint", "backend").index)
+        for service, spec in config.repos.items()
+    }
+    primary_role = {service: spec.role for service, spec in config.repos.items()}
+
     repo_paths = {s: spec.path for s, spec in config.repos.items()}
     # final-review MINOR 8: 并发上限改接 SUPERNOVA_MAX_CONCURRENT(whitebox/blackbox 同源 env 驱动,
     # 默认 3),闭合 spec B5 风险登记 TODO。
@@ -235,10 +241,10 @@ async def run_correlation_phase(
                 # 关联 out_dlv,引导读两仓真实扫描产物)
                 "artifacts_guide": build_artifacts_guide(
                     artifacts_by_service.get(f) or ServiceArtifacts(
-                        service=f, role=role_map.get(f, "backend"),
+                        service=f, role=primary_role.get(f, "backend"), roles=role_map.get(f, ["backend"]),
                         repo_path=repo_paths.get(f), deliverables=None),
                     artifacts_by_service.get(t) or ServiceArtifacts(
-                        service=t, role=role_map.get(t, "backend"),
+                        service=t, role=primary_role.get(t, "backend"), roles=role_map.get(t, ["backend"]),
                         repo_path=repo_paths.get(t), deliverables=None)),
             }
             metrics = await executor.execute(
@@ -273,7 +279,10 @@ async def run_correlation_phase(
 
     # 4. 组装 topology + boundaries
     topology = CrossServiceTopology(
-        services=[ServiceNode(name=s, role=spec.role, repo=spec.path or spec.workspace or "")
+        services=[ServiceNode(
+                      name=s, role=spec.role,
+                      roles=sorted(spec.effective_roles, key=("entrypoint", "backend").index),
+                      repo=spec.path or spec.workspace or "")
                   for s, spec in config.repos.items()],
         edges=[TopologyEdge(from_=e["from"], to=e["to"], protocol=e["protocol"],
                             calls=[Call(method=c["method"],

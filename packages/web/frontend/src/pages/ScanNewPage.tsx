@@ -3,10 +3,13 @@ import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import type { ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
-import { apiGet, apiPost, ApiError } from "../api/client";
+import type { CorrelationTopologyAnalysis, ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
+import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, startCorrelationTopologyAnalysis } from "../api/client";
+import { useRepos } from "../api/useRepos";
+import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
+import { CorrelationTopologyFields } from "../components/correlation/CorrelationTopologyFields";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,6 +17,11 @@ import { Card } from "@/components/ui/card";
 import {
   formToYaml, yamlToForm, validateForm, CorrYamlError, type CorrFormState,
 } from "@/lib/correlation-yaml";
+import {
+  confirmTopologyDraft, createTopologyDraft, topologyDraftFingerprint,
+  topologyDraftToCorrForm, updateTopologyRepositories, validateTopologyDraft,
+  type TopologyDraftState,
+} from "@/lib/correlation-topology-draft";
 
 /** 页面可达类型（D3）：白盒 | 跨仓关联，顶部 segmented 切换。黑盒只读分支已删除——
  *  黑盒一律是组合任务的嵌套 run 或经 ScanDetail addBlackboxToWhitebox，无独立创建入口。 */
@@ -365,6 +373,13 @@ export function ScanNewPage() {
   const [corrState, setCorrState] = useState<CorrFormState>({ repos: [], relations: [] });
   const [corrYaml, setCorrYaml] = useState<string>(() => formToYaml({ repos: [], relations: [] }));
   const [yamlErr, setYamlErr] = useState<CorrYamlError | null>(null);
+  const [corrMode, setCorrMode] = useState<"auto" | "manual">("auto");
+  const [selectedTopologyRepos, setSelectedTopologyRepos] = useState<string[]>([]);
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<CorrelationTopologyAnalysis | null>(null);
+  const [analysisStarting, setAnalysisStarting] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [topologyState, setTopologyState] = useState<TopologyDraftState | null>(null);
   const updateCorr = (s: CorrFormState) => {
     setCorrState(s);
     setCorrYaml(formToYaml(s));
@@ -385,6 +400,7 @@ export function ScanNewPage() {
   const applyYaml = () => {
     try {
       updateCorr(yamlToForm(corrYaml));
+      setCorrMode("manual");
     } catch {
       /* 不可达：YamlPanel 的应用按钮在有错时 disabled */
     }
@@ -396,6 +412,9 @@ export function ScanNewPage() {
   const [wsLoading, setWsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
+  const topologyReposEnabled = type === "correlation" && corrMode === "auto";
+  const { repos: topologyRepos } = useRepos(topologyReposEnabled ? workspace : "");
+  const { scans } = useScans(type === "correlation" ? workspace : "");
   const setAuth = (patch: Partial<AuthFormState>) => setF((prev) => ({ ...prev, auth: { ...prev.auth, ...patch } }));
   const setHost = (patch: Partial<HostFormState>) => setF((prev) => ({ ...prev, host: { ...prev.host, ...patch } }));
 
@@ -412,6 +431,67 @@ export function ScanNewPage() {
       .finally(() => setWsLoading(false));
   }, []);
 
+  const analysisStatus = analysis?.status;
+  useEffect(() => {
+    if (!analysisId || (analysisStatus && analysisStatus !== "queued" && analysisStatus !== "running")) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await getCorrelationTopologyAnalysis(workspace, analysisId);
+        if (!cancelled) setAnalysis(next);
+      } catch {
+        /* GET 失败保留上一帧；下一次轮询继续。 */
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [analysisId, analysisStatus, workspace]);
+
+  useEffect(() => {
+    if (analysis?.status !== "completed" || !selectedTopologyRepos.length) return;
+    if (topologyState?.analysis?.analysis_id === analysis.analysis_id) return;
+    const sources = Object.fromEntries(corrState.repos.map((repo) => [repo.repo, repo.reuseScanId]));
+    setTopologyState(createTopologyDraft(selectedTopologyRepos, analysis, sources));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis, selectedTopologyRepos]);
+
+  const startTopologyAnalysis = async (refresh = false) => {
+    if (!workspace || selectedTopologyRepos.length < 2) return;
+    try {
+      setAnalysisStarting(true); setAnalysisError(null);
+      const result = await startCorrelationTopologyAnalysis(workspace, { repos: selectedTopologyRepos, refresh });
+      setAnalysisId(result.analysis_id); setAnalysis(null); setTopologyState(null);
+    } catch (e) {
+      setAnalysisError(e instanceof Error ? e.message : String(e));
+    } finally { setAnalysisStarting(false); }
+  };
+  const cancelTopologyAnalysis = async () => {
+    if (!workspace || !analysisId) return;
+    try { setAnalysis(await cancelCorrelationTopologyAnalysis(workspace, analysisId)); }
+    catch (e) { setAnalysisError(e instanceof Error ? e.message : String(e)); }
+  };
+  const selectTopologyRepos = (repos: string[]) => {
+    setSelectedTopologyRepos(repos);
+    setAnalysisId(null); setAnalysis(null); setAnalysisError(null);
+    // Selector changes are table-compatible graph edits: preserve compatible nodes/edges/sources.
+    setTopologyState((previous) => previous ? updateTopologyRepositories(previous, repos) : null);
+  };
+  const switchCorrMode = (mode: "auto" | "manual") => {
+    if (corrMode === "auto" && mode === "manual" && topologyState) {
+      // Preserve an edited but unconfirmed candidate as a manual draft; evidence remains in analysis state.
+      updateCorr(topologyDraftToCorrForm(topologyState.draft));
+    }
+    setCorrMode(mode);
+  };
+
+  const confirmCurrentTopology = () => {
+    if (!topologyState) return;
+    const next = confirmTopologyDraft(topologyState);
+    setTopologyState(next);
+    if (next.confirmation.status === "confirmed") updateCorr(topologyDraftToCorrForm(next.draft));
+  };
+
   // 校验：白盒 = repo + url(可选) + ws；correlation = validateForm(corrState) 空 + 无
   // YAML 错 + ws（gateway url 可选，开了才纳入 url/auth/host 校验——同白盒组合扫描）。
   const combined = type === "whitebox" && !!f.combined;
@@ -423,13 +503,24 @@ export function ScanNewPage() {
   const authErr = (combined || corrGatewayOn) ? validateAuth(f.auth, t) : null;
   const hostErr = (combined || corrGatewayOn) ? validateHost(f.host, t) : null;
   const corrIssues = type === "correlation" ? validateForm(corrState) : [];
+  const confirmedTopologyYaml = topologyState?.confirmation.yaml ?? null;
+  const topologyConfirmed = corrMode === "manual" || (
+    topologyState?.confirmation.status === "confirmed"
+    && topologyState.confirmation.fingerprint === topologyDraftFingerprint(topologyState.draft)
+    && validateTopologyDraft(topologyState.draft).length === 0
+    && (confirmedTopologyYaml === null || corrYaml === confirmedTopologyYaml)
+  );
   const isValid = !sourceErr && !urlErr && !authErr && !hostErr && !!workspace
-    && (type === "whitebox" || (corrIssues.length === 0 && !yamlErr));
+    && (type === "whitebox" || (corrIssues.length === 0 && !yamlErr && topologyConfirmed));
 
   async function onSubmit() {
     try {
       setSubmitting(true);
-      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace, corrYaml));
+      const submissionYaml = corrMode === "auto"
+        ? topologyState?.confirmation.yaml ?? ""
+        : corrYaml;
+      const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace, submissionYaml));
+
       // 组合扫描预验证态（Task 9，spec §8.2）：后端 passthrough bb_phase=precheck 表示
       // 黑盒认证预验证先行——提示用户「预验证中」，再跳 live 页跟踪进度。
       if (r.bb_phase === "precheck") toast.info(t("scan.precheckStatus"));
@@ -444,7 +535,9 @@ export function ScanNewPage() {
   }
 
   const subtitleKey = type === "correlation" ? "scan.correlation.subtitle" : "scan.subtitleWhitebox";
-  const submitLabel = type === "correlation" ? t("scan.correlation.submit") : t("scan.submit");
+  const submitLabel = type === "correlation"
+    ? (corrMode === "auto" ? t("scan.correlation.topology.submit") : t("scan.correlation.submit"))
+    : t("scan.submit");
   const footerHint = type === "correlation" ? t("scan.correlation.footerHint") : t("scan.footerHintWhitebox");
 
   return (
@@ -473,8 +566,22 @@ export function ScanNewPage() {
             ))}
           </div>
 
+          {type === "correlation" && (
+            <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+              {(["auto", "manual"] as const).map((mode) => (
+                <button key={mode} type="button" onClick={() => setCorrMode(mode)}
+                  aria-pressed={corrMode === mode} data-testid={`corr-mode-${mode}`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    corrMode === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}>
+                  {mode === "auto" ? t("scan.correlation.analysis.autoMode") : t("scan.correlation.analysis.manualMode")}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽；
-              跨仓关联走 CorrelationFormFields（仓库卡片 + YAML 面板）。 */}
+              跨仓关联默认自动拓扑，也保留手工表单/YAML。 */}
           {type === "whitebox" ? (
             <ScanFormFields
               type="whitebox"
@@ -489,6 +596,46 @@ export function ScanNewPage() {
               wsList={wsList}
               onWorkspaceChange={setWorkspace}
               wsLoading={wsLoading}
+            />
+          ) : corrMode === "auto" ? (
+            <CorrelationTopologyFields
+              workspace={workspace}
+              wsList={wsList}
+              onWorkspaceChange={(ws) => {
+                setWorkspace(ws);
+                selectTopologyRepos([]);
+              }}
+              wsLoading={wsLoading}
+              repos={topologyRepos}
+              selectedRepos={selectedTopologyRepos}
+              onSelectRepos={selectTopologyRepos}
+              analysis={analysis}
+              starting={analysisStarting}
+              analysisError={analysisError}
+              onStart={() => void startTopologyAnalysis(false)}
+              onRetry={() => void startTopologyAnalysis(true)}
+              onCancel={() => void cancelTopologyAnalysis()}
+              onManual={() => switchCorrMode("manual")}
+              topologyState={topologyState}
+              onTopologyState={setTopologyState}
+              onConfirm={confirmCurrentTopology}
+              availableRepos={topologyRepos.map((repo) => repo.name)}
+              onAddNode={(repo) => selectTopologyRepos([...new Set([...selectedTopologyRepos, repo])])}
+              onRemoveNode={(repo) => selectTopologyRepos(selectedTopologyRepos.filter((name) => name !== repo))}
+              scans={scans}
+              yaml={corrYaml}
+              onYaml={onCorrYaml}
+              yamlError={yamlErr}
+              onApplyYaml={applyYaml}
+              gatewayUrl={f.url}
+              onGatewayUrl={(v) => set({ url: v })}
+              gatewayErr={urlErr}
+              auth={f.auth}
+              setAuth={setAuth}
+              authErr={authErr}
+              host={f.host}
+              setHost={setHost}
+              hostErr={hostErr}
             />
           ) : (
             <CorrelationFormFields

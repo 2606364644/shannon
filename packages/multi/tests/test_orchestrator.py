@@ -124,12 +124,18 @@ async def test_run_correlation_phase_writes_flows_and_respects_paths(tmp_path, m
     event_file = tmp_path / "corr-scan" / "events.ndjson"
 
     cfg = MultiRepoConfig(
-        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint",
+                                    roles=["entrypoint", "backend"]),
                "order-svc": RepoSpec(path="/r/be", role="backend")},
         relations=[Relation(**{"from": "gateway", "to": "order-svc"})],
         correlation=CorrelationConfig(out_workspace="corr-scan"))
 
+    captured_role_map = None
+
     async def fake_execute(self, **kw):
+        nonlocal captured_role_map
+        captured_role_map = kw["prompt_variables"]["role_map"]
+
         class _M:  # 最小 metrics stub:edge_runner 只读 structured_output 属性
             structured_output = {
                 "from": "gateway", "to": "order-svc", "protocol": "grpc",
@@ -156,6 +162,11 @@ async def test_run_correlation_phase_writes_flows_and_respects_paths(tmp_path, m
     # spec 2026-08-27 §8:flows json 对象形态(含 multi_hop_chains)
     assert flows_obj["flows"][0]["method"] == "order.v1.OrderService/CreateOrder"
     assert flows_obj["multi_hop_chains"] == []
+    assert _json.loads(captured_role_map)["gateway"] == ["entrypoint", "backend"]
+    topology = _json.loads((dlv / "cross-service-topology.json").read_text(encoding="utf-8"))
+    gateway = next(service for service in topology["services"] if service["name"] == "gateway")
+    assert gateway["role"] == "entrypoint"
+    assert gateway["roles"] == ["entrypoint", "backend"]
     merged = _json.loads((dlv / "injection_exploitation_queue.json").read_text(encoding="utf-8"))
     assert merged["vulnerabilities"][0]["service"] == "order-svc"
     events = [_json.loads(l) for l in event_file.read_text(encoding="utf-8").splitlines() if l]
@@ -211,7 +222,8 @@ async def test_run_correlation_phase_two_stage(tmp_path, monkeypatch):
     out_ws.mkdir()
     event_file = out_ws / "events.ndjson"
     cfg = MultiRepoConfig(
-        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint"),
+        repos={"gateway": RepoSpec(path="/r/gw", role="entrypoint",
+                                    roles=["entrypoint", "backend"]),
                "order-svc": RepoSpec(path="/r/be", role="backend")},
         relations=[Relation(**{"from": "gateway", "to": "order-svc"})],
         correlation=CorrelationConfig(out_workspace="corr-scan"))

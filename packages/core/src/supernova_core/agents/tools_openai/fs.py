@@ -14,7 +14,12 @@ def _resolve(ctx: RunContextWrapper[ToolContext], path: str) -> Path:
     p = Path(path)
     if not p.is_absolute():
         p = Path(ctx.context.cwd) / p
-    return p
+    return p.resolve(strict=False)
+
+
+def _within_allowed_roots(ctx: RunContextWrapper[ToolContext], path: Path) -> bool:
+    roots = ctx.context.allowed_roots
+    return not roots or any(path.is_relative_to(root) for root in roots)
 
 
 def _truncate(text: str) -> str:
@@ -35,6 +40,8 @@ async def _read_file_impl(
         limit: Max number of lines to return (default all).
     """
     p = _resolve(ctx, path)
+    if not _within_allowed_roots(ctx, p):
+        return f"[read_file error] path is outside allowed roots: {path}"
     try:
         text = p.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
@@ -105,6 +112,8 @@ async def _glob_impl(
         path: Directory to search (default working directory).
     """
     base = _resolve(ctx, path)
+    if not _within_allowed_roots(ctx, base):
+        return f"[glob error] path is outside allowed roots: {path}"
     matches = sorted(base.glob(pattern), key=lambda f: f.stat().st_mtime if f.exists() else 0, reverse=True)
     return _truncate("\n".join(str(m.relative_to(base)) if m.is_relative_to(base) else str(m) for m in matches))
 

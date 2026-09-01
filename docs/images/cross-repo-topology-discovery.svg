@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">Cross-repo topology discovery flow</title>
+  <desc id="desc">Select repositories, run a read-only AI analysis, edit and confirm the candidate graph, then start the existing cross-repo scan.</desc>
+  <rect width="960" height="360" fill="#f8fafc"/>
+  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0f172a">
+    <rect x="30" y="55" width="180" height="80" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <text x="120" y="88" text-anchor="middle" font-weight="700">Select repos</text>
+    <text x="120" y="112" text-anchor="middle" fill="#64748b">2–8 ready repos</text>
+    <path d="M210 95h65" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="280" y="40" width="210" height="110" rx="12" fill="#eff6ff" stroke="#93c5fd"/>
+    <text x="385" y="72" text-anchor="middle" font-weight="700">Read-only AI analysis</text>
+    <text x="385" y="96" text-anchor="middle" fill="#475569">read / glob / grep only</text>
+    <text x="385" y="118" text-anchor="middle" fill="#475569">bounded manifest + audit</text>
+    <path d="M490 95h65" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="560" y="35" width="215" height="120" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <text x="667" y="67" text-anchor="middle" font-weight="700">Candidate graph</text>
+    <text x="667" y="91" text-anchor="middle" fill="#475569">SVG + accessible tables</text>
+    <text x="667" y="113" text-anchor="middle" fill="#475569">evidence / confidence</text>
+    <text x="667" y="135" text-anchor="middle" fill="#475569">M:N, multi-hop, cycles</text>
+    <path d="M667 155v50" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="550" y="215" width="235" height="80" rx="12" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="667" y="248" text-anchor="middle" font-weight="700">Human confirmation</text>
+    <text x="667" y="272" text-anchor="middle" fill="#475569">manual edits retained</text>
+    <path d="M550 255h-70" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="265" y="215" width="215" height="80" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <text x="372" y="248" text-anchor="middle" font-weight="700">Existing scan API</text>
+    <text x="372" y="272" text-anchor="middle" fill="#475569">repos + relations YAML</text>
+    <path d="M265 255h-65" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="25" y="215" width="175" height="80" rx="12" fill="#fff7ed" stroke="#fdba74"/>
+    <text x="112" y="248" text-anchor="middle" font-weight="700">Manual fallback</text>
+    <text x="112" y="272" text-anchor="middle" fill="#475569">form / YAML</text>
+    <path d="M385 150c-30 30-145 20-215 45" fill="none" stroke="#94a3b8" stroke-dasharray="5 5"/>
+    <text x="200" y="180" fill="#64748b">AI failure → no auto retry</text>
+  </g>
+  <defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 9 4.5 0 9z" fill="#64748b"/></marker></defs>
+</svg>

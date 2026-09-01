@@ -159,7 +159,7 @@ def _load_pricing_file(path: str | None) -> dict:
     return {}
 
 
-def _pricing() -> tuple[dict, str]:
+def _pricing(pricing_override: str | None = None) -> tuple[dict, str]:
     """分层合并内置表 + 三层 override，返回 (价目表, 币种)。
 
     优先级（低 → 高，逐层 update，高层同模型压过低层、未覆盖模型继承低层）：
@@ -174,7 +174,7 @@ def _pricing() -> tuple[dict, str]:
     （BUILTIN ∪ ws_getenv 单层混合）逐项等价。
     """
     layers = [
-        _load_pricing_file(os.environ.get("SUPERNOVA_PRICING_OVERRIDE")),  # process 层
+        _load_pricing_file(pricing_override or os.environ.get("SUPERNOVA_PRICING_OVERRIDE")),  # process 层
         _load_pricing_file(os.environ.get("SUPERNOVA_GLOBAL_PRICING")),  # 全局层（web 注入）
         _load_pricing_file(ws_override_get("SUPERNOVA_PRICING_OVERRIDE")),  # 工作区层（最高）
     ]
@@ -209,14 +209,14 @@ def is_model_priced(model: str) -> bool:
     return _lookup_key(model, table) in table
 
 
-def compute_cost(model: str, usage) -> CostAmount:
+def compute_cost(model: str, usage, *, pricing_override: str | None = None) -> CostAmount:
     """按价目表 + token 用量算成本。未知模型 → CostAmount(0.0, currency)。
 
     计费公式（spec §4.4，input_tokens 已归一为不含 cache 命中）::
 
         cost = ( input*P_in + cache_creation*P_cc + cache_read*P_cr + output*P_out ) / 1e6
     """
-    table, currency = _pricing()
+    table, currency = _pricing(pricing_override)
     key = _lookup_key(model, table)
     if key not in table:
         _log.warning(
@@ -238,9 +238,9 @@ def compute_cost(model: str, usage) -> CostAmount:
     return CostAmount(cost, _model_currency(p, currency))
 
 
-def compute_cost_usd(model: str, usage) -> float:
+def compute_cost_usd(model: str, usage, *, pricing_override: str | None = None) -> float:
     """过渡兼容 wrapper：返回 compute_cost().cost（本币值，不再 ÷ 汇率）。
 
     新代码请用 ``compute_cost`` 拿 (cost, currency)。mapper / provider 切换后本函数可移除。
     """
-    return compute_cost(model, usage).cost
+    return compute_cost(model, usage, pricing_override=pricing_override).cost

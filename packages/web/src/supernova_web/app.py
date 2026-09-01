@@ -270,7 +270,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     from .components.auth_profile_store import AuthProfileStore
     from .components.host_profile_store import HostProfileStore
     from .components.pricing_store import PricingStore
-    from .api import fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles, host_profiles, pricing
+    from .api import correlation_topology, fs, members, multi_configs, repos, scan, scans, system_status, users, workspaces, ws_config, branding, auth_profiles, host_profiles, pricing
 
     app.state.indexer = WorkspacesIndexer(cfg.workspaces_dir)
     # P3c 阶段 2：per-ws 配置
@@ -304,6 +304,11 @@ def create_app(overrides: dict | None = None) -> FastAPI:
         cfg.workspaces_dir, git_fetcher, max_concurrent=cfg.repos_max_concurrent_clones,
         max_upload_zip_bytes=cfg.max_upload_zip_bytes)
 
+    from .components.topology_analysis import TopologyAnalysisManager
+    app.state.topology_manager = overrides.get("topology_manager") or TopologyAnalysisManager(
+        cfg.workspaces_dir, repo_manager=app.state.repo_manager,
+        ws_config_store=app.state.ws_config_store)
+
     from .auth.dependencies import current_user
     _require_auth = [Depends(current_user)]
     app.include_router(workspaces.router, dependencies=_require_auth)
@@ -312,6 +317,7 @@ def create_app(overrides: dict | None = None) -> FastAPI:
     app.include_router(scan.router, dependencies=_require_auth)
     app.include_router(multi_configs.router, dependencies=_require_auth)
     app.include_router(repos.router, dependencies=_require_auth)
+    app.include_router(correlation_topology.router, dependencies=_require_auth)
     app.include_router(fs.router, dependencies=_require_auth)
     app.include_router(system_status.router, dependencies=_require_auth)
     app.include_router(members.router, dependencies=_require_auth)

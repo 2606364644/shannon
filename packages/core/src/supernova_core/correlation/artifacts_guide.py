@@ -23,10 +23,13 @@ class ServiceArtifacts:
     entry_points: Path | None = None                        # entry_points.json（存在才有）
     dismissed: Path | None = None                           # dismissed_findings.json
     proto_roots: list[str] = field(default_factory=list)    # RepoSpec.proto_roots 透传
+    roles: list[str] | None = None
 
 
 def _section(a: ServiceArtifacts, heading: str) -> list[str]:
-    lines = [f"## {heading} ({a.service} = {a.repo_path or '?'}, role: {a.role}) 扫描产物："]
+    effective_roles = a.roles or [a.role]
+    lines = [f"## {heading} ({a.service} = {a.repo_path or '?'}, "
+             f"role: {a.role}, roles: {','.join(effective_roles)}) 扫描产物："]
     ep = str(a.entry_points) if a.entry_points else "（缺失）"
     lines.append(
         f"- {ep} — HTTP 路由表（METHOD /path @ file:line + handler）。"

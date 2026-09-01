@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CorrFormState, formToYaml, yamlToForm, validateForm, CorrYamlError } from "./correlation-yaml";
+import { CorrFormState, formToYaml, yamlToForm, validateForm, CorrYamlError, effectiveCorrRoles } from "./correlation-yaml";
 
 const base: CorrFormState = {
   repos: [
@@ -77,4 +77,42 @@ describe("validateForm：复用模式未选扫描（reuseScanId === \"\" 哨兵�
     };
     expect(validateForm(selected)).toEqual([]);
   });
+});
+
+describe("multi-role correlation YAML", () => {
+  it("serializes legacy role and roles for dual capability", () => {
+    const s: CorrFormState = {
+      repos: [
+        { repo: "gateway", role: "entrypoint", roles: ["entrypoint", "backend"], protocol: "grpc", reuseScanId: null },
+        { repo: "order", role: "backend", protocol: "grpc", reuseScanId: null },
+      ],
+      relations: [
+        { from: "gateway", to: "order", protocol: "grpc" },
+        { from: "order", to: "gateway", protocol: "http" },
+      ],
+    };
+    const text = formToYaml(s);
+    expect(text).toContain("role: entrypoint");
+    expect(text).toContain("roles:\n      - entrypoint\n      - backend");
+    expect(yamlToForm(text)).toEqual(s);
+  });
+
+  it("keeps legacy single-role YAML unchanged and rejects malformed roles/protocol/self-loop", () => {
+    const legacy = yamlToForm("repos:\n  gateway: {path: gateway, role: entrypoint}\n  order: {path: order, role: backend}\nrelations:\n  - {from: gateway, to: order, protocol: grpc}\n  - {from: gateway, to: order, protocol: http}\n");
+    expect(legacy.repos[0].roles).toBeUndefined();
+    expect(effectiveCorrRoles(legacy.repos[0])).toEqual(["entrypoint"]);
+    expect(() => yamlToForm("repos:\n  a: {role: entrypoint, roles: [database]}\nrelations: []")).toThrow(/roles/);
+    expect(() => yamlToForm("repos:\n  a: {role: entrypoint}\nrelations:\n  - {from: a, to: a, protocol: grpc}")).toThrow(/self/);
+    expect(() => yamlToForm("repos:\n  a: {role: entrypoint}\nrelations:\n  - {from: a, to: a, protocol: thrift}")).toThrow(/protocol/);
+  });
+});
+
+it("treats a relation with omitted protocol as legacy grpc and rejects only explicit invalid values", () => {
+  const state = yamlToForm(`repos:
+  gateway: {path: gateway, role: entrypoint}
+  order: {path: order, role: backend}
+relations:
+  - {from: gateway, to: order}
+`);
+  expect(state.relations).toEqual([{ from: "gateway", to: "order", protocol: "grpc" }]);
 });

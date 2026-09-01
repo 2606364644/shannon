@@ -30,6 +30,7 @@ class AgentName(str, Enum):
     VALIDATE_AUTH = "validate-authentication"
     CROSS_REPO_CORRELATION = "cross-repo-correlation"
     CROSS_REPO_ADJUDICATION = "cross-repo-adjudication"  # spec 2026-08-27 阶段 B 跨仓裁决
+    CROSS_REPO_TOPOLOGY_DISCOVERY = "cross-repo-topology-discovery"
     ATTACK_CHAIN = "attack-chain"
     ENDPOINT_VERIFY = "endpoint-verify"  # spec 2026-08-03 黑盒端点 live 验证
 
@@ -168,6 +169,14 @@ AGENTS: dict[AgentName, AgentDefinition] = {
         deliverable_filename=None,  # adjudication-log 由编排器从 LLM 输出解析落盘
         model_tier="large",
     ),
+    AgentName.CROSS_REPO_TOPOLOGY_DISCOVERY: AgentDefinition(
+        name=AgentName.CROSS_REPO_TOPOLOGY_DISCOVERY,
+        display_name="Cross-Repo Topology Discovery",
+        prerequisites=[],
+        prompt_template="cross-repo-topology-discovery",
+        deliverable_filename=None,
+        model_tier="large",
+    ),
     AgentName.ATTACK_CHAIN: AgentDefinition(
         name=AgentName.ATTACK_CHAIN,
         display_name="Attack Chain Analysis",
@@ -227,6 +236,7 @@ AGENT_PHASE_MAP: dict[str, str] = {
     # 在途阶段 B（跨仓裁决）枚举补映射——对齐相邻 correlation 语义（枚举已入
     # AgentName 但 map 漏，test_all_agent_names_have_phase_mapping 红）。
     "cross-repo-adjudication": "correlation",
+    "cross-repo-topology-discovery": "correlation",
     AgentName.ATTACK_CHAIN: "attack-chain",
     "endpoint-verify": "endpoint-verify",
 }

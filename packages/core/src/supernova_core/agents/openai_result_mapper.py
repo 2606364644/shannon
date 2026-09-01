@@ -47,6 +47,7 @@ def map_run_result(
     turns: int,
     stop_reason: str | None = None,
     output_format: dict | None = None,
+    pricing_override: str | None = None,
 ) -> ClaudeRunResult:
     final = getattr(run_result, "final_output", "")
     # B2: 结构化输出路径下 final_output 可能是 dict（RawJsonSchemaOutputSchema.validate_json 返回）
@@ -55,7 +56,7 @@ def map_run_result(
     else:
         text = json.dumps(final, ensure_ascii=False) if not isinstance(final, (int, float, bool)) else str(final)
     tokens = _usage_from(run_result)
-    cost_amount = compute_cost(model, tokens)
+    cost_amount = compute_cost(model, tokens, pricing_override=pricing_override)
     cost = cost_amount.cost
     if model and cost == 0.0 and not is_model_priced(model):
         norm = normalize_model(model)

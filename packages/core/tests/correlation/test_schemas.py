@@ -72,6 +72,19 @@ def test_flow_serialization_roundtrip():
     assert rt.call_site.line == 42
 
 
+def test_service_node_serializes_legacy_role_and_roles():
+    from supernova_core.correlation.schemas import ServiceNode
+    node = ServiceNode(name="gateway", role="entrypoint", roles=["entrypoint", "backend"], repo="/r/gw")
+    data = json.loads(node_to_json(node))
+    assert data["role"] == "entrypoint"
+    assert data["roles"] == ["entrypoint", "backend"]
+
+
+def node_to_json(node):
+    import json as _json
+    return _json.dumps(node.__dict__, ensure_ascii=False)
+
+
 def test_flows_file_written(tmp_path):
     from supernova_core.correlation.report import write_correlation_deliverables
     from supernova_core.correlation.schemas import (

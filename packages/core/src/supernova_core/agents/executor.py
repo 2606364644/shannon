@@ -281,6 +281,7 @@ class AgentExecutor:
         provider_config: dict | None = None,   # P3c 阶段 1：穿线下传 run_claude_prompt
         queue_root: str | None = None,   # spec 2026-08-08：读 queue 的根（黑盒=白盒 repo_path/deliverables），透传到 render_deliverable
         proxy_url: str | None = None,   # Task 4：per-scan 出口代理穿线（host_profile → CLI env / ToolContext）
+        tool_policy: "ToolPolicy" = "default",
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -354,6 +355,7 @@ class AgentExecutor:
             provider_config=provider_config,   # P3c 阶段 1
             proxy_url=proxy_url,   # Task 4：per-scan 代理穿线到 provider
             usage_sink=self.usage_sink,   # cancel 兜底记账通道（2026-08-28）
+            tool_policy=tool_policy,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 

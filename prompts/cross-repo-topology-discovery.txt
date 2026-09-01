@@ -1,0 +1,36 @@
+You are building the **candidate service topology** for a cross-repository security workflow.
+
+Selected repositories:
+{{REPOSITORIES_JSON}}
+
+Bounded navigation manifest (navigation facts only; it is not proof and contains no vulnerability hints):
+{{NAVIGATION_MANIFEST_JSON}}
+
+# Methodology
+1. Treat this as one full directed graph across ALL repositories. Do not assume a star shape, one entrypoint, one backend per caller, or that backend services cannot call one another.
+2. Inspect source/config/proto directly with only `read_file`, `glob`, and `grep`. The manifest is only a map; open the relevant files before asserting an edge or capability.
+3. Identify external-entry capability from HTTP routes/controllers, GraphQL operations, public ingress, or server startup. Identify backend capability from gRPC service implementations, HTTP handlers, GraphQL resolvers, or incoming calls.
+4. Identify directed calls from client-side code: generated stubs, RPC client construction, HTTP request configuration, GraphQL client calls, service-discovery names, and deployment upstream configuration. Match each caller to a selected server repository before outputting an edge.
+5. A repository may simultaneously be `entrypoint` and `backend`. Preserve every ordered edge `(from, to, protocol)`; multiple callers to one backend, fan-out, multi-hop, backend-to-backend edges, and cycles are valid.
+6. Use `uncertain` for suspected relationships that cannot be verified or protocols outside grpc/http/graphql (for example Thrift or Dubbo). Never disguise an unknown protocol as a supported protocol.
+7. An empty graph is a valid answer. If no entry capability or no confident relation can be verified, return empty `edges`/`nodes` suggestions and explain what you checked in `coverage`/`uncertain`. Do not invent a default star graph.
+8. Record per-repository coverage and whether key route/client/proto/config files were checked. A manifest-only conclusion is incomplete.
+
+# Evidence rules
+- Every non-empty edge MUST include `client_evidence`; high confidence also requires a matching client-side file opened and cited.
+- Prefer `handler_evidence` from the target repository for backend capability and edge confirmation.
+- Evidence fields are `repo`, `file`, `line`, and `snippet`; paths must stay inside that repository and the snippet must occur on that line.
+- Do not infer vulnerability, exploitability, trust-boundary exposure, or an attack chain. This pre-analysis only proposes topology for human confirmation.
+
+# Required JSON only
+Return exactly one JSON object matching this schema (no Markdown):
+{
+  "nodes": [{"repo":"service","roles":["entrypoint","backend"],
+             "capabilities":[{"role":"entrypoint","confidence":"medium","evidence":[EVIDENCE]}]}],
+  "edges": [{"from":"caller","to":"callee","protocol":"grpc|http|graphql",
+             "confidence":"high|medium|low","service":"OrderService","method":"CreateOrder",
+             "client_evidence":[EVIDENCE],"handler_evidence":[EVIDENCE]}],
+  "uncertain": [{"repo":"service","message":"why uncertain","protocol_hint":null,"evidence":[EVIDENCE]}],
+  "coverage": [{"repo":"service","complete":true,"reason":"checked routes, clients, proto, config"}]
+}
+EVIDENCE = {"repo":"service","file":"relative/path.ts","line":1,"snippet":"exact source line"}

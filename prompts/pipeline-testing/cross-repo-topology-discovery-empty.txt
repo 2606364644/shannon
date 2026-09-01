@@ -1,0 +1,1 @@
+{"nodes":[],"edges":[],"uncertain":[{"repo":"gateway","message":"no verified selected-repo relation","protocol_hint":null,"evidence":[]}],"coverage":[{"repo":"gateway","complete":true,"reason":"fixture empty graph"},{"repo":"order-svc","complete":true,"reason":"fixture empty graph"}]}

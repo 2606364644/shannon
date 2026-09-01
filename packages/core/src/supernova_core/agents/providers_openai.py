@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from agents import (
@@ -34,7 +35,7 @@ from supernova_core.models.errors import ErrorCode
 from .openai_result_mapper import map_run_result
 from .openai_stream_collector import StreamCollector
 from .providers import BaseProvider, ProviderConfig
-from .runner import ClaudeRunResult, TokenUsage
+from .runner import ClaudeRunResult, TokenUsage, ToolPolicy
 
 logger = logging.getLogger(__name__)
 from .tool_audit_logger import ToolAuditLogger
@@ -268,7 +269,11 @@ class OpenAIProvider(BaseProvider):
         """
         return narration_directive()
 
-    def build_agent(self, model: str, output_format: dict | None, extra_tools: list | None = None) -> Agent:
+    def build_agent(
+        self, model: str, output_format: dict | None, extra_tools: list | None = None,
+        tool_policy: ToolPolicy = "default",
+        allowed_roots: list[str | Path] | None = None,
+    ) -> Agent:
         client = self._get_client()
         chat_model = OpenAIChatCompletionsModel(model=model, openai_client=client)
         # 不设 output_type：第三方 openai 兼容端点（deepseek/GLM）不支持
@@ -281,10 +286,19 @@ class OpenAIProvider(BaseProvider):
         # schema 产出 structured_output），机制差异是 SDK 哲学（CLAUDE.md §2）；claude
         # 引擎仍走 CLI --json-schema（端点支持）。output_format 参数保留供
         # map_run_result/call 触发本地解析，不传给 SDK。
+        if tool_policy == "readonly-code":
+            if not allowed_roots:
+                raise ValueError("readonly-code policy requires allowed_roots")
+            if extra_tools:
+                raise ValueError("readonly-code policy cannot add extra tools")
+            from .tools_openai import build_readonly_code_tools
+            tools = build_readonly_code_tools()
+        else:
+            tools = build_tools() + (extra_tools or [])
         return Agent(
             name="shannon-openai-agent",
             instructions=self._instructions(),  # None when disabled
-            tools=build_tools() + (extra_tools or []),
+            tools=tools,
             model=chat_model,
             model_settings=ModelSettings(include_usage=True),
             output_type=None,
@@ -419,6 +433,8 @@ class OpenAIProvider(BaseProvider):
         progress: "ProgressSpec | None" = None,
         proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → ToolContext（Task 2 工具读此字段）
         usage_sink: "UsageSink | None" = None,   # cancel 兜底记账（2026-08-28）
+        tool_policy: ToolPolicy = "default",
+        allowed_roots: list[str | Path] | None = None,
     ) -> ClaudeRunResult:
         start_time = time.time()
         model = self._get_model(model_tier)
@@ -428,7 +444,7 @@ class OpenAIProvider(BaseProvider):
             # engine-agnostic：caller 只传 CollectorBase/ProgressSpec，provider 经 compose 组装。
             from supernova_core.agents.progress_tool import compose_openai_extra_tools
             extra_tools = compose_openai_extra_tools(collector, progress) or None
-            agent = self.build_agent(model, output_format, extra_tools=extra_tools)
+            agent = self.build_agent(model, output_format, extra_tools=extra_tools, tool_policy=tool_policy, allowed_roots=allowed_roots)
             # stream_collector 收 openai stream events（与 CollectorBase 无关，避免与
             # 上面的 collector 参数命名冲突）。
             stream_collector = StreamCollector(audit_logger)
@@ -439,7 +455,8 @@ class OpenAIProvider(BaseProvider):
                     input=prompt,
                     context=ToolContext(
                         cwd=cwd,
-                        subagent_run=self._make_subagent_runner(model, cwd, proxy_url),
+                        subagent_run=None if tool_policy == "readonly-code" else self._make_subagent_runner(model, cwd, proxy_url),
+                        allowed_roots=tuple(Path(root).resolve() for root in allowed_roots),
                         proxy_url=proxy_url,
                     ),
                     max_turns=max_turns or self._max_turns(),
@@ -511,7 +528,7 @@ class OpenAIProvider(BaseProvider):
                     from .openai_result_mapper import _usage_from
                     from .pricing import compute_cost
                     u = _usage_from(streaming)
-                    ca = compute_cost(model, u)
+                    ca = compute_cost(model, u, pricing_override=self.config.pricing_override)
                     usage_sink.record(
                         model=model,
                         input_tokens=u.input_tokens,
@@ -558,7 +575,7 @@ class OpenAIProvider(BaseProvider):
             try:
                 from .openai_result_mapper import _usage_from
                 from .pricing import compute_cost
-                cost_amount = compute_cost(model, _usage_from(run_result))
+                cost_amount = compute_cost(model, _usage_from(run_result), pricing_override=self.config.pricing_override)
                 cost, cost_currency = cost_amount.cost, cost_amount.currency
             except (TypeError, AttributeError, ValueError):
                 pass

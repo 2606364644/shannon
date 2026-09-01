@@ -435,6 +435,7 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
   it("类型切换到跨仓关联渲染跨仓表单（含 YAML 面板），白盒表单不再渲染", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    fireEvent.click(screen.getByTestId("corr-mode-manual"));
     // 跨仓表单：YAML 面板（默认收起）+ 工作区下拉
     expect(screen.getByTestId("corr-yaml-panel")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /YAML 配置/ })).toBeInTheDocument();
@@ -466,6 +467,7 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
     );
     renderPageFresh();
     fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    fireEvent.click(screen.getByTestId("corr-mode-manual"));
     await selectWorkspace("ws1");
     // 添加一张仓库卡（唯一卡默认 entrypoint）→ 选 frontend
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
@@ -778,5 +780,96 @@ describe("HOST enabled source validation", () => {
       ...baseF,
       host: { enabled: true, mode: "url", profileId: "", hostUrl: "ftp://hosts.example/hosts" },
     }, "ws1")).toThrow();
+  });
+});
+
+describe("correlation topology auto flow", () => {
+  function renderAutoPage() {
+    return render(
+      <MemoryRouter initialEntries={["/scan/new"]}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <ScanNewPage />
+        </SWRConfig>
+      </MemoryRouter>,
+    );
+  }
+  it("analyzes, confirms topology, gates submission, and posts confirmed YAML", async () => {
+    let submitted: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "web", state: "ready" }, { name: "order", state: "ready" },
+        { name: "admin", state: "ready" }, { name: "user", state: "ready" },
+      ])),
+      http.post("/api/workspaces/:ws/correlation-topology/analyses", async ({ request }) => {
+        const body = await request.json() as { repos: string[]; refresh?: boolean };
+        expect(body.repos).toEqual(["web", "order", "admin", "user"]);
+        return HttpResponse.json({ analysis_id: "topology-1" }, { status: 202 });
+      }),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/:id", () => HttpResponse.json({
+        analysis_id: "topology-1", workspace: "ws1", status: "completed",
+        repos: ["web", "order"], cache_hit: false,
+        result: {
+          nodes: [{ repo: "web", roles: ["entrypoint", "backend"], capabilities: [] },
+            { repo: "order", roles: ["backend"], capabilities: [] },
+            { repo: "admin", roles: ["entrypoint"], capabilities: [] },
+            { repo: "user", roles: ["backend"], capabilities: [] }],
+          edges: [
+            { from: "web", to: "order", protocol: "grpc", confidence: "high",
+              client_evidence: [], handler_evidence: [] },
+            { from: "admin", to: "order", protocol: "graphql", confidence: "medium",
+              client_evidence: [], handler_evidence: [] },
+            { from: "admin", to: "user", protocol: "http", confidence: "medium",
+              client_evidence: [], handler_evidence: [] },
+          ],
+          uncertain: [], coverage: [], invalid: [],
+        },
+      })),
+      http.post("/api/scan", async ({ request }) => {
+        submitted = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "scan-1" });
+      }),
+    );
+    renderAutoPage();
+    fireEvent.click(screen.getByTestId("scan-type-correlation"));
+    await selectWorkspace("ws1");
+    fireEvent.click(await screen.findByRole("checkbox", { name: /web/ }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /order/ }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /admin/ }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /user/ }));
+    fireEvent.click(screen.getByRole("button", { name: /自动关联分析/ }));
+    expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
+    const fromSelects = screen.getAllByRole("combobox", { name: / from$/ });
+    fireEvent.change(fromSelects.at(-1)!, { target: { value: "web" } });
+    const toSelects = screen.getAllByRole("combobox", { name: / to$/ });
+    fireEvent.change(toSelects.at(-1)!, { target: { value: "user" } });
+    const protocols = screen.getAllByRole("combobox", { name: "protocol" });
+    fireEvent.change(protocols.at(-1)!, { target: { value: "http" } });
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
+    // Manual fallback preserves the edited graph before confirmation.
+    fireEvent.click(screen.getAllByRole("button", { name: /手工模式/ }).at(-1)!);
+    expect(screen.getAllByTestId("corr-relation-chip").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId("corr-mode-auto"));
+    fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
+
+    // An unapplied YAML edit must invalidate confirmation and cannot bypass submission.
+    fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
+    const editor = screen.getByLabelText("YAML 编辑器");
+    const confirmedYaml = (editor as HTMLTextAreaElement).value;
+    fireEvent.change(editor, { target: { value: `${confirmedYaml}\n# unconfirmed edit` } });
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
+    fireEvent.change(editor, { target: { value: confirmedYaml } });
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /启动跨仓扫描/ }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    const submittedYaml = String(submitted!.config_content);
+    expect(submittedYaml).toContain("from: web");
+    expect(submittedYaml).toContain("to: order");
+    expect(submittedYaml).toContain("from: admin");
+    expect(submittedYaml).toContain("to: user");
+    expect(submittedYaml).toContain("roles:\n      - entrypoint\n      - backend");
   });
 });

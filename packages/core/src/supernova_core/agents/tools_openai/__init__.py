@@ -6,6 +6,7 @@ cwd 经 RunContextWrapper[ToolContext] 注入，所有工具共享同一工作�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Awaitable, Callable
 
 
@@ -20,6 +21,16 @@ class ToolContext:
     # 由 executor（Task 4）从 host_profile 灌入；bash/web_fetch/web_search 读此字段
     # 注入 HTTPS_PROXY/HTTP_PROXY/NO_PROXY env 或 httpx ``proxy=`` kwarg。
     proxy_url: str | None = None
+    # readonly-code topology policy: empty tuple preserves legacy unrestricted behavior.
+    allowed_roots: tuple[Path, ...] = ()
+
+
+def build_readonly_code_tools():
+    """Read/search-only tool surface used by topology pre-analysis."""
+    from .exec import grep
+    from .fs import glob, read_file
+
+    return [read_file, glob, grep]
 
 
 def build_tools():
@@ -35,4 +46,4 @@ def build_tools():
     return [bash, read_file, write_file, edit_file, grep, glob, web_fetch, web_search, task]
 
 
-__all__ = ["ToolContext", "build_tools"]
+__all__ = ["ToolContext", "build_readonly_code_tools", "build_tools"]

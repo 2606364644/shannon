@@ -707,6 +707,81 @@ export interface CorrelationDetail {
  *  返 list[str]——仅配置名（已排序），无对象元数据，故摘要即 string（勿包 {name} 壳）。 */
 export type MultiConfigSummary = string;
 
+// === Cross-repository topology pre-analysis (candidate graph before scan submission) ===
+export type CorrelationTopologyStatus =
+  | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+
+export interface CorrelationTopologyEvidence {
+  repo: string;
+  file: string;
+  line?: number | null;
+  snippet?: string;
+  kind?: "client" | "handler" | "config" | "capability" | string;
+  valid?: boolean | null;
+  validation_errors?: string[];
+}
+
+export interface CorrelationTopologyNode {
+  repo: string;
+  roles: Array<"entrypoint" | "backend">;
+  capabilities?: Array<{
+    role: "entrypoint" | "backend";
+    confidence: "high" | "medium" | "low";
+    evidence: CorrelationTopologyEvidence[];
+  }>;
+}
+
+export interface CorrelationTopologyEdge {
+  from: string;
+  to: string;
+  protocol: "grpc" | "http" | "graphql";
+  confidence?: "high" | "medium" | "low";
+  service?: string | null;
+  method?: string | null;
+  client_evidence?: CorrelationTopologyEvidence[];
+  handler_evidence?: CorrelationTopologyEvidence[];
+}
+
+export interface CorrelationTopologyResult {
+  nodes: CorrelationTopologyNode[];
+  edges: CorrelationTopologyEdge[];
+  uncertain: Array<{
+    repo: string;
+    message: string;
+    protocol_hint?: string | null;
+    evidence?: CorrelationTopologyEvidence[];
+  }>;
+  coverage: Array<{ repo: string; complete: boolean; reason?: string }>;
+  invalid?: Array<{ reason: string; message: string; raw?: Record<string, unknown> }>;
+  raw?: CorrelationTopologyResult | null;
+}
+
+export interface CorrelationTopologyUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  cost_usd: number;
+  cost_currency: string;
+  model?: string | null;
+  turns?: number;
+}
+
+export interface CorrelationTopologyAnalysis {
+  analysis_id: string;
+  workspace: string;
+  status: CorrelationTopologyStatus;
+  repos: string[];
+  progress?: number;
+  cache_hit?: boolean;
+  fingerprint?: string;
+  result?: CorrelationTopologyResult | null;
+  usage?: CorrelationTopologyUsage | null;
+  error?: { code: string; message: string; retryable?: boolean } | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 /** 黑盒登录配置（对齐 core Authentication schema：models/config.py:29-45）。
  *  字段名（snake_case）与后端 pydantic 模型一致——scan_manager Authentication.model_validate 校验。*/
 export interface ScanAuthentication {

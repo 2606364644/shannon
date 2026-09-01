@@ -10,6 +10,9 @@ if TYPE_CHECKING:
     from supernova_core.collectors.base import CollectorBase
 
 
+ToolPolicy = Literal["default", "readonly-code"]
+
+
 @dataclass
 class TokenUsage:
     """Token 使用统计信息"""
@@ -85,6 +88,8 @@ class ProviderConfig:
     call_timeout: float | None = None         # SUPERNOVA_OPENAI_CALL_TIMEOUT（秒）
     subagent_call_timeout: float | None = None  # SUPERNOVA_OPENAI_SUBAGENT_CALL_TIMEOUT（秒）
     adaptive_thinking: bool | None = None     # CLAUDE_ADAPTIVE_THINKING
+    # Per-call workspace pricing override; None preserves process/global layering.
+    pricing_override: str | None = None
 
 
 # 默认模型映射表
@@ -164,6 +169,8 @@ async def run_claude_prompt(
     progress: "ProgressSpec | None" = None,
     proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → provider.call
     usage_sink: "UsageSink | None" = None,   # cancel 兜底记账通道（2026-08-28）→ provider.call
+    tool_policy: ToolPolicy = "default",
+    allowed_roots: list[str | Path] | None = None,
 ) -> ClaudeRunResult:
     """
     使用 Claude Agent SDK 或兼容 Provider 执行 AI prompt
@@ -228,6 +235,8 @@ async def run_claude_prompt(
                 progress=progress,
                 proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
                 usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
+                tool_policy=tool_policy,
+                allowed_roots=allowed_roots,
             )
 
         # 5. 检查花费上限行为

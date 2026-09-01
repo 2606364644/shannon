@@ -1,6 +1,7 @@
 import type {
   BlackboxRunSummary, CorrelationDetail, DataflowView, FsBrowseResult,
   MultiConfigSummary, Repo, RepoDetail, ScanRequest, ScanSummary, SessionData,
+  CorrelationTopologyAnalysis,
 } from "./types";
 
 export class ApiError extends Error {
@@ -357,6 +358,26 @@ export const fetchDataflowView = (ws: string, scanId: string) =>
 // 「关联阶段进行中/未开始」）。
 export function getCorrelationDetail(ws: string, scanId: string): Promise<CorrelationDetail> {
   return apiGet<CorrelationDetail>(`/workspaces/${encWs(ws)}/scans/${encWs(scanId)}/correlation`);
+}
+
+// === Cross-repo topology pre-analysis lifecycle ===
+export function startCorrelationTopologyAnalysis(
+  ws: string, body: { repos: string[]; refresh?: boolean },
+): Promise<{ analysis_id: string }> {
+  return apiPost<{ analysis_id: string }>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses`, body);
+}
+export function getCorrelationTopologyAnalysis(
+  ws: string, analysisId: string,
+): Promise<CorrelationTopologyAnalysis> {
+  return apiGet<CorrelationTopologyAnalysis>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs(analysisId)}`);
+}
+export function cancelCorrelationTopologyAnalysis(
+  ws: string, analysisId: string,
+): Promise<CorrelationTopologyAnalysis> {
+  return apiDelete<CorrelationTopologyAnalysis>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs(analysisId)}`);
 }
 
 // ── 多仓配置（对齐 backend api/multi_configs.py + MultiRepoConfigStore）─────────

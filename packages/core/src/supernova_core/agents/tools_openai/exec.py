@@ -100,12 +100,16 @@ async def _grep_impl(
     base = Path(path)
     if not base.is_absolute():
         base = Path(cwd) / base
+    base = base.resolve(strict=False)
+    roots = ctx.context.allowed_roots
+    if roots and not any(base.is_relative_to(root) for root in roots):
+        return _truncate(f"[grep error] path is outside allowed roots: {path}")
     regex = re.compile(pattern)
     files: list[Path] = []
     if base.is_file():
         files = [base]
     else:
-        files = [f for f in base.rglob(glob) if f.is_file()]
+        files = [f for f in base.rglob(glob) if f.is_file() and not f.is_symlink()]
 
     rg = shutil.which("rg")
     if rg:

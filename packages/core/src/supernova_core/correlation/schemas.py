@@ -56,6 +56,22 @@ class ServiceNode:
     name: str
     role: str
     repo: str
+    # New capability set; None/empty falls back to legacy single role for old readers.
+    roles: list[str] | None = None
+
+    @property
+    def effective_roles(self) -> list[str]:
+        if self.roles:
+            return self.roles
+        return [self.role]
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "role": self.role,
+            "roles": self.effective_roles,
+            "repo": self.repo,
+        }
 
 
 @dataclass
@@ -64,7 +80,7 @@ class CrossServiceTopology:
     edges: list[TopologyEdge]
 
     def to_json(self) -> str:
-        return json.dumps({"services": [_s(s) for s in self.services],
+        return json.dumps({"services": [s.to_dict() for s in self.services],
                            "edges": [json.loads(e.to_json()) for e in self.edges]},
                           ensure_ascii=False)
 

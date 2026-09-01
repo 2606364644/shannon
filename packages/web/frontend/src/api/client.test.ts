@@ -3,6 +3,8 @@ import {
   apiGet, apiPost, apiDelete, ApiError, setUnauthorizedHandler, resetUnauthorizedHandler,
   linkReposInDir, blackboxRunReportPath, blackboxRunDeliverablesPath,
   listBlackboxRuns, addBlackboxToWhitebox,
+  startCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis,
+  cancelCorrelationTopologyAnalysis,
 } from "./client";
 
 // 构造符合 fetch Response 真实契约的 mock：text() 与 json() 都在。
@@ -163,5 +165,33 @@ describe("client auth", () => {
     await expect(apiGet("/system-status")).rejects.toThrow();
     expect(assignSpy).not.toHaveBeenCalled();
     Object.defineProperty(window, "location", { value: origLoc, writable: true, configurable: true });
+  });
+});
+
+describe("correlation topology analysis client", () => {
+  it("start POST workspace path and body", async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    (globalThis.fetch as any).mockImplementation((url: string, init: RequestInit) => {
+      captured = { url, init };
+      return Promise.resolve(res({ ok: true, status: 202, body: { analysis_id: "topology-1" } }));
+    });
+    const r = await startCorrelationTopologyAnalysis("WS one", {
+      repos: ["gateway", "order-svc"], refresh: true,
+    });
+    expect(r.analysis_id).toBe("topology-1");
+    expect(captured.url).toBe("/api/workspaces/WS%20one/correlation-topology/analyses");
+    expect(captured.init?.body).toBe(JSON.stringify({ repos: ["gateway", "order-svc"], refresh: true }));
+  });
+
+  it("get and cancel use the analysis path", async () => {
+    (globalThis.fetch as any).mockResolvedValue(
+      res({ ok: true, status: 200, body: { status: "running" } }));
+    await getCorrelationTopologyAnalysis("WS", "topology-1");
+    expect((globalThis.fetch as any).mock.calls.at(-1)[0])
+      .toBe("/api/workspaces/WS/correlation-topology/analyses/topology-1");
+    await cancelCorrelationTopologyAnalysis("WS", "topology-1");
+    const last = (globalThis.fetch as any).mock.calls.at(-1);
+    expect(last[0]).toBe("/api/workspaces/WS/correlation-topology/analyses/topology-1");
+    expect(last[1].method).toBe("DELETE");
   });
 });

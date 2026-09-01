@@ -15,9 +15,12 @@ import json
 import logging
 import os
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import (
+    ClaudeAgentOptions, PermissionResultAllow, PermissionResultDeny, ResultMessage, query,
+)
 
 from supernova_core.models.errors import classify_error_for_temporal
 
@@ -26,7 +29,7 @@ from .narration import narration_directive
 from .openai_output_schema import _extract_json_payload
 from .pricing import compute_cost
 from .providers import BaseProvider
-from .runner import ClaudeRunResult, ProviderConfig, TokenUsage
+from .runner import ClaudeRunResult, ProviderConfig, TokenUsage, ToolPolicy
 from .tool_audit_logger import ToolAuditLogger
 
 if TYPE_CHECKING:
@@ -60,6 +63,35 @@ def _on_claude_stderr(line: str) -> None:
     logger.warning("[claude-cli stderr] %s", line.rstrip())
 
 
+def make_readonly_permission_guard(
+    allowed_roots: list[str | Path] | None, cwd: str,
+):
+    """Fail-close Claude read/search tools to the selected repository roots."""
+    roots = [Path(root).resolve() for root in (allowed_roots or [])]
+
+    async def guard(tool_name: str, tool_input: dict[str, Any], _context: Any):
+        normalized = tool_name.lower()
+        if normalized not in {"read", "glob", "grep"}:
+            return PermissionResultDeny(behavior="deny", message="readonly topology policy")
+        raw_path = (
+            tool_input.get("file_path") or tool_input.get("path")
+            or tool_input.get("directory") or tool_input.get("target")
+        )
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return PermissionResultDeny(
+                behavior="deny", message="specify a path inside a selected repository")
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = Path(cwd) / candidate
+        candidate = candidate.resolve(strict=False)
+        if not any(candidate.is_relative_to(root) for root in roots):
+            return PermissionResultDeny(
+                behavior="deny", message="path is outside selected repository roots")
+        return PermissionResultAllow(behavior="allow")
+
+    return guard
+
+
 class AnthropicProvider(BaseProvider):
     """使用 Claude Agent SDK 的 Provider。
 
@@ -91,6 +123,8 @@ class AnthropicProvider(BaseProvider):
         progress: "ProgressSpec | None" = None,
         proxy_url: str | None = None,   # Task 4：per-scan 代理穿线 → CLI 子进程 env
         usage_sink: "UsageSink | None" = None,   # cancel 兜底记账（2026-08-28；CLI 子进程被杀拿不到中途值，占位不写）
+        tool_policy: ToolPolicy = "default",
+        allowed_roots: list[str | Path] | None = None,
     ) -> ClaudeRunResult:
         """
         调用 Claude Agent SDK 执行 prompt
@@ -125,6 +159,8 @@ class AnthropicProvider(BaseProvider):
                 mcp_servers=mcp_servers or None,
                 allowed_tools=allowed_tools or None,
                 proxy_url=proxy_url,
+                tool_policy=tool_policy,
+                allowed_roots=allowed_roots,
             )
 
             # 执行调用
@@ -317,6 +353,8 @@ class AnthropicProvider(BaseProvider):
         mcp_servers: dict | None = None,
         allowed_tools: list[str] | None = None,
         proxy_url: str | None = None,
+        tool_policy: ToolPolicy = "default",
+        allowed_roots: list[str | Path] | None = None,
     ) -> ClaudeAgentOptions:
         """构建 ClaudeAgentOptions"""
         options = ClaudeAgentOptions(
@@ -324,6 +362,18 @@ class AnthropicProvider(BaseProvider):
             cwd=cwd,
             permission_mode="bypassPermissions",  # 无交互环境必需
         )
+        if tool_policy == "readonly-code":
+            if not allowed_roots:
+                raise ValueError("readonly-code policy requires allowed_roots")
+            options.permission_mode = "default"
+            options.can_use_tool = make_readonly_permission_guard(allowed_roots, cwd)
+        if tool_policy == "readonly-code":
+            if mcp_servers or allowed_tools:
+                raise ValueError("readonly-code policy cannot inject collector/progress tools")
+            # tools is the availability set (unlike allowed_tools, which only bypasses prompts).
+            options.tools = ["Read", "Glob", "Grep"]
+            options.strict_mcp_config = True
+            options.mcp_servers = {}
 
         # max_turns: high "runaway" ceiling. 优先级见 _resolve_max_turns。
         max_turns = self._resolve_max_turns(max_turns_override)
@@ -612,7 +662,7 @@ class AnthropicProvider(BaseProvider):
     def _extract_cost(self, result_message: ResultMessage, model: str):
         """自算成本（spec §4.5）：tokens × 价目表，不再读 SDK total_cost_usd。"""
         tokens = self._extract_tokens(result_message)
-        return compute_cost(model, tokens)
+        return compute_cost(model, tokens, pricing_override=self.config.pricing_override)
 
     def _classify_result_failure(
         self,
