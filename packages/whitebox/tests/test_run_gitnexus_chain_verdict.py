@@ -459,6 +459,35 @@ async def test_agent_runner_factory_passes_through(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_agent_runner_factory_max_turns_ws_override(monkeypatch, tmp_path):
+    """max_turns 读 ws_getenv（per-workspace，2026-09-01 准入）：工作区覆盖层
+    优先于进程 env；覆盖层清掉回落进程 env——闭包每次调用现读，per-call 生效。"""
+    from supernova_core.config import scan_env
+
+    captured = {}
+
+    async def fake_run_agent(*, prompt, repo_path, structured_output_schema=None,
+                             audit_session=None, provider_config=None,
+                             max_turns=None, agent_name="gitnexus-verdict"):
+        captured["max_turns"] = max_turns
+        return _AgentRunResult(structured_output={"verdict": "safe",
+                                                  "witness_payload": None,
+                                                  "evidence_chain": "x->y", "title": "t"})
+
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", fake_run_agent)
+    monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS", "20")
+    scan_env.set_scan_env({"SUPERNOVA_CHAIN_VERDICT_MAX_TURNS": "7"})
+    try:
+        runner = activities._make_verdict_agent_runner(str(tmp_path))
+        await runner("p")
+        assert captured["max_turns"] == 7  # ws 覆盖层压过进程 env
+    finally:
+        scan_env.clear_scan_env()
+    await runner("p")
+    assert captured["max_turns"] == 20  # 覆盖层清掉 → 回落进程 env
+
+
+@pytest.mark.asyncio
 async def test_activity_uses_agent_path_when_enabled(tmp_path, monkeypatch):
     """env 开（is_gitnexus_llm_enabled=True）→ activity 构造 agent runner 走
     多轮路径（run_gitnexus_verdict_agent 被调、agent_name 唯一化）。"""

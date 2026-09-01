@@ -177,3 +177,66 @@ def test_chain_verdict_concurrency_ws_override(monkeypatch):
     finally:
         scan_env.clear_scan_env()
     assert get_chain_verdict_concurrency() == 2  # 覆盖层清掉 → 回落进程 env
+
+
+# ===== verdict max_turns 两键（2026-09-01 准入：工作区预算×质量取舍， =====
+# 与 CHAIN_VERDICT_CONCURRENCY 同族旋钮——容量铁律「链数÷并发×单链耗时≤窗口」
+# 里单链耗时由 max_turns 决定，只许并发 per-ws 调、深度全局调则配平只能调一半。
+
+_CHAIN_MAX_TURNS_KEY = "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS"
+_GN_MAX_TURNS_KEY = "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS"
+
+
+def test_chain_verdict_max_turns_default_and_ws_override(monkeypatch):
+    """chain verdict 主链键：默认 30；ws 覆盖层优先于进程 env；清层回落。"""
+    from supernova_core.config import scan_env
+    from supernova_core.config.concurrency import get_chain_verdict_max_turns
+
+    monkeypatch.delenv(_CHAIN_MAX_TURNS_KEY, raising=False)
+    assert get_chain_verdict_max_turns() == 30
+    monkeypatch.setenv(_CHAIN_MAX_TURNS_KEY, "20")
+    scan_env.set_scan_env({_CHAIN_MAX_TURNS_KEY: "7"})
+    try:
+        assert get_chain_verdict_max_turns() == 7
+    finally:
+        scan_env.clear_scan_env()
+    assert get_chain_verdict_max_turns() == 20  # 覆盖层清掉 → 回落进程 env
+
+
+def test_gitnexus_verdict_max_turns_default_and_ws_override(monkeypatch):
+    """authz 深判等不显式传参调用方的回落键：默认 30；ws 覆盖层优先。"""
+    from supernova_core.config import scan_env
+    from supernova_core.config.concurrency import get_gitnexus_verdict_max_turns
+
+    monkeypatch.delenv(_GN_MAX_TURNS_KEY, raising=False)
+    assert get_gitnexus_verdict_max_turns() == 30
+    monkeypatch.setenv(_GN_MAX_TURNS_KEY, "20")
+    scan_env.set_scan_env({_GN_MAX_TURNS_KEY: "9"})
+    try:
+        assert get_gitnexus_verdict_max_turns() == 9
+    finally:
+        scan_env.clear_scan_env()
+    assert get_gitnexus_verdict_max_turns() == 20
+
+
+def test_verdict_max_turns_malformed_falls_back(monkeypatch, caplog):
+    """畸形 / <=0 回退默认 30 + warning（ws 文本框手输容错，不 crash 扫描）。"""
+    from supernova_core.config.concurrency import (
+        get_chain_verdict_max_turns,
+        get_gitnexus_verdict_max_turns,
+    )
+
+    for key, reader in (
+        (_CHAIN_MAX_TURNS_KEY, get_chain_verdict_max_turns),
+        (_GN_MAX_TURNS_KEY, get_gitnexus_verdict_max_turns),
+    ):
+        monkeypatch.setenv(key, "abc")
+        with caplog.at_level(logging.WARNING):
+            assert reader() == 30
+        assert "not an int" in caplog.text
+        caplog.clear()
+        monkeypatch.setenv(key, "0")
+        with caplog.at_level(logging.WARNING):
+            assert reader() == 30
+        assert "must be >=1" in caplog.text
+        caplog.clear()

@@ -39,7 +39,8 @@ from supernova_core.agents.recon_context_summarizer import (
     summarize_recon_context,
 )
 from supernova_core.config.concurrency import (
-    get_chain_verdict_concurrency, is_gitnexus_llm_enabled,
+    get_chain_verdict_concurrency, get_chain_verdict_max_turns,
+    get_gitnexus_verdict_max_turns, is_gitnexus_llm_enabled,
 )
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
@@ -2807,7 +2808,8 @@ def _make_verdict_agent_runner(repo_path: str, provider_config: dict | None = No
     ``async (prompt, *, output_format, agent_name) -> ClaudeRunResult``——
     经 run_gitnexus_verdict_agent 多轮跑（grep/read 自主验证链），继承记账
     （audit_session → end_agent）、工具审计、max_turns
-    （SUPERNOVA_CHAIN_VERDICT_MAX_TURNS 默认 30）。agent_name 由 builder 逐链
+    （SUPERNOVA_CHAIN_VERDICT_MAX_TURNS 默认 30，ws_getenv per-workspace）。
+    agent_name 由 builder 逐链
     传唯一名（chain-verdict-{vc}-{i:02d}，防 metrics.agents 同名覆盖）。"""
     async def runner(prompt: str, *, output_format=None, agent_name=None):
         return await run_gitnexus_verdict_agent(
@@ -2816,7 +2818,7 @@ def _make_verdict_agent_runner(repo_path: str, provider_config: dict | None = No
             structured_output_schema=output_format,
             audit_session=audit_session,
             provider_config=provider_config,
-            max_turns=int(os.getenv("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS", "30")),
+            max_turns=get_chain_verdict_max_turns(),
             agent_name=agent_name or "chain-verdict",
         )
     return runner
@@ -2874,7 +2876,8 @@ async def run_gitnexus_verdict_agent(
 ) -> "ClaudeRunResult":
     """GitNexus 多轮 verdict agent：带 grep/read 自主追链，吃确定性候选做深度判定。
 
-    max_turns 显式参数优先；None 走 SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS（默认 30）。
+    max_turns 显式参数优先；None 走 SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS
+    （默认 30，ws_getenv per-workspace）。
     返回完整 ClaudeRunResult（含 turns/cost/structured_output），不截断为 str——
     chain verdict 判定的唯一通道（单次 llm_client 路径已拆，2026-09-01）。
     GN-only 深度富化（run_gn_finding_enrichment）
@@ -2921,7 +2924,7 @@ async def run_gitnexus_verdict_agent(
             repo_path=repo_path,
             model_tier="medium",
             max_turns=(max_turns if max_turns is not None else
-                       int(os.getenv("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", "30"))),
+                       get_gitnexus_verdict_max_turns()),
             structured_output_schema=structured_output_schema,
             tool_audit_logger=tool_audit_logger,
             provider_config=provider_config,   # P3c 阶段 1

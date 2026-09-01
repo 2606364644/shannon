@@ -99,6 +99,12 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
       { key: "SUPERNOVA_MODEL_CONTEXT_OVERRIDE", kind: "str", defaultValue: "" },
       { key: "SUPERNOVA_CHUNK_TOKEN_THRESHOLD", kind: "int", defaultValue: "" },
       { key: "SUPERNOVA_CHAIN_VERDICT_CONCURRENCY", kind: "int", defaultValue: "4" },
+      // 2026-09-01 准入（工作区预算×质量取舍，与 CONCURRENCY 同族旋钮）：verdict
+      // 多轮判定深度两键——CHAIN 管 inj/xss/ssrf 主链，GITNEXUS 管 authz 深判
+      // 等不传参调用方的回落。调大单链耗时上升，需与 CONCURRENCY 一起按容量
+      // 铁律（链数÷并发×单链耗时≤窗口）配平。
+      { key: "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS", kind: "int", defaultValue: "30" },
+      { key: "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", kind: "int", defaultValue: "30" },
       { key: "SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS", kind: "int", defaultValue: "600" },
     ],
   },

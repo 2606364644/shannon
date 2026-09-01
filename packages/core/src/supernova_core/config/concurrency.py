@@ -192,6 +192,52 @@ def get_chain_verdict_concurrency() -> int:
     return val
 
 
+_CHAIN_VERDICT_MAX_TURNS_DEFAULT = 30
+_GITNEXUS_VERDICT_MAX_TURNS_DEFAULT = 30
+
+
+def _get_max_turns(key: str, default: int) -> int:
+    """verdict 多轮 agent 深度上限的共享读取（ws_getenv per-workspace）。
+
+    两键同族：SUPERNOVA_CHAIN_VERDICT_MAX_TURNS 管 inj/xss/ssrf 判定主链
+    （_make_verdict_agent_runner 显式传参），SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS
+    是 run_gitnexus_verdict_agent 不显式传参调用方（authz 深判等）的回落默认。
+    2026-09-01 准入工作区覆盖：max_turns 与 CHAIN_VERDICT_CONCURRENCY 同为
+    「工作区预算×质量」旋钮——容量铁律「链数÷并发×单链耗时≤窗口」里单链
+    耗时由 max_turns 决定，只许并发 per-ws 调、深度全局调则配平只能调一半。
+
+    返回 env 值(int>=1)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描，
+    对齐 get_chain_verdict_concurrency 的容错契约——ws 文本框手输容错）。
+    """
+    raw = ws_getenv(key)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("%s=%r not an int; falling back to %d", key, raw, default)
+        return default
+    if val < 1:
+        _log.warning("%s=%d must be >=1; falling back to %d", key, val, default)
+        return default
+    return val
+
+
+def get_chain_verdict_max_turns() -> int:
+    """SUPERNOVA_CHAIN_VERDICT_MAX_TURNS（默认 30，经 ws_getenv 支持 per-workspace）：
+    chain-verdict 单链多轮深判的轮数上限。"""
+    return _get_max_turns("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS",
+                          _CHAIN_VERDICT_MAX_TURNS_DEFAULT)
+
+
+def get_gitnexus_verdict_max_turns() -> int:
+    """SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS（默认 30，经 ws_getenv 支持 per-workspace）：
+    run_gitnexus_verdict_agent 的回落默认（authz 深判 / gn-enrich 首轮等不显式
+    传 max_turns 的调用方；chain verdict 主链被显式参数遮蔽不读此键）。"""
+    return _get_max_turns("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS",
+                          _GITNEXUS_VERDICT_MAX_TURNS_DEFAULT)
+
+
 _GN_DISCOVERY_AGENT_TIMEOUT_DEFAULT = 300.0
 
 

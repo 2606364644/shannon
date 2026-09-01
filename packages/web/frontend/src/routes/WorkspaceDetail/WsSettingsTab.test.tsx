@@ -65,6 +65,8 @@ describe("WsSettingsTab", () => {
     expect(ta.value).not.toContain("GITLAB_USER");
     expect(ta.value).not.toContain("SUPERNOVA_LLM_PER_CALL_TIMEOUT");
     expect(ta.value).not.toContain("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY");
+    expect(ta.value).not.toContain("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS");
+    expect(ta.value).not.toContain("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS");
   });
 
   it("is_default=false → 显示后端 env_text，不预填模板", async () => {
@@ -173,6 +175,10 @@ describe("WsSettingsTab", () => {
     expect(screen.getByText("SUPERNOVA_CHUNK_TOKEN_THRESHOLD")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_CHAIN_VERDICT_CONCURRENCY")).toBeInTheDocument();
     expect(screen.getByText("SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS")).toBeInTheDocument();
+    // 2026-09-01 准入（工作区预算×质量取舍，与 CONCURRENCY 同族旋钮）：verdict
+    // 多轮判定深度两键——CHAIN 管 inj/xss/ssrf 主链，GITNEXUS 管 authz 深判回落。
+    expect(screen.getByText("SUPERNOVA_CHAIN_VERDICT_MAX_TURNS")).toBeInTheDocument();
+    expect(screen.getByText("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS")).toBeInTheDocument();
     // PRICING_OVERRIDE 已移出词典（2026-08-31）：定价四层链最高层,推荐走
     // WsPricingCard 通道;后端白名单仍收（向后兼容手写）
     expect(screen.queryByText("SUPERNOVA_PRICING_OVERRIDE")).toBeNull();

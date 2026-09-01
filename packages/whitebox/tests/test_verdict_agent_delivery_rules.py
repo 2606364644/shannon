@@ -57,3 +57,20 @@ def test_no_injection_without_schema():
     _, mock_run = _run(schema=None)
     prompt = mock_run.call_args.kwargs["prompt"]
     assert prompt == "BASE PROMPT"
+
+
+def test_max_turns_fallback_reads_ws_override(monkeypatch):
+    """不显式传 max_turns（authz 深判等调用方）→ 回落键
+    SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS 读 ws_getenv：工作区覆盖层优先于
+    进程 env（2026-09-01 准入，per-workspace 预算旋钮与 CONCURRENCY 同族）。"""
+    from supernova_core.config import scan_env
+
+    monkeypatch.setenv("SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS", "20")
+    scan_env.set_scan_env({"SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS": "9"})
+    try:
+        _, mock_run = _run()
+        assert mock_run.call_args.kwargs["max_turns"] == 9
+    finally:
+        scan_env.clear_scan_env()
+    _, mock_run = _run()
+    assert mock_run.call_args.kwargs["max_turns"] == 20  # 清层 → 回落进程 env

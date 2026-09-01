@@ -266,6 +266,24 @@ def test_parse_chain_verdict_concurrency_to_env_section():
     assert parsed.ineffective == []
 
 
+def test_parse_verdict_max_turns_keys_to_env_section():
+    """verdict max_turns 两键（2026-09-01 准入，工作区预算×质量取舍）→ env 段。
+
+    CHAIN_VERDICT_MAX_TURNS 管 inj/xss/ssrf 判定主链深度；
+    GITNEXUS_VERDICT_MAX_TURNS 是 authz 深判等不传参调用方的回落默认。
+    同日裁定注意：CHAIN_VERDICT_MAX_AGENTS（护栏）仍是有意不进白名单的
+    运维参数（见下个测试），勿无差别补齐。"""
+    parsed = parse_env_text(
+        "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS=40\n"
+        "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS=25\n")
+    assert parsed.env == {
+        "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS": "40",
+        "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS": "25",
+    }
+    assert parsed.unknown == []
+    assert parsed.ineffective == []
+
+
 def test_parse_endpoint_enrich_key_and_removed_gn_enrich_mode():
     """接口富化开关是 per-workspace 语义的扫描期键 → 进 env 段（2026-08-31 裁定）。
 

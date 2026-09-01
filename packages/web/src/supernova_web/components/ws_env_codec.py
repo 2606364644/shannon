@@ -68,6 +68,14 @@ SCAN_ENV_KEYS: frozenset[str] = frozenset({
     # CHAIN_VERDICT_MAX_AGENTS）有意不进——全局配置走全局通道（.env；ws_getenv
     # 回落 os.environ），工作区写了归 unknown 警告丢弃。
     "SUPERNOVA_ENDPOINT_ENRICH_ENABLED",
+    # 2026-09-01 准入（per-workspace 预算×质量取舍）：verdict 多轮判定深度
+    # 两键，与 CHAIN_VERDICT_CONCURRENCY 同族旋钮——容量铁律「链数÷并发×
+    # 单链耗时≤窗口」里单链耗时由 max_turns 决定，只许并发 per-ws 调、深度
+    # 全局调则配平只能调一半。CHAIN 管 inj/xss/ssrf 判定主链；GITNEXUS 是
+    # authz 深判等不传参调用方的回落默认。护栏键 CHAIN_VERDICT_MAX_AGENTS
+    # 仍有意不进（见上条注释）。
+    "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS",
+    "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS",
 })
 
 # 启动期配置（worker main() 启动时读一次，ws 覆盖不生效）→ 警告不阻塞，不进 fields/env。
