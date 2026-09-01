@@ -1,8 +1,8 @@
 """P3c 阶段 1：白盒 activity 把 input.provider_config 下传 run_claude_prompt。
 
 只验穿线（mock run_claude_prompt），不跑真实 agent / temporalio 上下文。
-覆盖 3 个模块级纯函数调用点（_make_recon_summary_llm_client /
-_make_verdict_llm_client / run_gitnexus_verdict_agent）。
+覆盖 2 个模块级纯函数调用点（_make_recon_summary_llm_client /
+run_gitnexus_verdict_agent；chain-verdict 单次工厂已拆，2026-09-01）。
 
 不在直测范围（按 plan 说明靠回归 + Task 5 e2e 覆盖）：
 - _make_gitnexus_llm_client :672（嵌套在 run_code_index 局部函数）
@@ -29,25 +29,6 @@ async def test_make_recon_summary_llm_client_passes_provider_config(monkeypatch)
     )
     await client("prompt")
     assert captured["provider_config"] == {"type": "openai_compatible", "api_key": "sk"}
-
-
-async def test_make_verdict_llm_client_passes_provider_config(monkeypatch):
-    """_make_verdict_llm_client 收 provider_config → 闭包内 run_claude_prompt 收到。
-
-    _make_verdict_llm_client 内延迟 import run_claude_prompt（:1235），patch 源模块。
-    """
-    captured = {}
-
-    async def fake_run(**kw):
-        captured.update(kw)
-        return ClaudeRunResult(success=True)
-
-    monkeypatch.setattr("supernova_core.agents.runner.run_claude_prompt", fake_run)
-    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: True)
-    client = activities._make_verdict_llm_client("/r", provider_config={"type": "x"})
-    assert client is not None  # is_gitnexus_llm_enabled=True → 构造 _client（非 raise 兜底）
-    await client("prompt")
-    assert captured["provider_config"] == {"type": "x"}
 
 
 async def test_run_gitnexus_verdict_agent_passes_provider_config(monkeypatch):

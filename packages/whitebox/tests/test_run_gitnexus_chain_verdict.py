@@ -8,10 +8,35 @@ from supernova_whitebox.pipeline import activities
 
 
 @pytest.fixture(autouse=True)
-def _gitnexus_llm_off(monkeypatch):
-    """测试统一走各用例注入的 fake_llm：关掉 GitNexus LLM 开关，否则
-    _make_verdict_llm_client 构建真 client 静默打真实 LLM（默认开）。"""
-    monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: False)
+def _verdict_agent_guard(monkeypatch):
+    """测试统一守卫 verdict agent 通道：默认 patch run_gitnexus_verdict_agent
+    为「真调即断言失败」（防静默打真实 LLM）；需要判定的用例自行 patch
+    run_gitnexus_verdict_agent / _make_verdict_agent_runner 注入 fake——
+    判定只有多轮 agent 一种形态（2026-09-01 单次 llm_client 路径拆除）。"""
+    async def _guard(**kw):
+        raise AssertionError("verdict agent not faked in this test")
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", _guard)
+
+
+class _AgentRunResult:
+    """ClaudeRunResult-like：judge 只消费 success/structured_output/text/error。"""
+
+    def __init__(self, text="", structured_output=None, success=True, error=None):
+        self.text = text
+        self.structured_output = structured_output
+        self.success = success
+        self.error = error
+
+
+def _verdict_agent(payload: str):
+    """fake run_gitnexus_verdict_agent：把 verdict JSON 作为 structured_output 返回。"""
+    import json as _json
+
+    async def run(*, prompt, repo_path, structured_output_schema=None,
+                  audit_session=None, provider_config=None,
+                  max_turns=None, agent_name="gitnexus-verdict"):
+        return _AgentRunResult(structured_output=_json.loads(payload))
+    return run
 
 
 class _RecordingSession:
@@ -129,12 +154,11 @@ async def test_writes_injection_gitnexus_queue(tmp_path, monkeypatch):
     deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [_flow("sql_value")])
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')))
     session = _RecordingSession()
     set_audit_session(session)
     try:
@@ -161,11 +185,7 @@ async def test_no_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("should not call LLM")
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
     session = _RecordingSession()
     set_audit_session(session)
     try:
@@ -194,12 +214,11 @@ async def test_writes_xss_and_ssrf_queues(tmp_path, monkeypatch):
     ])
     _write_sink(deliverables, xss_sid, "xss", "xss_innerhtml")
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"x","evidence_chain":"s->k",'
-                '"mismatch_reason":"m","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"x","evidence_chain":"s->k",'
+                '"mismatch_reason":"m","confidence":"high"}')))
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -219,11 +238,7 @@ async def test_invalid_parameter_graph_skips_gracefully(tmp_path, monkeypatch):
     deliverables.mkdir(parents=True)
     (deliverables / "parameter_graph.json").write_text("not json")
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("should not call LLM")
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
     session = _RecordingSession()
     set_audit_session(session)
     try:
@@ -245,11 +260,7 @@ async def test_summary_info_when_all_classes_zero(tmp_path, monkeypatch):
     deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [])
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("empty pgraph should not call LLM")
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
     session = _RecordingSession()
     set_audit_session(session)
     try:
@@ -273,12 +284,11 @@ async def test_entry_points_route_flows_into_queue(tmp_path, monkeypatch):
     _write_pgraph(deliverables, [_flow("sql_value")])
     _write_entry_point(deliverables, "app.py:h:1", "/search", "POST")
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')))
     set_audit_session(_RecordingSession())
     try:
         await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -306,12 +316,11 @@ async def test_presumed_safe_vulnerable_excluded_from_queue_kept_in_verdicts(
               notes="presumed-safe"),                                        # P2 来源
     ])
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')))
     session = _RecordingSession()
     set_audit_session(session)
     try:
@@ -344,12 +353,11 @@ async def test_presumed_safe_safe_verdict_archived_not_in_queue(tmp_path, monkey
               notes="presumed-safe"),
     ])
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
-                '"b->db","mismatch_reason":null,"confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"safe","witness_payload":null,"evidence_chain":'
+                '"b->db","mismatch_reason":null,"confidence":"high"}')))
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -378,17 +386,21 @@ async def test_safe_verdict_excluded_from_queue_and_archived(tmp_path, monkeypat
         _flow("sql_value", source="b", sink_id="app.py:h:db.execute:6:0"),
     ])
 
-    async def fake_llm(prompt, **kw):
+    async def fake_run_agent(*, prompt, repo_path, structured_output_schema=None,
+                             audit_session=None, provider_config=None,
+                             max_turns=None, agent_name="gitnexus-verdict"):
         if "db.execute:5" in prompt:
-            return ('{"verdict":"vulnerable","witness_payload":"\'",'
-                    '"evidence_chain":"a->db","mismatch_reason":"concat",'
-                    '"confidence":"high"}')
-        return ('{"verdict":"safe","witness_payload":null,'
-                '"evidence_chain":"b->db","mismatch_reason":"parameterized query",'
-                '"confidence":"high"}')
+            return _AgentRunResult(structured_output={
+                "verdict": "vulnerable", "witness_payload": "'",
+                "evidence_chain": "a->db", "mismatch_reason": "concat",
+                "confidence": "high"})
+        return _AgentRunResult(structured_output={
+            "verdict": "safe", "witness_payload": None,
+            "evidence_chain": "b->db", "mismatch_reason": "parameterized query",
+            "confidence": "high"})
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", fake_run_agent)
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -412,15 +424,7 @@ async def test_safe_verdict_excluded_from_queue_and_archived(tmp_path, monkeypat
     assert d["evidence"] == "b->db"
 
 
-# ===== spec 2026-08-27 §3：多轮 verdict agent 接线（env 开走 agent 路径）=====
-
-class _AgentRunResult:
-    def __init__(self, text="", structured_output=None, success=True, error=None):
-        self.text = text
-        self.structured_output = structured_output
-        self.success = success
-        self.error = error
-
+# ===== spec 2026-08-27 §3：多轮 verdict agent 接线（唯一判定形态）=====
 
 @pytest.mark.asyncio
 async def test_agent_runner_factory_passes_through(monkeypatch, tmp_path):
@@ -506,16 +510,18 @@ async def test_three_builders_run_concurrently(tmp_path, monkeypatch):
 
     state = {"in_flight": 0, "max_seen": 0}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_run_agent(**kw):
         state["in_flight"] += 1
         state["max_seen"] = max(state["max_seen"], state["in_flight"])
         await asyncio.sleep(0.03)
         state["in_flight"] -= 1
-        return ('{"verdict":"safe","witness_payload":"","evidence_chain":"s->k",'
-                '"mismatch_reason":"","confidence":"high"}')
+        return _AgentRunResult(structured_output={
+            "verdict": "safe", "witness_payload": "",
+            "evidence_chain": "s->k", "mismatch_reason": "",
+            "confidence": "high"})
 
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", fake_run_agent)
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -609,11 +615,7 @@ async def test_step_cache_hit_skips_verdict_machinery(tmp_path, monkeypatch):
     step_cache.mark_done(_STEP, deliverables, inputs=_cache_inputs(deliverables),
                          outputs=[], ret=cached_ret, salt=_salt())
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("缓存命中时不得走判定通道")
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -634,12 +636,11 @@ async def test_clean_run_writes_marker(tmp_path, monkeypatch):
         "taint_flows": [_flow("sql_value")],
         "language_coverage": ["python"], "skipped_languages": []}))
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db","mismatch_reason":"concat","confidence":"high"}')))
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
@@ -669,12 +670,11 @@ async def test_failed_classes_run_does_not_write_marker(tmp_path, monkeypatch):
         ib, "build_injection_findings",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("builder boom")))
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"x","evidence_chain":"q->db",'
-                '"mismatch_reason":"concat","confidence":"high"}')
-
     monkeypatch.setattr(activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path))
-    monkeypatch.setattr(activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False)
+    monkeypatch.setattr(
+        activities, "run_gitnexus_verdict_agent",
+        _verdict_agent(('{"verdict":"vulnerable","witness_payload":"x","evidence_chain":"q->db",'
+                '"mismatch_reason":"concat","confidence":"high"}')))
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))

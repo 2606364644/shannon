@@ -5,6 +5,7 @@ findings, which merge (verdict OR) with synthetic LLM findings. Confirms
 source_track / evidence_chain survive into the merged exploitation queue.
 """
 import pytest
+from types import SimpleNamespace
 
 from supernova_core.code_index.parameter_models import (
     ParameterPropagationGraph, TaintFlow, PropagationStep,
@@ -15,6 +16,15 @@ from supernova_core.code_index.vuln_chain_builders.injection_builder import (
 )
 from supernova_core.code_index.dual_track_merger import merge_dual_track_queues
 from supernova_core.models.queue_schemas import InjectionVulnerability
+
+
+def _agent(payload: str):
+    """fake verdict_agent（SimpleNamespace 模拟 ClaudeRunResult，text 兜底解析）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        return SimpleNamespace(success=True, structured_output=None,
+                               text=payload, error=None)
+    return agent
+
 
 
 def _flow(slot="sql_value", steps=None):
@@ -34,11 +44,9 @@ async def test_gitnexus_track_merges_with_llm_track_verdict_or():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def gn_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db.exec(L5)","mismatch_reason":"concat","confidence":"high"}')
-
-    gn_findings = await build_injection_findings(pgraph, llm_client=gn_llm)
+    gn_findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+        ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec(L5)","mismatch_reason":"concat","confidence":"high"}')))
     assert len(gn_findings) == 1
     assert gn_findings[0].source_track == "gitnexus"
 
@@ -71,11 +79,9 @@ async def test_gitnexus_only_marked_gitnexus_only():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def gn_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"concat","confidence":"high"}')
-
-    gn_findings = await build_injection_findings(pgraph, llm_client=gn_llm)
+    gn_findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+        ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec(L5)","mismatch_reason":"concat","confidence":"high"}')))
     # empty LLM track -> all gitnexus-only
     merged = merge_dual_track_queues([], gn_findings, mode="verdict")
     assert len(merged) == 1
@@ -88,10 +94,9 @@ async def test_empty_pgraph_yields_no_gitnexus_findings():
     """Plan 1 not landed -> GN track empty -> merger is LLM-only."""
     pgraph = ParameterPropagationGraph(taint_flows=[], language_coverage=["python"])
 
-    async def gn_llm(prompt, **kw):
-        raise AssertionError("no LLM on empty pgraph")
-
-    gn_findings = await build_injection_findings(pgraph, llm_client=gn_llm)
+    gn_findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+        ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+                '"q->db.exec(L5)","mismatch_reason":"concat","confidence":"high"}')))
     assert gn_findings == []
 
     llm_findings = [InjectionVulnerability(

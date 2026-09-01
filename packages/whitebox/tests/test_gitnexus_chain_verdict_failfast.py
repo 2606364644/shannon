@@ -53,8 +53,8 @@ def _input(repo):
 
 @pytest.fixture(autouse=True)
 def _gitnexus_llm_off(monkeypatch):
-    """测试统一走 _wire 注入的 fake_llm：关掉 GitNexus LLM 开关，否则
-    _make_verdict_llm_client 构建真 client 静默打真实 LLM（默认开）。"""
+    """判定通道关（activity 不造 verdict agent runner，不打真实 LLM）；
+    fail-fast 用例靠 pgraph 缺失/损坏制造 failed_classes，与判定通道无关。"""
     monkeypatch.setattr(activities, "is_gitnexus_llm_enabled", lambda: False)
 
 
@@ -89,14 +89,16 @@ _VERDICT_OK = (
 )
 
 
-def _wire(tmp_path, deliverables, monkeypatch, fake_llm):
-    """Wire up _get_paths + verdict LLM client for a test."""
+def _wire(tmp_path, deliverables, monkeypatch):
+    """Wire up _get_paths + verdict-agent guard for a test（判定通道不应被触达：
+    pgraph 缺失/损坏/空或 builder 已打桩——守卫真调即断言失败，防打真 LLM）。"""
     monkeypatch.setattr(
         activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path)
     )
-    monkeypatch.setattr(
-        activities, "_gitnexus_verdict_llm_client", fake_llm, raising=False
-    )
+
+    async def _guard(**kw):
+        raise AssertionError("verdict agent must not run in this test")
+    monkeypatch.setattr(activities, "run_gitnexus_verdict_agent", _guard)
     session = _RecordingSession()
     set_audit_session(session)
     return session
@@ -112,10 +114,7 @@ async def test_missing_parameter_graph_returns_failed_classes(tmp_path, monkeypa
     deliverables = tmp_path / "deliverables" / "whitebox"
     deliverables.mkdir(parents=True)
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("missing pgraph should not call LLM")
-
-    session = _wire(tmp_path, deliverables, monkeypatch, fake_llm)
+    session = _wire(tmp_path, deliverables, monkeypatch)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
@@ -136,10 +135,7 @@ async def test_invalid_parameter_graph_returns_failed_classes(tmp_path, monkeypa
     deliverables.mkdir(parents=True)
     (deliverables / "parameter_graph.json").write_text("not json")
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("invalid pgraph should not call LLM")
-
-    session = _wire(tmp_path, deliverables, monkeypatch, fake_llm)
+    session = _wire(tmp_path, deliverables, monkeypatch)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
@@ -158,10 +154,7 @@ async def test_zero_findings_is_ok_not_failed(tmp_path, monkeypatch):
     deliverables.mkdir(parents=True)
     _write_pgraph(deliverables, [])
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("empty pgraph should not call LLM")
-
-    session = _wire(tmp_path, deliverables, monkeypatch, fake_llm)
+    session = _wire(tmp_path, deliverables, monkeypatch)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:
@@ -194,11 +187,7 @@ async def test_builder_exception_marks_class_failed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inj_mod, "build_injection_findings", _raise_inj)
 
-    async def fake_llm(prompt, **kw):
-        # xss/ssrf builders won't reach the LLM without their sink_call_sites.
-        return _VERDICT_OK
-
-    session = _wire(tmp_path, deliverables, monkeypatch, fake_llm)
+    session = _wire(tmp_path, deliverables, monkeypatch)
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))
     finally:

@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 async def build_ssrf_findings(
     pgraph: ParameterPropagationGraph,
     *,
-    llm_client: Callable[..., Awaitable[str]] | None = None,
     verdict_agent: Callable[..., Awaitable] | None = None,
     sink_call_sites: dict[str, SinkCallSite] | None = None,
     progress_cb: ProgressCb = None,
@@ -64,7 +63,7 @@ async def build_ssrf_findings(
 
     # 逐链并行研判（Semaphore 并发 + gather 保序；预算/agent_name/tick 语义不变）
     verdicts = await gather_verdicts_concurrently(
-        candidates, vc="ssrf", llm_client=llm_client, verdict_agent=verdict_agent,
+        candidates, vc="ssrf", verdict_agent=verdict_agent,
         emitter=emitter, detail_of=_detail, semaphore=semaphore, checkpoint=verdict_checkpoint)
     findings: list[SsrfVulnerability] = []
     for i, (chain, verdict) in enumerate(zip(candidates, verdicts), start=1):

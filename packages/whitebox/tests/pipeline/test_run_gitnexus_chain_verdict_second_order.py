@@ -59,7 +59,7 @@ def _input(repo):
         deliverables_subdir = None
         workspace_name = None
         workspace_path = None
-        provider_config = None   # P3c 阶段 1：穿线字段（run_gitnexus_chain_verdict 经 _make_verdict_llm_client 读）
+        provider_config = None   # P3c 阶段 1：穿线字段（runner 工厂经 provider_config 下传）
 
     return FakeInput()
 
@@ -160,23 +160,25 @@ async def test_xss_queue_contains_second_order_finding(tmp_path, monkeypatch):
     _write_pgraph(deliverables)
     _write_code_index(deliverables)
 
-    async def fake_llm(prompt, **kw):
-        return (
-            '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
-            '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
-            '"mismatch_reason":"stored value rendered without encoding",'
-            '"confidence":"high"}'
-        )
+    from types import SimpleNamespace
+
+    async def fake_run_agent(**kw):
+        return SimpleNamespace(success=True, error=None, text="",
+                               structured_output={
+                                   "verdict": "vulnerable",
+                                   "witness_payload": "<svg>alert(1)</svg>",
+                                   "evidence_chain": "users(Storage) -> innerHTML unescaped",
+                                   "mismatch_reason": "stored value rendered without encoding",
+                                   "confidence": "high"})
 
     monkeypatch.setattr(
         activities, "_get_paths", lambda i: (tmp_path, deliverables, tmp_path)
     )
-    # Patch the call-site factory so the stub is used regardless of the
-    # is_gitnexus_llm_enabled branch (default=True would otherwise build a
-    # real-LLM client and bypass the stub below). See Task 8 fix.
+    # Patch the verdict-agent entry so the fake is used regardless of the
+    # runner factory (default env would otherwise run the real multi-turn
+    # agent). See Task 8 fix; 2026-09-01 单次路径拆除后判定唯一通道即此。
     monkeypatch.setattr(
-        activities, "_make_verdict_llm_client", lambda repo, provider_config=None: fake_llm
-    )
+        activities, "run_gitnexus_verdict_agent", fake_run_agent)
     set_audit_session(_RecordingSession())
     try:
         result = await activities.run_gitnexus_chain_verdict(_input(tmp_path))

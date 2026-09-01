@@ -2,13 +2,15 @@
 
 Three vuln classes (injection/xss/ssrf) share this framework; they differ
 only in trace direction and the blind spots each fills. The LLM track already
-runs the full methodology (vuln-*.txt prompts). This module is the LIGHT
-GitNexus-track chain-verdict pass:
+runs the full methodology (vuln-*.txt prompts). Chain verdict here is the
+multi-turn verdict agent pass (2026-08-27 `7b9b64a2` upgrade; 2026-09-01 the
+legacy single-pass llm_client path was REMOVED — verdicts come only from
+agents that grep/read the repo to verify the chain snapshot):
 
   parameter_graph.json (Plan 1) -> extract_candidate_chains(pgraph, vuln_class)
   -> deterministic sanitizer/encoder annotation (sanitizer_library, Task 1)
   -> post-sanitize-concat detection
-  -> judge_chain_verdict(candidate, llm_client) -> verdict + witness + evidence
+  -> judge_chain_verdict(candidate, verdict_agent=...) -> verdict + witness + evidence
 
 The merger (Plan 3) then does verdict OR against the LLM track. The GitNexus
 track is a CROSS-VALIDATION / BLIND-SPOT FILL, never a constraint on the LLM
@@ -119,44 +121,10 @@ _TITLE_DIRECTIVE = {
     ),
 }
 
-# LLM pass prompt template (lightweight; full methodology stays in vuln-*.txt).
-_VERDICT_PROMPT = """You are a lightweight chain-verdict pass for the {vuln_class} GitNexus track.
-Given ONE candidate source->sink chain with deterministic sanitizer annotations,
-judge ONLY whether it is vulnerable. Do NOT re-run full analysis methodology.
-
-Candidate chain:
-- source: {source_param} ({source_type})
-- sink: {sink_call_site_id}
-- slot/render_context: {sink_slot}
-- sink arg expressions (source code reaching the dangerous slot): {sink_expressions}
-- direction: {direction_hint}
-- propagation steps: {steps_repr}
-- sanitizer annotations (best-effort, NOT judged for effectiveness): {sanitizers_repr}
-- post-sanitize concatenation detected: {post_sanitize_concat}
-
-Rules:
-- post-sanitize concatenation = sanitizer considered INEFFECTIVE (tainted again).
-- A defense is effective ONLY if it matches the slot/render_context AND no concat after.
-- Inspect sink arg expressions to judge whether the sanitizer actually covers the tainted segment.
-- Be decisive: return vulnerable OR safe.
-- witness_payload = the MINIMAL concrete attack input that would trigger this sink
-  (e.g. "' OR '1'='1" for a SQL value slot, "http://169.254.169.254/" for a url slot).
-  Required when verdict is vulnerable; use null only when verdict is safe.
-- source_param_location = where the source parameter is delivered in the HTTP
-  request: "body" or "query". Judge from the source expression shown above
-  (e.g. req.body.x → body, req.query.x / ?x= → query); use null only when
-  genuinely indeterminable.
-- {title_directive}
-
-Respond with a compact JSON object ONLY:
-{{"verdict":"safe|vulnerable","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with sanitizer notes>","mismatch_reason":"<if vulnerable>","confidence":"high|medium|low","title":"<one-line descriptive name>","source_param_location":"body|query|null"}}
-"""
-
-# 多轮 agent 版 prompt（spec 2026-08-27 §3，逐条深判）：同一链快照与输出契约，
-# 差异在判定形态——不再假设快照完备，agent 自主 grep/read 验证每一步
-# （sanitize 实际实现、sink 实参构造、可达性）。内嵌常量对齐 _VERDICT_PROMPT
-# 同模式（core 层无 prompt_manager；spec 所指 prompts/chain-verdict-agent.txt
-# 落在此处，避免双份漂移）。
+# verdict agent prompt（spec 2026-08-27 §3 逐条深判；2026-09-01 起唯一判定
+# 形态）：不假设链快照完备，agent 自主 grep/read 验证每一步（sanitize 实际
+# 实现、sink 实参构造、可达性）。内嵌常量（core 层无 prompt_manager；spec 所指
+# prompts/chain-verdict-agent.txt 落在此处）。
 _VERDICT_PROMPT_AGENT = """You are a multi-turn chain-verdict agent for the {vuln_class} GitNexus track.
 You are given ONE candidate source->sink chain with deterministic (best-effort) annotations.
 Your job: VERIFY it in the actual repository, then judge whether it is vulnerable.
@@ -201,29 +169,16 @@ Respond with a compact JSON object ONLY:
 {{"verdict":"safe|vulnerable|needs_review","witness_payload":"<minimal concrete attack payload; null if safe>","evidence_chain":"<source->sink with file:line citations>","mismatch_reason":"<if vulnerable or needs_review>","confidence":"high|medium|low","title":"<one-line descriptive name>","source_param_location":"body|query|null"}}
 """
 
-# unparseable 有界重试（spec O2 后半）：openai_compatible 引擎（GLM）端点不支持
+# unparseable 有界重试：openai_compatible 引擎（GLM）端点不支持
 # response_format=json_schema（发之 400），schema 只用于本地解析，模型仅受 prompt
-# 约束——实测对 Markdown 输出合规率极低（2026-07-22 spec R5: 14/14 unparseable）。
-# 重试链：先轻量转格式（对齐 providers_openai._lightweight_reparse 措辞，便宜），
-# 再全量重发 + 加强 JSON-only 指令。耗尽才落保守分支（不丢报，witness=None）。
+# 约束。重试 = 重跑 verdict agent（原 prompt + 加强 JSON-only 指令）——与首跑
+# 同形态（2026-09-01 用户决策「不认同单次判定理念」，轻量转格式重试已拆）。
+# 耗尽才落保守分支（不丢报，witness=None）。
 _JSON_ONLY_REMINDER = (
     "\n\nIMPORTANT: Your previous response was NOT valid JSON. "
     "Respond with ONLY the compact JSON object — no markdown fences, "
     "no explanation, no code blocks."
 )
-
-
-def _reformat_prompt(raw: str) -> str:
-    """轻量转格式 prompt（不用 str.format：schema 里的 JSON 花括号会撞占位符）。"""
-    return (
-        "将以下分析结论转为符合 schema 的纯 JSON，只输出 JSON 本体，"
-        "不要任何解释、前言或 markdown 代码围栏。schema 字段："
-        '{"verdict":"safe|vulnerable","witness_payload":"<攻击载荷字符串或 null>",'
-        '"evidence_chain":"<source->sink 证据链>",'
-        '"mismatch_reason":"<字符串或 null>","confidence":"high|medium|low",'
-        '"title":"<一句话标题>","source_param_location":"<body|query|null>"}\n'
-        f"待转换文本：\n{raw[:4000]}"
-    )
 
 
 @dataclass(frozen=True)
@@ -443,24 +398,21 @@ def extract_candidate_chains(
 
 
 async def _retry_verdict_parse(
-    prompt: str, raw: str, *, llm_client: Callable[..., Awaitable[str]],
+    prompt: str, *, verdict_agent: Callable[..., Awaitable],
+    agent_name: str | None = None,
 ) -> dict | None:
-    """unparseable 后的有界重试：先轻量转格式（便宜），再全量重发+加强 JSON-only。
+    """unparseable 后的有界重试：重跑 verdict agent（原 prompt + JSON-only 加强指令）。
 
-    env SUPERNOVA_CHAIN_VERDICT_RETRIES 控制总次数（默认 2；0 = 直接保守降级）。
+    env SUPERNOVA_CHAIN_VERDICT_RETRIES 控制次数（默认 2；0 = 直接保守降级）。
     调用异常 / 全部尝试仍失败 → None（judge 落保守分支）。
     """
     max_retries = max(0, int(os.getenv("SUPERNOVA_CHAIN_VERDICT_RETRIES", "2")))
-    retry_prompts: list[str] = []
-    if raw.strip():
-        retry_prompts.append(_reformat_prompt(raw))
-    while len(retry_prompts) < max_retries:
-        retry_prompts.append(prompt + _JSON_ONLY_REMINDER)
-    for retry_prompt in retry_prompts[:max_retries]:
+    for _ in range(max_retries):
         try:
-            raw = await llm_client(retry_prompt, output_format=CHAIN_VERDICT_SCHEMA)
+            raw = await _resolve_agent_raw(
+                verdict_agent, prompt + _JSON_ONLY_REMINDER, agent_name=agent_name)
         except Exception as exc:
-            logger.warning("chain-verdict retry LLM call failed (%s); giving up", exc)
+            logger.warning("chain-verdict retry agent call failed (%s); giving up", exc)
             return None
         data = _parse_verdict_json(raw)
         if data is not None:
@@ -489,7 +441,7 @@ def unadjudicated_verdict(candidate: "CandidateChain", reason: str) -> ChainVerd
 
 async def _resolve_agent_raw(verdict_agent, prompt: str, *,
                              agent_name: str | None = None) -> str:
-    """多轮 agent 结果 → raw str（与 llm_client 契约归一）。
+    """多轮 agent 结果 → raw str（judge 的解析契约归一）。
 
     structured_output（dict/list）→ JSON str；缺失回退 .text；success=False
     → raise（由 judge 的 except 接住走保守 unadjudicated——通道失败 ≠ 判非漏洞）。
@@ -511,18 +463,18 @@ async def _resolve_agent_raw(verdict_agent, prompt: str, *,
 async def judge_chain_verdict(
     candidate: CandidateChain,
     *,
-    llm_client: Callable[..., Awaitable[str]] | None = None,
     verdict_agent: Callable[..., Awaitable] | None = None,
     agent_name: str | None = None,
 ) -> ChainVerdict:
-    """Judge one candidate chain -> verdict（spec 2026-08-27 §3 双形态）。
+    """Judge one candidate chain -> verdict（多轮 verdict agent 唯一形态）。
 
-    - ``llm_client``：单次轻量路径（async (prompt, output_format=...) -> str），
-      历史契约，测试 / 降级场景。
-    - ``verdict_agent``：多轮 agent 路径（async (prompt, *, output_format,
-      agent_name) -> ClaudeRunResult-like），生产主线——agent 自主 grep/read
-      验证链快照后判定；structured_output 优先、text 兜底、success=False 走
+    - ``verdict_agent``：多轮 agent（async (prompt, *, output_format,
+      agent_name) -> ClaudeRunResult-like）——agent 自主 grep/read 验证链快照
+      后判定；structured_output 优先、text 兜底、success=False / raise 走
       保守 unadjudicated。
+    - ``verdict_agent=None``：判定通道未配置（SUPERNOVA_GITNEXUS_LLM_ENABLED=0，
+      activity 层不造 runner）→ 保守 unadjudicated。单次判定路径已拆
+      （2026-09-01），不存在「无 agent 时退单次」的形态。
     - ``agent_name``：多轮调用记账名（chain-verdict-{vc}-{i:02d}，防
       metrics.agents 同名覆盖，对齐 22269e4a）。
 
@@ -532,8 +484,15 @@ async def judge_chain_verdict(
     low confidence) so the merger still processes it (Plan 3 OR is
     conservative).
     """
-    template = _VERDICT_PROMPT_AGENT if verdict_agent is not None else _VERDICT_PROMPT
-    prompt = template.format(
+    if verdict_agent is None:
+        logger.warning(
+            "chain-verdict: verdict agent channel not configured "
+            "(SUPERNOVA_GITNEXUS_LLM_ENABLED=0?); marking unadjudicated")
+        return unadjudicated_verdict(
+            candidate,
+            "verdict agent channel not configured; needs human/LLM-track review")
+
+    prompt = _VERDICT_PROMPT_AGENT.format(
         vuln_class=candidate.vuln_class,
         source_param=candidate.source_param,
         source_type=candidate.source_type,
@@ -555,14 +514,7 @@ async def judge_chain_verdict(
     )
 
     try:
-        if verdict_agent is not None:
-            raw = await _resolve_agent_raw(
-                verdict_agent, prompt, agent_name=agent_name)
-        else:
-            if llm_client is None:
-                raise ValueError(
-                    "judge_chain_verdict requires llm_client or verdict_agent")
-            raw = await llm_client(prompt, output_format=CHAIN_VERDICT_SCHEMA)
+        raw = await _resolve_agent_raw(verdict_agent, prompt, agent_name=agent_name)
     except Exception as exc:
         logger.warning("chain-verdict LLM pass failed (%s); marking unadjudicated", exc)
         return ChainVerdict(
@@ -578,14 +530,9 @@ async def judge_chain_verdict(
 
     data = _parse_verdict_json(raw)
     if data is None:
-        # retry 与首call同通道（agent 路径走 agent，单次路径走 llm_client）
-        async def _retry_caller(p: str, **kw) -> str:
-            if verdict_agent is not None:
-                return await _resolve_agent_raw(
-                    verdict_agent, p, agent_name=agent_name)
-            return await llm_client(p, output_format=kw.get("output_format"))
+        # 重试与首跑同形态：重跑 verdict agent（原 prompt + JSON-only 加强指令）
         data = await _retry_verdict_parse(
-            prompt, raw if isinstance(raw, str) else "", llm_client=_retry_caller)
+            prompt, verdict_agent=verdict_agent, agent_name=agent_name)
     if data is None:
         # 空输出与非法输出分流：诊断时区分「调用层失败」与「模型不合规」。
         final_raw = raw if isinstance(raw, str) else ""
@@ -624,7 +571,6 @@ async def gather_verdicts_concurrently(
     candidates: list,
     *,
     vc: str,
-    llm_client: Callable[..., Awaitable[str]] | None = None,
     verdict_agent: Callable[..., Awaitable] | None = None,
     emitter=None,
     chain_of: Callable[[object], "CandidateChain"] | None = None,
@@ -674,7 +620,7 @@ async def gather_verdicts_concurrently(
     async def _judge(i: int, chain: "CandidateChain") -> "ChainVerdict":
         async with sem:
             return await judge_chain_verdict(
-                chain, llm_client=llm_client, verdict_agent=verdict_agent,
+                chain, verdict_agent=verdict_agent,
                 agent_name=f"chain-verdict-{vc}-{i:02d}")
 
     async def _one(i: int, item) -> "ChainVerdict":

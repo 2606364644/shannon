@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from supernova_core.code_index.chain_verdict import ChainVerdict
 from supernova_core.code_index.vuln_chain_builders.ssrf_builder import (
@@ -10,6 +11,21 @@ from supernova_core.code_index.parameter_models import (
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import SsrfVulnerability
+
+def _agent(payload: str = ""):
+    """fake verdict_agent（SimpleNamespace 模拟 ClaudeRunResult，text 兜底解析）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        return SimpleNamespace(success=True, structured_output=None,
+                               text=payload, error=None)
+    return agent
+
+
+def _never_agent():
+    """不应被调用的守卫 agent（调用即断言失败）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        raise AssertionError("verdict agent must not be called")
+    return agent
+
 
 
 def _flow(source="url", source_type=ParameterSource.QUERY_PARAM):
@@ -27,12 +43,10 @@ async def test_build_ssrf_vulnerable():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
-                '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
-                '"confidence":"high"}')
-
-    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    findings = await build_ssrf_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
+            '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+            '"confidence":"high"}'))
     assert len(findings) == 1
     f = findings[0]
     assert isinstance(f, SsrfVulnerability)
@@ -54,20 +68,14 @@ async def test_build_ssrf_skips_non_url_slots():
         )], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("url slot only")
-
-    assert await build_ssrf_findings(pgraph, llm_client=fake_llm) == []
+    assert await build_ssrf_findings(pgraph, verdict_agent=_never_agent()) == []
 
 
 @pytest.mark.asyncio
 async def test_build_ssrf_empty_pgraph_returns_empty():
     pgraph = ParameterPropagationGraph(taint_flows=[], language_coverage=["python"])
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("no LLM on empty")
-
-    assert await build_ssrf_findings(pgraph, llm_client=fake_llm) == []
+    assert await build_ssrf_findings(pgraph, verdict_agent=_never_agent()) == []
 
 
 @pytest.mark.asyncio
@@ -86,8 +94,7 @@ async def test_build_ssrf_findings_reports_chain_progress(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def fake_judge(chain, *, llm_client=None, verdict_agent=None,
-                         agent_name=None):
+    async def fake_judge(chain, *, verdict_agent=None, agent_name=None):
         call_count["n"] += 1
         is_vuln = (call_count["n"] == 1)  # first chain vulnerable
         return ChainVerdict(
@@ -103,11 +110,8 @@ async def test_build_ssrf_findings_reports_chain_progress(monkeypatch):
         fake_judge,
     )
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("judge is monkeypatched; llm_client unused")
-
     findings = await build_ssrf_findings(
-        pgraph, llm_client=fake_llm, progress_cb=cb)
+        pgraph, verdict_agent=_never_agent(), progress_cb=cb)
 
     assert len(findings) == 2
     non_final = [s for s in samples if not s.final]
@@ -127,11 +131,9 @@ async def test_build_ssrf_findings_progress_cb_none_no_raise():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
-                '"url->fetch","mismatch_reason":null,"confidence":"high"}')
-
-    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    findings = await build_ssrf_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"safe","witness_payload":null,"evidence_chain":'
+            '"url->fetch","mismatch_reason":null,"confidence":"high"}'))
     assert len(findings) == 1
 
 
@@ -157,12 +159,10 @@ async def test_build_ssrf_accepts_sink_call_sites_param():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
-                '"url->fetch","mismatch_reason":null,"confidence":"high"}')
-
     findings = await build_ssrf_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"safe","witness_payload":null,"evidence_chain":'
+            '"url->fetch","mismatch_reason":null,"confidence":"high"}'), sink_call_sites={sid: sink})
     assert isinstance(findings, list)
     assert len(findings) == 1
 
@@ -190,13 +190,11 @@ async def test_build_ssrf_open_redirect_sink_reports_open_redirect_subtype():
         taint_flows=[_flow()], language_coverage=["javascript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"https://evil.com/",'
-                '"evidence_chain":"url->redirect","mismatch_reason":"no allowlist",'
-                '"confidence":"high"}')
-
     findings = await build_ssrf_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: redirect_sink})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"https://evil.com/",'
+            '"evidence_chain":"url->redirect","mismatch_reason":"no allowlist",'
+            '"confidence":"high"}'), sink_call_sites={sid: redirect_sink})
     assert len(findings) == 1, "REDIRECT 候选须产出(不再过滤)"
     f = findings[0]
     assert f.vulnerability_type == "Open_Redirect", \
@@ -221,13 +219,11 @@ async def test_build_ssrf_non_redirect_keeps_url_manipulation():
         taint_flows=[_flow()], language_coverage=["javascript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"http://169.254.169.254/",'
-                '"evidence_chain":"url->needle.get","mismatch_reason":"no allowlist",'
-                '"confidence":"high"}')
-
     findings = await build_ssrf_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: fetch_sink})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"http://169.254.169.254/",'
+            '"evidence_chain":"url->needle.get","mismatch_reason":"no allowlist",'
+            '"confidence":"high"}'), sink_call_sites={sid: fetch_sink})
     assert len(findings) == 1
     assert findings[0].vulnerability_type == "URL_Manipulation"
 
@@ -250,12 +246,10 @@ async def test_build_ssrf_finding_carries_title():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"http://127.0.0.1/",'
-                '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
-                '"confidence":"high","title":"SSRF via url param in /proxy"}')
-
-    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    findings = await build_ssrf_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"http://127.0.0.1/",'
+            '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+            '"confidence":"high","title":"SSRF via url param in /proxy"}'))
     assert findings[0].title == "SSRF via url param in /proxy"
 
 
@@ -267,22 +261,23 @@ async def test_build_ssrf_entry_points_route_label():
         taint_flows=[_flow()], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
-                '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
-                '"confidence":"high"}')
-
     ep = EntryPoint(
         func_block_id="app.py:proxy:1", entry_type="http_route",
         route="/proxy", http_method="GET", confidence=1.0,
         evidence="annot", needs_llm_review=False,
     )
     findings = await build_ssrf_findings(
-        pgraph, llm_client=fake_llm, entry_points={"app.py:proxy:1": ep})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
+            '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+            '"confidence":"high"}'), entry_points={"app.py:proxy:1": ep})
     assert findings[0].source_endpoint == "GET /proxy"
     assert findings[0].path == "GET /proxy → url->fetch(L5)"
 
     # miss（不传 kwarg）→ FuncBlock id 占位保持
-    findings = await build_ssrf_findings(pgraph, llm_client=fake_llm)
+    findings = await build_ssrf_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
+            '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
+            '"confidence":"high"}'))
     assert findings[0].source_endpoint == "app.py:proxy:1"
     assert findings[0].path == "url->fetch(L5)"

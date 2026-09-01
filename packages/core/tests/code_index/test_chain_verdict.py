@@ -21,6 +21,27 @@ from supernova_core.code_index.parameter_models import (
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 
 
+class _AgentResult:
+    """ClaudeRunResult-like：judge 只消费 success/structured_output/text/error。"""
+
+    def __init__(self, *, success=True, structured_output=None, text="", error=None):
+        self.success = success
+        self.structured_output = structured_output
+        self.text = text
+        self.error = error
+
+
+def _agent_returning(payload: str = "", *, calls=None, prompts=None):
+    """fake verdict_agent：text=payload（text 兜底解析路径）。可选记次数/捕 prompt。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        if calls is not None:
+            calls["n"] += 1
+        if prompts is not None:
+            prompts.append(prompt)
+        return _AgentResult(text=payload)
+    return agent
+
+
 def _flow(sink_slot, source="q", source_type=ParameterSource.QUERY_PARAM, steps=None,
           sink_id="app.py:handler:db.execute:1:0"):
     return TaintFlow(
@@ -140,8 +161,8 @@ def test_post_sanitize_concat_detected_from_summary_step_marker():
 
 
 @pytest.mark.asyncio
-async def test_judge_chain_verdict_calls_llm_and_parses_verdict():
-    """LLM pass returns verdict JSON -> ChainVerdict parsed."""
+async def test_judge_chain_verdict_agent_text_parses_verdict():
+    """verdict agent 返回 verdict JSON（text 兜底）-> ChainVerdict parsed."""
     chain = CandidateChain(
         vuln_class="injection", flow_id="f1", entry_point_id="ep",
         source_param="q", source_type="query", sink_call_site_id="db.execute:1",
@@ -150,13 +171,14 @@ async def test_judge_chain_verdict_calls_llm_and_parses_verdict():
         post_sanitize_concat=True,
     )
 
-    async def fake_llm(prompt, **kw):
-        # LLM pass returns a compact verdict JSON
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q -> db.execute(L1)","mismatch_reason":"concat into sql value slot",'
-                '"confidence":"high"}')
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        # agent final message is a compact verdict JSON
+        return _AgentResult(text=(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q -> db.execute(L1)","mismatch_reason":"concat into sql value slot",'
+            '"confidence":"high"}'))
 
-    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    verdict = await judge_chain_verdict(chain, verdict_agent=fake_agent)
     assert isinstance(verdict, ChainVerdict)
     assert verdict.verdict == "vulnerable"
     assert verdict.witness_payload == "'"
@@ -165,8 +187,8 @@ async def test_judge_chain_verdict_calls_llm_and_parses_verdict():
 
 
 @pytest.mark.asyncio
-async def test_judge_chain_verdict_defaults_safe_on_llm_failure():
-    """LLM pass raises/fails → conservative: treat as needs_review, do not crash."""
+async def test_judge_chain_verdict_defaults_conservative_on_agent_failure():
+    """verdict agent raises/fails → conservative: treat as needs_review, do not crash."""
     chain = CandidateChain(
         vuln_class="ssrf", flow_id="f1", entry_point_id="ep",
         source_param="url", source_type="query", sink_call_site_id="fetch:1",
@@ -174,16 +196,26 @@ async def test_judge_chain_verdict_defaults_safe_on_llm_failure():
         direction_hint="backward", post_sanitize_concat=False,
     )
 
-    async def failing_llm(prompt, **kw):
-        raise RuntimeError("LLM chain-verdict pass not available")
+    async def failing_agent(prompt, *, output_format=None, agent_name=None):
+        raise RuntimeError("verdict agent not available")
 
-    verdict = await judge_chain_verdict(chain, llm_client=failing_llm)
+    verdict = await judge_chain_verdict(chain, verdict_agent=failing_agent)
     # graceful: never crash; verdict stays conservative-vulnerable (OR-friendly)
     # spec 2026-08-26 §5.7：判定通道失败 → confidence="unadjudicated"（不再用 low
     # 冒充已判定——low 是「LLM 判了且结论低置信」，通道失败是另一语义）
     assert verdict.confidence == "unadjudicated"
     assert verdict.verdict == "vulnerable"
     assert "needs_review" in (verdict.mismatch_reason or "") or verdict.verdict in ("safe", "vulnerable")
+
+
+@pytest.mark.asyncio
+async def test_judge_no_agent_channel_unadjudicated():
+    """判定通道未配置（verdict_agent=None，SUPERNOVA_GITNEXUS_LLM_ENABLED=0）
+    → 直接保守 unadjudicated，不 crash、不落任何单次判定形态。"""
+    verdict = await judge_chain_verdict(_chain())
+    assert verdict.confidence == "unadjudicated"
+    assert verdict.verdict == "vulnerable"
+    assert verdict.witness_payload is None
 
 
 def _slot_sink(sink_id, slot=SlotContext.SQL_VALUE, expr="req.query.q"):
@@ -240,11 +272,11 @@ async def test_judge_chain_verdict_prompt_includes_sink_expressions_and_intermed
     )
     captured = {}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         captured["prompt"] = prompt
-        return '{"verdict":"safe","witness_payload":null,"evidence_chain":"q->db","mismatch_reason":null,"confidence":"high"}'
+        return _AgentResult(text='{"verdict":"safe","witness_payload":null,"evidence_chain":"q->db","mismatch_reason":null,"confidence":"high"}')
 
-    await judge_chain_verdict(chain, llm_client=fake_llm)
+    await judge_chain_verdict(chain, verdict_agent=fake_agent)
     assert "'sel ' + q" in captured["prompt"]            # sink_expressions 进 prompt
     assert "raw" in captured["prompt"] and "esc" in captured["prompt"]   # intermediate_vars 进 steps_repr
 
@@ -277,18 +309,19 @@ async def test_judge_chain_verdict_parses_title_from_llm():
         post_sanitize_concat=True,
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q -> db.execute(L1)","mismatch_reason":"concat into sql value slot",'
-                '"confidence":"high","title":"SQL Injection via search q param"}')
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text=(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q -> db.execute(L1)","mismatch_reason":"concat into sql value slot",'
+            '"confidence":"high","title":"SQL Injection via search q param"}'))
 
-    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    verdict = await judge_chain_verdict(chain, verdict_agent=fake_agent)
     assert verdict.title == "SQL Injection via search q param"
 
 
 @pytest.mark.asyncio
-async def test_judge_chain_verdict_title_none_when_llm_omits():
-    """LLM 不返 title（旧/兜底分支）→ ChainVerdict.title=None，不崩。"""
+async def test_judge_chain_verdict_title_none_when_agent_omits():
+    """agent 不返 title（旧/兜底分支）→ ChainVerdict.title=None，不崩。"""
     chain = CandidateChain(
         vuln_class="ssrf", flow_id="f1", entry_point_id="ep",
         source_param="url", source_type="query", sink_call_site_id="fetch:1",
@@ -296,11 +329,12 @@ async def test_judge_chain_verdict_title_none_when_llm_omits():
         direction_hint="backward", post_sanitize_concat=False,
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":"url->fetch",'
-                '"mismatch_reason":null,"confidence":"high"}')
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text=(
+            '{"verdict":"safe","witness_payload":null,"evidence_chain":"url->fetch",'
+            '"mismatch_reason":null,"confidence":"high"}'))
 
-    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    verdict = await judge_chain_verdict(chain, verdict_agent=fake_agent)
     assert verdict.title is None
 
 
@@ -332,19 +366,23 @@ def _chain():
 
 
 @pytest.mark.asyncio
-async def test_judge_recovers_from_markdown_via_reformat_retry():
-    """首次返回 GLM Markdown → 轻量转格式重试恢复合法 JSON（spec O2 后半）。"""
+async def test_judge_recovers_from_markdown_via_agent_rerun():
+    """agent 首跑 text=GLM Markdown → 重跑 agent（原 prompt + JSON-only 提示）
+    恢复合法 JSON。单次判定路径（轻量转格式）已拆除——重试与首跑同形态。"""
     prompts: list[str] = []
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         prompts.append(prompt)
-        return _GLM_MARKDOWN if len(prompts) == 1 else _VERDICT_JSON
+        return _AgentResult(
+            text=_GLM_MARKDOWN if len(prompts) == 1 else _VERDICT_JSON)
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert verdict.verdict == "vulnerable"
     assert verdict.witness_payload == "' OR '1'='1"
-    assert len(prompts) == 2                       # 1 次 + 1 次轻量转格式
-    assert "待转换文本" in prompts[1]              # 转格式 prompt 而非全量重发
+    assert len(prompts) == 2                       # 1 次原跑 + 1 次重跑 agent
+    assert prompts[1].startswith(prompts[0])       # 全量重发（同链 prompt）
+    assert "NOT valid JSON" in prompts[1]          # 加强 JSON-only 指令
+    assert "待转换文本" not in prompts[1]          # 不再有轻量转格式形态
 
 
 @pytest.mark.asyncio
@@ -352,11 +390,11 @@ async def test_judge_unparseable_after_retries_is_conservative():
     """全部尝试仍 Markdown → 保守分支：不丢报、witness=None、置信度 low。"""
     calls = {"n": 0}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         calls["n"] += 1
-        return _GLM_MARKDOWN
+        return _AgentResult(text=_GLM_MARKDOWN)
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert calls["n"] == 3                          # 1 原始 + 2 重试（默认）
     assert verdict.verdict == "vulnerable"          # OR 友好，不静默清除
     assert verdict.witness_payload is None
@@ -368,10 +406,10 @@ async def test_judge_unparseable_after_retries_is_conservative():
 @pytest.mark.asyncio
 async def test_judge_empty_output_after_retries_distinguishes_reason():
     """空输出与非法输出分流：mismatch_reason 报 empty 而非 unparseable。"""
-    async def fake_llm(prompt, **kw):
-        return ""
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text="")
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert verdict.verdict == "vulnerable"
     assert verdict.confidence == "unadjudicated"
     assert "empty output" in verdict.mismatch_reason
@@ -385,24 +423,25 @@ async def test_judge_empty_output_after_retries_distinguishes_reason():
 
 @pytest.mark.asyncio
 async def test_judge_llm_low_confidence_verdict_is_not_unadjudicated():
-    """LLM 成功判定且自评 low → confidence 透传 "low"（不被改写 unadjudicated）。"""
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q -> db.execute(L1)","mismatch_reason":"weak signal",'
-                '"confidence":"low","title":"SQLi"}')
+    """agent 成功判定且自评 low → confidence 透传 "low"（不被改写 unadjudicated）。"""
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text=(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q -> db.execute(L1)","mismatch_reason":"weak signal",'
+            '"confidence":"low","title":"SQLi"}'))
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert verdict.confidence == "low"
     assert verdict.verdict == "vulnerable"
 
 
 @pytest.mark.asyncio
-async def test_judge_llm_failure_unadjudicated_keeps_conservative_fields():
+async def test_judge_agent_failure_unadjudicated_keeps_conservative_fields():
     """通道失败分支：verdict 保守 vulnerable + witness=None + 兜底 title（不丢报）。"""
-    async def failing_llm(prompt, **kw):
+    async def failing_agent(prompt, *, output_format=None, agent_name=None):
         raise RuntimeError("provider down")
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=failing_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=failing_agent)
     assert verdict.confidence == "unadjudicated"
     assert verdict.verdict == "vulnerable"
     assert verdict.witness_payload is None
@@ -416,11 +455,11 @@ async def test_judge_no_retry_when_env_zero(monkeypatch):
     monkeypatch.setenv("SUPERNOVA_CHAIN_VERDICT_RETRIES", "0")
     calls = {"n": 0}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         calls["n"] += 1
-        return _GLM_MARKDOWN
+        return _AgentResult(text=_GLM_MARKDOWN)
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert calls["n"] == 1
     assert verdict.verdict == "vulnerable"
     assert verdict.witness_payload is None
@@ -431,13 +470,13 @@ async def test_judge_retry_call_exception_falls_conservative():
     """重试调用本身 raise → 放弃重试，保守降级（不 crash）。"""
     calls = {"n": 0}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _GLM_MARKDOWN
+            return _AgentResult(text=_GLM_MARKDOWN)
         raise RuntimeError("provider down")
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert calls["n"] == 2
     assert verdict.verdict == "vulnerable"
     assert verdict.witness_payload is None
@@ -448,11 +487,11 @@ async def test_judge_single_call_when_parseable():
     """合法 JSON 一次到位 → 不触发任何重试。"""
     calls = {"n": 0}
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         calls["n"] += 1
-        return _VERDICT_JSON
+        return _AgentResult(text=_VERDICT_JSON)
 
-    verdict = await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    verdict = await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert calls["n"] == 1
     assert verdict.verdict == "vulnerable"
 
@@ -462,11 +501,11 @@ async def test_judge_prompt_asks_for_concrete_witness():
     """prompt 含具体 witness 指令（MINIMAL concrete attack input）。"""
     prompts: list[str] = []
 
-    async def fake_llm(prompt, **kw):
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
         prompts.append(prompt)
-        return _VERDICT_JSON
+        return _AgentResult(text=_VERDICT_JSON)
 
-    await judge_chain_verdict(_chain(), llm_client=fake_llm)
+    await judge_chain_verdict(_chain(), verdict_agent=fake_agent)
     assert "MINIMAL concrete attack input" in prompts[0]
 
 
@@ -546,12 +585,13 @@ async def test_judge_verdict_parses_source_param_location():
         post_sanitize_concat=True,
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"1;id","evidence_chain":'
-                '"preTax -> eval","mismatch_reason":"eval on body param",'
-                '"confidence":"high","source_param_location":"body"}')
+    async def fake_agent(prompt, *, output_format=None, agent_name=None):
+        return _AgentResult(text=(
+            '{"verdict":"vulnerable","witness_payload":"1;id","evidence_chain":'
+            '"preTax -> eval","mismatch_reason":"eval on body param",'
+            '"confidence":"high","source_param_location":"body"}'))
 
-    verdict = await judge_chain_verdict(chain, llm_client=fake_llm)
+    verdict = await judge_chain_verdict(chain, verdict_agent=fake_agent)
     assert verdict.source_param_location == "body"
 
 
@@ -567,18 +607,19 @@ async def test_judge_verdict_normalizes_bad_source_param_location():
         post_sanitize_concat=True,
     )
 
-    async def llm_returns(loc):
-        async def _f(prompt, **kw):
-            return ('{"verdict":"vulnerable","witness_payload":"http://x/",'
-                    '"evidence_chain":"url -> get","confidence":"medium",'
-                    f'"source_param_location":"{loc}"' + '}')
+    async def agent_returns(loc):
+        async def _f(prompt, *, output_format=None, agent_name=None):
+            return _AgentResult(text=(
+                '{"verdict":"vulnerable","witness_payload":"http://x/",'
+                '"evidence_chain":"url -> get","confidence":"medium",'
+                f'"source_param_location":"{loc}"' + '}'))
         return _f
 
-    v = await judge_chain_verdict(chain, llm_client=await llm_returns("QUERY"))
+    v = await judge_chain_verdict(chain, verdict_agent=await agent_returns("QUERY"))
     assert v.source_param_location == "query"      # 大小写折叠
-    v = await judge_chain_verdict(chain, llm_client=await llm_returns("header"))
+    v = await judge_chain_verdict(chain, verdict_agent=await agent_returns("header"))
     assert v.source_param_location is None          # 非法 → None
-    v = await judge_chain_verdict(chain, llm_client=await llm_returns(""))
+    v = await judge_chain_verdict(chain, verdict_agent=await agent_returns(""))
     assert v.source_param_location is None
 
 
@@ -594,24 +635,28 @@ async def test_judge_verdict_fallback_location_none():
         post_sanitize_concat=True,
     )
 
-    async def boom(prompt, **kw):
+    async def boom(prompt, *, output_format=None, agent_name=None):
         raise RuntimeError("llm down")
 
-    verdict = await judge_chain_verdict(chain, llm_client=boom)
+    verdict = await judge_chain_verdict(chain, verdict_agent=boom)
     assert verdict.confidence == "unadjudicated"
     assert verdict.source_param_location is None
 
 
-# ===== spec 2026-08-27 §3：多轮 verdict agent 路径（逐条深判）=====
+# ===== spec 2026-08-27 §3：多轮 verdict agent 路径（逐条深判，2026-09-01 起唯一形态）=====
 
-class _AgentResult:
-    """ClaudeRunResult-like：judge 只消费 success/structured_output/text/error。"""
-
-    def __init__(self, *, success=True, structured_output=None, text="", error=None):
-        self.success = success
-        self.structured_output = structured_output
-        self.text = text
-        self.error = error
+def test_single_pass_path_removed():
+    """单次判定路径已拆除（2026-09-01 用户决策「不认同单次判定理念」）：
+    模块不再有单次模板 / 轻量转格式 / llm_client 注入口——判定只有多轮 agent
+    一种形态。仿 test_static_dataflow_hints_decoupling 的锁定测试先例，防回潮。"""
+    import supernova_core.code_index.chain_verdict as cv
+    import inspect
+    assert not hasattr(cv, "_VERDICT_PROMPT")       # 单次版模板
+    assert not hasattr(cv, "_reformat_prompt")      # 轻量转格式重试
+    # judge 签名不再接受 llm_client
+    assert "llm_client" not in inspect.signature(cv.judge_chain_verdict).parameters
+    assert "llm_client" not in inspect.signature(
+        cv.gather_verdicts_concurrently).parameters
 
 
 def _agent_chain():
@@ -654,7 +699,7 @@ async def test_judge_chain_verdict_agent_runner_structured_output():
 
 @pytest.mark.asyncio
 async def test_judge_chain_verdict_agent_runner_text_fallback():
-    """agent 无 structured_output → text 兜底（与 llm_client 路径同解析）。"""
+    """agent 无 structured_output → text 兜底解析。"""
     async def fake_agent(prompt, *, output_format=None, agent_name=None):
         return _AgentResult(text='{"verdict":"safe","witness_payload":null,'
                                  '"evidence_chain":"q -> db(ORM)","confidence":"high"}')
@@ -666,7 +711,7 @@ async def test_judge_chain_verdict_agent_runner_text_fallback():
 @pytest.mark.asyncio
 async def test_judge_chain_verdict_agent_failure_conservative():
     """agent 返回 success=False → 保守 unadjudicated（通道失败 ≠ 判非漏洞，
-    对齐 llm_client 异常路径）。"""
+    对齐 agent 异常路径）。"""
     async def failing_agent(prompt, *, output_format=None, agent_name=None):
         return _AgentResult(success=False, error="max turns reached")
 

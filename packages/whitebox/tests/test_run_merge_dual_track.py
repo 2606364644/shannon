@@ -72,8 +72,10 @@ async def _run(tmp_path, parity_client="raise"):
     """parity_client：track-parity LLM stub。默认 raise（raise 桩 → enhance 优雅
     退化），防既有测试真调 LLM；显式注入 fake 走配对路径。"""
     from unittest.mock import patch
-    client = (parity_client if callable(parity_client)
-              else activities._gitnexus_verdict_llm_client)
+    async def _raise_stub(prompt, **kw):
+        raise RuntimeError("track-parity LLM client not configured")
+
+    client = (parity_client if callable(parity_client) else _raise_stub)
     with patch.object(activities, "_get_paths",
                       lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
          patch.object(activities, "_make_track_parity_client",

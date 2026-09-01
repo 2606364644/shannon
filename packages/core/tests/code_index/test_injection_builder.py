@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from supernova_core.code_index.vuln_chain_builders.injection_builder import (
     build_injection_findings,
@@ -10,6 +11,21 @@ from supernova_core.code_index.parameter_models import (
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import InjectionVulnerability
+
+
+def _agent(payload: str = ""):
+    """fake verdict_agent（SimpleNamespace 模拟 ClaudeRunResult，text 兜底解析）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        return SimpleNamespace(success=True, structured_output=None,
+                               text=payload, error=None)
+    return agent
+
+
+def _never_agent():
+    """不应被调用的守卫 agent（调用即断言失败）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        raise AssertionError("verdict agent must not be called")
+    return agent
 
 
 def _ep(func_block_id="app.py:handler:1", route="/search", http_method="POST"):
@@ -43,11 +59,9 @@ async def test_build_injection_findings_vulnerable_chain():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db.exec","mismatch_reason":"concat into value slot","confidence":"high"}')
-
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":"concat into value slot","confidence":"high"}'))
     assert len(findings) == 1
     f = findings[0]
     assert isinstance(f, InjectionVulnerability)
@@ -68,11 +82,9 @@ async def test_build_injection_flags_post_sanitize_concat():
         taint_flows=[_flow("sql_value", steps=steps)], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"post-sanitize concat","confidence":"high"}')
-
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db","mismatch_reason":"post-sanitize concat","confidence":"high"}'))
     assert len(findings) == 1
     assert "post-sanitize concat" in (findings[0].concat_occurrences or "").lower()
 
@@ -81,10 +93,8 @@ async def test_build_injection_flags_post_sanitize_concat():
 async def test_build_injection_empty_pgraph_returns_empty():
     pgraph = ParameterPropagationGraph(taint_flows=[], language_coverage=["python"])
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("should not call LLM on empty pgraph")
 
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_never_agent())
     assert findings == []
 
 
@@ -95,10 +105,8 @@ async def test_build_injection_skips_non_injection_slots():
         taint_flows=[_flow("url")], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("should not call LLM on url slot")
 
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_never_agent())
     assert findings == []
 
 
@@ -122,8 +130,7 @@ async def test_build_injection_findings_reports_chain_progress(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def fake_judge(chain, *, llm_client=None, verdict_agent=None,
-                         agent_name=None):
+    async def fake_judge(chain, *, verdict_agent=None, agent_name=None):
         call_count["n"] += 1
         # first chain vulnerable, others safe
         is_vuln = (call_count["n"] == 1)
@@ -140,11 +147,9 @@ async def test_build_injection_findings_reports_chain_progress(monkeypatch):
         fake_judge,
     )
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("judge is monkeypatched; llm_client unused")
 
     findings = await build_injection_findings(
-        pgraph, llm_client=fake_llm, progress_cb=cb)
+        pgraph, verdict_agent=_never_agent(), progress_cb=cb)
 
     assert len(findings) == 3
     # 3 candidates -> 3 non-final ticks
@@ -170,11 +175,9 @@ async def test_build_injection_findings_progress_cb_none_no_raise():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":null,"confidence":"high"}')
-
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db","mismatch_reason":null,"confidence":"high"}'))
     assert len(findings) == 1
 
 
@@ -201,12 +204,10 @@ async def test_build_injection_accepts_sink_call_sites_param():
         taint_flows=[_flow("sql_value")], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db","mismatch_reason":"x","confidence":"high"}')
-
     findings = await build_injection_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: sink})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db","mismatch_reason":"x","confidence":"high"}'), sink_call_sites={sid: sink})
     assert isinstance(findings, list)
     assert len(findings) == 1
 
@@ -219,12 +220,10 @@ async def test_build_injection_finding_carries_title():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db.exec","mismatch_reason":"concat","confidence":"high",'
-                '"title":"SQL Injection via q param"}')
-
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":"concat","confidence":"high",'
+            '"title":"SQL Injection via q param"}'))
     assert findings[0].title == "SQL Injection via q param"
 
 
@@ -237,12 +236,10 @@ async def test_build_injection_entry_points_prefixes_path_with_route():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db.exec","mismatch_reason":"x","confidence":"high"}')
-
     findings = await build_injection_findings(
-        pgraph, llm_client=fake_llm, entry_points={"app.py:handler:1": _ep()})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":"x","confidence":"high"}'), entry_points={"app.py:handler:1": _ep()})
     assert findings[0].path == "POST /search → q->db.exec"
     assert findings[0].evidence_chain == "q->db.exec"
 
@@ -255,18 +252,20 @@ async def test_build_injection_entry_points_miss_keeps_path():
         language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
-                '"q->db.exec","mismatch_reason":null,"confidence":"high"}')
-
-    findings = await build_injection_findings(pgraph, llm_client=fake_llm)
+    findings = await build_injection_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":null,"confidence":"high"}'))
     assert findings[0].path == "q->db.exec"
     findings = await build_injection_findings(
-        pgraph, llm_client=fake_llm,
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":null,"confidence":"high"}'),
         entry_points={"app.py:handler:1": _ep(route=None)})
     assert findings[0].path == "q->db.exec"
     findings = await build_injection_findings(
-        pgraph, llm_client=fake_llm,
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"\'","evidence_chain":'
+            '"q->db.exec","mismatch_reason":null,"confidence":"high"}'),
         entry_points={"app.py:handler:1": _ep(http_method=None)})
     assert findings[0].path == "q->db.exec"
 
@@ -286,32 +285,33 @@ async def test_build_injection_affected_parameters_placement_note():
             sink_slot="sql_value", propagation_steps=[_step("concat")],
         )
 
-    async def llm_with(loc):
-        async def _f(prompt, **kw):
+    async def agent_with(loc):
+        async def _f(prompt, *, output_format=None, agent_name=None):
             extra = f',"source_param_location":"{loc}"' if loc else ""
-            return ('{"verdict":"vulnerable","witness_payload":"\'",'
-                    '"evidence_chain":"q->db.exec","confidence":"high"' + extra + '}')
+            return SimpleNamespace(success=True, structured_output=None, error=None,
+                                   text=('{"verdict":"vulnerable","witness_payload":"\'",'
+                                         '"evidence_chain":"q->db.exec","confidence":"high"' + extra + '}'))
         return _f
 
     # A: Agent 判定 body，flow source_type=query → Agent 优先
     pgraph = ParameterPropagationGraph(
         taint_flows=[_flow_st(ParameterSource.QUERY_PARAM)], language_coverage=["python"])
     findings = await build_injection_findings(
-        pgraph, llm_client=await llm_with("body"))
+        pgraph, verdict_agent=await agent_with("body"))
     assert findings[0].affected_parameters == ["q (body)"]
 
     # B: Agent 缺失 → source_type=query 确定性注记
     pgraph = ParameterPropagationGraph(
         taint_flows=[_flow_st(ParameterSource.QUERY_PARAM)], language_coverage=["python"])
     findings = await build_injection_findings(
-        pgraph, llm_client=await llm_with(None))
+        pgraph, verdict_agent=await agent_with(None))
     assert findings[0].affected_parameters == ["q (query)"]
 
     # C: Agent 缺失 + source_type=path（无 HTTP placement 对应）→ 不注
     pgraph = ParameterPropagationGraph(
         taint_flows=[_flow_st(ParameterSource.PATH_PARAM)], language_coverage=["python"])
     findings = await build_injection_findings(
-        pgraph, llm_client=await llm_with(None))
+        pgraph, verdict_agent=await agent_with(None))
     assert findings[0].affected_parameters is None
 
 

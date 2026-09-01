@@ -98,15 +98,19 @@ async def test_sanitizer_pipeline_flows_end_to_end():
 
     captured = {}
 
-    async def verdict_llm(prompt, **kw):
+    from types import SimpleNamespace
+
+    async def verdict_agent(prompt, *, output_format=None, agent_name=None):
         captured["prompt"] = prompt
         import json
-        return json.dumps({
-            "verdict": "safe", "witness_payload": None,
-            "evidence_chain": "q->db", "mismatch_reason": None, "confidence": "high",
-        })
+        return SimpleNamespace(success=True, structured_output=None, error=None,
+                               text=json.dumps({
+                                   "verdict": "safe", "witness_payload": None,
+                                   "evidence_chain": "q->db", "mismatch_reason": None,
+                                   "confidence": "high",
+                               }))
 
-    verdict = await judge_chain_verdict(c, llm_client=verdict_llm)
+    verdict = await judge_chain_verdict(c, verdict_agent=verdict_agent)
     # 判定 LLM 拿到了完整信息(非空 sanitizer/expression/post_concat)
     assert "html.escape" in captured["prompt"]
     assert "'sel ' + q" in captured["prompt"]

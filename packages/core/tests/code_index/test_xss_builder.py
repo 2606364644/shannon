@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from supernova_core.code_index.chain_verdict import ChainVerdict
 from supernova_core.code_index.vuln_chain_builders.xss_builder import (
@@ -9,6 +10,21 @@ from supernova_core.code_index.parameter_models import (
 )
 from supernova_core.code_index.models import EntryPoint, ParameterSource
 from supernova_core.models.queue_schemas import XssVulnerability
+
+def _agent(payload: str = ""):
+    """fake verdict_agent（SimpleNamespace 模拟 ClaudeRunResult，text 兜底解析）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        return SimpleNamespace(success=True, structured_output=None,
+                               text=payload, error=None)
+    return agent
+
+
+def _never_agent():
+    """不应被调用的守卫 agent（调用即断言失败）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        raise AssertionError("verdict agent must not be called")
+    return agent
+
 
 
 def _flow(slot="generic", source="name", source_type=ParameterSource.QUERY_PARAM,
@@ -43,12 +59,10 @@ async def test_build_xss_reflected_vulnerable():
         language_coverage=["typescript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"><script>","evidence_chain":'
-                '"q->innerHTML","mismatch_reason":"no encoding for html body","confidence":"high"}')
-
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><script>","evidence_chain":'
+            '"q->innerHTML","mismatch_reason":"no encoding for html body","confidence":"high"}'), sink_call_sites={sid: _xss_sink(sid)})
     assert len(findings) == 1
     f = findings[0]
     assert isinstance(f, XssVulnerability)
@@ -108,12 +122,10 @@ async def test_build_xss_synthesizes_stored_finding():
         taint_flows=[read_flow, write_flow], language_coverage=["python"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"><img>","evidence_chain":'
-                '"bio(input)->DB->read->innerHTML","mismatch_reason":"stored, no encode",'
-                '"confidence":"high"}')
-
-    findings = await build_xss_findings(pgraph, llm_client=fake_llm)
+    findings = await build_xss_findings(pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><img>","evidence_chain":'
+            '"bio(input)->DB->read->innerHTML","mismatch_reason":"stored, no encode",'
+            '"confidence":"high"}'))
     stored = [f for f in findings if f.vulnerability_type == "Stored"]
     assert len(stored) >= 1
 
@@ -122,10 +134,7 @@ async def test_build_xss_synthesizes_stored_finding():
 async def test_build_xss_empty_pgraph_returns_empty():
     pgraph = ParameterPropagationGraph(taint_flows=[], language_coverage=["python"])
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("no LLM on empty pgraph")
-
-    assert await build_xss_findings(pgraph, llm_client=fake_llm) == []
+    assert await build_xss_findings(pgraph, verdict_agent=_never_agent()) == []
 
 
 @pytest.mark.asyncio
@@ -148,8 +157,7 @@ async def test_build_xss_findings_reports_chain_progress(monkeypatch):
 
     call_count = {"n": 0}
 
-    async def fake_judge(chain, *, llm_client=None, verdict_agent=None,
-                         agent_name=None):
+    async def fake_judge(chain, *, verdict_agent=None, agent_name=None):
         call_count["n"] += 1
         is_vuln = (call_count["n"] == 2)  # second chain vulnerable
         return ChainVerdict(
@@ -167,11 +175,8 @@ async def test_build_xss_findings_reports_chain_progress(monkeypatch):
         fake_judge,
     )
 
-    async def fake_llm(prompt, **kw):
-        raise AssertionError("judge is monkeypatched; llm_client unused")
-
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm,
+        pgraph, verdict_agent=_never_agent(),
         sink_call_sites={sid: _xss_sink(sid)},
         progress_cb=cb,
     )
@@ -196,12 +201,10 @@ async def test_build_xss_findings_progress_cb_none_no_raise():
         language_coverage=["typescript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"safe","witness_payload":null,"evidence_chain":'
-                '"q->innerHTML","mismatch_reason":null,"confidence":"high"}')
-
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"safe","witness_payload":null,"evidence_chain":'
+            '"q->innerHTML","mismatch_reason":null,"confidence":"high"}'), sink_call_sites={sid: _xss_sink(sid)})
     assert len(findings) == 1
 
 
@@ -214,13 +217,11 @@ async def test_build_xss_finding_carries_title():
         language_coverage=["typescript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"><script>","evidence_chain":'
-                '"q->innerHTML","mismatch_reason":"no encoding","confidence":"high",'
-                '"title":"Reflected XSS via q param into innerHTML"}')
-
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><script>","evidence_chain":'
+            '"q->innerHTML","mismatch_reason":"no encoding","confidence":"high",'
+            '"title":"Reflected XSS via q param into innerHTML"}'), sink_call_sites={sid: _xss_sink(sid)})
     assert findings[0].title == "Reflected XSS via q param into innerHTML"
 
 
@@ -236,13 +237,11 @@ async def test_build_xss_finding_carries_sink_call():
         language_coverage=["typescript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"><script>",'
-                '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
-                '"confidence":"high"}')
-
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><script>",'
+            '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
+            '"confidence":"high"}'), sink_call_sites={sid: _xss_sink(sid)})
     assert findings[0].sink_call == sid
 
 
@@ -255,23 +254,24 @@ async def test_build_xss_entry_points_prefixes_path_with_route():
         language_coverage=["typescript"],
     )
 
-    async def fake_llm(prompt, **kw):
-        return ('{"verdict":"vulnerable","witness_payload":"><script>",'
-                '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
-                '"confidence":"high"}')
-
     ep = EntryPoint(
         func_block_id="app.py:h:1", entry_type="http_route",
         route="/comment", http_method="POST", confidence=1.0,
         evidence="annot", needs_llm_review=False,
     )
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)},
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><script>",'
+            '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
+            '"confidence":"high"}'), sink_call_sites={sid: _xss_sink(sid)},
         entry_points={"app.py:h:1": ep})
     assert findings[0].path == "POST /comment → q->innerHTML"
 
     findings = await build_xss_findings(
-        pgraph, llm_client=fake_llm, sink_call_sites={sid: _xss_sink(sid)})
+        pgraph, verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"><script>",'
+            '"evidence_chain":"q->innerHTML","mismatch_reason":"x",'
+            '"confidence":"high"}'), sink_call_sites={sid: _xss_sink(sid)})
     assert findings[0].path == "q->innerHTML"
 
 

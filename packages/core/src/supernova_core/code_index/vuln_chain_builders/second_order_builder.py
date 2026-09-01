@@ -68,7 +68,6 @@ async def build_second_order_findings(
     writes: list[StorageWritePoint],
     pgraph,
     *,
-    llm_client: Callable[..., Awaitable[str]] | None = None,
     verdict_agent: Callable[..., Awaitable] | None = None,
     sink_call_sites,
     reads_by_id: dict,
@@ -131,7 +130,7 @@ async def build_second_order_findings(
 
     # 逐链并行研判（chain_of 提取 read_side_chain；预算/agent_name/tick 语义不变）
     verdicts = await gather_verdicts_concurrently(
-        candidates, vc="2nd", llm_client=llm_client,
+        candidates, vc="2nd",
         verdict_agent=verdict_agent, emitter=emitter, detail_of=_detail,
         chain_of=lambda cand: cand.read_side_chain, semaphore=semaphore, checkpoint=verdict_checkpoint)
     findings: list[InjectionVulnerability] = []

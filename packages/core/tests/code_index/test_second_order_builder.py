@@ -12,6 +12,7 @@ param_name. The write is a StorageWritePoint whose storage_token matches the
 read's resolved literal token, so extract_second_order_candidates pairs them.
 """
 import pytest
+from types import SimpleNamespace
 
 from supernova_core.code_index.chain_verdict import CandidateChain
 from supernova_core.code_index.models import ParameterSource
@@ -24,6 +25,21 @@ from supernova_core.code_index.parameter_models import (
     TaintFlow,
 )
 from supernova_core.code_index.storage_models import StorageMedium, StorageWritePoint
+
+def _agent(payload: str = ""):
+    """fake verdict_agent（SimpleNamespace 模拟 ClaudeRunResult，text 兜底解析）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        return SimpleNamespace(success=True, structured_output=None,
+                               text=payload, error=None)
+    return agent
+
+
+def _never_agent():
+    """不应被调用的守卫 agent（调用即断言失败）。"""
+    async def agent(prompt, *, output_format=None, agent_name=None):
+        raise AssertionError("verdict agent must not be called")
+    return agent
+
 from supernova_core.code_index.vuln_chain_builders.second_order_builder import (
     build_second_order_findings,
     _looks_user_tainted,
@@ -97,17 +113,13 @@ async def test_second_order_xss_when_write_tainted_and_read_vuln():
     writes = [_tainted_write()]
     pgraph, reads_by_id, sink_call_sites = _build_xss_second_order_pgraph()
 
-    async def llm(prompt, **kw):
-        return (
+    findings = await build_second_order_findings(
+        writes, pgraph,
+        verdict_agent=_agent(
             '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
             '"evidence_chain":"users(Storage) -> innerHTML(C.java:5) unescaped",'
             '"mismatch_reason":"stored value rendered without encoding",'
-            '"confidence":"high"}'
-        )
-
-    findings = await build_second_order_findings(
-        writes, pgraph,
-        llm_client=llm, sink_call_sites=sink_call_sites,
+            '"confidence":"high"}'), sink_call_sites=sink_call_sites,
         reads_by_id=reads_by_id,
     )
     assert findings, "must emit a second-order XSS finding"
@@ -130,16 +142,12 @@ async def test_no_finding_when_read_side_safe():
     writes = [_tainted_write()]
     pgraph, reads_by_id, sink_call_sites = _build_xss_second_order_pgraph()
 
-    async def llm(prompt, **kw):
-        return (
-            '{"verdict":"safe","witness_payload":"",'
-            '"evidence_chain":"users -> innerHTML (encoded)",'
-            '"mismatch_reason":"","confidence":"high"}'
-        )
-
     findings = await build_second_order_findings(
         writes, pgraph,
-        llm_client=llm, sink_call_sites=sink_call_sites,
+        verdict_agent=_agent(
+            '{"verdict":"safe","witness_payload":"",'
+            '"evidence_chain":"users -> innerHTML (encoded)",'
+            '"mismatch_reason":"","confidence":"high"}'), sink_call_sites=sink_call_sites,
         reads_by_id=reads_by_id,
     )
     assert findings == []
@@ -166,20 +174,13 @@ async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
     writes = [_tainted_write()]
     pgraph, reads_by_id, sink_call_sites = _build_xss_second_order_pgraph()
 
-    async def vuln_llm(prompt, **kw):
-        # Stub always-vulnerable: any candidate that reaches judge_chain_verdict
-        # would be marked vulnerable - so the ONLY way single-hop emits nothing
-        # is if STORAGE chains are filtered before judging.
-        return (
+    # (a) single-hop XSS builder must NOT emit XSS-GN-* for STORAGE chain
+    xss_findings = await build_xss_findings(
+        pgraph, verdict_agent=_agent(
             '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
             '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
             '"mismatch_reason":"stored value rendered without encoding",'
-            '"confidence":"high"}'
-        )
-
-    # (a) single-hop XSS builder must NOT emit XSS-GN-* for STORAGE chain
-    xss_findings = await build_xss_findings(
-        pgraph, llm_client=vuln_llm, sink_call_sites=sink_call_sites,
+            '"confidence":"high"}'), sink_call_sites=sink_call_sites,
     )
     xss_ids = [f.ID for f in xss_findings]
     assert not any(i.startswith("XSS-GN-") for i in xss_ids), (
@@ -190,7 +191,11 @@ async def test_single_hop_xss_builder_suppresses_storage_sourced_chain():
     # (b) second-order builder DOES emit 2ND-GN-* for the same fixture
     second_order_findings = await build_second_order_findings(
         writes, pgraph,
-        llm_client=vuln_llm, sink_call_sites=sink_call_sites,
+        verdict_agent=_agent(
+            '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
+            '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
+            '"mismatch_reason":"stored value rendered without encoding",'
+            '"confidence":"high"}'), sink_call_sites=sink_call_sites,
         reads_by_id=reads_by_id,
     )
     second_order_ids = [f.ID for f in second_order_findings]
@@ -277,16 +282,12 @@ async def test_save_entity_joins_from_sql_read():
     )
     reads_by_id = {"users": read_src}
 
-    async def llm(prompt, **kw):
-        return (
+    findings = await build_second_order_findings(
+        [write], pgraph, verdict_agent=_agent(
             '{"verdict":"vulnerable","witness_payload":"<svg>alert(1)</svg>",'
             '"evidence_chain":"users(Storage) -> innerHTML unescaped",'
             '"mismatch_reason":"stored value rendered without encoding",'
-            '"confidence":"high"}'
-        )
-
-    findings = await build_second_order_findings(
-        [write], pgraph, llm_client=llm, sink_call_sites={_SINK_ID: sink},
+            '"confidence":"high"}'), sink_call_sites={_SINK_ID: sink},
         reads_by_id=reads_by_id, source_provider=source_provider,
     )
     assert findings, "must emit a 2ND-GN-* finding (write token resolved via @Table)"
@@ -343,16 +344,12 @@ async def test_second_order_injection_via_stored_sql_read():
     )
     reads_by_id = {"users": read_src}
 
-    async def llm(prompt, **kw):
-        return (
+    findings = await build_second_order_findings(
+        [write], pgraph, verdict_agent=_agent(
             '{"verdict":"vulnerable","witness_payload":"\' OR 1=1--",'
             '"evidence_chain":"users(Storage) -> db.execute unparameterised",'
             '"mismatch_reason":"stored value concatenated into SQL",'
-            '"confidence":"high"}'
-        )
-
-    findings = await build_second_order_findings(
-        [write], pgraph, llm_client=llm, sink_call_sites={SQL_SINK: sink},
+            '"confidence":"high"}'), sink_call_sites={SQL_SINK: sink},
         reads_by_id=reads_by_id, source_provider=source_provider,
     )
     assert findings, "must emit a second-order injection finding"
