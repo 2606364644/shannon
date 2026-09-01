@@ -111,6 +111,33 @@ describe("TopBar i18n", () => {
   });
 });
 
+describe("TopBar 工作区 nav active 判定", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  // 回归（2026-09-01 用户反馈）：「工作区」nav 的 to 是三段跳转中转 /workspaces-entry
+  // （WorkspacesEntry 渲染 null 后立即 replace 走人，永不停留），真实工作区页在
+  // /p/:ws 前缀下。NavLink 默认匹配只看 to → 在 /p/:ws 时工作区项永不高亮。
+  it("/p/:ws 工作区详情页 → 工作区 data-active=true", () => {
+    renderAt("/p/demo-ws");
+    expect(screen.getByText("工作区").getAttribute("data-active")).toBe("true");
+  });
+
+  it("/p/:ws/scans/:id/... 扫描子页（隶属工作区）→ 工作区 data-active=true", () => {
+    renderAt("/p/demo-ws/scans/scan-123/report");
+    expect(screen.getByText("工作区").getAttribute("data-active")).toBe("true");
+  });
+
+  it("/workspaces-entry 中转（loading 瞬时停留）→ 工作区 data-active=true", () => {
+    renderAt("/workspaces-entry");
+    expect(screen.getByText("工作区").getAttribute("data-active")).toBe("true");
+  });
+
+  it("非工作区路由 → 工作区 data-active=false（不误亮）", () => {
+    renderAt("/settings");
+    expect(screen.getByText("工作区").getAttribute("data-active")).toBe("false");
+  });
+});
+
 describe("TopBar sticky 吸顶", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 

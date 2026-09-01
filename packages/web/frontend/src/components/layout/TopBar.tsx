@@ -1,4 +1,4 @@
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
@@ -14,11 +14,15 @@ interface NavItem {
   disabled?: boolean;
   end?: boolean;
   testId?: string;
+  // to 之外的 active 判定前缀：用于 to 是中转路由、真实页面在别处前缀下的 nav 项。
+  activePrefixes?: string[];
 }
 
 const NAV: NavItem[] = [
   { labelKey: "nav.dashboard", to: "/", end: true },
-  { labelKey: "nav.workspaces", to: "/workspaces-entry", end: true },
+  // 「工作区」to 是三段跳转中转（/workspaces-entry 渲染 null 即跳走），真实工作区页
+  // 在 /p/:ws 前缀下——NavLink 默认匹配只看 to 会永不命中，补 /p/ 前缀判定。
+  { labelKey: "nav.workspaces", to: "/workspaces-entry", end: true, activePrefixes: ["/p/"] },
   // P2: 仓库入口已迁入工作区详情页的「仓库」tab，顶级 nav 撤销
   { labelKey: "nav.scan", to: "/scan/new" },
   { labelKey: "nav.settings", to: "/settings" },
@@ -28,6 +32,7 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
   const { t } = useTranslation();
   const brand = useBrand();
   const { user } = useAuth();
+  const { pathname } = useLocation();
   const mustChange = user?.must_change_password === true;
   // nav 统一 4 项（概览/工作区/扫描/设置），所有角色一致——WorkspaceListPage 已下线（spec 2026-07-27）。
   const items: NavItem[] = NAV;
@@ -53,12 +58,12 @@ export function TopBar({ onOpenChangePwd }: { onOpenChangePwd?: () => void } = {
                 {({ isActive }) => (
                   <span
                     data-testid={n.testId}
-                    data-active={isActive}
+                    data-active={isActive || !!n.activePrefixes?.some((p) => pathname.startsWith(p))}
                     className={cn(
                       // topbar-nav-item：主题级导航材质挂钩（mac 分段控件 CSS 消费，
                       // 其他主题无规则、维持下划线范式）
                       "topbar-nav-item border-b-2 px-3 py-1.5 text-sm transition-colors",
-                      isActive
+                      isActive || !!n.activePrefixes?.some((p) => pathname.startsWith(p))
                         ? "border-primary text-primary"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     )}
