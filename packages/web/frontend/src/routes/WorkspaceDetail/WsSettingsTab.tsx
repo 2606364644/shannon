@@ -63,7 +63,12 @@ const EFFECTIVE_GROUPS: CfgGroup[] = [
     titleKey: "wsConfig.keys.groups.runtime",
     keys: [
       { key: "SUPERNOVA_MAX_TURNS", kind: "int", defaultValue: "10000" },
-      { key: "SUPERNOVA_ADAPTIVE_THINKING", kind: "bool", defaultValue: "true" },
+      // 2026-09-01 默认 false（用户裁定「默认不开 think」）：推理快照模型
+      // （deepseek-v4-flash-0731 等）默认开 thinking 且 reasoning 计入
+      // completion——chain verdict 单链 133s 撑爆 15min 窗口
+      // （NodeGoat-20260901-015018）；关后单轮 19s→7s。两引擎同字段同语义
+      // （False=显式禁用；providers_openai client 包装层全请求注入）。
+      { key: "SUPERNOVA_ADAPTIVE_THINKING", kind: "bool", defaultValue: "false" },
     ],
   },
   {

@@ -183,3 +183,106 @@ async def test_wrap_client_strips_strict_preserves_messages_sanitization():
     kw = raw.chat.completions.create.call_args.kwargs
     assert kw["messages"][0]["tool_calls"][0]["function"]["arguments"] == "{}"
     assert "strict" not in kw["tools"][0]["function"]
+
+
+# ---- thinking 禁用注入（2026-09-01 NodeGoat-20260901-015018 事故驱动）----
+# 背景：deepseek-v4-flash-0731 等推理快照默认开 thinking 且 reasoning token 计入
+# completion_tokens——chain verdict 单链 mean 133s（每轮 output 745 tok，对比 coder
+# 版 154 tok），72 链判定量撑爆 15min×3 窗口。实测（2026-09-01 llm-proxy A/B）：
+# 请求体加 ``thinking: {"type": "disabled"}`` 是该网关唯一有效开关（deepseek 官方
+# chat_template_kwargs 风格被网关忽略），单轮 19s→7s、completion -73%、reasoning 归零。
+# 注入做在 client 包装层（所有 chat.completions.create 必经）= 整个扫描全部 LLM
+# 请求统一生效（多轮 agent / 单次调用 / subagent 共用同一 client）。
+
+
+@pytest.mark.asyncio
+async def test_wrap_client_injects_thinking_disabled_when_flag_set():
+    raw = MagicMock()
+    raw.chat.completions.create = AsyncMock(return_value="resp")
+    wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
+    await wrapped.chat.completions.create(model="m", messages=[])
+    assert raw.chat.completions.create.call_args.kwargs["thinking"] == {
+        "type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_wrap_client_no_thinking_injection_by_default():
+    """默认（disable_thinking=False）不注入——保持模型默认行为，零行为变化。"""
+    raw = MagicMock()
+    raw.chat.completions.create = AsyncMock(return_value="resp")
+    wrapped = _wrap_client_for_argument_sanitize(raw)
+    await wrapped.chat.completions.create(model="m", messages=[])
+    assert "thinking" not in raw.chat.completions.create.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_wrap_client_thinking_not_overridden_when_explicit():
+    """调用方显式传 thinking 时不覆盖（setdefault 语义，防御未来细粒度控制）。"""
+    raw = MagicMock()
+    raw.chat.completions.create = AsyncMock(return_value="resp")
+    wrapped = _wrap_client_for_argument_sanitize(raw, disable_thinking=True)
+    await wrapped.chat.completions.create(
+        model="m", messages=[], thinking={"type": "adaptive"})
+    assert raw.chat.completions.create.call_args.kwargs["thinking"] == {
+        "type": "adaptive"}
+
+
+@pytest.mark.asyncio
+async def test_provider_wires_disable_thinking_from_config(monkeypatch):
+    """ProviderConfig.adaptive_thinking=False → client 包装层带 thinking 禁用。
+
+    对齐 anthropic 引擎同字段语义（providers_anthropic._is_adaptive_thinking_enabled）：
+    False=显式禁用；True/None=不动（模型默认）。工作区 config.yaml 的
+    adaptive_thinking 字段（ws_env_codec CONFIG_FIELDS 的 SUPERNOVA_ADAPTIVE_THINKING）
+    经 build_provider_config 填充至此——工作区一键关整个扫描的 thinking。
+    """
+    from supernova_core.agents import providers_openai as mod
+    from supernova_core.agents.runner import ProviderConfig
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = AsyncMock(return_value="resp")
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+        def __getattr__(self, name):
+            return getattr(fake_client, name)
+
+    monkeypatch.setattr(mod, "AsyncOpenAI", _FakeAsyncOpenAI)
+
+    provider = mod.OpenAIProvider(
+        ProviderConfig(type="openai_compatible", api_key="k",
+                       base_url="https://x.example", adaptive_thinking=False))
+    client = provider._get_client()
+    # 经包装代理发一次请求，断言 thinking 注入
+    await client.chat.completions.create(model="m", messages=[])
+    assert fake_client.chat.completions.create.call_args.kwargs["thinking"] == {
+        "type": "disabled"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [True, None])
+async def test_provider_no_thinking_wiring_when_config_true_or_none(monkeypatch, flag):
+    """adaptive_thinking=True/None → 不注入（默认行为，两引擎语义对齐）。"""
+    from supernova_core.agents import providers_openai as mod
+    from supernova_core.agents.runner import ProviderConfig
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = AsyncMock(return_value="resp")
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            pass
+
+        def __getattr__(self, name):
+            return getattr(fake_client, name)
+
+    monkeypatch.setattr(mod, "AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = mod.OpenAIProvider(
+        ProviderConfig(type="openai_compatible", api_key="k",
+                       base_url="https://x.example", adaptive_thinking=flag))
+    client = provider._get_client()
+    await client.chat.completions.create(model="m", messages=[])
+    assert "thinking" not in fake_client.chat.completions.create.call_args.kwargs
+

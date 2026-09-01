@@ -72,13 +72,22 @@ DEFAULT_WS_MODEL = "glm-5.2-coder"
 
 
 def default_ws_config() -> WsConfig:
-    """返回新工作区的 Provider 默认模板（不包含 API key）。"""
+    """返回新工作区的 Provider 默认模板（不包含 API key）。
+
+    adaptive_thinking=False（2026-09-01 用户裁定「默认不开 think」，与前端
+    WsSettingsTab 模板预填对齐）：推理快照模型（deepseek-v4-flash-0731 等）默认
+    开 thinking 且 reasoning 计入 completion_tokens——chain verdict 单链 133s
+    撑爆 15min 窗口（NodeGoat-20260901-015018）；显式 False 经 providers_openai
+    client 包装层全请求注入 thinking 禁用（单轮 19s→7s）。要开 thinking 的
+    工作区在 env 文本框显式设 true。
+    """
     return WsConfig(provider=WsProviderFields(
         ai_provider=DEFAULT_WS_PROVIDER,
         base_url=DEFAULT_WS_BASE_URL,
         small_model=DEFAULT_WS_MODEL,
         medium_model=DEFAULT_WS_MODEL,
         large_model=DEFAULT_WS_MODEL,
+        adaptive_thinking=False,
     ))
 
 

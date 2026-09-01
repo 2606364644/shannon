@@ -42,7 +42,10 @@ describe("WsSettingsTab", () => {
     // 非凭据默认值已预填（保存即生效）
     expect(ta.value).toContain("SUPERNOVA_AI_PROVIDER=openai_compatible");
     expect(ta.value).toContain("SUPERNOVA_MAX_TURNS=10000");
-    expect(ta.value).toContain("SUPERNOVA_ADAPTIVE_THINKING=true");
+    // 2026-09-01 默认 false（用户裁定「默认不开 think」）：推理快照模型默认开
+    // thinking 且 reasoning 计入 completion——chain verdict 单链 133s 撑爆 15min
+    // 窗口（NodeGoat-20260901-015018）；关后单轮 19s→7s。
+    expect(ta.value).toContain("SUPERNOVA_ADAPTIVE_THINKING=false");
     expect(ta.value).toContain("SUPERNOVA_LLM_TRACK_ENABLED=1");
     expect(ta.value).toContain("SUPERNOVA_GITNEXUS_LLM_ENABLED=0");
     expect(ta.value).toContain("SUPERNOVA_BROWSER_ENGINE=agent-browser");

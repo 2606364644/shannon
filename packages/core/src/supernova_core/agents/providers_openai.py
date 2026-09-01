@@ -132,11 +132,22 @@ def _strip_tools_strict(tools: Any) -> Any:
     return tools
 
 
-def _wrap_client_for_argument_sanitize(client: AsyncOpenAI) -> Any:
+def _wrap_client_for_argument_sanitize(
+    client: AsyncOpenAI, disable_thinking: bool = False
+) -> Any:
     """返回 client 的代理：透传所有属性，仅 ``chat.completions.create`` 发包前清洗。
 
     发包前两道防线：归一化 messages 的非法 tool_call arguments（止血 400）+
     剥离 tools.strict（止血 litellm/DFLASH grammar 约束流中途崩）。
+
+    ``disable_thinking=True`` 时第三道注入：请求体加 ``thinking={"type":"disabled"}``。
+    推理快照模型（deepseek-v4-flash-0731 等）默认开 thinking 且 reasoning token 计入
+    completion_tokens——chain verdict 单链 mean 133s 撑爆 15min 窗口（2026-09-01
+    NodeGoat-20260901-015018）；实测 llm-proxy 唯一有效开关即该参数（官方
+    chat_template_kwargs 风格被网关忽略），单轮 19s→7s。做在 client 包装层 =
+    该 provider 所有请求（多轮 agent / 单次调用 / subagent，共用同一 client）
+    统一生效。对齐 anthropic 引擎 ProviderConfig.adaptive_thinking 语义：
+    False=显式禁用，True/None=模型默认（见 OpenAIProvider._get_client）。
     """
     original_create = client.chat.completions.create
 
@@ -147,6 +158,8 @@ def _wrap_client_for_argument_sanitize(client: AsyncOpenAI) -> Any:
         tools = kwargs.get("tools")
         if tools is not None:
             kwargs["tools"] = _strip_tools_strict(tools)
+        if disable_thinking:
+            kwargs.setdefault("thinking", {"type": "disabled"})
         return await original_create(*args, **kwargs)
 
     completions_proxy = _AttrProxy(client.chat.completions, {"create": _sanitized_create})
@@ -192,7 +205,13 @@ class OpenAIProvider(BaseProvider):
             # agent）。流式请求的 transient stall 由 activity 层重试兜底，不缺这一层。
             kwargs["timeout"] = float(os.getenv("SUPERNOVA_OPENAI_HTTP_TIMEOUT", "300"))
             kwargs["max_retries"] = int(os.getenv("SUPERNOVA_OPENAI_MAX_RETRIES", "1"))
-            self._client = _wrap_client_for_argument_sanitize(AsyncOpenAI(**kwargs))
+            self._client = _wrap_client_for_argument_sanitize(
+                AsyncOpenAI(**kwargs),
+                # ProviderConfig.adaptive_thinking=False → 全请求注入 thinking 禁用
+                # （工作区 config.yaml 一键关整个扫描的 thinking；语义对齐
+                # providers_anthropic._is_adaptive_thinking_enabled：仅 False 显式禁用）。
+                disable_thinking=self.config.adaptive_thinking is False,
+            )
         return self._client
 
     def _max_turns(self) -> int:
