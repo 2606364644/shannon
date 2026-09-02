@@ -316,14 +316,28 @@ class AuthProfileStore:
             if not cfg.authentication:
                 log.debug("auth-profile seed: skip %s (no authentication section)", cfg_path.name)
                 continue
-            cred = cfg.authentication.credentials
-            email_login = None
-            if cred.email_login:
-                email_login = EmailLoginCred(
-                    address=cred.email_login.address,
-                    password=cred.email_login.password,
-                    totp_secret=cred.email_login.totp_secret,
+
+            def _cred(cred, role: str) -> AuthProfileCredential:
+                email_login = None
+                if cred.email_login:
+                    email_login = EmailLoginCred(
+                        address=cred.email_login.address,
+                        password=cred.email_login.password,
+                        totp_secret=cred.email_login.totp_secret,
+                    )
+                return AuthProfileCredential(
+                    id="", role=role, username=cred.username,
+                    password=cred.password, totp_secret=cred.totp_secret,
+                    email_login=email_login,
                 )
+
+            # accounts 段（多角色，core Config.accounts）优先：每账号一个 credential，
+            # role 透传（含 "admin" → 扫描展开时 derive_privilege_tier 判 high）。
+            # 缺省回落单 primary（futunn/moomoo 旧路径，行为不变）。
+            if cfg.accounts:
+                credentials = [_cred(acc.credentials, acc.role or "primary") for acc in cfg.accounts]
+            else:
+                credentials = [_cred(cfg.authentication.credentials, "primary")]
             profile = AuthProfile(
                 id="",
                 name=stem,
@@ -331,14 +345,7 @@ class AuthProfileStore:
                 login_type=cfg.authentication.login_type,
                 login_flow=cfg.authentication.login_flow,
                 scope="system",
-                credentials=[AuthProfileCredential(
-                    id="",
-                    role="primary",
-                    username=cred.username,
-                    password=cred.password,
-                    totp_secret=cred.totp_secret,
-                    email_login=email_login,
-                )],
+                credentials=credentials,
             )
             self.upsert_profile(SYSTEM_WS, profile)
             existing_names.add(stem)

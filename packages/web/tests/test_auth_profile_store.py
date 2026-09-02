@@ -231,6 +231,54 @@ def test_seed_excludes_multi_and_users_yaml(tmp_path):
     assert names == {"futunn"}
 
 
+_MULTI_ACCOUNTS_CONFIG = """\
+authentication:
+  login_type: form
+  login_url: "http://10.2.22.187:4000/login"
+  credentials:
+    username: "user1"
+    password: "User1_123"
+accounts:
+  - id: admin
+    role: admin
+    tier: high
+    credentials:
+      username: "admin"
+      password: "Admin_123"
+  - id: user1
+    role: user
+    tier: low
+    credentials:
+      username: "user1"
+      password: "User1_123"
+  - id: user2
+    role: user
+    tier: low
+    credentials:
+      username: "user2"
+      password: "User2_123"
+"""
+
+
+def test_seed_accounts_yields_multi_role_credentials(tmp_path):
+    """accounts 段（core Config.accounts，多角色）→ 每账号一个 credential，
+    role/username/password 逐项映射；不再回落单 primary。"""
+    store = AuthProfileStore(tmp_path, _vault(tmp_path))
+    configs = tmp_path / "configs"
+    _write_config(configs, "nodegoat.yaml", _MULTI_ACCOUNTS_CONFIG)
+    n = store.seed_from_config(configs)
+    assert n == 1
+    p = store.read(".system")[0]
+    assert p.name == "nodegoat"
+    assert p.login_url == "http://10.2.22.187:4000/login"
+    roles = [(c.role, c.username, c.password) for c in p.credentials]
+    assert roles == [
+        ("admin", "admin", "Admin_123"),
+        ("user", "user1", "User1_123"),
+        ("user", "user2", "User2_123"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # set_verify_status 对称化：系统档案写回 .system，不在 ws 创副本
 # ---------------------------------------------------------------------------

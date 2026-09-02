@@ -1,0 +1,40 @@
+# OWASP NodeGoat 靶场默认账号（web 启动时 seed 成系统级认证档案，所有工作区共享）。
+# 凭据为 NodeGoat 公开默认值，入 git 无风险。
+# 部署：本机 docker compose（nodegoat-web-1，宿主 4000 端口）。supernova-worker 与
+# nodegoat 分属不同 docker 网络，容器名互不可达 → login_url 用宿主机 IP（实测容器内 200）。
+#
+# 消费链：auth_profile_store.seed_from_config → .system 段档案（name=nodegoat，只读可 fork）
+#         → 扫描时 _expand_multi_identity：role="admin" → high tier，user1/user2 → low，
+#            primary = 首个 low（user1）。
+# accounts 段：每账号一个角色凭据（seed 优先路径）。
+# authentication.credentials：core schema 必填占位（blackbox CLI 直跑用），与 accounts
+#         中首个 low-tier 账号一致（对齐 primary 展开语义）。
+
+description: "OWASP NodeGoat 靶场默认账号（本机 docker nodegoat-web-1，宿主 4000 端口）"
+
+authentication:
+  login_type: form
+  login_url: "http://10.2.22.187:4000/login"
+  credentials:
+    username: "user1"
+    password: "User1_123"
+
+accounts:
+  - id: admin
+    role: admin
+    tier: high
+    credentials:
+      username: "admin"
+      password: "Admin_123"
+  - id: user1
+    role: user
+    tier: low
+    credentials:
+      username: "user1"
+      password: "User1_123"
+  - id: user2
+    role: user
+    tier: low
+    credentials:
+      username: "user2"
+      password: "User2_123"
