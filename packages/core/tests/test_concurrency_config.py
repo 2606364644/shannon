@@ -240,3 +240,45 @@ def test_verdict_max_turns_malformed_falls_back(monkeypatch, caplog):
             assert reader() == 30
         assert "must be >=1" in caplog.text
         caplog.clear()
+
+
+# ── poc-agent 聚类分片旋钮（2026-09-02 NodeGoat-20260902-045436 根因修复）──
+
+_POC_SHARD_KEY = "SUPERNOVA_POC_SHARD_MAX_CARDS"
+_POC_CONC_KEY = "SUPERNOVA_POC_AGENT_CONCURRENCY"
+
+
+def test_poc_shard_and_concurrency_defaults(monkeypatch):
+    """默认：片上限 3（NodeGoat XSS session.js 18 卡裂 6 片的量级）、并发 3。"""
+    from supernova_core.config.concurrency import (
+        get_poc_agent_concurrency,
+        get_poc_shard_max_cards,
+    )
+
+    monkeypatch.delenv(_POC_SHARD_KEY, raising=False)
+    monkeypatch.delenv(_POC_CONC_KEY, raising=False)
+    assert get_poc_shard_max_cards() == 3
+    assert get_poc_agent_concurrency() == 3
+
+
+def test_poc_shard_and_concurrency_env_and_malformed(monkeypatch, caplog):
+    """env 覆盖生效；畸形 / <=0 回退默认 + warning（ws 文本框手输容错）。"""
+    import logging as _logging
+
+    from supernova_core.config.concurrency import (
+        get_poc_agent_concurrency,
+        get_poc_shard_max_cards,
+    )
+
+    for key, reader, dflt in (
+        (_POC_SHARD_KEY, get_poc_shard_max_cards, 3),
+        (_POC_CONC_KEY, get_poc_agent_concurrency, 3),
+    ):
+        monkeypatch.setenv(key, "1" if key == _POC_SHARD_KEY else "5")
+        assert reader() in (1, 5)
+        for bad in ("abc", "0"):
+            monkeypatch.setenv(key, bad)
+            with caplog.at_level(_logging.WARNING):
+                assert reader() == dflt
+            assert ("not an int" in caplog.text) or ("must be >=1" in caplog.text)
+            caplog.clear()

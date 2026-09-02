@@ -188,8 +188,9 @@ async def test_polish_qa_flags_and_reworks_missing_endpoints(tmp_path, monkeypat
     assert result["reworked"] == ["XSS-GN-01"]  # 多路回炉去重（同一卡只记一次）
     # 回炉 agent 记账唯一名（防 metrics.agents 同名覆盖）：接口富化/POC 补写/
     # narrative 富化各带 vuln_class 后缀，与主富化（endpoint-enrich-*/gn-enrich-*）分流。
+    # poc-agent 2026-09-02 聚类分片后名带片号（poc-agent-{vc}-{序号}）。
     assert _agent_side_effect.calls == [
-        "endpoint-enrich-rework-xss", "poc-agent-xss", "gn-enrich-rework-xss"]
+        "endpoint-enrich-rework-xss", "poc-agent-xss-01", "gn-enrich-rework-xss"]
     data = json.loads(d.joinpath("report_data.json").read_text(encoding="utf-8"))
     assert data["qa"]["passed"] is True
     assert data["qa"]["reworked_ids"] == ["XSS-GN-01"]

@@ -311,3 +311,61 @@ def get_transient_retry_delay() -> float:
                      "falling back to %s", val, _TRANSIENT_RETRY_DELAY_DEFAULT)
         return _TRANSIENT_RETRY_DELAY_DEFAULT
     return val
+
+
+# ── poc-agent 聚类分片旋钮（2026-09-02 NodeGoat-20260902-045436 根因修复）──
+# 一锅端 14 卡 = 90KB prompt + 10万 token 级请求（429 最先被丢）+ 超限截断
+# 输出，4 次启动 0 交付；分片对齐 chain-verdict 逐条模式。两键同为工作区
+# 「预算×质量」取舍（与 CHAIN_VERDICT_CONCURRENCY 同族），进 SCAN_ENV_KEYS。
+
+_POC_SHARD_MAX_CARDS_DEFAULT = 3
+_POC_AGENT_CONCURRENCY_DEFAULT = 3
+
+
+def get_poc_shard_max_cards() -> int:
+    """SUPERNOVA_POC_SHARD_MAX_CARDS（默认 3，经 ws_getenv 支持 per-workspace）：
+    poc-agent 按 sink 文件聚类后每片卡数上限——同文件卡共享读码（路由注册/
+    handler/middleware 文件级复用），超限同文件裂多片（防「文件级一锅端」回潮，
+    NodeGoat XSS session.js 一家 18 卡的现实量级）。大仓单卡验证重可降到 1-2。
+
+    返回 env 值(int>=1)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描，
+    对齐 get_chain_verdict_concurrency 的容错契约——ws 文本框手输容错）。
+    """
+    raw = ws_getenv("SUPERNOVA_POC_SHARD_MAX_CARDS")
+    if raw is None:
+        return _POC_SHARD_MAX_CARDS_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_POC_SHARD_MAX_CARDS=%r not an int; "
+                     "falling back to %d", raw, _POC_SHARD_MAX_CARDS_DEFAULT)
+        return _POC_SHARD_MAX_CARDS_DEFAULT
+    if val < 1:
+        _log.warning("SUPERNOVA_POC_SHARD_MAX_CARDS=%d must be >=1; "
+                     "falling back to %d", val, _POC_SHARD_MAX_CARDS_DEFAULT)
+        return _POC_SHARD_MAX_CARDS_DEFAULT
+    return val
+
+
+def get_poc_agent_concurrency() -> int:
+    """SUPERNOVA_POC_AGENT_CONCURRENCY（默认 3，经 ws_getenv 支持 per-workspace）：
+    poc-agent 片间并发上限——**类间+片间共享**（write_agent_poc 是 5 类 gather
+    并行，每类再裂 N 片，若各类各持信号量瞬时并发 = 5×N 反而放大 429 暴露面；
+    共享一个 scan 级 Semaphore 统一限流，对齐容量直觉）。
+
+    返回 env 值(int>=1)；未设 / 畸形 / <=0 回退默认并 warning（不 crash 扫描）。
+    """
+    raw = ws_getenv("SUPERNOVA_POC_AGENT_CONCURRENCY")
+    if raw is None:
+        return _POC_AGENT_CONCURRENCY_DEFAULT
+    try:
+        val = int(raw)
+    except ValueError:
+        _log.warning("SUPERNOVA_POC_AGENT_CONCURRENCY=%r not an int; "
+                     "falling back to %d", raw, _POC_AGENT_CONCURRENCY_DEFAULT)
+        return _POC_AGENT_CONCURRENCY_DEFAULT
+    if val < 1:
+        _log.warning("SUPERNOVA_POC_AGENT_CONCURRENCY=%d must be >=1; "
+                     "falling back to %d", val, _POC_AGENT_CONCURRENCY_DEFAULT)
+        return _POC_AGENT_CONCURRENCY_DEFAULT
+    return val

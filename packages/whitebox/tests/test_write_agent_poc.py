@@ -79,9 +79,10 @@ async def test_writes_agent_text_poc_verbatim(tmp_path, monkeypatch):
     assert poc["steps"] == ["plant via POST /memos", "reviewer opens /memos"]
     assert poc["self_check"] == "pass"
     assert "request" not in poc                        # 旧确定性 schema 不再产出
-    # agent 调用契约：poc-agent-{vc} 命名 + prompt 渲染
+    # agent 调用契约：poc-agent-{vc}-{序号} 命名（2026-09-02 聚类分片后带片号）
+    # + prompt 渲染
     kwargs = mock_agent.call_args.kwargs
-    assert kwargs["agent_name"] == "poc-agent-xss"
+    assert kwargs["agent_name"] == "poc-agent-xss-01"
     assert "XSS-VULN-01" in kwargs["prompt"]           # queue 内容进 prompt
     assert "{{VULN_QUEUE}}" not in kwargs["prompt"]    # 占位符已替换
     assert "{{WEB_URL}}" not in kwargs["prompt"]
@@ -182,9 +183,9 @@ async def test_only_ids_reflow_filters(tmp_path, monkeypatch):
 
 
 async def test_max_turns_default_and_env_override(tmp_path, monkeypatch):
-    """turn 预算：默认 180（2026-09-01 上调：NodeGoat 三扫实测 xss 类 78/129/89
-    turns——129 为自然满跑非掐断，100 无余量；180×6s/turn≈18min 不撞 20min 窗口），
-    env 可覆盖。"""
+    """turn 预算：默认 40（2026-09-02 聚类分片后换算：2026-09-01 一锅端实证
+    xss 单 agent 129 turns/14 卡 ≈ 9 turns/卡 + 固定探索，≤3 卡/片 ≈ 3×9+
+    余量 → 40；一锅端旧值 180 的 6s/turn×180≈18min 长尾不复存在），env 可覆盖。"""
     d = _wb(tmp_path)
     _write_queue(d, [dict(_VULN)])
     monkeypatch.setattr(activities, "_get_paths",
@@ -193,7 +194,7 @@ async def test_max_turns_default_and_env_override(tmp_path, monkeypatch):
     with patch.object(activities, "run_gitnexus_verdict_agent",
                       return_value=_agent_result({"pocs": []})) as mock_agent:
         await activities._write_agent_pocs(_FakeInput(tmp_path), d)
-    assert mock_agent.call_args.kwargs["max_turns"] == 180
+    assert mock_agent.call_args.kwargs["max_turns"] == 40
 
     monkeypatch.setenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "7")
     with patch.object(activities, "run_gitnexus_verdict_agent",

@@ -13,6 +13,8 @@ contract. The PoC must be **correct first, well-formatted second**: a beautiful
 curl aimed at the wrong endpoint is worse than an honest "cannot produce".
 
 Target host: {{WEB_URL}}
+Repo root (absolute path; this IS your working directory — cd there directly,
+never search the filesystem for the repo): {{REPO_ROOT}}
 </objective>
 
 <mandatory_source_verification>
@@ -108,11 +110,12 @@ burned its ENTIRE budget hand-fixing JSON quoting and delivered nothing.)
 2. **curl quoting**: wrap URL/data arguments in single quotes. A single quote
    inside single-quoted shell text is written `'\''`. Keep parentheses and
    braces balanced.
-3. **Build the final JSON with python3, not string surgery**: write the payload
-   to /tmp/poc.json via a python3 heredoc (let json.dump do ALL escaping), then
-   validate with `python3 -m json.tool /tmp/poc.json`. Formatting gets ONE
-   repair round maximum — after that, emit with self_check="fail" and the
-   reason in notes. An honest degraded card beats burning the budget on quotes.
+3. **Emit the final JSON directly in your response** — the queue is small
+   (a few cards), so no scripts, no temp files, no tool-mediated JSON building.
+   A large script-written payload gets truncated mid-write and corrupts the
+   whole delivery. Formatting gets ONE repair round maximum — after that,
+   emit with self_check="fail" and the reason in notes. An honest degraded
+   card beats burning the budget on quotes.
 </output_discipline>
 
 <output_contract>

@@ -76,6 +76,11 @@ SCAN_ENV_KEYS: frozenset[str] = frozenset({
     # 仍有意不进（见上条注释）。
     "SUPERNOVA_CHAIN_VERDICT_MAX_TURNS",
     "SUPERNOVA_GITNEXUS_VERDICT_MAX_TURNS",
+    # 2026-09-02 准入（per-workspace 预算×质量取舍）：poc-agent 聚类分片
+    # 两旋钮，与 CHAIN_VERDICT_CONCURRENCY 同族——NodeGoat-20260902-045436
+    # 一锅端 14 卡 4 次启动 0 交付（429 大请求 + 输出截断）的根因修复。
+    "SUPERNOVA_POC_SHARD_MAX_CARDS",
+    "SUPERNOVA_POC_AGENT_CONCURRENCY",
 })
 
 # 启动期配置（worker main() 启动时读一次，ws 覆盖不生效）→ 警告不阻塞，不进 fields/env。

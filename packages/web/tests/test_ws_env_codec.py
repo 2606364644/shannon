@@ -311,3 +311,20 @@ def test_parse_endpoint_enrich_key_and_removed_gn_enrich_mode():
         "SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY",
     ]
     assert parsed.ineffective == []
+
+
+def test_parse_poc_shard_keys_to_env_section():
+    """poc-agent 聚类分片两键（2026-09-02 准入，工作区预算×质量取舍）→ env 段。
+
+    SHARD_MAX_CARDS 控每片卡数（大仓单卡验证重可降 1-2）；
+    AGENT_CONCURRENCY 是类间+片间共享的片级并发。根因：NodeGoat-20260902-
+    045436 一锅端 14 卡 4 次启动 0 交付（429 大请求 + 输出截断）。"""
+    parsed = parse_env_text(
+        "SUPERNOVA_POC_SHARD_MAX_CARDS=2\n"
+        "SUPERNOVA_POC_AGENT_CONCURRENCY=2\n")
+    assert parsed.env == {
+        "SUPERNOVA_POC_SHARD_MAX_CARDS": "2",
+        "SUPERNOVA_POC_AGENT_CONCURRENCY": "2",
+    }
+    assert parsed.unknown == []
+    assert parsed.ineffective == []

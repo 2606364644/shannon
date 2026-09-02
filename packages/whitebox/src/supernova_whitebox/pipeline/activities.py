@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import os
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -42,7 +43,8 @@ from supernova_core.agents.recon_context_summarizer import (
 )
 from supernova_core.config.concurrency import (
     get_chain_verdict_concurrency, get_chain_verdict_max_turns,
-    get_gitnexus_verdict_max_turns, is_gitnexus_llm_enabled,
+    get_gitnexus_verdict_max_turns, get_poc_agent_concurrency,
+    get_poc_shard_max_cards, is_gitnexus_llm_enabled,
 )
 from supernova_core.prompts.manager import PromptManager
 from supernova_core.session import SessionManager
@@ -2320,18 +2322,77 @@ async def write_agent_poc(input: ActivityInput) -> None:
         log.warning("poc: whitebox write_agent_poc failed (non-blocking): %s", exc)
 
 
+_SINK_FILE_RE = re.compile(r"([\w./\\-]+\.[A-Za-z]\w*):\d+")
+
+
+def _sink_file_key(card: object) -> str:
+    """聚类 key：卡片 sink 所在文件（空串 = unknown 桶）。
+
+    提取优先级（2026-09-02 NodeGoat-20260902-045436 真实卡形态校准）：
+    1. sink_call / sink_function 字符串里的「file:line」——LLM 轨卡
+       （xss: 'login.html:110 value=…'、inj: 'eval() — contributions.js:32-34'）；
+       对 LLM 轨 XSS 卡它指向模板 sink 终点，比 dataflow 末步（渲染入口
+       server.js）更准。
+    2. dataflow_steps 末步 file——GN 轨卡（sink_function 常为裸 'render'）。
+    3. 都提不出 → ""（authz 等非 taint 卡无 sink 概念，同类卡共享
+       handler/middleware 读码，按序聚片恰好合理）。
+    """
+    for attr in ("sink_call", "sink_function"):
+        v = getattr(card, attr, None)
+        if isinstance(v, str):
+            m = _SINK_FILE_RE.search(v)
+            if m:
+                return m.group(1)
+    steps = getattr(card, "dataflow_steps", None)
+    if isinstance(steps, list) and steps:
+        last = steps[-1]
+        if isinstance(last, dict):
+            f = last.get("file")
+            if isinstance(f, str) and f.strip():
+                return f.strip()
+    return ""
+
+
+def _group_poc_targets(targets: list, max_per_shard: int) -> list[list]:
+    """按 sink 文件聚类 → 切片：同 key 相邻按序装片，超限同 key 裂多片。
+
+    一锅端 14 卡 = 90KB prompt + 10万 token 级请求（GLM ServerOverloaded 时段
+    最先被丢）+ 超限截断输出（2026-09-02 4 次启动 0 交付的根因）；同文件卡
+    共享读码（路由注册/handler/middleware 文件级复用）故按文件聚、不按序号
+    平切。输入序在片内与片间均保持（稳定输出，回炉 only_ids 可复算）。
+    """
+    by_key: dict[str, list] = {}
+    order: list[str] = []
+    for t in targets:
+        k = _sink_file_key(t)
+        if k not in by_key:
+            by_key[k] = []
+            order.append(k)
+        by_key[k].append(t)
+    shards: list[list] = []
+    for k in order:
+        group = by_key[k]
+        for i in range(0, len(group), max_per_shard):
+            shards.append(group[i:i + max_per_shard])
+    return shards
+
+
 async def _write_agent_pocs(
     input: ActivityInput, deliverables: Path,
     only_ids: set[str] | None = None,
 ) -> list[str]:
-    """poc-agent 接线（spec 2026-08-27-poc-agent-direct-design §3）：每类 queue
-    一次 run_gitnexus_verdict_agent（多轮可 grep/read 回读源码验证端点形态）→
-    validate_pocs L0-L3 校验 → report_poc 写回（agent 直产 curl/raw_http/steps
-    文本，透传不改写）。取代确定性拼装（build_structured_poc 退役）。
+    """poc-agent 接线（spec 2026-08-27-poc-agent-direct-design §3，2026-09-02
+    聚类分片）：每类 queue 的目标卡按 sink 文件聚类成 ≤N 卡的片，每片一次
+    run_gitnexus_verdict_agent（多轮可 grep/read 回读源码验证端点形态）→
+    validate_pocs L0-L3 校验 → report_poc 类级统一写回（agent 直产
+    curl/raw_http/steps 文本，透传不改写）。取代确定性拼装（build_structured_poc
+    退役）。
 
-    - 诚实缺失：agent 失败/空产出 → 该类卡不写回（queue 原样），warning 记账；
+    - 诚实缺失：片 agent 失败/空产出 → 该片卡不写回（queue 原样），warning
+      记账；一片失败不炸类、类失败不炸 activity；
     - 写回即 checkpoint：已有 report_poc 的卡默认跳过（不重打、不覆写）；
-    - ``only_ids``（回炉）：额外过滤，只处理指定且尚无 report_poc 的卡。
+    - ``only_ids``（回炉）：额外过滤，只处理指定且尚无 report_poc 的卡——
+      分片在过滤之后，回炉只重跑缺失卡命中的片。
     """
     from supernova_core.collectors.poc import (
         POC_AGENT_OUTPUT_SCHEMA, extract_pocs_payload, validate_pocs,
@@ -2341,17 +2402,21 @@ async def _write_agent_pocs(
 
     prompts_dir = Path(__file__).resolve().parents[5] / "prompts"
     prompt_manager = PromptManager(prompts_dir)
-    # turn 预算默认 180（2026-09-01 上调，NodeGoat 三扫实证：auth/ssrf/authz/
-    # injection 14-42 turns 宽裕，xss 类 78/129/89——129 为自然满跑非掐断（存储
-    # 型 plant+trigger 两步 + DOM 渲染追码单卡验证贵），100 无余量。180 × 最慢
-    # 实测 6s/turn ≈ 18min，20min 窗口内收尾不撞线（用户口径：宁 180 不动窗口，
-    # 撞线再升窗口）。容量铁律对齐 chain_verdict：改判定形态/预算时同步评估窗口。
-    max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "180"))
+    # turn 预算默认 40（2026-09-02 聚类分片后换算：2026-09-01 一锅端实证 xss
+    # 单 agent 129 turns / 14 卡 ≈ 9 turns/卡 + 固定探索，≤3 卡/片 ≈ 3×9 + 余量
+    # → 40；一锅端 180 的 6s/turn×180≈18min 长尾随之消失）。容量铁律对齐
+    # chain_verdict：改片大小/预算时同步评估 write_agent_poc 窗口（片多时
+    # 总量 ≈ 片数 ÷ 并发 × 单片耗时）。
+    max_turns = int(os.getenv("SUPERNOVA_POC_AGENT_MAX_TURNS", "40"))
+    shard_max = get_poc_shard_max_cards()
+    # 类间+片间共享限流：write_agent_poc 是 5 类 gather 并行、每类再裂 N 片，
+    # 各持信号量会 5×N 叠加放大 429 暴露面——一个 scan 级 Semaphore 统一管。
+    sem = asyncio.Semaphore(get_poc_agent_concurrency())
     classes = [vc for vc in (input.vuln_classes or list(ALL_VULN_CLASSES))
                if vc in _QUEUE_FILES]
 
     async def _one_class(vuln_class: str) -> list[str]:
-        """单类：agent 会话 → 校验 → 写回自己的 queue 文件（类间无共享状态）。"""
+        """单类：分片 → 片 agent（共享限流）→ 校验 → 统一写回 queue 一次。"""
         queue_path = resolve_intermediate(deliverables, _QUEUE_FILES[vuln_class])
         if queue_path is None or not queue_path.exists():
             return []
@@ -2364,46 +2429,64 @@ async def _write_agent_pocs(
                    and (only_ids is None or f.ID in only_ids)]
         if not targets:
             return []
-        try:
-            prompt = prompt_manager.load_sync(
-                "poc-agent",
-                variables={
-                    "web_url": input.web_url or "http://TARGET",
-                    "vuln_class": vuln_class,
-                    "vuln_queue": json.dumps(
-                        [f.model_dump() for f in targets],
-                        ensure_ascii=False, indent=2),
-                })
-            result = await run_gitnexus_verdict_agent(
-                prompt=prompt,
-                repo_path=input.repo_path,
-                structured_output_schema=POC_AGENT_OUTPUT_SCHEMA,
-                audit_session=get_audit_session(),
-                provider_config=input.provider_config,
-                max_turns=max_turns,
-                agent_name=f"poc-agent-{vuln_class}",
-            )
-        except Exception as exc:  # noqa: BLE001 — 诚实缺失：不写回，不阻塞报告
-            logger.warning("poc-agent: %s failed (cards left without PoC): %s",
-                           vuln_class, exc)
+        shards = _group_poc_targets(targets, shard_max)
+
+        async def _one_shard(idx: int, shard: list) -> list[dict]:
+            """单片：prompt 只塞该片卡；失败诚实缺失（return []，不炸类）。"""
+            agent_name = f"poc-agent-{vuln_class}-{idx + 1:02d}"
+            try:
+                async with sem:
+                    prompt = prompt_manager.load_sync(
+                        "poc-agent",
+                        variables={
+                            "web_url": input.web_url or "http://TARGET",
+                            "vuln_class": vuln_class,
+                            "repo_root": input.repo_path,
+                            "vuln_queue": json.dumps(
+                                [f.model_dump() for f in shard],
+                                ensure_ascii=False, indent=2),
+                        })
+                    result = await run_gitnexus_verdict_agent(
+                        prompt=prompt,
+                        repo_path=input.repo_path,
+                        structured_output_schema=POC_AGENT_OUTPUT_SCHEMA,
+                        audit_session=get_audit_session(),
+                        provider_config=input.provider_config,
+                        max_turns=max_turns,
+                        agent_name=agent_name,
+                    )
+            except Exception as exc:  # noqa: BLE001 — 诚实缺失：不写回，不阻塞
+                logger.warning("poc-agent: %s failed (cards left without "
+                               "PoC): %s", agent_name, exc)
+                return []
+            raw = result.structured_output
+            if raw is None and getattr(result, "text", None):
+                # 打捞兜底（2026-08-28 auth 实证：agent 烧满 turn 预算被 SDK
+                # 掐断，structured_output=None 但 text 里常有成型/围栏 pocs
+                # JSON）——裸 JSON → 花括号平衡段纯解析，不改写内容；救不回
+                # 走诚实缺失。
+                raw = extract_pocs_payload(result.text)
+            items = raw.get("pocs") if isinstance(raw, dict) else None
+            if not items:
+                logger.warning("poc-agent: %s returned no pocs (cards left "
+                               "without PoC)", agent_name)
+                return []
+            # valid_ids 限片内（不是全类）：片 A agent 幻觉返回片 B 的 ID
+            # 不越片写回。
+            res = validate_pocs(items, valid_ids={f.ID for f in shard})
+            for _rej, reason in res.rejected:
+                logger.warning("poc-agent: %s verdict rejected: %s",
+                               agent_name, reason)
+            return res.accepted
+
+        # 片间并行（共享 sem 限流）；gather 后类级统一写回一次（单点写盘，
+        # 片间无「读-改-写」竞争——多片各写各的会互相覆盖）。
+        shard_results = await asyncio.gather(
+            *(_one_shard(i, s) for i, s in enumerate(shards)))
+        accepted = [p for r in shard_results for p in r]
+        if not accepted:
             return []
-        raw = result.structured_output
-        if raw is None and getattr(result, "text", None):
-            # 打捞兜底（2026-08-28 auth 实证：agent 烧满 turn 预算被 SDK 掐断，
-            # structured_output=None 但 text 里常有成型/围栏 pocs JSON）——裸 JSON
-            # → 花括号平衡段纯解析，不改写内容；救不回走诚实缺失。
-            raw = extract_pocs_payload(result.text)
-        items = raw.get("pocs") if isinstance(raw, dict) else None
-        if not items:
-            logger.warning("poc-agent: %s returned no pocs (cards left "
-                           "without PoC)", vuln_class)
-            return []
-        res = validate_pocs(items, valid_ids={f.ID for f in targets})
-        for _rej, reason in res.rejected:
-            logger.warning("poc-agent: %s verdict rejected: %s", vuln_class, reason)
-        if not res.accepted:
-            return []
-        by_id = {v["vulnerability_id"]: v for v in res.accepted}
+        by_id = {v["vulnerability_id"]: v for v in accepted}
         entries = [f.model_dump() for f in findings]
         wrote: list[str] = []
         for entry in entries:
@@ -2415,8 +2498,8 @@ async def _write_agent_pocs(
         return wrote
 
     # 类间并行（对齐 endpoint_enrichment per-class 并行模式）：各类写各自的
-    # queue 文件无共享状态，agent_name 带 vc 后缀记账不互相覆盖；单类失败不阻塞
-    # 其余（_one_class 内部全捕获）。结果按类序拼接（稳定输出序）。
+    # queue 文件无共享状态，agent_name 带 vc+片序号记账不互相覆盖；片级/类级
+    # 失败均不阻塞其余。结果按类序拼接（稳定输出序）。
     results = await asyncio.gather(*(_one_class(vc) for vc in classes))
     return [vid for r in results for vid in r]
 
