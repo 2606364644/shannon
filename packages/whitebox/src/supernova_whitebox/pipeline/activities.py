@@ -10,6 +10,8 @@ from pathlib import Path
 from temporalio import activity
 from temporalio.exceptions import ApplicationError as ApplicationFailure
 
+from pydantic import ValidationError
+
 from supernova_core.models.agents import AgentName, AGENTS, ALL_VULN_CLASSES, VulnType
 from supernova_core.models.audit import AgentEndResult, WorkflowSummary
 from supernova_core.models.errors import (
@@ -796,12 +798,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     result = await run_gitnexus_verdict_agent(
                         prompt=prompt,
                         repo_path=str(repo),
-                        structured_output_schema={
-                            "type": "object",
-                            "properties": {
-                                "vulnerabilities": {"type": "array"},
-                            },
-                        },
+                        structured_output_schema=_authz_output_schema(),
                         audit_session=get_audit_session(),
                         provider_config=input.provider_config,   # P3c 阶段 1
                     )
@@ -853,12 +850,7 @@ async def run_authz_gitnexus_judge(input: ActivityInput) -> dict:
                     result = await run_gitnexus_verdict_agent(
                         prompt=explore_prompt,
                         repo_path=str(repo),
-                        structured_output_schema={
-                            "type": "object",
-                            "properties": {
-                                "vulnerabilities": {"type": "array"},
-                            },
-                        },
+                        structured_output_schema=_authz_output_schema(),
                         audit_session=get_audit_session(),
                         provider_config=input.provider_config,   # P3c 阶段 1
                     )
@@ -1406,6 +1398,32 @@ _ENRICHABLE_FIELDS = (
 )
 # chain-verdict 降级占位前缀（LLM 关/失败时的 fallback 文案）——富化输出可替换。
 _DEGRADED_PREFIXES = ("llm chain-verdict pass",)
+
+# _ENRICHABLE_FIELDS 里的 list 型字段（模型 list[str]/list[dict]）：回填守卫
+# 非 list 丢弃（dataflow_steps 既有守卫 2026-09-02 扩到 endpoints/
+# affected_parameters 同治——三字段同是 array 契约，守卫只护一个是漏的）。
+_LIST_ENRICHABLE_FIELDS = frozenset(
+    {"dataflow_steps", "endpoints", "affected_parameters"})
+
+
+def _coerce_str_field(new: object) -> str | None:
+    """str 字段回填类型收敛（2026-09-02 NodeGoat-045436 实翻车根因修复）。
+
+    gn-enrich 的 structured_output_schema 是空壳（vulnerabilities: array 无
+    items 约束），LLM 布尔直觉会把 authentication_required 落笔成原生 JSON
+    bool（同扫描内 ssrf 类输出字符串、xss 类输出 bool 的概率性翻车），而
+    模型契约是 str|None（"true"|"false" 字符串枚举，TS 移植——vuln.py
+    _str_field 声明同源）。bool 保语义小写化成 "true"/"false"；其余非 str
+    标量（int/float，如 cvss 给 7.6）str() 收敛；空串/复杂类型（list/dict）
+    返回 None 丢弃该值——单字段畸形不值得炸整个 activity。
+    """
+    if isinstance(new, bool):
+        return "true" if new else "false"
+    if isinstance(new, str):
+        return new if new.strip() else None
+    if isinstance(new, (int, float)):
+        return str(new)
+    return None
 # chain_verdict._fallback_title 的确定性形态（"{vuln_class}：{src} → {sink}"）——
 # 非叙事标题，富化输出可替换（叙事 title 永不以裸类名+冒号/via 开头）。
 import re as _re
@@ -1477,10 +1495,14 @@ def _apply_gn_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
         touched = False
         for field in _ENRICHABLE_FIELDS:
             new = entry.get(field)
-            if new is None or (isinstance(new, str) and not new.strip()):
-                continue
-            if field == "dataflow_steps" and not isinstance(new, list):
-                continue
+            if field in _LIST_ENRICHABLE_FIELDS:
+                if not isinstance(new, list):
+                    continue
+            else:
+                # str 字段类型收敛（bool/数字标量 → str；畸形 → None 丢弃）。
+                new = _coerce_str_field(new)
+                if new is None:
+                    continue
             old = data_f.get(field)
             is_degraded = (isinstance(old, str)
                            and any(old.strip().lower().startswith(p)
@@ -1492,8 +1514,18 @@ def _apply_gn_enrichment(findings: list, raw: object) -> tuple[int, list[str]]:
                 data_f[field] = new
                 touched = True
         if touched:
-            findings[findings.index(target)] = type(target).model_validate(data_f)
-            enriched += 1
+            # per-entry 容错（2026-09-02 前科：单字段类型错炸整个 activity，
+            # temporal 全量重跑再炸，enrichment 与 report_polish rework 两处
+            # 同雷）：深层结构校验炸（如 dataflow_steps 元素非 dict）跳过该条
+            # 保确定性原值，其余条目照常——对齐本 activity docstring 承诺的
+            # 「失败降级为不富化」。
+            try:
+                findings[findings.index(target)] = type(target).model_validate(data_f)
+                enriched += 1
+            except ValidationError as exc:
+                warnings.append(
+                    f"gn-enrichment: entry {eid!r} validation failed "
+                    f"(kept deterministic fields): {str(exc)[:200]}")
     if not enriched and entries:
         warnings.append("gn-enrichment: 0 findings enriched (all IDs unknown or no new fields)")
     return enriched, warnings
@@ -1553,12 +1585,7 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
                     prompt=prompt,
                     repo_path=str(repo),
                     agent_name=f"gn-enrich-{vuln_class}",
-                    structured_output_schema={
-                        "type": "object",
-                        "properties": {
-                            "vulnerabilities": {"type": "array"},
-                        },
-                    },
+                    structured_output_schema=_gn_enrich_output_schema(),
                     audit_session=get_audit_session(),
                     provider_config=input.provider_config,   # P3c 阶段 1
                     max_turns=max_turns,
@@ -1589,6 +1616,74 @@ async def run_gn_finding_enrichment(input: ActivityInput) -> dict:
                 vuln_class, enriched, len(gn_only))
     return {"skipped": None, "enriched_classes": enriched_classes,
             "total_enriched": total_enriched}
+
+
+def _gn_enrich_output_schema() -> dict:
+    """gn-enrich structured_output_schema 的 items 字段级类型引导（源头治理，
+    2026-09-02 NodeGoat-045436 翻车：空壳 schema——vulnerabilities: array 无
+    items 约束——LLM 布尔直觉把 authentication_required 落笔成原生 bool）。
+
+    宽松声明：只引导类型，不设 required / additionalProperties——anthropic
+    引擎 --json-schema 走 AJV 协议级校验 + SDK 自纠重试，过严声明会触发
+    重试循环；openai 引擎 non-strict 本就宽松。回填层类型收敛
+    （_coerce_str_field）仍是两引擎统一的权威防线，此处仅减少 bool 产出。
+    enrichment 与 rework 两处共用（enrichment 与 _rework_missing_narratives
+    都喂 _apply_gn_enrichment）。"""
+    props = {f: {"type": "string"}
+             for f in _ENRICHABLE_FIELDS if f not in _LIST_ENRICHABLE_FIELDS}
+    props.update({
+        "ID": {"type": "string"},  # 回填主键（不在 _ENRICHABLE_FIELDS，同样引导）
+        "dataflow_steps": {"type": "array", "items": {"type": "object"}},
+        "endpoints": {"type": "array", "items": {"type": "string"}},
+        "affected_parameters": {"type": "array", "items": {"type": "string"}},
+    })
+    return {
+        "type": "object",
+        "properties": {
+            "vulnerabilities": {
+                "type": "array",
+                "items": {"type": "object", "properties": props},
+            },
+        },
+    }
+
+
+def _authz_output_schema() -> dict:
+    """authz judge/explore structured_output_schema 的 items 字段级类型引导。
+
+    两处原为空壳（vulnerabilities: array 无 items 约束，与 gn-enrich 2026-09-02
+    翻车同款形态）：authz 输出走 _parse_gitnexus_verdict_output →
+    VulnerabilityQueue.parse_lenient——单条类型错不炸 activity，但该条被丢弃
+    （静默漏报），schema 引导从源头减少类型错。字段 = authz_gitnexus_judge.txt
+    <output_format> 契约（explore 是其子集，无 ID——宽松声明对子集无副作用，
+    缺 ID 由 _parse_gitnexus_verdict_output 回填）。注意 externally_exploitable
+    契约是 bool（可达性标签，与 gn-enrich 的 str 字段相反）。宽松声明（无
+    required / additionalProperties，防 anthropic AJV 过严自纠循环），对齐
+    _gn_enrich_output_schema 的设计。"""
+    props = {
+        "ID": {"type": "string"},
+        "title": {"type": "string"},
+        "vulnerability_type": {"type": "string"},
+        "externally_exploitable": {"type": "boolean"},
+        "endpoint": {"type": "string"},
+        "vulnerable_code_location": {"type": "string"},
+        "role_context": {"type": "string"},
+        "guard_evidence": {"type": "string"},
+        "side_effect": {"type": "string"},
+        "reason": {"type": "string"},
+        "minimal_witness": {"type": "string"},
+        "confidence": {"type": "string"},
+        "notes": {"type": "string"},
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "vulnerabilities": {
+                "type": "array",
+                "items": {"type": "object", "properties": props},
+            },
+        },
+    }
 
 
 def _gn_enrich_max_turns() -> int:
@@ -2691,10 +2786,7 @@ async def _rework_missing_narratives(
                 prompt=prompt,
                 repo_path=str(repo),
                 agent_name=f"gn-enrich-rework-{vuln_class}",
-                structured_output_schema={
-                    "type": "object",
-                    "properties": {"vulnerabilities": {"type": "array"}},
-                },
+                structured_output_schema=_gn_enrich_output_schema(),
                 audit_session=get_audit_session(),
                 provider_config=input.provider_config,
                 max_turns=_gn_enrich_max_turns(),

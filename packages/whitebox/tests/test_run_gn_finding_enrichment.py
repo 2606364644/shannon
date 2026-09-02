@@ -289,6 +289,125 @@ def test_apply_gn_enrichment_failure_warnings_include_raw_shape():
     assert len(warnings[0]) < 300
 
 
+@pytest.mark.asyncio
+async def test_enrichment_coerces_native_bool_auth_required(tmp_path):
+    """gn-enrich agent 交原生 bool（NodeGoat 2026-09-02-045436 实翻车形态：
+    authentication_required: true 无引号——gn-enrich 的 structured_output_schema
+    是空壳（vulnerabilities: array 无 items 约束），LLM 布尔直觉落笔 JSON bool，
+    同扫描内 ssrf 类输出字符串、xss 类输出 bool 的概率性翻车）。回填层收敛成
+    "true"/"false"（模型契约 str|None 的字符串枚举，TS 移植），activity 不炸、
+    卡片不丢。数字标量同理 str() 收敛。"""
+    result_so = {
+        "vulnerabilities": [{
+            "ID": "XSS-GN-01",
+            "authentication_required": True,   # 原生 bool，实翻车形态
+            "severity": "high",
+            "cvss": 7.6,                       # 数字标量 → str 收敛
+        }]
+    }
+    _write_queue(tmp_path, [dict(_GN_VULN)])
+    result = await _run(tmp_path, agent_result=_Result(so=result_so))
+    assert result["total_enriched"] == 1
+
+    out = json.loads((_wb(tmp_path) / "intermediate" /
+                      "xss_exploitation_queue.json").read_text())
+    gn = next(v for v in out["vulnerabilities"] if v["ID"] == "XSS-GN-01")
+    assert gn["authentication_required"] == "true"
+    assert gn["severity"] == "high"
+    assert gn["cvss"] == "7.6"
+
+
+@pytest.mark.asyncio
+async def test_enrichment_bool_false_and_list_fields_guarded(tmp_path):
+    """bool false 同样收敛为 "false"；list 字段（endpoints/affected_parameters）
+    收到非 list 值丢弃不炸（对齐 dataflow_steps 既有守卫——三 list 字段同治）。"""
+    result_so = {
+        "vulnerabilities": [{
+            "ID": "XSS-GN-01",
+            "authentication_required": False,
+            "endpoints": "GET /benefits (不是 list)",
+            "impact": "存储型 XSS。",
+        }]
+    }
+    _write_queue(tmp_path, [dict(_GN_VULN)])
+    result = await _run(tmp_path, agent_result=_Result(so=result_so))
+    assert result["total_enriched"] == 1
+
+    out = json.loads((_wb(tmp_path) / "intermediate" /
+                      "xss_exploitation_queue.json").read_text())
+    gn = next(v for v in out["vulnerabilities"] if v["ID"] == "XSS-GN-01")
+    assert gn["authentication_required"] == "false"
+    assert gn["impact"] == "存储型 XSS。"
+    assert gn.get("endpoints") is None  # 非 list 丢弃，原值 None 保持
+
+
+@pytest.mark.asyncio
+async def test_enrichment_deep_structure_failure_skips_entry_not_activity(tmp_path):
+    """单条 entry 深层结构炸（类型收敛覆盖不到的：dataflow_steps 是 list 但
+    元素非 dict）：per-entry 容错——该条跳过 + warning，其余条目照常富化，
+    activity 不炸（2026-09-02 前科：单字段类型错炸整个 activity，temporal
+    全量重跑再炸一遍，enrichment 与 report_polish rework 两处同雷）。"""
+    result_so = {
+        "vulnerabilities": [
+            {"ID": "XSS-GN-01",
+             "dataflow_steps": [42],           # list 守卫过、元素校验炸
+             "impact": "这条应整体跳过"},
+            {"ID": "XSS-GN-02",
+             "impact": "其余条目照常富化"},
+        ]
+    }
+    gn2 = dict(_GN_VULN, ID="XSS-GN-02", flow_id="contributions:7->render:22:19")
+    _write_queue(tmp_path, [dict(_GN_VULN), gn2])
+    result = await _run(tmp_path, agent_result=_Result(so=result_so))
+    # XSS-GN-01 跳过、XSS-GN-02 富化成功，activity 不抛
+    assert result["total_enriched"] == 1
+
+    out = json.loads((_wb(tmp_path) / "intermediate" /
+                      "xss_exploitation_queue.json").read_text())
+    kept = next(v for v in out["vulnerabilities"] if v["ID"] == "XSS-GN-01")
+    assert kept["impact"] is None              # 炸条保持确定性原值
+    ok = next(v for v in out["vulnerabilities"] if v["ID"] == "XSS-GN-02")
+    assert ok["impact"] == "其余条目照常富化"
+
+
+@pytest.mark.asyncio
+async def test_enrichment_output_schema_has_field_type_guidance(tmp_path):
+    """structured_output_schema 不再是空壳（2026-09-02 根因之一：vulnerabilities:
+    array 无 items 约束，LLM 布尔直觉落笔原生 bool）：items 带白名单字段类型
+    引导——authentication_required: string、dataflow_steps: array；宽松声明
+    （无 required / additionalProperties，防 anthropic AJV 过严自纠循环）。"""
+    import supernova_whitebox.audit.session_registry as session_registry
+
+    captured: list[dict] = []
+
+    async def fake_agent(**kw):
+        captured.append(kw)
+        return _Result()
+
+    async def noop_ensure(input):
+        return None
+
+    _write_queue(tmp_path, [dict(_GN_VULN)])
+    with patch.object(activities, "_get_paths",
+                      lambda i: (tmp_path, _wb(tmp_path), tmp_path)), \
+         patch.object(activities, "run_gitnexus_verdict_agent", fake_agent), \
+         patch.object(session_registry, "get_audit_session",
+                      lambda: _RecordingSession()), \
+         patch.object(activities, "ensure_audit_session", noop_ensure):
+        await activities.run_gn_finding_enrichment(_FakeInput(tmp_path))
+
+    schema = captured[0]["structured_output_schema"]
+    items = schema["properties"]["vulnerabilities"]["items"]
+    props = items["properties"]
+    assert props["authentication_required"] == {"type": "string"}
+    assert props["severity"] == {"type": "string"}
+    assert props["dataflow_steps"]["type"] == "array"
+    assert props["endpoints"]["items"] == {"type": "string"}
+    # 宽松声明：不设 required / additionalProperties
+    assert "required" not in items
+    assert "additionalProperties" not in items
+
+
 def test_worker_registers_gn_finding_enrichment():
     """worker activities 列表含 run_gn_finding_enrichment（4 处注册同步之一）。"""
     from supernova_whitebox import worker

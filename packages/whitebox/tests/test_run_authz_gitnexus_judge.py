@@ -288,6 +288,52 @@ async def test_judge_explore_fills_missing_id_not_drops(tmp_path):
     assert all(v.get("needs_review") is True for v in data["vulnerabilities"])  # 探索软候选
 
 
+@pytest.mark.asyncio
+async def test_judge_explore_output_schema_has_field_type_guidance(tmp_path):
+    """structured_output_schema 不再是空壳（2026-09-02 盘点收口：authz 两处与
+    gn-enrich 翻车同款形态——vulnerabilities: array 无 items 约束）：items 带
+    authz_gitnexus_judge.txt <output_format> 契约的类型引导——str 字段 +
+    externally_exploitable: boolean（可达性标签，bool 契约，与 gn-enrich 的
+    str 字段相反）；宽松声明（无 required / additionalProperties，防
+    anthropic AJV 过严自纠循环）。judge 与 explore 两分支共用同一 schema。"""
+    dlv = tmp_path / "whitebox"
+    dlv.mkdir(parents=True, exist_ok=True)
+    (dlv / "code_index.json").write_text(json.dumps({
+        "repository": "r", "language": "typescript", "total_blocks": 0,
+        "total_entry_points": 0, "total_chains": 0, "blocks": [], "edges": [],
+        "entry_points": [], "chains": [],
+    }))
+
+    captured = {}
+
+    async def fake_run(prompt, **kwargs):
+        captured.update(kwargs)
+        return type("R", (), {
+            "success": True,
+            "structured_output": {"vulnerabilities": []},
+            "text": "",
+        })()
+
+    with patch.object(activities, "_get_paths", return_value=(tmp_path, tmp_path / "whitebox", tmp_path)):
+        with patch("supernova_whitebox.pipeline.activities.run_gitnexus_verdict_agent", new=fake_run):
+            with patch("supernova_whitebox.audit.session_registry.get_audit_session") as gs:
+                inst = gs.return_value
+                inst.track_step = _noop_cm_factory()
+                inst.log_info = AsyncMock()
+                await activities.run_authz_gitnexus_judge(_FakeInput(tmp_path))
+
+    schema = captured["structured_output_schema"]
+    items = schema["properties"]["vulnerabilities"]["items"]
+    props = items["properties"]
+    assert props["endpoint"] == {"type": "string"}
+    assert props["vulnerable_code_location"] == {"type": "string"}
+    assert props["externally_exploitable"] == {"type": "boolean"}
+    assert props["confidence"] == {"type": "string"}
+    # 宽松声明：不设 required / additionalProperties
+    assert "required" not in items
+    assert "additionalProperties" not in items
+
+
 def test_parse_gitnexus_verdict_output_fills_missing_id():
     """缺 ID 的候选 parse 前补序列化 ID(不被 parse_lenient 丢弃);已有 ID 保留不变。
 
