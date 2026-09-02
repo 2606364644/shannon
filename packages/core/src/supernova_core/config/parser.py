@@ -15,6 +15,7 @@ from supernova_core.models.config import (
     Rules,
     VulnClass,
 )
+from supernova_core.config.scan_env import ws_getenv
 from supernova_core.models.errors import ErrorCode, PentestError
 from supernova_core.utils.authz_identity import ACCOUNT_ID_RE
 
@@ -227,8 +228,10 @@ def parse_config(config_path: str) -> Config:
             error_code=ErrorCode.CONFIG_PARSE_ERROR,
         )
 
-    # Environment variable override for browser engine
-    if env_engine := os.environ.get("SUPERNOVA_BROWSER_ENGINE"):
+    # Environment variable override for browser engine. 经 ws_getenv 读——ws 级
+    # SUPERNOVA_BROWSER_ENGINE 覆盖（ws 设置页 env 段 → worker set_scan_env）才能进
+    # parse_config；未注入覆盖层时与 os.environ.get 等价（CLI 零行为变化）。
+    if env_engine := ws_getenv("SUPERNOVA_BROWSER_ENGINE"):
         raw["browser_engine"] = env_engine.strip()
 
     # Sanitize raw dict before Pydantic validation (normalizes case/whitespace)

@@ -492,3 +492,44 @@ accounts:
 """)
     with pytest.raises(PentestError, match="authentication"):
         parse_config(config_path)
+
+
+# ---------------------------------------------------------------------------
+# 修复 B（2026-09-03）：SUPERNOVA_BROWSER_ENGINE 读取经 ws_getenv——ws 级引擎
+# 覆盖（ws 设置页 env 段 → worker set_scan_env）此前进不了 parse_config
+# （裸 os.environ），认证/扫描引擎与 ws 配置脱节。
+# ---------------------------------------------------------------------------
+
+def test_parse_config_browser_engine_ws_env_override(tmp_path):
+    """ws 级 SUPERNOVA_BROWSER_ENGINE 覆盖进 parse_config。"""
+    from supernova_core.config.scan_env import set_scan_env, clear_scan_env
+
+    config_path = _write_config(tmp_path, 'description: "x"\n')
+    set_scan_env({"SUPERNOVA_BROWSER_ENGINE": "playwright"})
+    try:
+        config = parse_config(config_path)
+        assert config.browser_engine == "playwright"
+    finally:
+        clear_scan_env()
+
+
+def test_parse_config_browser_engine_ws_env_beats_process_env(tmp_path, monkeypatch):
+    """ws 覆盖压过进程 env（ws_getenv 语义：覆盖层优先于 os.environ）。"""
+    from supernova_core.config.scan_env import set_scan_env, clear_scan_env
+
+    config_path = _write_config(tmp_path, 'description: "x"\n')
+    monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "agent-browser")
+    set_scan_env({"SUPERNOVA_BROWSER_ENGINE": "playwright"})
+    try:
+        config = parse_config(config_path)
+        assert config.browser_engine == "playwright"
+    finally:
+        clear_scan_env()
+
+
+def test_parse_config_browser_engine_process_env_without_ws_layer(tmp_path, monkeypatch):
+    """无覆盖层时进程 env 照旧生效（CLI 回归保护，行为不变）。"""
+    config_path = _write_config(tmp_path, 'description: "x"\n')
+    monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "playwright")
+    config = parse_config(config_path)
+    assert config.browser_engine == "playwright"
