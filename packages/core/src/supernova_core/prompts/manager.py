@@ -434,7 +434,10 @@ class PromptManager:
         manually — it is NOT loaded through the ``@include`` mechanism.
         """
         from supernova_core.utils.authz_identity import build_comparison_matrix
-        from supernova_core.services.playwright_config_writer import get_identity_session_id
+        from supernova_core.services.playwright_config_writer import (
+            get_identity_session_id,
+            get_session_id,
+        )
         from supernova_core.models.config import Account, Credentials
 
         if manifest is None:
@@ -457,9 +460,12 @@ class PromptManager:
         rows = []
         for r in available:
             # Primary identity keeps the base authz-exploit session id (no suffix);
-            # other identities get a per-account session slot.
+            # other identities get a per-account session slot. base 必须经
+            # get_session_id 解析（= exploit_executor 注入的 browser_session_id，
+            # 与 {{BROWSER_SESSION_FLAG}} 实际 session 一致）——原硬编码字符串
+            # "authz-exploit" 与 agent 实际 session 脱节（2026-09-03 修）。
             sid = (
-                "authz-exploit"
+                get_session_id("authz-exploit")
                 if r.account_id == "primary"
                 else get_identity_session_id("authz-exploit", r.account_id)
             )

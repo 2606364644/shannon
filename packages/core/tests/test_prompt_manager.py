@@ -794,3 +794,31 @@ def test_identity_context_token_interpolated_via_interpolate(prompts_dir):
     result_empty = manager.load_sync("idctx", {"web_url": ""})
     assert "BEFOREAFTER" == result_empty
 
+
+
+def test_build_identity_context_primary_session_matches_engine_session_flag(identity_prompts_dir):
+    """primary 身份的 session 行必须与 {{BROWSER_SESSION_FLAG}} 实际 session 一致。
+
+    exploit_executor 注入 browser_session_id = get_session_id("authz-exploit")
+    = "agent-authz"（AGENT_SESSION_MAPPING）；原实现硬编码字符串 "authz-exploit"，
+    agent 读到的 identity 声明与自己实际所在的 session 脱节（2026-09-03 修）。
+    identity slot 语义：primary 保持 base session（无后缀）、其余 = base-<account_id>。
+    """
+    from supernova_core.services.validate_authentication import (
+        IdentityManifest,
+        IdentityRecord,
+    )
+    from supernova_core.services.engines.agent_browser_engine import AgentBrowserEngine
+
+    pm = PromptManager(str(identity_prompts_dir))
+    manifest = IdentityManifest(identities=[
+        IdentityRecord("primary", "user", "low", "auth-state.json", True),
+        IdentityRecord("victim-b", "user", "low", "auth-state-victim-b.json", True),
+    ])
+    ctx = pm.build_identity_context(manifest, AgentBrowserEngine())
+    # primary 行：base session（get_session_id("authz-exploit") = agent-authz）
+    assert "session=agent-authz " in ctx
+    # identity slot：base-<account_id>（get_identity_session_id）
+    assert "session=agent-authz-victim-b" in ctx
+    # 硬编码 agent 名字符串不再作为 session 出现
+    assert "session=authz-exploit" not in ctx
