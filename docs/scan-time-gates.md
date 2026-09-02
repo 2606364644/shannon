@@ -37,7 +37,7 @@
 ### 3. 判链环节 15 分钟（2026-08-27 事故原样未改；2026-09-01 同型复发）
 
 - 整个 chain verdict 环节（GitNexus 轨逐链深判）窗口 **15min**，写死在 `whitebox/pipeline/workflows.py:515`，被测试 `test_workflows_safety.py`（断言 `timedelta(minutes=15)`）锁定——改窗口要同步改断言。
-- 容量公式：`链数 × 单链耗时 ÷ 并发`。**单链耗时高度随模型变**（2026-09-01 实测：deepseek-v4-flash-coder 单链 mean 24s / 每轮 2.0s；同仓换 deepseek-v4-flash-0731 后单链 mean 133s / 每轮 8.7s，慢 4-5 倍）——**换模型 = 换容量，判链是否超窗口要按当前模型重算**。
+- 容量公式：`链数 × 单链耗时 ÷ 并发`。**单链耗时高度随模型变**（2026-09-01 实测：deepseek-v4-flash-coder 单链 mean 24s / 每轮 2.0s；同仓换 deepseek-v4-flash-0731 后单链 mean 133s / 每轮 8.7s，慢 4-5 倍）——**换模型 = 换容量，判链是否超窗口要按当前模型重算**。另注意换模型还受网关参数白名单约束（0731 直名接受 `thinking` 关断参数、coder 别名路由直接 400），见 `docs/llm-proxy/thinking-matrix.md`。
 - 2026-09-01 复发实证（NodeGoat-20260901-015018，组合扫描 failed）：72 链 × 133s ÷ 4 并发 ≈ 40min 纯判定 > 3×15min 窗口有效容量（扣 backoff 空转 15min + 长尾塌陷后 ≈ 30-35min），3 次重试耗尽时只差 4 条链。
 - **开 LLM 轨也救不回来（2026-09-01 修正）**：~~"LLM 轨关了才整场判失败"~~ 不准确——activity **超时异常**会直接冒泡打挂 workflow，绕过 `_decide_gitnexus_failfast` 的「开轨标红继续」分流。该次 LLM 轨 7 个 agent 全部成功、白盒 deliverable 已落盘，仍整场 failed 且组合扫描黑盒未跑。**超时耗尽 ≠ 优雅降级，此路径只能改代码**（异常转 `failed_classes` 语义）。
 - 窗口改不了，但分母（并发）能调：`SUPERNOVA_CHAIN_VERDICT_CONCURRENCY` 默认 4，在 ws 白名单（工作区可配）。已有逐链 checkpoint 兜底（重试只补未判的链，不再全量重跑）。调高两个注意：① 8 路对网关的限流表现未实测（4 路时 429 仅 2/81 链）；② 与在途 llm-concurrency-governance change（全局 in-flight 上限，stable profile=4）方向相反，其落地后工作区高并发会被全局闸压回——**建议先 6 观察限流再上 8**。
