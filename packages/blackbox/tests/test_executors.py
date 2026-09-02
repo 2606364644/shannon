@@ -335,3 +335,48 @@ async def test_exploit_executor_reads_queue_from_queue_root(tmp_path):
     assert "INJ-VULN-01" in pv["vulnerability_entries"]
     # queue_root 透传到底层 executor（→ renderer 读 queue 建 valid_ids）
     assert stub_executor.execute.call_args.kwargs.get("queue_root") == str(queue_root)
+
+
+# ---------------------------------------------------------------------------
+# 修复 C（2026-09-03）：identity 恢复命令按 config 引擎生成——原硬编码
+# AgentBrowserEngine()，playwright 引擎下命令形态错（state load vs state-load）。
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_authz_exploit_identity_context_respects_playwright_engine(mock_repo, tmp_path):
+    """browser_engine=playwright → IDENTITY_CONTEXT 的恢复命令是 playwright 形态。"""
+    from supernova_core.prompts.manager import PromptManager
+
+    repo, deliverables = mock_repo
+    (deliverables.parent / "identity-manifest.json").write_text(json.dumps({"identities": [
+        {"account_id": "primary", "role": "user", "tier": "low",
+         "auth_state_file": "auth-state.json", "available": True},
+        {"account_id": "victim-b", "role": "user", "tier": "low",
+         "auth_state_file": "auth-state-victim-b.json", "available": True},
+    ]}))
+    prompts_dir = tmp_path / "prompts"
+    shared = prompts_dir / "shared"
+    shared.mkdir(parents=True)
+    (shared / "_identities.txt").write_text(
+        "<identity_set>\n{{IDENTITY_SESSION_ROWS}}\n{{IDENTITY_COMPARISON_PAIRS}}\n</identity_set>",
+        encoding="utf-8",
+    )
+    cfg_file = tmp_path / "c.yaml"
+    cfg_file.write_text("browser_engine: playwright\n")
+
+    mock_executor = AsyncMock()
+    mock_executor.execute.return_value = AgentMetrics(duration_ms=10)
+    mock_executor.prompt_manager = PromptManager(prompts_dir)
+    ex = ExploitExecutor(mock_executor)
+
+    await ex.execute(
+        agent_name=AgentName.AUTHZ_EXPLOIT, vuln_type="authz",
+        workspace_path=deliverables.parent, deliverables_path=deliverables,
+        web_url="https://x", config_path=str(cfg_file),
+    )
+    pv = mock_executor.execute.call_args.kwargs.get("prompt_variables", {})
+    ctx = pv.get("IDENTITY_CONTEXT", "")
+    assert "state-load" in ctx, \
+        "playwright 引擎下 identity 恢复命令应为 state-load 形态"
+    assert "state load" not in ctx, \
+        "不应出现 agent-browser 的 state load 形态（硬编码引擎根因）"
