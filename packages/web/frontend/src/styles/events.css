@@ -123,10 +123,63 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* TOOL/LLM 行缩进一级（2ch）：AGENT start/end 行顶格为锚点，行内 agentTitle
-   全名区分并发交错归属（2026-09-02，对齐 CLI TOOL_LLM_INDENT）。 */
-.log-body--indent {
-  padding-left: 2ch;
+/* agent 指纹色调色板（--ag-0..11）：归属 chip 专用，与 --c-* 语义色正交（类型色走
+   gutter/icon/正文，归属色走 chip）。hue 选点避开语义 hue（红5/橙24/黄38/绿142/
+   青190/品红280 ±15°——chip 色撞行类型色时 chip 融进行色，如金 chip 在黄 TOOL 行）。
+   分配按 agent 首见顺序（LogStream useMemo），同屏并发 agent 保证不同色（≤12），
+   超 12 回绕；深主题 L 蓝紫区 66-72%/绿区 58-62%，浅主题对齐 --c-* 深浅梯度。
+   2026-09-03 撤 2026-09-02 版 TOOL/LLM body 缩进一级：并发平级无嵌套深度可依，
+   缩进读不出规律，归属改由 chip 颜色分组。 */
+:root {
+  --ag-0: 210 70% 68%;
+  --ag-1: 232 68% 70%;
+  --ag-2: 254 65% 72%;
+  --ag-3: 268 60% 70%;
+  --ag-4: 308 60% 70%;
+  --ag-5: 330 65% 70%;
+  --ag-6: 350 70% 66%;
+  --ag-7: 62 65% 62%;
+  --ag-8: 78 60% 62%;
+  --ag-9: 100 50% 62%;
+  --ag-10: 122 45% 62%;
+  --ag-11: 165 55% 62%;
 }
+.light {
+  --ag-0: 210 80% 40%;
+  --ag-1: 232 65% 44%;
+  --ag-2: 254 58% 48%;
+  --ag-3: 268 52% 46%;
+  --ag-4: 308 52% 44%;
+  --ag-5: 330 60% 42%;
+  --ag-6: 350 65% 46%;
+  --ag-7: 62 70% 34%;
+  --ag-8: 78 60% 34%;
+  --ag-9: 100 50% 34%;
+  --ag-10: 122 45% 34%;
+  --ag-11: 165 55% 32%;
+}
+.log-chip {
+  font-weight: 500;
+  margin-right: 1ch;
+  white-space: nowrap;
+}
+.log-chip.ag-0 { color: hsl(var(--ag-0)); }
+.log-chip.ag-1 { color: hsl(var(--ag-1)); }
+.log-chip.ag-2 { color: hsl(var(--ag-2)); }
+.log-chip.ag-3 { color: hsl(var(--ag-3)); }
+.log-chip.ag-4 { color: hsl(var(--ag-4)); }
+.log-chip.ag-5 { color: hsl(var(--ag-5)); }
+.log-chip.ag-6 { color: hsl(var(--ag-6)); }
+.log-chip.ag-7 { color: hsl(var(--ag-7)); }
+.log-chip.ag-8 { color: hsl(var(--ag-8)); }
+.log-chip.ag-9 { color: hsl(var(--ag-9)); }
+.log-chip.ag-10 { color: hsl(var(--ag-10)); }
+.log-chip.ag-11 { color: hsl(var(--ag-11)); }
 .log-row:hover { background: hsl(var(--secondary) / 0.55); }
+/* hover 聚焦（归属可追踪）：hover 有 chip 的行 → 同 agent 行 --kin 提亮、其余 --dim
+   压暗（含无 chip 的 LOG/GITNX 系统行，退后但仍可见=时间上下文）。kin 带 :hover
+   变体——`.log-row:hover`（类+伪类）特异性高于单类，不带则鼠标所在 kin 行反而
+   比其它 kin 行暗（0.55 vs 0.95）。 */
+.log-row--kin, .log-row--kin:hover { background: hsl(var(--secondary) / 0.95); }
+.log-row--dim { opacity: 0.45; }
 

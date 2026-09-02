@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { LogStream } from "./LogStream";
 import type { NdjsonEvent } from "../api/types";
 
@@ -203,11 +203,14 @@ describe("LogStream", () => {
     expect(txt).toContain("Bash");
   });
 
-  // ─── agent 身份显示 + 缩进（2026-09-02 对齐 CLI agent_title + TOOL_LLM_INDENT）───
+  // ─── agent 身份显示 + 指纹色 chip（2026-09-03 撤缩进一级，归属改颜色分组）───
   // chain-verdict-* 等未入 AGENT_PREFIX 表的 agent，TOOL/LLM 行原先只有 [Agent] 占位，
-  // 并发交错时无法分辨归属；现在统一 agentTitle（表内 [Prefix] 全名 / 未知名全名）+
-  // body 缩进一级（AGENT start/end 行顶格为锚点）。
-  it("ToolCallEvent 未知 agent 显示全名（[Agent] 占位消失）+ body 缩进 class", () => {
+  // 并发交错时无法分辨归属；统一 agentTitle（表内 [Prefix] 全名 / 未知名全名）。
+  // 2026-09-02 版「TOOL/LLM body 缩进一级」在真实数据流（并发平级 agent 交错 +
+  // LOG/GITNX 顶格穿插）里读不出规律，已撤——归属改由 ●chip 指纹色分组：
+  // 同 agent 的 AGENT/TOOL/LLM 行同色（首见顺序分配，SSE 重放稳定），AGENT
+  // start/end 成为可按色认领的锚点。
+  it("ToolCallEvent 未知 agent chip 显示全名（[Agent] 占位消失），body 无缩进 class", () => {
     const ev: NdjsonEvent = {
       ts: "2026-09-02T09:47:48.000Z", category: "TOOL", type: "ToolCallEvent",
       agent_name: "chain-verdict-xss-40", tool_name: "bash",
@@ -218,11 +221,13 @@ describe("LogStream", () => {
     expect(txt).toContain("chain-verdict-xss-40");
     expect(txt).not.toMatch(/\[Agent\]/);
     expect(txt).toContain("bash");
-    const body = container.querySelector(".ev-tool .log-body");
-    expect(body?.className).toContain("log-body--indent");
+    const chip = container.querySelector(".ev-tool .log-chip");
+    expect(chip?.textContent).toBe("●chain-verdict-xss-40");
+    expect(chip?.className).toMatch(/^log-chip ag-\d{1,2}$/);
+    expect(container.querySelector(".log-body--indent")).toBeNull();
   });
 
-  it("LlmTurnEvent 未知 agent 显示全名 + body 缩进 class", () => {
+  it("LlmTurnEvent 未知 agent chip 显示全名", () => {
     const ev: NdjsonEvent = {
       ts: "2026-09-02T09:47:52.000Z", category: "LLM", type: "LlmTurnEvent",
       agent_name: "chain-verdict-xss-43", turn: 5,
@@ -233,11 +238,11 @@ describe("LogStream", () => {
     expect(txt).toContain("chain-verdict-xss-43");
     expect(txt).not.toMatch(/\[Agent\]/);
     expect(txt).toMatch(/Turn 5/);
-    const body = container.querySelector(".ev-llm .log-body");
-    expect(body?.className).toContain("log-body--indent");
+    const chip = container.querySelector(".ev-llm .log-chip");
+    expect(chip?.textContent).toBe("●chain-verdict-xss-43");
   });
 
-  it("表内 agent 的 TOOL/LLM 行显示 [Prefix] 全名（对齐 CLI agent_title）", () => {
+  it("表内 agent 的 TOOL/LLM 行 chip 显示 [Prefix] 全名（对齐 CLI agent_title）", () => {
     const evs: NdjsonEvent[] = [
       { ts: "2026-09-02T09:48:00.000Z", category: "TOOL", type: "ToolCallEvent",
         agent_name: "injection-vuln", tool_name: "Bash", parameters: { command: "ls" } },
@@ -251,19 +256,67 @@ describe("LogStream", () => {
     expect(llmTxt).toContain("[SSRF] ssrf-vuln");
   });
 
-  it("AGENT start/end 行不缩进（顶格锚点），GITNX 行不缩进", () => {
+  // ─── hover 聚焦（归属可追踪）：并发交错时按 agent 追踪执行线 ───
+  // chip 同色解决「归属可判读」（每行看得出谁干的），没解决「归属可追踪」（跟一条
+  // agent 的完整故事线）——hover 有 chip 的行：同 agent 行 --kin 提亮、其余 --dim
+  // 压暗；hover 无 chip 行 / 移出容器 → 恢复全流。
+  it("hover agent 行 → 同 agent 行提亮、其余压暗；hover 无 chip 行恢复全流", async () => {
     const evs: NdjsonEvent[] = [
-      { ts: "2026-09-02T09:47:51.000Z", category: "AGENT", type: "AgentEvent",
-        agent_name: "chain-verdict-xss-43", event: "start", attempt: 1 },
-      { ts: "2026-09-02T09:47:51.000Z", category: "GITNEXUS", type: "GitnexusLlmEvent",
-        phase: "chain-verdict", kind: "hit", done: 0, total: 0, hits: 0,
-        detail: "XSS-GN-40 vulnerable" } as NdjsonEvent,
+      { ts: "2026-09-02T09:47:50.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "cv-xss-1", event: "start", attempt: 1 },
+      { ts: "2026-09-02T09:47:51.000Z", category: "TOOL", type: "ToolCallEvent",
+        agent_name: "cv-xss-2", tool_name: "grep", parameters: { pattern: "eval" } },
+      { ts: "2026-09-02T09:47:52.000Z", category: "TOOL", type: "ToolCallEvent",
+        agent_name: "cv-xss-1", tool_name: "bash", parameters: { command: "ls" } },
+      { ts: "2026-09-02T09:47:53.000Z", category: "INFO", type: "LogEvent",
+        logger_name: "mod", level: "INFO", message: "system ctx" } as NdjsonEvent,
     ];
     const { container } = render(<LogStream events={evs} />);
-    const agentBody = container.querySelector(".ev-agent .log-body");
-    expect(agentBody?.className).not.toContain("log-body--indent");
-    const gitnxBody = container.querySelector(".ev-info .log-body");
-    expect(gitnxBody?.className).not.toContain("log-body--indent");
+    const rows = container.querySelectorAll(".log-row");
+    // 初始无聚焦 class
+    rows.forEach((r) => expect(r.className).not.toContain("log-row--"));
+    // hover cv-xss-1 的 AGENT 行（第 0 行）
+    await fireEvent.mouseEnter(rows[0]);
+    expect(rows[0].className).toContain("log-row--kin");      // cv-xss-1 自己
+    expect(rows[1].className).toContain("log-row--dim");      // cv-xss-2
+    expect(rows[2].className).toContain("log-row--kin");      // cv-xss-1 散落的 TOOL 行
+    expect(rows[3].className).toContain("log-row--dim");      // LOG 系统行退后
+    // hover 无 chip 的 LOG 行 → 清除聚焦
+    await fireEvent.mouseEnter(rows[3]);
+    rows.forEach((r) => expect(r.className).not.toContain("log-row--"));
+  });
+
+  it("同 agent 的 AGENT/TOOL/LLM 行 chip 同色，不同 agent 不同色，GITNX/LOG 行无 chip", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-09-02T09:47:50.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "chain-verdict-xss-43", event: "start", attempt: 1 },
+      { ts: "2026-09-02T09:47:51.000Z", category: "TOOL", type: "ToolCallEvent",
+        agent_name: "chain-verdict-xss-43", tool_name: "grep",
+        parameters: { pattern: "eval" } },
+      { ts: "2026-09-02T09:47:52.000Z", category: "LLM", type: "LlmTurnEvent",
+        agent_name: "chain-verdict-xss-43", turn: 2, content: "Verifying chain." },
+      { ts: "2026-09-02T09:47:50.500Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "chain-verdict-inj-07", event: "start", attempt: 1 },
+      { ts: "2026-09-02T09:47:53.000Z", category: "TOOL", type: "ToolCallEvent",
+        agent_name: "chain-verdict-inj-07", tool_name: "read",
+        parameters: { path: "app.js" } },
+      { ts: "2026-09-02T09:47:53.000Z", category: "GITNEXUS", type: "GitnexusLlmEvent",
+        phase: "chain-verdict", kind: "hit", done: 0, total: 0, hits: 0,
+        detail: "XSS-GN-40 vulnerable" } as NdjsonEvent,
+      { ts: "2026-09-02T09:47:54.000Z", category: "INFO", type: "LogEvent",
+        logger_name: "mod", level: "INFO", message: "hi" } as NdjsonEvent,
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    const chips = container.querySelectorAll(".log-chip");
+    expect(chips.length).toBe(5);  // 两个 agent 的 AGENT/TOOL/LLM 行，GITNX/LOG 行无 chip
+    const hueOf = (c: Element) => c.className.match(/ag-\d{1,2}/)?.[0] ?? "?";
+    // 同 agent（首见 xss-43）三行同色
+    expect(hueOf(chips[0])).toBe(hueOf(chips[1]));
+    expect(hueOf(chips[1])).toBe(hueOf(chips[2]));
+    // 不同 agent（inj-07 首见第二）不同色（首见顺序分配 ag-0/ag-1）
+    expect(hueOf(chips[3])).not.toBe(hueOf(chips[0]));
+    expect(hueOf(chips[3])).toBe(hueOf(chips[4]));
+    expect(chips[0].textContent).toBe("●chain-verdict-xss-43");
   });
 
   // ── StepEvent done 含 duration ──
@@ -424,10 +477,13 @@ describe("LogStream", () => {
     expect(dRow.textContent).toMatch(/\[GitNexus\] gn-discovery-source-001/);
     expect(dRow.textContent).toContain("(recall skipped)");
     expect(dRow.textContent).toContain("Connection error.");
-    // 主 agent fail 行保持现状：✗ + ev-agent-fail + [Agent]，不吃 discovery 分流
+    // 主 agent fail 行保持现状：✗ + ev-agent-fail，不吃 discovery 分流。
+    // chip 统一 agentTitle（2026-09-03）：未知名直接显示名字，[Agent] 占位不再出现
+    // （对齐 127eb47a 对 TOOL/LLM 行的同款裁撤）。
     expect(mRow.className).toContain("ev-agent-fail");
     expect(mRow.querySelector(".log-icon")?.textContent).toBe("✗");
-    expect(mRow.textContent).toMatch(/\[Agent\]/);
+    expect(mRow.textContent).toContain("pre-recon");
+    expect(mRow.textContent).not.toMatch(/\[Agent\]/);
     expect(mRow.textContent).not.toContain("recall skipped");
   });
 });
