@@ -218,6 +218,10 @@ LABEL_WIDTH = 5  # PHASE/AGENT=5，STEP 补齐到 5，让标签列等宽
 
 LOG_INDENT = 27  # 续行缩进列 = [ts]19 + " "1 + LABEL_WIDTH5 + "  "2 = body 起点
 
+# TOOL/LLM 行缩进一级（2 空格）：AGENT start/end 行顶格作锚点，其间的 TOOL/LLM
+# 行缩进表达"agent 执行期内"，归属靠行内 agent_title 全名区分（2026-09-02）。
+TOOL_LLM_INDENT = "  "
+
 
 def tag(label: str, width: int = LABEL_WIDTH) -> str:
     """补齐到固定宽度的标签内容：tag("STEP") -> "STEP "。

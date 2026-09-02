@@ -87,7 +87,8 @@ async def test_tool_line_alignment():
         timestamp="t", category="TOOL", agent_name="injection-vuln",
         tool_name="Bash", parameters={"command": "ls"}))
     out = renderer._writer.text
-    assert "[TOOL]  [Injection] injection-vuln: Bash: command=ls\n" in out  # two spaces after [TOOL]
+    # [TOOL] 后 2 空格标签列 + 2 空格 agent 执行期缩进（2026-09-02 TOOL/LLM 行缩进一级）
+    assert "[TOOL]    [Injection] injection-vuln: Bash: command=ls\n" in out
 
 
 async def test_llm_line_alignment():
@@ -96,7 +97,22 @@ async def test_llm_line_alignment():
         timestamp="t", category="LLM", agent_name="injection-vuln",
         turn=1, content="Analyzing"))
     out = renderer._writer.text
-    assert "[LLM]   [Injection] injection-vuln: Turn 1: Analyzing\n" in out  # three spaces after [LLM]
+    # [LLM] 后 3 空格标签列补齐 + 2 空格 agent 执行期缩进
+    assert "[LLM]     [Injection] injection-vuln: Turn 1: Analyzing\n" in out
+
+
+async def test_tool_llm_unknown_agent_full_name_with_indent():
+    """未知 agent（chain-verdict-* 不在前缀表）TOOL/LLM 行显示全名 + 缩进一级。"""
+    renderer = FileLogRenderer(FakeWriter())
+    await renderer.render(ToolCallEvent(
+        timestamp="t", category="TOOL", agent_name="chain-verdict-xss-40",
+        tool_name="Bash", parameters={"command": "ls"}))
+    await renderer.render(LlmTurnEvent(
+        timestamp="t", category="LLM", agent_name="chain-verdict-xss-40",
+        turn=5, content="The sink is at 214:27"))
+    out = renderer._writer.text
+    assert "[TOOL]    chain-verdict-xss-40: Bash: command=ls\n" in out
+    assert "[LLM]     chain-verdict-xss-40: Turn 5: The sink is at 214:27\n" in out
 
 
 from supernova_core.display.events import AgentMetric, ErrorEvent, ResumeEvent, SummaryEvent

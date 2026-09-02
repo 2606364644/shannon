@@ -12,7 +12,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from supernova_core.display.formatters import (
-    agent_body, agent_prefix, format_duration,
+    TOOL_LLM_INDENT, agent_body, agent_title, format_duration,
     format_error_block, gitnexus_body, humanize_tool_call, first_nonempty_line,
     pad_rule, phase_body, step_body, tag, wrap_body,
 )
@@ -179,12 +179,15 @@ class RichConsoleRenderer:
 
     def _render_tool(self, e) -> None:
         params = humanize_tool_call(e.tool_name, e.parameters if isinstance(e.parameters, dict) else {})
-        self._console.print(f"[{e.timestamp}] [yellow]🔧 {e.tool_name}({params})[/]", highlight=False)
+        who = agent_title(e.agent_name)
+        self._console.print(
+            f"[{e.timestamp}] [yellow]{TOOL_LLM_INDENT}🔧 {who}: {e.tool_name}({params})[/]",
+            highlight=False)
 
     def _render_llm(self, e) -> None:
         line = first_nonempty_line(e.content) or "(无文本)"
         self._console.print(
-            f"[{e.timestamp}] [magenta]💭 {agent_prefix(e.agent_name)} "
+            f"[{e.timestamp}] [magenta]{TOOL_LLM_INDENT}💭 {agent_title(e.agent_name)} "
             f"Turn {e.turn}: {line}[/]", highlight=False)
 
     def _render_gitnexus(self, e) -> None:

@@ -336,6 +336,33 @@ async def test_llm_renders_agent_prefix_for_attribution():
     assert "Checking SQL injection in login form" in out
 
 
+async def test_tool_renders_agent_title_with_indent():
+    """TOOL 行带 agent 身份（未知 agent 显示全名）+ 图标前缩进一级，归属可辨。
+
+    2026-09-02：chain-verdict-* 等未入 _AGENT_PREFIXES 表的 agent，TOOL 行原先
+    连身份都没有（🔧 bash(...)），并发交错时无法分辨归属。
+    """
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(ToolCallEvent(
+        timestamp="t", category="TOOL", agent_name="chain-verdict-xss-40",
+        tool_name="Bash", parameters={"command": "ls"}))
+    out = renderer._console.export_text()
+    assert "chain-verdict-xss-40" in out     # agent_title：未知 agent 全名
+    assert "  🔧" in out                     # 图标前缩进一级（AGENT 行顶格为锚）
+
+
+async def test_llm_renders_full_agent_name_with_indent():
+    """LLM 行未知 agent 显示全名（[Agent] 占位消失）+ 图标前缩进一级。"""
+    renderer, _ = _renderer_with_capture()
+    await renderer.render(LlmTurnEvent(
+        timestamp="t", category="LLM", agent_name="chain-verdict-xss-40",
+        turn=5, content="The sink is at 214:27"))
+    out = renderer._console.export_text()
+    assert "chain-verdict-xss-40" in out
+    assert "[Agent]" not in out               # 占位符被真名取代
+    assert "  💭" in out                      # 图标前缩进一级
+
+
 async def test_phase_rule_right_edges_align_across_phases():
     from rich.cells import cell_len
     renderer, _ = _renderer_with_capture()

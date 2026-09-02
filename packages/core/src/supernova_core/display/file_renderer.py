@@ -7,7 +7,7 @@ line, matching the COMPLETION_PATTERN in supernova_core.cli.logs.
 from __future__ import annotations
 
 from supernova_core.display.formatters import (
-    agent_body, agent_title, format_duration, format_error_block,
+    TOOL_LLM_INDENT, agent_body, agent_title, format_duration, format_error_block,
     gitnexus_body, humanize_tool_call, phase_body, step_body, tag,
 )
 from supernova_core.display.symbols import SUMMARY_FAIL, SUMMARY_OK
@@ -91,12 +91,12 @@ class FileLogRenderer:
     def _tool(self, e) -> str:
         who = _prefixed(e.agent_name)
         params = humanize_tool_call(e.tool_name, e.parameters if isinstance(e.parameters, dict) else {})
-        return f"[{e.timestamp}] [TOOL]  {who}: {e.tool_name}: {params}\n"
+        return f"[{e.timestamp}] [TOOL]  {TOOL_LLM_INDENT}{who}: {e.tool_name}: {params}\n"
 
     def _llm(self, e) -> str:
         who = _prefixed(e.agent_name)
         content = e.content[:200] + "..." if len(e.content) > 200 else e.content
-        return f"[{e.timestamp}] [LLM]   {who}: Turn {e.turn}: {content}\n"
+        return f"[{e.timestamp}] [LLM]   {TOOL_LLM_INDENT}{who}: Turn {e.turn}: {content}\n"
 
     def _gitnexus(self, e) -> str:
         return f"[{e.timestamp}] [LLM]   [GitNexus] {gitnexus_body(e)}\n"

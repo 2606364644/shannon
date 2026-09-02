@@ -123,5 +123,10 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* TOOL/LLM 行缩进一级（2ch）：AGENT start/end 行顶格为锚点，行内 agentTitle
+   全名区分并发交错归属（2026-09-02，对齐 CLI TOOL_LLM_INDENT）。 */
+.log-body--indent {
+  padding-left: 2ch;
+}
 .log-row:hover { background: hsl(var(--secondary) / 0.55); }
 

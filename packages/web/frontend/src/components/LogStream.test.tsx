@@ -203,6 +203,69 @@ describe("LogStream", () => {
     expect(txt).toContain("Bash");
   });
 
+  // ─── agent 身份显示 + 缩进（2026-09-02 对齐 CLI agent_title + TOOL_LLM_INDENT）───
+  // chain-verdict-* 等未入 AGENT_PREFIX 表的 agent，TOOL/LLM 行原先只有 [Agent] 占位，
+  // 并发交错时无法分辨归属；现在统一 agentTitle（表内 [Prefix] 全名 / 未知名全名）+
+  // body 缩进一级（AGENT start/end 行顶格为锚点）。
+  it("ToolCallEvent 未知 agent 显示全名（[Agent] 占位消失）+ body 缩进 class", () => {
+    const ev: NdjsonEvent = {
+      ts: "2026-09-02T09:47:48.000Z", category: "TOOL", type: "ToolCallEvent",
+      agent_name: "chain-verdict-xss-40", tool_name: "bash",
+      parameters: { command: "cd /app/workspaces/evangan/repos/NodeGoat" },
+    };
+    const { container } = render(<LogStream events={[ev]} />);
+    const txt = rowText(container, "ev-tool");
+    expect(txt).toContain("chain-verdict-xss-40");
+    expect(txt).not.toMatch(/\[Agent\]/);
+    expect(txt).toContain("bash");
+    const body = container.querySelector(".ev-tool .log-body");
+    expect(body?.className).toContain("log-body--indent");
+  });
+
+  it("LlmTurnEvent 未知 agent 显示全名 + body 缩进 class", () => {
+    const ev: NdjsonEvent = {
+      ts: "2026-09-02T09:47:52.000Z", category: "LLM", type: "LlmTurnEvent",
+      agent_name: "chain-verdict-xss-43", turn: 5,
+      content: "The sink is at 214:27 per the chain.",
+    };
+    const { container } = render(<LogStream events={[ev]} />);
+    const txt = rowText(container, "ev-llm");
+    expect(txt).toContain("chain-verdict-xss-43");
+    expect(txt).not.toMatch(/\[Agent\]/);
+    expect(txt).toMatch(/Turn 5/);
+    const body = container.querySelector(".ev-llm .log-body");
+    expect(body?.className).toContain("log-body--indent");
+  });
+
+  it("表内 agent 的 TOOL/LLM 行显示 [Prefix] 全名（对齐 CLI agent_title）", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-09-02T09:48:00.000Z", category: "TOOL", type: "ToolCallEvent",
+        agent_name: "injection-vuln", tool_name: "Bash", parameters: { command: "ls" } },
+      { ts: "2026-09-02T09:48:01.000Z", category: "LLM", type: "LlmTurnEvent",
+        agent_name: "ssrf-vuln", turn: 2, content: "Checking" },
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    const toolTxt = rowText(container, "ev-tool");
+    expect(toolTxt).toContain("[Injection] injection-vuln");
+    const llmTxt = rowText(container, "ev-llm");
+    expect(llmTxt).toContain("[SSRF] ssrf-vuln");
+  });
+
+  it("AGENT start/end 行不缩进（顶格锚点），GITNX 行不缩进", () => {
+    const evs: NdjsonEvent[] = [
+      { ts: "2026-09-02T09:47:51.000Z", category: "AGENT", type: "AgentEvent",
+        agent_name: "chain-verdict-xss-43", event: "start", attempt: 1 },
+      { ts: "2026-09-02T09:47:51.000Z", category: "GITNEXUS", type: "GitnexusLlmEvent",
+        phase: "chain-verdict", kind: "hit", done: 0, total: 0, hits: 0,
+        detail: "XSS-GN-40 vulnerable" } as NdjsonEvent,
+    ];
+    const { container } = render(<LogStream events={evs} />);
+    const agentBody = container.querySelector(".ev-agent .log-body");
+    expect(agentBody?.className).not.toContain("log-body--indent");
+    const gitnxBody = container.querySelector(".ev-info .log-body");
+    expect(gitnxBody?.className).not.toContain("log-body--indent");
+  });
+
   // ── StepEvent done 含 duration ──
   it("StepEvent done 行含 duration", () => {
     const ev: NdjsonEvent = {

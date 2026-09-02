@@ -38,6 +38,14 @@ function agentPrefix(name: string): string {
   return AGENT_PREFIX[name] ?? "[Agent]";
 }
 
+/** 对齐 CLI formatters.py agent_title：'[Prefix] name'，未知 agent 直接 name。
+ *  TOOL/LLM 行用它显示 agent 身份——chain-verdict-* 等未入表的 agent 原先只有
+ *  [Agent] 占位，并发交错时无法分辨归属（2026-09-02）。 */
+function agentTitle(name: string): string {
+  const pfx = agentPrefix(name);
+  return pfx === "[Agent]" ? name : `${pfx} ${name}`;
+}
+
 /** gn-discovery-*（code_index 内 LLM 补召回子 agent，gn-discovery-sink-001 等
  *  带序号）失败=跳过该 chunk 走纯规则降级，非 activity 级失败——渲染分流用
  *  （2026-08-29 网关抖动事故：同款红色 ✗ 误导用户以为扫描出大问题）。 */
@@ -98,15 +106,15 @@ function describe(e: NdjsonEvent): RowDesc {
     }
 
     case "ToolCallEvent": {
-      const pfx = agentPrefix(e.agent_name);
+      const who = agentTitle(e.agent_name);
       const params = humanizeToolCall(e.tool_name, e.parameters ?? {});
-      return { icon: "↳", tag: "TOOL", body: `${pfx} ${e.tool_name}${params ? `: ${params}` : ""}` };
+      return { icon: "↳", tag: "TOOL", body: `${who} ${e.tool_name}${params ? `: ${params}` : ""}` };
     }
 
     case "LlmTurnEvent": {
-      const pfx = agentPrefix(e.agent_name);
+      const who = agentTitle(e.agent_name);
       const line = firstNonemptyLine(e.content);
-      return { icon: "›", tag: "LLM", body: `${pfx} Turn ${e.turn}${line ? `: ${line}` : ""}` };
+      return { icon: "›", tag: "LLM", body: `${who} Turn ${e.turn}${line ? `: ${line}` : ""}` };
     }
 
     case "GitnexusLlmEvent": {
@@ -195,6 +203,12 @@ function rowClass(e: NdjsonEvent): string {
 const ROW_HEIGHT = 20;
 const VIRTUAL_THRESHOLD = 500;
 
+/** TOOL/LLM 行缩进一级（对齐 CLI TOOL_LLM_INDENT）：AGENT start/end 行顶格作锚点，
+ *  其间的 TOOL/LLM 行 body 缩进表达"agent 执行期内"，归属靠行内 agentTitle 全名。 */
+function isAgentScoped(e: NdjsonEvent): boolean {
+  return e.type === "ToolCallEvent" || e.type === "LlmTurnEvent";
+}
+
 /** 单事件行：固定列网格（色边|时间|图标|标签|主体|metrics）。
  *  - ev-* 色留在行容器（测试 ROW_SELECTOR 不变量）；ts/tag/metrics 降级 muted + normal。
  *  - data-type 保留 type 身份（hover tooltip + 测试 hook），替代旧版裸 type 名文本。 */
@@ -202,13 +216,14 @@ function LogRow({ e, style }: { e: NdjsonEvent; style?: CSSProperties }) {
   const { icon, tag, body, metrics } = describe(e);
   // hover title 带完整 ts：窄列只显 HH:MM:SS，悬停看完整 "2026-07-31 10:53:53"。
   const title = [e.ts, body, metrics].filter(Boolean).join("  ");
+  const bodyCls = `log-body${isAgentScoped(e) ? " log-body--indent" : ""}`;
   return (
     <div style={style} className={`log-row ${rowClass(e)}`} data-type={e.type} title={title}>
       <span className="log-gutter" aria-hidden />
       <span className="log-ts">{tsClock(e.ts)}</span>
       <span className="log-icon" aria-hidden>{icon}</span>
       <span className="log-tag">{tag}</span>
-      <span className="log-body">{body}</span>
+      <span className={bodyCls}>{body}</span>
       <span className="log-metrics">{metrics ?? ""}</span>
     </div>
   );
