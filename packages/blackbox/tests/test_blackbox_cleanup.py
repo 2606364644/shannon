@@ -263,3 +263,91 @@ class TestResolveBlackboxEngineIdleTimeout:
             "supernova_core.services.browser_engine.BrowserEngineFactory.get_engine",
             lambda name: FakeEngine(),
         )
+
+
+# ---------------------------------------------------------------------------
+# 修复 D（2026-09-03）：resolve_blackbox_engine repo 级 config 带 per-scan proxy
+# —— playwright 代理唯一注入通道是 launchOptions（config 文件），preflight 时
+# proxy 已起（workflow 起 proxy → preflight → resolve），不传则 playwright 主扫描
+# 在 per-session config 写入前有代理盲区。
+# ---------------------------------------------------------------------------
+
+class TestResolveBlackboxEngineProxy:
+    @pytest.mark.asyncio
+    async def test_write_config_receives_proxy_url(self, tmp_path, monkeypatch):
+        """input.proxy_url 非空 → write_config 收到（playwright launchOptions 注入）。"""
+        monkeypatch.delenv("AGENT_BROWSER_IDLE_TIMEOUT_MS", raising=False)
+        calls = {}
+
+        class FakeEngine:
+            name = "agent-browser"
+
+            def check_available(self):
+                return True
+
+            def write_config(self, source_dir, session_id=None, proxy_url=None):
+                calls["proxy_url"] = proxy_url
+                return {"result": "wrote", "configPath": str(tmp_path)}
+
+        monkeypatch.setattr(
+            "supernova_core.services.browser_engine.BrowserEngineFactory.get_engine",
+            lambda name: FakeEngine(),
+        )
+
+        await act.resolve_blackbox_engine(BlackboxActivityInput(
+            web_url="https://x.com", repo_path=str(tmp_path),
+            proxy_url="http://127.0.0.1:8899"))
+
+        assert calls["proxy_url"] == "http://127.0.0.1:8899"
+        monkeypatch.delenv("AGENT_BROWSER_IDLE_TIMEOUT_MS", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_write_config_without_proxy_passes_none(self, tmp_path, monkeypatch):
+        """无 proxy（未启用 HOST 档案）→ None，零回归。"""
+        monkeypatch.delenv("AGENT_BROWSER_IDLE_TIMEOUT_MS", raising=False)
+        calls = {}
+
+        class FakeEngine:
+            name = "agent-browser"
+
+            def check_available(self):
+                return True
+
+            def write_config(self, source_dir, session_id=None, proxy_url=None):
+                calls["proxy_url"] = proxy_url
+                return {"result": "wrote", "configPath": str(tmp_path)}
+
+        monkeypatch.setattr(
+            "supernova_core.services.browser_engine.BrowserEngineFactory.get_engine",
+            lambda name: FakeEngine(),
+        )
+
+        await act.resolve_blackbox_engine(BlackboxActivityInput(
+            web_url="https://x.com", repo_path=str(tmp_path)))
+
+        assert calls["proxy_url"] is None
+        monkeypatch.delenv("AGENT_BROWSER_IDLE_TIMEOUT_MS", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_engine_name_without_config_reads_env(self, tmp_path, monkeypatch):
+        """顺带（修复 B 主题）：无 config_path 时引擎 fallback 经 env——
+        SUPERNOVA_BROWSER_ENGINE=playwright 不再被硬编码 agent-browser 忽略。"""
+        monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "playwright")
+
+        class FakeEngine:
+            name = "playwright"
+
+            def check_available(self):
+                return True
+
+            def write_config(self, source_dir, session_id=None, proxy_url=None):
+                return {"result": "wrote", "configPath": str(tmp_path)}
+
+        monkeypatch.setattr(
+            "supernova_core.services.browser_engine.BrowserEngineFactory.get_engine",
+            lambda name: FakeEngine(),
+        )
+
+        name = await act.resolve_blackbox_engine(BlackboxActivityInput(web_url="https://x.com"))
+
+        assert name == "playwright"

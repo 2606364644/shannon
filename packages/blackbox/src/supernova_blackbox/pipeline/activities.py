@@ -795,7 +795,14 @@ async def resolve_blackbox_engine(input: BlackboxActivityInput) -> str:
         import supernova_core.services.engines  # noqa: F401 – registers engines
 
         cfg = parse_config(input.config_path) if input.config_path else None
-        engine_name = cfg.browser_engine if cfg else "agent-browser"
+        # 无 config 时 fallback 经 ws_getenv 读 env（对齐 parser 的 env 优先级），
+        # SUPERNOVA_BROWSER_ENGINE 显式配置不再被硬编码默认忽略。
+        if cfg:
+            engine_name = cfg.browser_engine
+        else:
+            from supernova_core.config.scan_env import ws_getenv
+            env_engine = ws_getenv("SUPERNOVA_BROWSER_ENGINE")
+            engine_name = env_engine.strip() if env_engine else "agent-browser"
         if engine_name == "agent-browser":
             # 2026-09-03 xss 40min 事故治本主力：agent-browser daemon 官方 idle 自愈
             # （README Architecture——"an integration that dies without calling close
@@ -826,7 +833,12 @@ async def resolve_blackbox_engine(input: BlackboxActivityInput) -> str:
         if cfg and cfg.rules and cfg.rules.avoid:
             sync_code_path_deny_rules(cfg.rules.avoid)
         if input.repo_path:
-            engine.write_config(input.repo_path)
+            # 修复 D（2026-09-03）：repo 级 config 带 per-scan proxy——playwright 代理
+            # 唯一注入通道是 launchOptions（config 文件）；此 activity 运行时代理已起
+            # （workflow 起 proxy → preflight → resolve），不传则 playwright 主扫描在
+            # per-session config 写入前存在代理盲区。agent-browser write_config 忽略
+            # proxy（走 session_flag --proxy），零影响。
+            engine.write_config(input.repo_path, proxy_url=input.proxy_url or None)
         return engine_name
     except PentestError as e:
         error_type, retryable = classify_error_for_temporal(e)
