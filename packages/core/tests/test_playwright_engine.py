@@ -6,6 +6,25 @@ from supernova_core.services.browser_engine import BrowserEngine
 from supernova_core.services.engines.playwright_engine import PlaywrightEngine
 
 
+class TestPlaywrightEngineCommandsReference:
+    """2026-09-03 xss 40min 事故：与 agent-browser 对称，命令参考必须教 close + 资源纪律。"""
+
+    def test_commands_reference_documents_close(self):
+        ref = PlaywrightEngine().commands_reference()
+        flat = " ".join(ref.split())
+        assert "-s=<session> close" in ref
+        assert "release browser processes" in flat.lower()
+
+    def test_commands_reference_has_session_discipline(self):
+        ref = PlaywrightEngine().commands_reference()
+        flat = " ".join(ref.lower().split())
+        assert "never invent" in flat
+        assert "state-save" in ref and "state-load" in ref
+        assert "at most 2" in flat
+        assert "empty" in flat
+        assert "same session" in flat
+
+
 class TestPlaywrightEngineCleanupProcesses:
     def test_satisfies_protocol(self):
         assert isinstance(PlaywrightEngine(), BrowserEngine)

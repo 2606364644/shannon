@@ -186,7 +186,10 @@ class BlackboxScanWorkflow:
                 retry_policy=retry_for("log"),
             )
             await workflow.execute_activity(
-                activities.run_blackbox_auth_validation, act_input,
+                activities.run_blackbox_auth_validation,
+                # B 层（2026-09-03 xss 40min 事故）：透传 engine_name，activity 结束
+                # 即回收 validate-auth 的浏览器 session（agent1），不等扫描级 finally。
+                BlackboxActivityInput(**{**act_input.__dict__, "engine_name": engine_name}),
                 start_to_close_timeout=timedelta(minutes=10),
                 retry_policy=retry_for("auth-validation"),
             )
@@ -340,7 +343,11 @@ class BlackboxScanWorkflow:
                 # 功能不重试(失败=现状)。exploit 衔接(读 endpoint_verify.json)见 ExploitExecutor。
                 if input.web_url:
                     await workflow.execute_activity(
-                        activities.run_endpoint_verify, act_input,
+                        activities.run_endpoint_verify,
+                        # B 层（2026-09-03 xss 40min 事故）：透传 engine_name，activity
+                        # 结束即回收 endpoint-verify 的浏览器 session（default）。
+                        BlackboxActivityInput(**{**act_input.__dict__,
+                                                 "engine_name": engine_name}),
                         start_to_close_timeout=timedelta(minutes=15),
                         retry_policy=RetryPolicy(maximum_attempts=1),
                     )
@@ -388,7 +395,11 @@ class BlackboxScanWorkflow:
                             **{**act_input.__dict__,
                                "agent_name": agent_name.value,
                                "vuln_type": vt,
-                               "correlation_context": self._state.correlation_context}
+                               "correlation_context": self._state.correlation_context,
+                               # B 层（2026-09-03 xss 40min 事故）：透传 engine_name，
+                               # exploit agent 结束即回收自己的浏览器 session——
+                               # 治死占（先结束 agent 的浏览器不再被独跑的 xss 白背）。
+                               "engine_name": engine_name}
                         )
                         exploit_tasks.append((vt, agent_name, workflow.execute_activity(
                             activities.run_exploit_agent, exploit_input,

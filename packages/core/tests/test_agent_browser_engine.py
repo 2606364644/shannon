@@ -79,6 +79,32 @@ class TestAgentBrowserEngineCommandsReference:
         assert "state save" in ref
         assert "state load" in ref
 
+    def test_commands_reference_documents_close(self):
+        """2026-09-03 xss 40min 事故：reference 必须教 close（回收 session 浏览器进程），
+        且显式禁 `close --all`（并行 agent 共机，--all 会连杀其他 agent 的 session）。"""
+        engine = AgentBrowserEngine()
+        ref = engine.commands_reference()
+        assert "--session <session> close" in ref
+        assert "close --all" in ref  # 文档需解释为什么不能用它
+
+    def test_commands_reference_has_session_discipline(self):
+        """2026-09-03 xss 40min 事故（274 chromium 堆积）：reference 必须带资源纪律——
+        禁发明新 session id、多身份用 state save/load 复用同一 session、并发上限 2、
+        命令返回空 = 资源耗尽征兆（close 后用原 id 重开，不开新 id）。"""
+        engine = AgentBrowserEngine()
+        ref = engine.commands_reference()
+        # normalize 空白：纪律句跨行时不受换行/缩进影响
+        flat = " ".join(ref.lower().split())
+        # 禁发明新 session id
+        assert "never invent new session" in flat or "do not invent" in flat
+        # 多身份切返回 state save/load（同一 session 内）
+        assert "state save" in ref and "state load" in ref
+        # 并发 session 上限
+        assert "at most 2" in flat
+        # 返回空 = 资源耗尽的诊断指引（close 后复用原 id 重开）
+        assert "empty" in flat
+        assert "same session id" in flat
+
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -238,13 +264,16 @@ class TestAgentBrowserEngineCleanupProcesses:
     # -- Bug 修复(真机验证发现) -------------------------------------------
 
     def test_pkill_pattern_has_trailing_space_to_isolate_prefix(self, monkeypatch):
-        """Bug1: Chrome pkill pattern 必须尾随空格,隔离 agent-auth vs agent-authz 前缀。
+        """Bug1: Chrome pkill pattern 必须以分隔符结尾,隔离 agent-auth vs agent-authz 前缀,
+        同时覆盖 identity session 变体(agent-authz-<account_id>,get_identity_session_id)。
 
         真实 session ID 见 AGENT_SESSION_MAPPING:agent-auth 是 agent-authz 的前缀。
-        无尾空格时 pkill 'profiles/agent-auth' 会连杀并发 'agent-authz' 的 Chrome。
-        Chrome cmdline 里 profiles/{sid} 后跟一个空格
-        (--user-data-dir=...profiles/{sid} --window-size=...),故 pattern
-        'headless.*profiles/agent-auth ' 精准隔离。真机已复现。
+        无分隔时 pkill 'profiles/agent-auth' 会连杀并发 'agent-authz' 的 Chrome。
+        Chrome cmdline 里 profiles/{sid} 后跟空格或连字符(identity 变体),故 pattern
+        'headless.*profiles/{sid}[- ]' 精准隔离前缀且连带回收 identity 变体。
+        2026-09-03 从纯尾随空格升级:旧 pattern 匹配不到 'profiles/agent-authz-alice'
+        (authz 后是 '-',不是空格)——authz 多身份扫描的 identity session 连扫描级
+        finally 都清不掉(cleanup_engine_configs 只传 AGENT_SESSION_MAPPING 的 base id)。
         """
         engine = AgentBrowserEngine()
         cmds = _record_subprocess(monkeypatch, returncodes=[1])
@@ -252,8 +281,43 @@ class TestAgentBrowserEngineCleanupProcesses:
         chrome_pkill = [c for c in cmds if c.startswith("pkill") and "headless" in c]
         assert chrome_pkill, "close 失败应触发 Chrome pkill 兜底"
         assert any(
-            c.endswith("profiles/agent-auth ") for c in chrome_pkill
-        ), f"Chrome pkill pattern 缺尾随空格(会误杀 agent-authz): {chrome_pkill!r}"
+            c.endswith("profiles/agent-auth[- ]") for c in chrome_pkill
+        ), f"Chrome pkill pattern 缺 [- ] 分隔后缀(会误杀 agent-authz/漏杀 identity): {chrome_pkill!r}"
+
+    def test_pkill_pattern_matches_identity_variant_not_longer_prefix(self, monkeypatch):
+        """pattern 语义正反例(ERE):base sid 的 pattern 应匹配 identity 变体、
+        不匹配更长 base 的其他 agent。"""
+        import re
+
+        engine = AgentBrowserEngine()
+        cmds = _record_subprocess(monkeypatch, returncodes=[1])
+        engine.cleanup_processes(session_ids=["agent-authz"])
+        chrome_pkill = [c for c in cmds if c.startswith("pkill") and "headless" in c]
+        pattern = chrome_pkill[0].split("pkill -f ")[-1]
+        cmdline_suffixes = [
+            "--headless --user-data-dir=/repo/.agent-browser/profiles/agent-authz --window-size=1920,1080",
+            "--headless --user-data-dir=/repo/.agent-browser/profiles/agent-authz-alice --window-size=1920,1080",
+        ]
+        for cmdline in cmdline_suffixes:
+            assert re.search(pattern, cmdline), (
+                f"pattern {pattern!r} 应匹配 {cmdline!r} (含 identity 变体)"
+            )
+        # 反例:agent-auth(更短前缀)的 Chrome 不被 agent-authz pattern 误杀
+        assert not re.search(
+            pattern,
+            "--headless --user-data-dir=/repo/.agent-browser/profiles/agent-auth --window-size=1920,1080",
+        ), "pattern 不应误杀更短前缀的其他 agent"
+        # 反例(关键方向):agent-auth 的 pattern 不误杀 agent-authz 的 Chrome
+        engine2 = AgentBrowserEngine()
+        cmds2 = _record_subprocess(monkeypatch, returncodes=[1])
+        engine2.cleanup_processes(session_ids=["agent-auth"])
+        pattern2 = [
+            c for c in cmds2 if c.startswith("pkill") and "headless" in c
+        ][0].split("pkill -f ")[-1]
+        assert not re.search(
+            pattern2,
+            "--headless --user-data-dir=/repo/.agent-browser/profiles/agent-authz --window-size=1920,1080",
+        ), "agent-auth pattern 不应误杀并发 agent-authz 的 Chrome"
 
     def test_no_dead_agent_browser_profile_pattern(self, monkeypatch):
         """Bug2: 删除死代码 pattern1 'agent-browser.*profiles/{sid}'。
@@ -315,7 +379,7 @@ class TestAgentBrowserEngineCleanupProcesses:
         monkeypatch.setattr(mod, "subprocess", _FakeSub, raising=False)
         result = engine.cleanup_processes(session_ids=["agent-auth"])
         joined = " ".join(cmds)
-        assert "pgrep" in joined and "headless.*profiles/agent-auth " in joined
+        assert "pgrep" in joined and "headless.*profiles/agent-auth[- ]" in joined
         assert "ppid=" in joined  # PPID 查找
         assert "comm=" in joined  # 父进程名确认(避免误杀非 daemon 父)
         assert "kill" in joined  # 杀 daemon

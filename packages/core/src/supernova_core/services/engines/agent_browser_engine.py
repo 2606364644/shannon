@@ -83,6 +83,31 @@ AUTH STATE:
   another). When a prompt gives an explicit AUTH_SAVE/AUTH_LOAD command,
   run it verbatim against {{AUTH_STATE_FILE}}.
 
+CLOSE SESSION:
+  agent-browser --session <session> close
+    Close this session's browser and release its daemon + browser
+    processes (each session holds roughly 10 OS processes). Run this as
+    soon as you no longer need the browser.
+  NEVER run `agent-browser close --all` — other agents run in parallel
+  on this machine and share its memory; `--all` would kill their
+  sessions mid-task.
+
+SESSION DISCIPLINE (browser memory is shared with parallel agents):
+  - Every NEW session id spawns its own daemon + ~10 chromium processes
+    on a memory-constrained host. Inventing extra session ids exhausts
+    memory and makes ALL browser commands return empty output — your own
+    work dies with everyone else's.
+  - Reuse the session ID given in your prompt for every command. NEVER
+    invent new session ids.
+  - Multi-identity testing (attacker plants the payload / victim
+    triggers it): stay in ONE session and switch identities with
+    `state save` / `state load` instead of opening more sessions. If you
+    truly need a second concurrent session, keep it to at most 2 and
+    `close` the extra one the moment you are done with it.
+  - If browser commands consistently return empty output, browser
+    resources are exhausted: `close` your session, then reopen it with
+    the SAME session id — do not spawn new ones.
+
 ANTI-DETECTION:
   Anti-detection measures are built-in to agent-browser. No stealth scripts
   or extra configuration is required.
@@ -223,12 +248,15 @@ class AgentBrowserEngine:
 
         兜底策略(close 失败时):
 
-        - **Chrome** : ``pkill -f "headless.*profiles/{sid} "`` —— **尾随空格**
+        - **Chrome** : ``pkill -f "headless.*profiles/{sid}[- ]"`` —— **[- ] 分隔
+          后缀**
           是关键:真实 session ID 里 ``agent-auth`` 是 ``agent-authz`` 的前缀
           (见 ``AGENT_SESSION_MAPPING``),无尾空格的 ``profiles/agent-auth`` 会
           连杀并发 ``agent-authz`` 的 Chrome。Chrome cmdline 里 ``profiles/{sid}``
           后跟一个空格(``--user-data-dir=...profiles/{sid} --window-size=...``),
-          故尾随空格精准隔离。
+          故字符类 [- ] 既隔离前缀又连带回收
+          identity 变体(get_identity_session_id 的 {sid}-{account_id} 形态;
+          2026-09-03 升级,纯尾随空格匹配不到 agent-authz-alice)。
         - **daemon** : agent-browser 的 daemon(``agent-browser-linux-x64``)
           daemon 化后 cmdline 裸(零参数),``pkill -f`` 无法按 profile 匹配(旧
           ``agent-browser.*profiles/{sid}`` pattern 是死代码,已删)。per-session
@@ -279,11 +307,11 @@ class AgentBrowserEngine:
             """沿残留 Chrome 的 PPID 链杀 per-session daemon(close 失败兜底)。
 
             daemon cmdline 裸,pkill -f 匹配不到;改用 pgrep 残留 Chrome → ps 父
-            → 父 comm 以 agent-browser 开头则 kill。pgrep 的 pattern 同样带尾随
-            空格隔离前缀(agent-auth vs agent-authz)。
+            → 父 comm 以 agent-browser 开头则 kill。pgrep 的 pattern 同样带 [- ]
+            分隔后缀隔离前缀(agent-auth vs agent-authz)并覆盖 identity 变体。
             """
             rc, out = _run_capture(
-                ["pgrep", "-f", f"headless.*profiles/{sid} "], timeout=5.0
+                ["pgrep", "-f", f"headless.*profiles/{sid}[- ]"], timeout=5.0
             )
             if rc != 0 or not out:
                 return
@@ -331,7 +359,7 @@ class AgentBrowserEngine:
             else:
                 # Chrome 子进程:尾随空格隔离前缀(agent-auth vs agent-authz)
                 _run(
-                    ["pkill", "-f", f"headless.*profiles/{sid} "],
+                    ["pkill", "-f", f"headless.*profiles/{sid}[- ]"],
                     timeout=5.0,
                 )
                 killed.append(close_tag)

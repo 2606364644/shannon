@@ -109,6 +109,8 @@ SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS=600  # 3 次全超时白烧 30min 还�
 | GitNexus MCP 常量组 | `gitnexus_mcp.py:14-32` | 30s/120s/5s/30s/10s |
 | 批量认证 probe | blackbox `workflows.py:881` | 硬编码 10min（单个的能 env 调、批量的不能，不一致） |
 
+**单 agent 40min 门（2026-09-03 xss 事故补录，容易被漏看的一道）**：openai 引擎每个 agent 的 wall-clock 上限是 `SUPERNOVA_OPENAI_CALL_TIMEOUT`（默认 2400s=40min，`providers_openai.py::_call_timeout`），包住**整个 agent run**（含全部 turns），不是单次 LLM 请求超时。超时判 retryable=False（`_classify_error`：失控/stall agent 重试只放大成 40min×N 卡死）→ attempt 1/3 直接失败、该 vuln 类整类丢失（外层 run 仍 completed，报告缺节）。本表上文的最小单步窗口是 15min 判链，但黑盒 agent 实际最先撞的是这道 40min。真机形态（NodeGoat 2026-09-02）：xss agent 与浏览器资源耗尽搏斗烧满 40min（chromium 堆到 274 个压穿 4G worker，snapshot/eval 全返回空）撞死。治本已落三件：agent-browser 官方 idle 自愈注入（`resolve_blackbox_engine` setdefault `AGENT_BROWSER_IDLE_TIMEOUT_MS=300000`，死占/野开 session 5min 自动回收）+ exploit/auth-validation/endpoint-verify activity 结束即回收自己的 session（B 层）+ 命令参考教 agent close/复用 session（A 层）。调窗口：env 设 `SUPERNOVA_OPENAI_CALL_TIMEOUT=3600` 之类，但先确认 agent 不是在资源搏斗——那只是晚 20min 死。
+
 ---
 
 ## 六、三个结构性隐患（建议排期修）
@@ -127,6 +129,8 @@ SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS=600  # 3 次全超时白烧 30min 还�
 | t=0 | 提交宽限 | 120s | 过了还没轮到就开始怀疑孤儿 |
 | 组合 t0 | 认证预检 | 10min×3 | 全超时白烧 30min，组合扫描 fail-fast 不跑白盒 |
 | 运行中 | 心跳判活 | 90s | 标 interrupted（不可逆） |
+| 运行中 | **单 agent 40min（openai 引擎）** | `SUPERNOVA_OPENAI_CALL_TIMEOUT` 默认 2400s，**不可重试** | attempt 1/3 直接死，该 vuln 类整类丢失（外层仍 completed） |
+| 运行中 | agent-browser idle 自愈 | 5min 无命令（扫描内 setdefault 注入） | daemon 存档自杀；下条命令自动重拉 + profile 保认证态 |
 | 运行中 | 单步窗口 | 2min～4h 不等 | 重试最多 3 次，耗尽标 failed 或整场终止 |
 | 运行中 | 隐形消耗 | — | 富化/PoC 等非致命环节各 20-30min×3，失败不报错但吃总闸时长 |
 | 运行中 | **总闸** | **3h** | **TIMED_OUT 硬死，不可恢复** |

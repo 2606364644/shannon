@@ -263,6 +263,15 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    finally:
+        # B 层机械收尾：validate-auth 的浏览器 session 是 manager._interpolate 的
+        # BROWSER_SESSION_MAPPING 回落（VALIDATE_AUTH → agent1，models/agents.py），
+        # 结束即回收，不等扫描级 finally（其 session_ids 只取 AGENT_SESSION_MAPPING
+        # 的 5 个 exploit base id，agent1 本就不在扫描级清理集里）。
+        from supernova_core.models.agents import BROWSER_SESSION_MAPPING
+        await _cleanup_browser_session(
+            input.repo_path, input.engine_name,
+            [BROWSER_SESSION_MAPPING.get(AgentName.VALIDATE_AUTH.value, "agent1")])
 
     # validate_authentication 正常返回（未 raise）：可观测收尾按真实 verdict 记录，
     # 恰一次（旧版先记 success=True 再 raise PentestError 进 except 双记，黑盒 auth
@@ -284,6 +293,35 @@ async def run_blackbox_auth_validation(input: BlackboxActivityInput) -> None:
         error_type, retryable = classify_error_for_temporal(err)
         raise ApplicationFailure(str(err), type=error_type,
                                  non_retryable=not retryable) from err
+
+
+async def _cleanup_browser_session(
+    repo_path: str | None, engine_name: str | None, session_ids: list[str],
+) -> None:
+    """agent 结束即回收自己的浏览器 session（2026-09-03 xss 40min 事故 B 层机械收尾）。
+
+    死占泄漏根因：exploit / auth-validation / endpoint-verify agent 各绑一个浏览器
+    profile，agent 结束后 session 死占到扫描级 finally 的 cleanup_engine_configs——
+    并行 agent 越晚结束，白背的已死 agent 浏览器越多（真机 274 chromium 压穿 4G
+    worker，xss agent 空转烧满 40min 超时）。归属唯一（每 agent 独立 session id），
+    per-session 清理不误杀并行 agent（pkill pattern 带 [- ] 分隔后缀，core 测试锁定）。
+    engine_name 缺省（CLI 直跑 / 独立 AuthValidationWorkflow 未透传）→ 不清理，行为
+    与现状一致。best-effort：清理失败绝不影响 agent 结果（吞掉）；扫描级 finally
+    cleanup_engine_configs 保留兜底。activity 重试兼容：失败清理后 write_config
+    幂等重写、agent 重开同 id session。
+    """
+    if not (repo_path and engine_name and session_ids):
+        return
+    try:
+        from supernova_core.services.browser_engine import BrowserEngineFactory
+        import supernova_core.services.engines  # noqa: F401 – registers engines
+
+        engine = BrowserEngineFactory.get_engine(engine_name)
+        engine.cleanup_processes(repo_path, session_ids=session_ids)
+        for sid in session_ids:
+            engine.cleanup_config(repo_path, session_id=sid)
+    except Exception:  # noqa: BLE001 - best-effort，绝不影响 agent 结果
+        pass
 
 
 @activity.defn
@@ -365,6 +403,12 @@ async def run_exploit_agent(input: BlackboxActivityInput) -> dict:
         await session.log_error(e, context=agent_name.value, attempt=attempt, max_attempts=max_attempts)
         error_type, retryable = classify_error_for_temporal(e)
         raise ApplicationFailure(str(e), type=error_type, non_retryable=not retryable) from e
+    finally:
+        # B 层机械收尾：agent 结束（成功/失败/异常）立即回收自己的浏览器 session，
+        # 不等扫描级 finally（治死占——见 _cleanup_browser_session docstring）。
+        from supernova_core.services.playwright_config_writer import get_session_id
+        await _cleanup_browser_session(
+            input.repo_path, input.engine_name, [get_session_id(agent_name.value)])
 
 
 @activity.defn
@@ -427,6 +471,13 @@ async def run_endpoint_verify(input: BlackboxActivityInput) -> dict:
             attempt_number=attempt, error=str(e)))
         # 降级:不 raise,返回 degraded。exploit 据此全打(零回归)。
         return {"endpoint_verify": None, "reason": f"{type(e).__name__}: {e}"}
+    finally:
+        # B 层机械收尾：endpoint-verify 用 get_session_id 回落 "default" session
+        # （endpoint_verify_executor 同口径取 id），结束即回收，不等扫描级 finally。
+        from supernova_core.services.playwright_config_writer import get_session_id
+        await _cleanup_browser_session(
+            input.repo_path, input.engine_name,
+            [get_session_id(AgentName.ENDPOINT_VERIFY.value)])
 
 
 @activity.defn
@@ -745,6 +796,18 @@ async def resolve_blackbox_engine(input: BlackboxActivityInput) -> str:
 
         cfg = parse_config(input.config_path) if input.config_path else None
         engine_name = cfg.browser_engine if cfg else "agent-browser"
+        if engine_name == "agent-browser":
+            # 2026-09-03 xss 40min 事故治本主力：agent-browser daemon 官方 idle 自愈
+            # （README Architecture——"an integration that dies without calling close
+            # cannot leak the daemon and its browser indefinitely"）。默认 1h 对扫描
+            # 场景太长（死占窗口 35min << 1h，idle 门永远等不到），收紧到 5min——对齐
+            # 云浏览器厂 session TTL 行业默认（Browserless TTL / Kernel TIMEOUT 均
+            # 300s）。每条命令重置计时（活跃 agent 不受影响）；daemon 被 idle 回收后
+            # 下一条命令自动重拉 + --profile 持久目录保住认证态。同时治两个泄漏源：
+            # 死占（agent 结束后 5min 内 daemon 自杀）+ 野开 session（无人再发命令，
+            # 同样 5min 自杀）。setdefault：部署者显式配置完全尊重。
+            import os
+            os.environ.setdefault("AGENT_BROWSER_IDLE_TIMEOUT_MS", "300000")
         try:
             engine = BrowserEngineFactory.get_engine(engine_name)
         except KeyError as e:

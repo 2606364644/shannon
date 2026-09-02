@@ -59,7 +59,23 @@ Playwright CLI Commands (use these for browser automation):
 - State management: playwright-cli -s=<session> state-save <path> / state-load <path>
 - Element interaction: playwright-cli -s=<session> click <selector>, fill <selector> <text>
 - Get content: playwright-cli -s=<session> get text <selector>, get html <selector>
-Always pass -s=<session> to every command for session isolation."""
+- Close session: playwright-cli -s=<session> close (release browser processes as
+  soon as you no longer need the browser)
+Always pass -s=<session> to every command for session isolation.
+
+SESSION DISCIPLINE (browser memory is shared with parallel agents):
+- Every NEW session id spawns its own browser process tree on a
+  memory-constrained host. Inventing extra session ids exhausts memory and
+  makes ALL browser commands return empty output.
+- Reuse the session ID given in your prompt for every command. NEVER invent
+  new session ids.
+- Multi-identity testing: stay in ONE session and switch identities with
+  state-save / state-load instead of opening more sessions. If you truly
+  need a second concurrent session, keep it to at most 2 and close the
+  extra one the moment you are done with it.
+- If browser commands consistently return empty output, browser resources
+  are exhausted: close your session, then reopen it with the SAME session
+  id — do not spawn new ones."""
 
 
 # ---------------------------------------------------------------------------

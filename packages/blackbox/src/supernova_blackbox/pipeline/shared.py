@@ -160,6 +160,10 @@ class BlackboxActivityInput:
     proxy_url: str | None = None
     # 扫描期 per-workspace env 覆盖（scan_env 覆盖层用）；由 workflow 从 BlackboxPipelineInput 灌入。
     env_overrides: dict[str, str] = field(default_factory=dict)
+    # 2026-09-03 xss 40min 事故 B 层：浏览器引擎名（resolve_blackbox_engine 解析后由 workflow
+    # 透传），run_exploit_agent / run_blackbox_auth_validation / run_endpoint_verify 结束时
+    # 据此回收自己的浏览器 session。缺省 None = 不清理（CLI 直跑/独立 auth workflow，零回归）。
+    engine_name: str | None = None
 
 
 @dataclass
