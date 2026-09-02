@@ -456,7 +456,12 @@ class OpenAIProvider(BaseProvider):
                     context=ToolContext(
                         cwd=cwd,
                         subagent_run=None if tool_policy == "readonly-code" else self._make_subagent_runner(model, cwd, proxy_url),
-                        allowed_roots=tuple(Path(root).resolve() for root in allowed_roots),
+                        # None 容错（对齐 anthropic 引擎 `(allowed_roots or [])`）：主链路
+                        # executor→run_claude_prompt 不传 allowed_roots（默认 None），裸迭代
+                        # 秒挂 "'NoneType' object is not iterable"（2026-09-02 NodeGoat
+                        # -20260902-032328 全 agent 瘫痪回归）。空 tuple 语义 = 不限制
+                        # （fs.py::_within_allowed_roots `not roots or ...`），同旧行为。
+                        allowed_roots=tuple(Path(root).resolve() for root in (allowed_roots or [])),
                         proxy_url=proxy_url,
                     ),
                     max_turns=max_turns or self._max_turns(),
