@@ -86,3 +86,58 @@ it("supports keyboard-accessible node deletion", () => {
   expect(current.draft.nodes.some((node) => node.repo === "web")).toBe(false);
   expect(current.draft.edges).toHaveLength(0);
 });
+
+/** jsdom 的 SVG getBoundingClientRect 全 0——mock 成 viewBox 等比，坐标换算才可用。 */
+function mockSvgRect(container: HTMLElement) {
+  const svg = container.querySelector("svg")!;
+  vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
+    x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600,
+    toJSON: () => "",
+  } as DOMRect);
+  return svg;
+}
+
+it("拖线式连接：按住手柄出现预览，拖到目标节点上松手建 manual 边；Esc 取消", () => {
+  let current = state();
+  const onState = (next: typeof current) => { current = next; };
+  const { rerender, container } = render(<TopologyEditor state={current} onState={onState} />);
+  const svg = mockSvgRect(container);
+  const handle = screen.getByRole("button", { name: /Connect web/i });
+  fireEvent.pointerDown(handle);
+  expect(screen.getByTestId("topology-connect-preview")).toBeInTheDocument();
+  fireEvent.pointerMove(svg, { clientX: 400, clientY: 120 });
+  // Esc 取消：预览消失，不建边
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByTestId("topology-connect-preview")).toBeNull();
+  // 再拖一次，在目标节点上松手 → 建 manual 边
+  fireEvent.pointerDown(handle);
+  fireEvent.pointerMove(svg, { clientX: 400, clientY: 120 });
+  fireEvent.pointerUp(screen.getByTestId("topology-node-order"));
+  rerender(<TopologyEditor state={current} onState={onState} />);
+  expect(current.draft.edges.some((e) => e.from === "web" && e.to === "order" && e.origin === "manual")).toBe(true);
+});
+
+it("空白处松手取消连线（不建边）", () => {
+  let current = state();
+  const onState = (next: typeof current) => { current = next; };
+  const { rerender, container } = render(<TopologyEditor state={current} onState={onState} />);
+  const svg = mockSvgRect(container);
+  fireEvent.pointerDown(screen.getByRole("button", { name: /Connect web/i }));
+  fireEvent.pointerMove(svg, { clientX: 500, clientY: 300 });
+  fireEvent.pointerUp(svg);
+  rerender(<TopologyEditor state={current} onState={onState} />);
+  expect(current.draft.edges.every((e) => e.origin !== "manual")).toBe(true);
+});
+
+it("节点拖动 clamp 在画布内（拖出边界不再丢失节点）", () => {
+  let current = state();
+  const onState = (next: typeof current) => { current = next; };
+  const { rerender, container } = render(<TopologyEditor state={current} onState={onState} />);
+  const svg = mockSvgRect(container);
+  fireEvent.pointerDown(screen.getByTestId("topology-node-web"));
+  fireEvent.pointerMove(svg, { clientX: 1200, clientY: -300 });
+  rerender(<TopologyEditor state={current} onState={onState} />);
+  const web = current.draft.nodes.find((n) => n.repo === "web")!;
+  expect(web.position.x).toBeLessThanOrEqual(800 - 105 - 6);
+  expect(web.position.y).toBeGreaterThanOrEqual(6);
+});

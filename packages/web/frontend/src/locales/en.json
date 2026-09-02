@@ -472,14 +472,22 @@
       "subtitle": "Chain calls across repositories and run a cross-repo correlation analysis",
       "submit": "Start correlation scan",
       "footerHint": "Configure the multi-repo topology, then submit",
+      "mode": {
+        "group": "Build method",
+        "autoDesc": "Analyze source of the selected repositories to infer the call topology",
+        "manualDesc": "Set role, source and relations per repository by hand"
+      },
       "reposSection": "Repositories & services",
       "addRepo": "+ Add repository",
+      "reposEmptyHint": "No repositories yet — add the first service with “+ Add repository” above",
+      "colRepo": "Repository",
+      "colReuse": "Reuse scan",
       "roleLabel": "Role",
       "roleEntrypoint": "Entrypoint",
       "roleBackend": "Backend",
       "sourceLabel": "Source",
       "sourceRescan": "Rescan",
-      "sourceReuse": "Reuse past scan",
+      "sourceReuse": "Reuse",
       "protocolLabel": "Protocol",
       "removeRepo": "Remove repository",
       "selectRepoFirst": "Select a repository first",
@@ -577,6 +585,11 @@
         "cache": "Cache reused",
         "failed": "Analysis failed; switch to manual mode",
         "noReadyRepos": "No ready repositories in this workspace",
+        "searchPlaceholder": "Search repositories…",
+        "filterEmpty": "No matching repositories",
+        "selectedCount": "{{count}} selected",
+        "selectAll": "Select all",
+        "clearAll": "Clear",
         "usage": "Usage {{tokens}} tokens · {{cost}}",
         "status": {
           "queued": "Queued",
@@ -613,8 +626,8 @@
         "selectNode": "Select service",
         "removedAi": "Removed AI suggestions",
         "restore": "Restore",
-        "canvasHint": "Drag nodes to rearrange; drag a node's ○ handle onto another node to add an edge",
-        "connectHandle": "Drag this handle to a target node to add an edge"
+        "canvasHint": "Drag nodes to rearrange; drag a node's ○ handle onto a target and release to add an edge (Esc cancels)",
+        "connectHandle": "Hold and drag onto a target node, then release to add an edge; click the handle again or press Esc to cancel"
       },
       "colFrom": "From",
       "colTo": "To"

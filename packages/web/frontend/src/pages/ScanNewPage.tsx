@@ -13,6 +13,7 @@ import { CorrelationTopologyFields } from "../components/correlation/Correlation
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
+import { GroupLabel } from "@/components/GroupLabel";
 import { Card } from "@/components/ui/card";
 import {
   formToYaml, yamlToForm, validateForm, CorrYamlError, type CorrFormState,
@@ -566,18 +567,55 @@ export function ScanNewPage() {
             ))}
           </div>
 
+          {/* 跨仓扫描的构建方式（自动拓扑 | 手工模式）：归属于跨仓表单的第一个分组——
+              原第二个平级 segmented 与「白盒|跨仓关联」同视觉语言上下叠放，层级读不出
+              从属（反馈「自动拓扑/手动模式应该归属于跨仓扫描」）。radio-card 能承载一句
+              引导说明，选中态 coral 描边对齐全站 token；testid 保持供测试寻址。 */}
           {type === "correlation" && (
-            <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-              {(["auto", "manual"] as const).map((mode) => (
-                <button key={mode} type="button" onClick={() => setCorrMode(mode)}
-                  aria-pressed={corrMode === mode} data-testid={`corr-mode-${mode}`}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    corrMode === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                  }`}>
-                  {mode === "auto" ? t("scan.correlation.analysis.autoMode") : t("scan.correlation.analysis.manualMode")}
-                </button>
-              ))}
-            </div>
+            <section className="space-y-2">
+              <GroupLabel>{t("scan.correlation.mode.group")}</GroupLabel>
+              <div
+                className="grid gap-2 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label={t("scan.correlation.mode.group")}
+              >
+                {(["auto", "manual"] as const).map((mode) => (
+                  <label
+                    key={mode}
+                    htmlFor={`corr-mode-radio-${mode}`}
+                    data-testid={`corr-mode-${mode}`}
+                    className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 transition-colors focus-within:ring-1 focus-within:ring-ring ${
+                      corrMode === mode
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-card hover:border-muted-foreground/40"
+                    }`}
+                  >
+                    <input
+                      id={`corr-mode-radio-${mode}`}
+                      type="radio"
+                      name="corr-build-mode"
+                      className="sr-only"
+                      checked={corrMode === mode}
+                      onChange={() => switchCorrMode(mode)}
+                    />
+                    <span
+                      aria-hidden
+                      className={`mt-1 h-2 w-2 shrink-0 rounded-full border ${
+                        corrMode === mode ? "border-primary bg-primary" : "border-muted-foreground/50 bg-transparent"
+                      }`}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-foreground">
+                        {mode === "auto" ? t("scan.correlation.analysis.autoMode") : t("scan.correlation.analysis.manualMode")}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                        {mode === "auto" ? t("scan.correlation.mode.autoDesc") : t("scan.correlation.mode.manualDesc")}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
           )}
 
           {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽；

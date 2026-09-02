@@ -4,9 +4,11 @@ import type { CorrelationDetail } from "@/api/types";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { anchorPair, type Box } from "@/lib/topology-anchors";
 
 /**
- * 服务拓扑图（D5，spec 2026-08-24）：纯 SVG——entrypoint 列左、backend 网格列右；
+ * 服务拓扑图（D5，spec 2026-08-24）：纯 SVG——按调用层级分层（入口第 0 层，
+ * layer(to) ≥ layer(from)+1 长路径松弛），层间左→右、层内垂直均分；
  * 节点 = 圆角矩形 + 服务名 + role 徽标文字；边 = 直线箭头 + 中点 protocol 标签 +
  * status 语义着色（ok=green / low=amber / unverified=muted / error=red /
  * declared-missing=muted 虚线）。点边 → 下方展开该边 calls 表。
@@ -24,32 +26,53 @@ export interface NodePos {
   role: string;
 }
 
-/** 列 x 坐标（brief 骨架口径）：入口列左 90、后端列右 width-130（默认 560 → 430）。 */
-const ENTRY_X = 90;
-
 /** 节点盒尺寸（rect 宽高，中心对齐 NodePos.x/y）。 */
 const NODE_W = 150;
 const NODE_H = 56;
 
 /**
- * 布局纯函数：入口服务过滤到左列、其余（backend/未知 role）右列垂直均分；
- * 高度 = max(左右列节点数, 1) × heightPerNode + 40（单列空也不塌缩，留呼吸边距）。
+ * 布局纯函数（调用层级分层）：入口第 0 层；沿边松弛 layer(to) ≥ layer(from)+1
+ * （迭代至稳定，容忍环）；无前驱的非入口服务落第 0 层（与入口并列——它们不依赖
+ * 任何人）。层间从左到右均分画布宽，层内垂直均分；单层居中。高度 =
+ * max(各层节点数, 1) × heightPerNode + 40（空服务不塌缩，留呼吸边距）。
+ *
+ * 原「入口左列 / 其余右列」两列布局：backend 间调用边在右列内部变成垂直线、
+ * protocol 标签叠在节点身上；分层后 backend 按被调深度各归其列，跨层边走水平带。
  */
 export function layout(
   services: { name: string; role: string }[],
+  edges: { from: string; to: string }[] = [],
   width = 560,
   heightPerNode = 90,
 ): { nodes: NodePos[]; height: number } {
-  const eps = services.filter((s) => s.role === "entrypoint");
-  const bes = services.filter((s) => s.role !== "entrypoint");
+  // 分层：入口初始化为 0，沿边反复抬高被调方（最多 |services| 轮，环收敛）
+  const layer = new Map<string, number>();
+  services.forEach((s) => { if (s.role === "entrypoint") layer.set(s.name, 0); });
+  const known = new Set(services.map((s) => s.name));
+  for (let round = 0; round < services.length; round++) {
+    let changed = false;
+    for (const e of edges) {
+      if (!known.has(e.from) || !known.has(e.to)) continue;
+      const lf = layer.get(e.from);
+      if (lf === undefined) continue;
+      if ((layer.get(e.to) ?? -1) < lf + 1) { layer.set(e.to, lf + 1); changed = true; }
+    }
+    if (!changed) break;
+  }
+  // 无前驱的非入口（含孤立）服务落第 0 层，与入口并列
+  services.forEach((s) => { if (!layer.has(s.name)) layer.set(s.name, 0); });
+
+  const maxLayer = Math.max(0, ...layer.values());
+  const columns: { name: string; role: string }[][] = Array.from({ length: maxLayer + 1 }, () => []);
+  services.forEach((s) => columns[layer.get(s.name)!].push(s));
+  const height = Math.max(...columns.map((c) => c.length), 1) * heightPerNode + 40;
+
   const nodes: NodePos[] = [];
-  const colH = (n: number) => Math.max(n, 1) * heightPerNode;
-  const height = Math.max(colH(eps.length), colH(bes.length)) + 40;
-  const backendX = width - 130;
-  eps.forEach((s, i) =>
-    nodes.push({ name: s.name, role: s.role, x: ENTRY_X, y: 40 + i * heightPerNode + 20 }));
-  bes.forEach((s, i) =>
-    nodes.push({ name: s.name, role: s.role, x: backendX, y: 40 + i * heightPerNode + 20 }));
+  const span = width - 40; // 左右各 20 边距
+  columns.forEach((column, li) => {
+    const x = maxLayer === 0 ? width / 2 : 20 + (span / (maxLayer + 1)) * (li + 0.5);
+    column.forEach((s, i) => nodes.push({ name: s.name, role: s.role, x, y: 40 + i * heightPerNode + 20 }));
+  });
   return { nodes, height };
 }
 
@@ -78,7 +101,7 @@ function roleLabel(role: string, t: (k: string) => string): string {
 export function TopologyGraph({ topology }: { topology: CorrTopology }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<number | null>(null);
-  const { nodes, height } = layout(topology.services);
+  const { nodes, height } = layout(topology.services, topology.edges);
   const byName = new Map(nodes.map((n) => [n.name, n]));
   const width = 560;
 
@@ -104,15 +127,19 @@ export function TopologyGraph({ topology }: { topology: CorrTopology }) {
             <path d="M 0 1 L 9 5 L 0 9 z" fill="hsl(var(--muted-foreground))" />
           </marker>
         </defs>
-        {/* 边先画（在节点下层）：节点右缘 → 目标左缘直线 + 箭头 + 中点 protocol 标签 */}
+        {/* 边先画（在节点下层）：anchorPair 按节点相对位置选面向侧（分层布局下
+            跨层边走水平带；同层/环边自动转垂直上下缘，不再垂直叠在节点身上） */}
         {topology.edges.map((e, i) => {
           const from = byName.get(e.from);
           const to = byName.get(e.to);
           if (!from || !to) return null;
-          const x1 = from.x + NODE_W / 2;
-          const y1 = from.y;
-          const x2 = to.x - NODE_W / 2;
-          const y2 = to.y;
+          const boxOf = (n: NodePos): Box =>
+            ({ x: n.x - NODE_W / 2, y: n.y - NODE_H / 2, w: NODE_W, h: NODE_H });
+          const { from: p1, to: p2 } = anchorPair(boxOf(from), boxOf(to));
+          const x1 = p1.x;
+          const y1 = p1.y;
+          const x2 = p2.x;
+          const y2 = p2.y;
           const mx = (x1 + x2) / 2;
           const my = (y1 + y2) / 2;
           const isSel = selected === i;

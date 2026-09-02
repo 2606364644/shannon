@@ -45,14 +45,16 @@ interface Props {
 
 /** 分组小标题：共享 GroupLabel（coral 竖条 eyebrow，全站卡内分组统一语言）。 */
 
-/** 紧凑 segmented（角色/来源二选一）：aria-pressed 按钮，样式对齐 ScanFormFields 的来源 segmented。 */
-function MiniSegmented({ value, options, onChange }: {
+/** 紧凑 segmented（角色/来源二选一）：aria-pressed 按钮，样式对齐 ScanFormFields 的来源 segmented。
+ * 行式布局后字段不再带可见 Label——ariaLabel 补分组语义（role=group），供屏幕阅读器寻址。 */
+function MiniSegmented({ value, options, onChange, ariaLabel }: {
   value: string;
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
+  ariaLabel?: string;
 }) {
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
+    <div role="group" aria-label={ariaLabel} className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 w-full">
       {options.map((o) => (
         <button
           key={o.value}
@@ -223,19 +225,49 @@ export function CorrelationFormFields({
         </div>
       </section>
 
-      {/* ② 仓库卡片列表 */}
-      <section className="space-y-2.5">
-        <GroupLabel>{t("scan.correlation.reposSection")}</GroupLabel>
+      {/* ② 仓库行列表（每仓一行：仓库 | 角色 | 来源 | 协议 | 复用扫描）——原每仓一块的
+          卡片纵向过长（反馈「每仓库一行能搞定吗」），改表格化行；entrypoint 行左缘
+          coral 身份条，与拓扑画布 entrypoint 节点同语言（入口概念全流程同一视觉线索）。 */}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <GroupLabel>{t("scan.correlation.reposSection")}</GroupLabel>
+          {workspace && (
+            <Button type="button" variant="outline" size="sm" onClick={addRepo}>
+              {t("scan.correlation.addRepo")}
+            </Button>
+          )}
+        </div>
         {!workspace ? (
           <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+        ) : state.repos.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+            {t("scan.correlation.reposEmptyHint")}
+          </div>
         ) : (
-          <>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {/* 列头（lg+ 单行铺开时才显示；字段可见 Label 已撤，列头即字段名） */}
+            <div className="hidden gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] font-medium text-muted-foreground lg:grid lg:grid-cols-[minmax(0,1.2fr)_112px_104px_92px_minmax(0,1fr)]">
+              <span>{t("scan.correlation.colRepo")}</span>
+              <span>{t("scan.correlation.roleLabel")}</span>
+              <span>{t("scan.correlation.sourceLabel")}</span>
+              <span>{t("scan.correlation.protocolLabel")}</span>
+              <span>{t("scan.correlation.colReuse")}</span>
+            </div>
             {state.repos.map((card, i) => {
               const candidates = candidatesFor(card);
+              const reuseOn = card.reuseScanId != null;
               return (
-                <div key={i} data-testid="corr-repo-card" className="rounded-lg border border-border bg-secondary p-3 space-y-2.5">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
+                <div
+                  key={i}
+                  data-testid="corr-repo-row"
+                  className="relative grid gap-x-2 gap-y-1.5 border-b border-border px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/30 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_112px_104px_92px_minmax(0,1fr)] lg:items-center"
+                >
+                  {card.role === "entrypoint" && (
+                    <span className="absolute inset-y-0 left-0 w-[3px] bg-primary" aria-hidden />
+                  )}
+                  {/* 仓库 + 删除 */}
+                  <div className="flex items-center gap-1.5 sm:col-span-2 lg:col-span-1">
+                    <div className="min-w-0 flex-1">
                       <RepoCombobox
                         repos={repos}
                         value={card.repo || null}
@@ -257,77 +289,67 @@ export function CorrelationFormFields({
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-medium text-muted-foreground">{t("scan.correlation.roleLabel")}</Label>
-                      <MiniSegmented
-                        value={card.role}
-                        options={[
-                          { value: "entrypoint", label: t("scan.correlation.roleEntrypoint") },
-                          { value: "backend", label: t("scan.correlation.roleBackend") },
-                        ]}
-                        onChange={(v) => setCardRole(i, v as CorrRole)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-medium text-muted-foreground">{t("scan.correlation.sourceLabel")}</Label>
-                      <MiniSegmented
-                        value={card.reuseScanId == null ? "rescan" : "reuse"}
-                        options={[
-                          { value: "rescan", label: t("scan.correlation.sourceRescan") },
-                          { value: "reuse", label: t("scan.correlation.sourceReuse") },
-                        ]}
-                        onChange={(v) => setCardSource(i, v as "rescan" | "reuse")}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-medium text-muted-foreground">{t("scan.correlation.protocolLabel")}</Label>
-                      <Select value={card.protocol} onValueChange={(v) => setCardProtocol(i, v as CorrProtocol)}>
-                        <SelectTrigger className="w-full text-xs">
-                          <SelectValue />
+                  {/* 角色 */}
+                  <MiniSegmented
+                    value={card.role}
+                    ariaLabel={t("scan.correlation.roleLabel")}
+                    options={[
+                      { value: "entrypoint", label: t("scan.correlation.roleEntrypoint") },
+                      { value: "backend", label: t("scan.correlation.roleBackend") },
+                    ]}
+                    onChange={(v) => setCardRole(i, v as CorrRole)}
+                  />
+                  {/* 来源 */}
+                  <MiniSegmented
+                    value={reuseOn ? "reuse" : "rescan"}
+                    ariaLabel={t("scan.correlation.sourceLabel")}
+                    options={[
+                      { value: "rescan", label: t("scan.correlation.sourceRescan") },
+                      { value: "reuse", label: t("scan.correlation.sourceReuse") },
+                    ]}
+                    onChange={(v) => setCardSource(i, v as "rescan" | "reuse")}
+                  />
+                  {/* 协议 */}
+                  <Select value={card.protocol} onValueChange={(v) => setCardProtocol(i, v as CorrProtocol)}>
+                    <SelectTrigger className="w-full text-xs" aria-label={t("scan.correlation.protocolLabel")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(["grpc", "http", "graphql"] as const).map((p) => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {/* 复用扫描（固定占位列：rescan 显占位符保持网格稳定，不跳行高） */}
+                  <div className="flex min-h-8 items-center sm:col-span-2 lg:col-span-1">
+                    {!reuseOn ? (
+                      <span className="text-xs text-muted-foreground/50">—</span>
+                    ) : !card.repo.trim() ? (
+                      <span className="text-xs text-muted-foreground">{t("scan.correlation.selectRepoFirst")}</span>
+                    ) : candidates.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">{t("scan.correlation.reuseEmpty")}</span>
+                    ) : (
+                      <Select value={card.reuseScanId || undefined} onValueChange={(v) => setCardReuseScan(i, v)}>
+                        <SelectTrigger className="w-full text-xs" aria-label={t("scan.correlation.colReuse")}>
+                          <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
                         </SelectTrigger>
                         <SelectContent>
-                          {(["grpc", "http", "graphql"] as const).map((p) => (
-                            <SelectItem key={p} value={p}>{p}</SelectItem>
+                          {candidates.map((s) => (
+                            <SelectItem key={s.scan_id} value={s.scan_id}>
+                              <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
+                              <span className="ml-1.5 text-[11px] text-muted-foreground">
+                                （{fmtTime(s.created_at)} · {String(s.status)}）
+                              </span>
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
+                    )}
                   </div>
-                  {card.reuseScanId != null && (
-                    <div className="space-y-1">
-                      {!card.repo.trim() ? (
-                        <div className="text-xs text-muted-foreground">{t("scan.correlation.selectRepoFirst")}</div>
-                      ) : candidates.length === 0 ? (
-                        <div className="text-xs text-muted-foreground">{t("scan.correlation.reuseEmpty")}</div>
-                      ) : (
-                        <Select value={card.reuseScanId || undefined} onValueChange={(v) => setCardReuseScan(i, v)}>
-                          <SelectTrigger className="w-full text-xs">
-                            <SelectValue placeholder={t("scan.fields.reuseSelectPlaceholder")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {candidates.map((s) => (
-                              <SelectItem key={s.scan_id} value={s.scan_id}>
-                                <span className="font-mono text-xs">{s.workflow_id ?? s.scan_id}</span>
-                                <span className="ml-1.5 text-[11px] text-muted-foreground">
-                                  （{fmtTime(s.created_at)} · {String(s.status)}）
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
-            <div>
-              <Button type="button" variant="outline" size="sm" onClick={addRepo}>
-                {t("scan.correlation.addRepo")}
-              </Button>
-            </div>
-          </>
+          </div>
         )}
       </section>
 

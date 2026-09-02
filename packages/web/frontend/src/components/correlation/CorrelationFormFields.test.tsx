@@ -1,4 +1,4 @@
-// D3: 跨仓关联表单组件——repo 卡片增删/角色/来源（重新扫 | 复用历史扫描）+ relations
+// D3: 跨仓关联表单组件——repo 卡片增删/角色/来源（重新扫 | 复用历史）+ relations
 // 摘要 + gateway/auth/HOST 块 + YamlPanel 接线。Harness 镜像 ScanNewPage 的单向数据流
 // （表单路径 yaml=formToYaml(state) 派生、YAML 编辑路径仅校验、apply 显式回填），
 // 风格对齐 ScanFormFields.test.tsx：msw + MemoryRouter + i18n zh + fireEvent。
@@ -115,7 +115,7 @@ describe("CorrelationFormFields", () => {
     // 无卡片 → 添加两次（第一张默认 entrypoint，第二张默认 backend）
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
-    const cards = screen.getAllByTestId("corr-repo-card");
+    const cards = screen.getAllByTestId("corr-repo-row");
     expect(cards).toHaveLength(2);
     expect(within(cards[0]).getByRole("button", { name: "入口" })).toHaveAttribute("aria-pressed", "true");
     expect(within(cards[1]).getByRole("button", { name: "后端" })).toHaveAttribute("aria-pressed", "true");
@@ -138,11 +138,11 @@ describe("CorrelationFormFields", () => {
   it("复用模式选历史扫描 → YAML 含 workspace 字段（候选按 repo 过滤）", async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
-    const card = screen.getByTestId("corr-repo-card");
+    const card = screen.getByTestId("corr-repo-row");
     openRepoPicker(card);
     await pickRepo("order-svc");
-    // 切来源 → 复用历史扫描
-    fireEvent.click(within(card).getByRole("button", { name: "复用历史扫描" }));
+    // 切来源 → 复用历史
+    fireEvent.click(within(card).getByRole("button", { name: "复用历史" }));
     // 候选下拉：order-svc 的白盒在列；frontend 的白盒被 repo 过滤掉
     fireEvent.click(screen.getByText("选择要复用的白盒扫描").closest("button")!);
     fireEvent.click(await screen.findByRole("option", { name: /20260801-120000/ }));
@@ -175,14 +175,14 @@ describe("CorrelationFormFields", () => {
     expect(apply).toBeEnabled();
     // 显式应用回填表单：两张卡片 + http 协议边
     fireEvent.click(apply);
-    await waitFor(() => expect(screen.getAllByTestId("corr-repo-card")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("corr-repo-row")).toHaveLength(2));
     expect(screen.getByText(/frontend → order-svc/).textContent).toContain("http");
   });
 
   it("缺 entrypoint 提交校验拦截（唯一卡片切 backend → 显校验问题）", async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
-    const card = screen.getByTestId("corr-repo-card");
+    const card = screen.getByTestId("corr-repo-row");
     // 唯一卡片从默认 entrypoint 切成 backend → 无 entrypoint
     fireEvent.click(within(card).getByRole("button", { name: "后端" }));
     await waitFor(() =>

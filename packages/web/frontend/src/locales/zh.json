@@ -472,14 +472,22 @@
       "subtitle": "串联多个仓库的调用链，发起跨仓关联分析",
       "submit": "开始关联扫描",
       "footerHint": "配置多仓拓扑后提交",
+      "mode": {
+        "group": "构建方式",
+        "autoDesc": "分析所选仓库源码，自动推断服务调用拓扑",
+        "manualDesc": "逐仓手填角色、来源与调用关系"
+      },
       "reposSection": "仓库与服务",
       "addRepo": "+ 添加仓库",
+      "reposEmptyHint": "还没有仓库——点击右上「+ 添加仓库」加入第一个服务",
+      "colRepo": "仓库",
+      "colReuse": "复用扫描",
       "roleLabel": "角色",
       "roleEntrypoint": "入口",
       "roleBackend": "后端",
       "sourceLabel": "来源",
       "sourceRescan": "重新扫描",
-      "sourceReuse": "复用历史扫描",
+      "sourceReuse": "复用历史",
       "protocolLabel": "协议",
       "removeRepo": "删除仓库",
       "selectRepoFirst": "请先选择仓库",
@@ -577,6 +585,11 @@
         "cache": "复用缓存",
         "failed": "分析失败，可切换手工模式",
         "noReadyRepos": "当前工作区没有可用仓库",
+        "searchPlaceholder": "搜索仓库…",
+        "filterEmpty": "没有匹配的仓库",
+        "selectedCount": "已选 {{count}}",
+        "selectAll": "全选",
+        "clearAll": "清空",
         "usage": "用量 {{tokens}} tokens · {{cost}}",
         "status": {
           "queued": "排队中",
@@ -613,8 +626,8 @@
         "selectNode": "选择服务",
         "removedAi": "已移除的 AI 建议",
         "restore": "恢复",
-        "canvasHint": "拖动节点调整布局；从节点右侧 ○ 手柄拉到目标节点添加关系",
-        "connectHandle": "从手柄拖到目标节点，添加一条关系"
+        "canvasHint": "拖动节点调整布局；从节点右侧 ○ 手柄拉到目标节点上松开添加关系（Esc 取消）",
+        "connectHandle": "按住拖到目标节点上松开，添加一条关系；再点手柄或按 Esc 取消"
       },
       "colFrom": "调用方",
       "colTo": "被调用方"
