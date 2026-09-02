@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from supernova_core.config.parser import distribute_config, parse_config
+from supernova_core.config.scan_env import ws_getenv
 from supernova_core.models.agents import AgentName, AGENTS
 from supernova_core.models.config import Config
 from supernova_core.models.errors import ErrorCode, PentestError
@@ -315,6 +316,15 @@ class AgentExecutor:
             variables["proxy_url"] = proxy_url
         if config:
             variables["browser_engine"] = config.browser_engine
+        else:
+            # 无 config（无认证配置的扫描）时经 ws_getenv 读 env 引擎——对齐
+            # resolve_blackbox_engine 的解析口径（有 config 时 cfg.browser_engine
+            # 已含 parser 的 env override；无 config 时 env 是唯一引擎来源）。
+            # 否则 env 配 playwright 时 prompt 注入 fallback agent-browser，
+            # 命令形态与引擎 config / cleanup 分裂（2026-09-03 收口）。
+            env_engine = ws_getenv("SUPERNOVA_BROWSER_ENGINE")
+            if env_engine:
+                variables["browser_engine"] = env_engine.strip()
         if prompt_variables:
             variables.update(prompt_variables)
         template_name = resolve_template_name(

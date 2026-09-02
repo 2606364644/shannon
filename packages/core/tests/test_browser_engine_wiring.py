@@ -125,6 +125,8 @@ async def test_executor_injects_browser_engine_from_config(tmp_path):
         r.structured_output = None
         r.tokens = None
         r.text = ""
+        r.cost_currency = "USD"
+        r.stop_reason = None
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
@@ -174,6 +176,8 @@ async def test_executor_no_browser_engine_without_config(tmp_path):
         r.structured_output = None
         r.tokens = None
         r.text = ""
+        r.cost_currency = "USD"
+        r.stop_reason = None
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
@@ -226,6 +230,8 @@ async def test_executor_prompt_variables_override_config_engine(tmp_path):
         r.structured_output = None
         r.tokens = None
         r.text = ""
+        r.cost_currency = "USD"
+        r.stop_reason = None
         return r
 
     with patch.object(PromptManager, "load_sync", mock_load_sync), \
@@ -245,3 +251,61 @@ async def test_executor_prompt_variables_override_config_engine(tmp_path):
         )
 
     assert captured_variables["browser_engine"] == "agent-browser"
+
+
+@pytest.mark.asyncio
+async def test_executor_env_engine_without_config(tmp_path, monkeypatch):
+    """无 config_path + SUPERNOVA_BROWSER_ENGINE=playwright → 注入 env 引擎。
+
+    残留缝隙收口（2026-09-03）：无认证 config 的扫描 + env 引擎时，
+    resolve_blackbox_engine 读 env 返回 playwright（repo config / cleanup /
+    engine_name 透传全按 playwright），但 prompt 注入 fallback agent-browser
+    ——命令形态与引擎 config 分裂。修后 executor 无 config 时经 ws_getenv
+    读 env（对齐 parser env-override 语义：有 config 时 cfg.browser_engine
+    已含 env 压过；无 config 时 env 是唯一引擎来源）。"""
+    import supernova_core.services.engines  # noqa: F401 — register engines
+
+    monkeypatch.setenv("SUPERNOVA_BROWSER_ENGINE", "playwright")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".shannon" / "deliverables").mkdir(parents=True)
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "recon.txt").write_text("{{BROWSER_COMMANDS}}")
+
+    captured_variables = {}
+
+    def mock_load_sync(self, template_name, variables, **kwargs):
+        captured_variables.update(variables)
+        return "mock prompt"
+
+    async def mock_run_claude(prompt, **kw):
+        r = MagicMock()
+        r.success = True
+        r.error = None
+        r.cost = 0.0
+        r.turns = 1
+        r.model = "test"
+        r.structured_output = None
+        r.tokens = None
+        r.text = ""
+        r.cost_currency = "USD"
+        r.stop_reason = None
+        return r
+
+    with patch.object(PromptManager, "load_sync", mock_load_sync), \
+         patch("supernova_core.agents.executor.run_claude_prompt", side_effect=mock_run_claude), \
+         patch.object(GitManager, "create_checkpoint", new_callable=AsyncMock), \
+         patch.object(GitManager, "commit", new_callable=AsyncMock), \
+         patch("supernova_core.agents.executor.validate_deliverable", new_callable=AsyncMock):
+
+        pm = PromptManager(prompts_dir)
+        executor = AgentExecutor(pm)
+        await executor.execute(
+            agent_name=AgentName.RECON,
+            repo_path=str(repo),
+            deliverables_path=str(repo / "deliverables"),
+        )
+
+    assert captured_variables.get("browser_engine") == "playwright"
