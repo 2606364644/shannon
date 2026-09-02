@@ -839,12 +839,16 @@ describe("correlation topology auto flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /自动关联分析/ }));
     expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
+    // 边表下拉已换 ui/Select（Radix）：click trigger → click option（原生 select change 不再生效）
     const fromSelects = screen.getAllByRole("combobox", { name: / from$/ });
-    fireEvent.change(fromSelects.at(-1)!, { target: { value: "web" } });
+    fireEvent.click(fromSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "web" }));
     const toSelects = screen.getAllByRole("combobox", { name: / to$/ });
-    fireEvent.change(toSelects.at(-1)!, { target: { value: "user" } });
+    fireEvent.click(toSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "user" }));
     const protocols = screen.getAllByRole("combobox", { name: "protocol" });
-    fireEvent.change(protocols.at(-1)!, { target: { value: "http" } });
+    fireEvent.click(protocols.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "http" }));
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();

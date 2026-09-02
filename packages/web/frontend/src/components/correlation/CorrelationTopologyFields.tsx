@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { AlertCircle } from "lucide-react";
+import { GroupLabel } from "@/components/GroupLabel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,8 +52,9 @@ interface Props {
   hostErr?: string | null;
 }
 
+/** 分组容器：标题走共享 GroupLabel（coral 竖条 eyebrow——与手工模式/白盒表单统一）。 */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="space-y-2.5"><div className="text-[13px] font-semibold">{title}</div>{children}</section>;
+  return <section className="space-y-2.5"><GroupLabel>{title}</GroupLabel>{children}</section>;
 }
 
 export function CorrelationTopologyFields(props: Props) {
@@ -103,7 +105,7 @@ export function CorrelationTopologyFields(props: Props) {
       )}
 
       <section className="space-y-2.5 border-t border-border pt-4">
-        <div className="text-[13px] font-semibold">{t("scan.correlation.gatewayTitle")}</div>
+        <GroupLabel>{t("scan.correlation.gatewayTitle")}</GroupLabel>
         <div className="space-y-1.5">
           <Label className="text-xs font-medium">{t("scan.correlation.gatewayLabel")}</Label>
           <Input value={props.gatewayUrl} onChange={(e) => props.onGatewayUrl(e.target.value)}

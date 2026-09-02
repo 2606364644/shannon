@@ -22,7 +22,7 @@ export function CorrelationTopologyAnalysisPanel({
   const terminalFailure = analysis?.status === "failed" || analysis?.status === "cancelled"
     || analysis?.status === "interrupted";
   return (
-    <section className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3" aria-label={t("scan.correlation.analysis.panel")}>
+    <section className="space-y-2 rounded-lg border border-border bg-card p-3" aria-label={t("scan.correlation.analysis.panel")}>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={active ? onCancel : terminalFailure || analysis?.status === "completed" ? onRetry : onStart}
           disabled={starting}>

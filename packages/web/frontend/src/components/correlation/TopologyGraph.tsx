@@ -83,7 +83,8 @@ export function TopologyGraph({ topology }: { topology: CorrTopology }) {
   const width = 560;
 
   return (
-    <div>
+    /* max-w 锚定 viewBox 宽（~1:1 渲染）：不限宽时整图随容器放大 2-3×，节点文字失衡 */
+    <div className="max-w-[600px]">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="w-full"

@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Redo2, Undo2, LayoutGrid } from "lucide-react";
+import { Info, Redo2, Undo2, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   addTopologyEdge, deleteTopologyEdge, moveTopologyNode, redoTopology, undoTopology,
   resetTopologyLayout, restoreTopologyAiEdge, setTopologyEdgeEnabled, updateTopologyEdge,
@@ -47,6 +50,10 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
         <Button type="button" variant="outline" size="sm" onClick={() => onState(resetTopologyLayout(state))}>
           <LayoutGrid className="h-3.5 w-3.5" />{t("scan.correlation.topology.resetLayout")}
         </Button>
+        <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Info className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+          {t("scan.correlation.topology.canvasHint")}
+        </span>
       </div>
       <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <svg ref={svgRef} viewBox="0 0 800 600" className="h-[420px] w-full rounded-lg border border-border bg-card"
@@ -56,9 +63,17 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
             onState(moveTopologyNode(state, dragRepo.current, p.x, p.y));
           }}
           onPointerUp={() => { dragRepo.current = null; connectFrom.current = null; }}>
-          <defs><marker id="topology-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-            <path d="M0,0 L8,4 L0,8 z" className="fill-muted-foreground" />
-          </marker></defs>
+          <defs>
+            <marker id="topology-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" className="fill-muted-foreground" />
+            </marker>
+            {/* 画布点阵：自由拖放工作台语义（对齐设计工具画布语言），token 派生全主题适配。
+                alpha 0.32 为五主题抽查定值：暗色/亮暗色底（charcoal/gruvbox）0.2x 档不可见。 */}
+            <pattern id="topology-dots" width="26" height="26" patternUnits="userSpaceOnUse">
+              <circle cx="1.2" cy="1.2" r="1.2" fill="hsl(var(--muted-foreground) / 0.32)" />
+            </pattern>
+          </defs>
+          <rect width="800" height="600" fill="url(#topology-dots)" aria-hidden className="pointer-events-none" />
           {state.draft.edges.map((edge) => {
             const from = nodeByRepo.get(edge.from); const to = nodeByRepo.get(edge.to);
             if (!from || !to) return null;
@@ -81,11 +96,20 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
               onPointerUp={() => { dragRepo.current = null; }}>
               <rect x={node.position.x} y={node.position.y} width={105} height={48} rx={8}
                 className="fill-secondary stroke-border" />
+              {/* 入口身份条：coral 左缘竖条（与 GroupLabel eyebrow 同语言——「入口」全站归 primary） */}
+              {node.roles.includes("entrypoint") && (
+                <rect x={node.position.x} y={node.position.y} width={3} height={48} rx={1.5} className="fill-primary" />
+              )}
               <text x={node.position.x + 10} y={node.position.y + 20} className="fill-foreground font-mono text-[11px]">{node.repo}</text>
-              <text x={node.position.x + 10} y={node.position.y + 37} className="fill-muted-foreground text-[9px]">{node.roles.join(" · ") || "—"}</text>
-              <circle cx={node.position.x + 112} cy={node.position.y + 24} r={6} className="fill-primary/70"
+              <text x={node.position.x + 10} y={node.position.y + 37} className="fill-muted-foreground text-[10px]">{node.roles.join(" · ") || "—"}</text>
+              {/* 连接柄：环+点（可拉出连线的「手柄」形态，悬停原生 tooltip 补操作说明） */}
+              <circle cx={node.position.x + 112} cy={node.position.y + 24} r={6.5}
+                className="fill-none stroke-primary/45"
                 aria-label={`${t("scan.correlation.topology.connect")} ${node.repo}`} role="button" tabIndex={0}
-                onPointerDown={(e) => { e.stopPropagation(); connectFrom.current = node.repo; }} />
+                onPointerDown={(e) => { e.stopPropagation(); connectFrom.current = node.repo; }}>
+                <title>{t("scan.correlation.topology.connectHandle")}</title>
+              </circle>
+              <circle cx={node.position.x + 112} cy={node.position.y + 24} r={2.5} className="fill-primary pointer-events-none" />
             </g>
           ))}
         </svg>
@@ -100,10 +124,15 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
               </div>
               <label className="block space-y-1">
                 <span className="text-muted-foreground">{t("scan.correlation.protocolLabel")}</span>
-                <select className="h-8 w-full rounded border border-input bg-background" value={selectedEdge.protocol}
-                  onChange={(e) => onState(updateTopologyEdge(state, selectedEdge.id, { protocol: e.target.value as never }))}>
-                  {["grpc", "http", "graphql"].map((p) => <option key={p}>{p}</option>)}
-                </select>
+                <Select value={selectedEdge.protocol}
+                  onValueChange={(v) => onState(updateTopologyEdge(state, selectedEdge.id, { protocol: v as never }))}>
+                  <SelectTrigger className="h-8 w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["grpc", "http", "graphql"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="flex items-center gap-2">
                 <Checkbox checked={selectedEdge.enabled}
@@ -113,7 +142,7 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
               <Button type="button" variant="outline" size="sm" onClick={() => onState(deleteTopologyEdge(state, selectedEdge.id))}>
                 {t("scan.correlation.topology.deleteEdge")}
               </Button>
-              <div className="space-y-1 font-mono text-[10px] text-muted-foreground">
+              <div className="space-y-1 font-mono text-[11px] leading-relaxed text-muted-foreground">
                 {[...(selectedEdge.client_evidence ?? []), ...(selectedEdge.handler_evidence ?? [])].map((ev, i) => (
                   <div key={`${ev.repo}-${ev.file}-${i}`}>
                     {ev.repo}/{ev.file}:{ev.line ?? "?"} — {ev.snippet}

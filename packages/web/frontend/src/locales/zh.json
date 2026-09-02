@@ -612,7 +612,9 @@
         "addNode": "添加服务",
         "selectNode": "选择服务",
         "removedAi": "已移除的 AI 建议",
-        "restore": "恢复"
+        "restore": "恢复",
+        "canvasHint": "拖动节点调整布局；从节点右侧 ○ 手柄拉到目标节点添加关系",
+        "connectHandle": "从手柄拖到目标节点，添加一条关系"
       },
       "colFrom": "调用方",
       "colTo": "被调用方"

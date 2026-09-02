@@ -137,7 +137,7 @@ export function CorrelationTab({ ws, scanId }: { ws: string; scanId: string }) {
             {t("scan.correlation.adjudicationIntro")}
           </p>
           {data.adjudication.error ? (
-            <p data-testid="corr-adjudication-error" className="mt-2 text-sm text-red-500">
+            <p data-testid="corr-adjudication-error" className="mt-2 text-sm text-destructive">
               {data.adjudication.error}
             </p>
           ) : (data.adjudication.cards ?? []).length === 0 ? (
@@ -293,15 +293,16 @@ export function AdjudicationCardView({ card }: { card: AdjudicationCard }) {
   const dirKey = ADJ_DIRECTION_KEY[card.direction] ?? card.direction;
   const isError = card.direction === "error";
   const isUpgrade = card.direction === "upgrade";
+  // 语义色走 --c-red/--c-amber token（逐主题校对比），不用 tailwind 原生色阶
   const frame = isError
-    ? "border-red-500/40 bg-red-500/5"
+    ? "border-red/40 bg-red/5"
     : isUpgrade
-      ? "border-amber-500/40 bg-amber-500/5"
+      ? "border-amber/40 bg-amber/5"
       : "border-border";
   return (
     <div data-testid="corr-adj-card" className={`rounded-md border p-3 text-sm ${frame}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className={isError ? "text-red-500" : undefined}>
+        <Badge variant="outline" className={isError ? "text-red" : undefined}>
           {t(dirKey, { defaultValue: card.direction })}
         </Badge>
         <span className="font-mono font-medium">{card.finding_ref.vuln_id || "?"}</span>

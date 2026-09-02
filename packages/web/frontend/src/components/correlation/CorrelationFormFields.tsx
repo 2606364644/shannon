@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { Info, Trash2 } from "lucide-react";
+import { AlertCircle, Info, Trash2 } from "lucide-react";
+import { GroupLabel } from "@/components/GroupLabel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -42,16 +43,7 @@ interface Props {
   hostErr?: string | null;
 }
 
-/** 分组小标题：coral 竖条 eyebrow（与 ScanFormFields 的 GroupLabel 同视觉语言——
- *  该 helper 未导出，此处内嵌同结构副本）。 */
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="h-3 w-[3px] rounded-full bg-primary" aria-hidden />
-      <span className="text-[11px] font-semibold text-muted-foreground">{children}</span>
-    </div>
-  );
-}
+/** 分组小标题：共享 GroupLabel（coral 竖条 eyebrow，全站卡内分组统一语言）。 */
 
 /** 紧凑 segmented（角色/来源二选一）：aria-pressed 按钮，样式对齐 ScanFormFields 的来源 segmented。 */
 function MiniSegmented({ value, options, onChange }: {
@@ -209,7 +201,7 @@ export function CorrelationFormFields({
     <div className="space-y-5">
       {/* ① 工作区 */}
       <section className="space-y-2">
-        <SectionLabel>{t("scan.fields.wsSelectLabel")}</SectionLabel>
+        <GroupLabel>{t("scan.fields.wsSelectLabel")}</GroupLabel>
         <div className="space-y-1.5">
           <Select value={workspace} onValueChange={onWorkspaceChange}>
             <SelectTrigger className="w-full font-mono text-xs">
@@ -223,12 +215,17 @@ export function CorrelationFormFields({
               ))}
             </SelectContent>
           </Select>
+          {wsEmpty && (
+            <div className="flex items-center gap-1.5 text-xs text-amber">
+              <AlertCircle className="h-3.5 w-3.5" />{t("scan.fields.wsEmptyHintUser")}
+            </div>
+          )}
         </div>
       </section>
 
       {/* ② 仓库卡片列表 */}
       <section className="space-y-2.5">
-        <SectionLabel>{t("scan.correlation.reposSection")}</SectionLabel>
+        <GroupLabel>{t("scan.correlation.reposSection")}</GroupLabel>
         {!workspace ? (
           <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
         ) : (
@@ -336,7 +333,7 @@ export function CorrelationFormFields({
 
       {/* ③ relations 只读摘要（复杂拓扑在 YAML 中编辑） */}
       <section className="space-y-2">
-        <SectionLabel>{t("scan.correlation.relationsTitle")}</SectionLabel>
+        <GroupLabel>{t("scan.correlation.relationsTitle")}</GroupLabel>
         {state.relations.length === 0 ? (
           <div className="text-xs text-muted-foreground">{t("scan.correlation.relationsEmpty")}</div>
         ) : (
@@ -369,7 +366,7 @@ export function CorrelationFormFields({
       {/* ④ 黑盒验证（可选）：gateway URL + 复用共享 AuthFields/HostFields（gatewayUrl 非空时
           页面才把认证/HOST 写进提交 body——与白盒组合扫描同款 assign*ToBody）。 */}
       <section className="space-y-2.5 border-t border-border pt-4">
-        <SectionLabel>{t("scan.correlation.gatewayTitle")}</SectionLabel>
+        <GroupLabel>{t("scan.correlation.gatewayTitle")}</GroupLabel>
         <div className="space-y-1.5">
           <Label className="text-xs font-medium">{t("scan.correlation.gatewayLabel")}</Label>
           <Input

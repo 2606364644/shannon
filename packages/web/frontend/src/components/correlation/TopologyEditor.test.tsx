@@ -21,7 +21,7 @@ function state(): TopologyDraftState {
   return createTopologyDraft(["web", "order"], analysis, {});
 }
 
-it("supports SVG graph and accessible table editing parity", () => {
+it("supports SVG graph and accessible table editing parity", async () => {
   let current = state();
   const onState = (next: typeof current) => { current = next; };
   const { rerender } = render(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
@@ -36,15 +36,17 @@ it("supports SVG graph and accessible table editing parity", () => {
   rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
   expect(current.draft.nodes[0].roles).toEqual(["entrypoint"]);
 
-  const protocol = screen.getByRole("combobox", { name: "protocol" });
-  fireEvent.change(protocol, { target: { value: "http" } });
+  // 协议下拉：Radix Select 交互（click trigger → click option；原生 select 已换 ui/Select）
+  fireEvent.click(screen.getByRole("combobox", { name: "protocol" }));
+  fireEvent.click(await screen.findByRole("option", { name: "http" }));
   rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
   expect(current.draft.edges[0].protocol).toBe("http");
 
   fireEvent.click(screen.getAllByRole("button", { name: /delete edge/i }).at(-1)!);
   rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
   expect(current.draft.edges).toHaveLength(0);
-  fireEvent.change(screen.getByRole("combobox", { name: /select service|选择服务/i }), { target: { value: "payment" } });
+  fireEvent.click(screen.getByRole("combobox", { name: /select service|选择服务/i }));
+  fireEvent.click(await screen.findByRole("option", { name: "payment" }));
   fireEvent.click(screen.getByRole("button", { name: /add service|添加服务/i }));
   rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} />);
   expect(current.draft.nodes.some((node) => node.repo === "payment")).toBe(true);

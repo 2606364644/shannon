@@ -612,7 +612,9 @@
         "addNode": "Add service",
         "selectNode": "Select service",
         "removedAi": "Removed AI suggestions",
-        "restore": "Restore"
+        "restore": "Restore",
+        "canvasHint": "Drag nodes to rearrange; drag a node's ○ handle onto another node to add an edge",
+        "connectHandle": "Drag this handle to a target node to add an edge"
       },
       "colFrom": "From",
       "colTo": "To"

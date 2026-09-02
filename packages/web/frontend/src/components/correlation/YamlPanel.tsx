@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { CorrYamlError } from "@/lib/correlation-yaml";
@@ -22,8 +23,10 @@ export function YamlPanel({ yaml, onChange, error, onApply }: {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="text-xs font-medium text-primary hover:underline"
+        aria-expanded={open}
+        className="flex items-center gap-0.5 text-xs font-medium text-primary hover:underline"
       >
+        <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />
         {t("scan.correlation.yamlToggle")}
       </button>
       {open && (
