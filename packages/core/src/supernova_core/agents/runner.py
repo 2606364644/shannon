@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from supernova_core.models.errors import classify_error_for_temporal
 
+from .rate_limit_retry import call_with_rate_limit_retry
+
 if TYPE_CHECKING:
     from supernova_core.logging.activity_logger import ActivityLogger
     from supernova_core.agents.tool_audit_logger import ToolAuditLogger
@@ -224,21 +226,26 @@ async def run_claude_prompt(
         # 单测）no-op，零行为变化。
         from ..runtime.temporal_heartbeat import activity_heartbeat
         async with activity_heartbeat():
-            result = await provider.call(
-                prompt=prompt,
-                cwd=repo_path,
-                model_tier=model_tier,
-                output_format=output_format,
-                deliverables_subdir=deliverables_subdir,
-                audit_logger=active_tool_logger,
-                max_turns=max_turns,
-                collector=collector,
-                progress=progress,
-                proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
-                usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
-                tool_policy=tool_policy,
-                allowed_roots=allowed_roots,
-            )
+            # 统一 429 重试（全系统单点，2026-09-02 NodeGoat 429 整类丢弃事故）：
+            # 只重 RateLimitError、指数退避盖网关过载窗口；timeout 刻意不重、
+            # CancelledError 穿透——语义边界见 rate_limit_retry 模块 docstring。
+            # 置于 heartbeat 内：退避 sleep 期间心跳继续，activity 不被误判死。
+            result = await call_with_rate_limit_retry(
+                lambda: provider.call(
+                    prompt=prompt,
+                    cwd=repo_path,
+                    model_tier=model_tier,
+                    output_format=output_format,
+                    deliverables_subdir=deliverables_subdir,
+                    audit_logger=active_tool_logger,
+                    max_turns=max_turns,
+                    collector=collector,
+                    progress=progress,
+                    proxy_url=proxy_url,   # Task 4：per-scan 代理穿线 → CLI env / ToolContext
+                    usage_sink=usage_sink,   # cancel 兜底记账通道：provider cancel 分支写入
+                    tool_policy=tool_policy,
+                    allowed_roots=allowed_roots,
+                ))
 
         # 5. 检查花费上限行为
         if _is_spending_cap_behavior(result):

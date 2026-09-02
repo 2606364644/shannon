@@ -75,6 +75,8 @@ SUPERNOVA_MAX_CONCURRENT=4                 # 当前 .env 是 2；worker 8CPU/4G 
 # C. 抗网关抖动（2026-08-28 网关 5s 断连曾致补召回整层丢失）
 SUPERNOVA_LLM_TRANSIENT_RETRIES=2          # 默认 1
 SUPERNOVA_LLM_TRANSIENT_RETRY_DELAY=20     # 默认 10s
+SUPERNOVA_RATE_LIMIT_RETRIES=2             # (2026-09-02) 统一 429 重试（runner 层单点，全系统生效——NodeGoat-20260902 poc-agent-xss 429 整类丢失事故）。默认 2、0=关
+SUPERNOVA_RATE_LIMIT_BACKOFF_SECONDS=20    # 429 退避基数（指数 20/40s，上限 120s，单 agent 最多 +60s 量级，对 3h 总闸可忽略）
 
 # D. 认证预检（这个支持按工作区覆盖）
 SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS=600  # 3 次全超时白烧 30min 还会挡住组合扫描启动
@@ -89,7 +91,7 @@ SUPERNOVA_AUTH_VALIDATION_TIMEOUT_SECONDS=600  # 3 次全超时白烧 30min 还�
 | 项 | 现值 | 为什么别加 |
 |---|---|---|
 | Temporal 重试次数 | 全线 max 3 | 从 50→8→3 一路砍下来的：曾 50×6min≈5h 卡死、8×10min≈80min 卡死、PoC 重入 1h43m |
-| `SUPERNOVA_OPENAI_MAX_RETRIES` | 1 | 超时是幂等的，重试只是再超时一遍（曾 stall 4×300s≈20min 拖死主 agent） |
+| `SUPERNOVA_OPENAI_MAX_RETRIES` | 1 | 超时是幂等的，重试只是再超时一遍（曾 stall 4×300s≈20min 拖死主 agent）。429 重试已由 runner 层统一接管（2026-09-02，`rate_limit_retry.py`：只重 RateLimitError、timeout 不碰），本值维持 1 |
 | PRODUCTION_RETRY 退避 5min→30min | — | 保持。判链要优化的话是给它换短退避档，不是放大窗口 |
 
 另一句（2026-09-01 修订）：~~"当前 profile 是 glm-anthropic，OPENAI_* 不生效"~~ **不能按 profile 一刀切**——工作区层可覆盖 provider（`__legacy__` 工作区 8-31 18:23 起 `ai_provider: openai_compatible` + deepseek，当前扫描全走 openai 引擎，OPENAI_* 组**全部生效**）。判断哪组变量生效，看工作区 `config.yaml`/env 文本框的实际 provider，别看全局 profile。
