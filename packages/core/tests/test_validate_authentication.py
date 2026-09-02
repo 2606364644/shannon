@@ -902,3 +902,129 @@ async def test_auth_validation_forwards_provider_config_to_executor(tmp_path):
     assert result.success is True
     call_kwargs = mock_executor.execute.call_args.kwargs
     assert call_kwargs.get("provider_config") == provider_config
+
+
+# ---------------------------------------------------------------------------
+# 修复 A（2026-09-03）：playwright 引擎下认证登录走 per-scan HOST 代理。
+# 认证链路此前从不写引擎 config，而 playwright 代理唯一注入通道是 per-session
+# config 的 launchOptions.proxy（认证 session 固定 agent1）→ 登录 Chrome 直连 DNS。
+# agent-browser 代理走 session_flag --proxy（prompt 层已生效），无需准备。
+# ---------------------------------------------------------------------------
+
+def _auth_config_yaml(engine: str) -> str:
+    return (
+        f"browser_engine: {engine}\n"
+        "authentication: { login_type: form, login_url: https://x/login, "
+        "credentials: { username: u, password: p } }\n"
+    )
+
+
+def _read_agent1_config(repo_dir: Path) -> dict:
+    return json.loads(
+        (repo_dir / ".playwright" / "cli.config.agent1.json").read_text())
+
+
+class TestPrepareAuthEngineConfig:
+    def test_playwright_writes_agent1_config_with_proxy(self, tmp_path):
+        from supernova_core.services.validate_authentication import (
+            _prepare_auth_engine_config,
+        )
+        from supernova_core.config.parser import parse_config
+        from supernova_core.models.config import Config
+
+        cfg_file = tmp_path / "c.yaml"
+        cfg_file.write_text(_auth_config_yaml("playwright"))
+        cfg = parse_config(str(cfg_file))
+
+        _prepare_auth_engine_config(
+            config=cfg, repo_path=str(tmp_path),
+            proxy_url="http://127.0.0.1:8899")
+
+        data = _read_agent1_config(tmp_path)
+        assert data["browser"]["launchOptions"]["proxy"]["server"] == "http://127.0.0.1:8899"
+
+    def test_playwright_stale_config_rewritten_per_call(self, tmp_path):
+        """Batch 每 cred 各起独立 proxy：残留 config 指向已停代理 → 先清后写（force）。"""
+        from supernova_core.services.validate_authentication import (
+            _prepare_auth_engine_config,
+        )
+        from supernova_core.config.parser import parse_config
+
+        cfg_file = tmp_path / "c.yaml"
+        cfg_file.write_text(_auth_config_yaml("playwright"))
+        cfg = parse_config(str(cfg_file))
+
+        _prepare_auth_engine_config(
+            config=cfg, repo_path=str(tmp_path),
+            proxy_url="http://127.0.0.1:1111")
+        _prepare_auth_engine_config(
+            config=cfg, repo_path=str(tmp_path),
+            proxy_url="http://127.0.0.1:2222")
+
+        data = _read_agent1_config(tmp_path)
+        assert data["browser"]["launchOptions"]["proxy"]["server"] == "http://127.0.0.1:2222"
+
+    def test_playwright_without_proxy_still_writes_config(self, tmp_path):
+        """无 HOST 档案（proxy=None）→ 仍写 agent1 config（stealth 等其余配置照旧）。"""
+        from supernova_core.services.validate_authentication import (
+            _prepare_auth_engine_config,
+        )
+        from supernova_core.config.parser import parse_config
+
+        cfg_file = tmp_path / "c.yaml"
+        cfg_file.write_text(_auth_config_yaml("playwright"))
+        cfg = parse_config(str(cfg_file))
+
+        _prepare_auth_engine_config(
+            config=cfg, repo_path=str(tmp_path), proxy_url=None)
+
+        data = _read_agent1_config(tmp_path)
+        assert "proxy" not in data["browser"]["launchOptions"]
+
+    def test_agent_browser_writes_no_playwright_config(self, tmp_path):
+        from supernova_core.services.validate_authentication import (
+            _prepare_auth_engine_config,
+        )
+        from supernova_core.config.parser import parse_config
+
+        cfg_file = tmp_path / "c.yaml"
+        cfg_file.write_text(_auth_config_yaml("agent-browser"))
+        cfg = parse_config(str(cfg_file))
+
+        _prepare_auth_engine_config(
+            config=cfg, repo_path=str(tmp_path),
+            proxy_url="http://127.0.0.1:8899")
+
+        assert not (tmp_path / ".playwright").exists()
+
+
+@pytest.mark.asyncio
+async def test_validate_authentication_prepares_playwright_engine_config(tmp_path):
+    """集成：validate_authentication 走 playwright + proxy 时，agent 执行前已写好
+    agent1 session 引擎 config（此前认证链路从不写引擎 config）。"""
+    from supernova_core.prompts.manager import PromptManager
+
+    cfg_file = tmp_path / "c.yaml"
+    cfg_file.write_text(_auth_config_yaml("playwright"))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+
+    executor = MagicMock()
+    executor.execute = AsyncMock(return_value=AgentMetrics(
+        agent_name="validate-authentication", duration_ms=1,
+        input_tokens=0, output_tokens=0))
+    executor.execute.return_value.structured_output = {"login_success": True}
+
+    result = await validate_authentication(
+        web_url="https://x.com",
+        config_path=str(cfg_file),
+        workspace_path=str(ws),
+        prompt_manager=MagicMock(),
+        executor=executor,
+        repo_path=str(tmp_path / "repo"),
+        proxy_url="http://127.0.0.1:8899",
+    )
+
+    assert result.success is True
+    data = _read_agent1_config(tmp_path / "repo")
+    assert data["browser"]["launchOptions"]["proxy"]["server"] == "http://127.0.0.1:8899"

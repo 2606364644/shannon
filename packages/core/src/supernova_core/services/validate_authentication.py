@@ -79,6 +79,41 @@ def auth_state_path(workspace_path: str | Path, account_id: str | None = None) -
     return Path(workspace_path) / name
 
 
+# 认证 agent 的 sandbox cwd 兜底（无真实 repo 的认证探针路径）。
+# executor kwargs 与 cwd mkdir 共用同一口径，勿内联两份。
+AUTH_REPO_FALLBACK = "/tmp/shannon-auth-check"
+
+
+def _prepare_auth_engine_config(
+    *, config, repo_path: str, proxy_url: str | None,
+) -> None:
+    """认证登录前准备浏览器引擎配置（修复 A，2026-09-03）。
+
+    agent-browser：代理经 ``session_flag --proxy`` 注入（prompt 层已生效），
+    write_config 只建 profile 目录——无需准备，直接返回。
+
+    playwright：代理唯一注入通道是 per-session config 的 ``launchOptions.proxy``
+    ——认证链路（AuthValidationWorkflow / Batch / 主扫描 auth 段 / 组合 precheck）
+    此前从不写引擎 config，登录 Chrome 绕过 HOST 代理直连 DNS。认证 session 固定
+    ``agent1``（BROWSER_SESSION_MAPPING[VALIDATE_AUTH]，models/agents.py）。
+
+    写入用「先清后写」而非 write_config 的 skipped-existing 幂等：Batch 认证每
+    cred 各起独立 per-scan proxy（端口不同），残留 config 指向上一 cred 已停的
+    代理会让下一 cred 的登录 Chrome 连死端口。登录前清理 config+storage state
+    无害（本来就要重新登录）。
+    """
+    if not (config and config.browser_engine == "playwright"):
+        return
+    from supernova_core.models.agents import BROWSER_SESSION_MAPPING
+    from supernova_core.services.browser_engine import BrowserEngineFactory
+    import supernova_core.services.engines  # noqa: F401 – registers engines
+
+    session_id = BROWSER_SESSION_MAPPING.get(AgentName.VALIDATE_AUTH.value, "agent1")
+    engine = BrowserEngineFactory.get_engine("playwright")
+    engine.cleanup_config(repo_path, session_id=session_id)
+    engine.write_config(repo_path, session_id=session_id, proxy_url=proxy_url)
+
+
 async def cleanup_auth_state(workspace_path: str | Path) -> None:
     import glob as _glob
     import aiofiles.os
@@ -150,7 +185,7 @@ def _build_validate_auth_executor_kwargs(
     """
     return dict(
         agent_name=AgentName.VALIDATE_AUTH,
-        repo_path=repo_path or "/tmp/shannon-auth-check",
+        repo_path=repo_path or AUTH_REPO_FALLBACK,
         web_url=web_url,
         deliverables_path=deliverables_path,
         config_path=config_path,
@@ -226,7 +261,14 @@ async def validate_authentication(
     # pre-created — unlike whitebox/blackbox scans whose repo_path is a real repo
     # (always present). Without this the bash tool's chdir fails on the first command
     # (FileNotFoundError) and the agent deadlocks (2026-08-14 NodeGoat root cause).
-    Path(repo_path or "/tmp/shannon-auth-check").mkdir(parents=True, exist_ok=True)
+    agent_repo = repo_path or AUTH_REPO_FALLBACK
+    Path(agent_repo).mkdir(parents=True, exist_ok=True)
+
+    # 2c. 修复 A（2026-09-03）：playwright 引擎登录前写 agent1 session config（带
+    # per-scan proxy）。agent-browser 走 session_flag --proxy（no-op）。放在 Branch
+    # A/B 之前——两分支的 executor 调用共用同一份准备。
+    _prepare_auth_engine_config(
+        config=config, repo_path=agent_repo, proxy_url=proxy_url)
 
     # ── Branch A: 无 accounts → 原 byte-identical 单次登录路径，不落 manifest ──
     if not accounts:
