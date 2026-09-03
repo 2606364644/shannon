@@ -474,6 +474,141 @@ def test_read_linked_repos_corrupt_degrades_to_empty(tmp_path, monkeypatch):
     assert read_linked_repos(_ws_dir(tmp_path)) == []
 
 
+# ---- 关联仓库 checkout / pull / branches（spec 2026-09-04：admin-only 可写）----
+
+def _real_work_repo(p: Path) -> Path:
+    """真 git 工作仓（非假 .git 标志）：main/dev 两分支内容不同，bare origin 作 remote。"""
+    import subprocess
+    origin = p.parent / (p.name + ".origin.git")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    subprocess.run(["git", "clone", "-q", str(origin), str(p)], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "t"], check=True)
+    (p / "README.md").write_text("main content")
+    subprocess.run(["git", "-C", str(p), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-qm", "init"], check=True)
+    subprocess.run(["git", "-C", str(p), "push", "-q", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", str(p), "checkout", "-qb", "dev"], check=True)
+    (p / "README.md").write_text("dev content")
+    subprocess.run(["git", "-C", str(p), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-qm", "dev"], check=True)
+    subprocess.run(["git", "-C", str(p), "push", "-q", "origin", "dev"], check=True)
+    subprocess.run(["git", "-C", str(p), "checkout", "-q", "main"], check=True)
+    return p
+
+
+def _link_real_repo(tmp_path, monkeypatch, name="shared"):
+    rm = _rm(tmp_path, monkeypatch)
+    target = _real_work_repo(tmp_path / "external" / name)
+    rm.link_repo(WS, name, str(target))
+    return rm, target
+
+
+@pytest.mark.asyncio
+async def test_checkout_linked_switches_branch_without_writing_meta(tmp_path, monkeypatch):
+    """spec §4.2：linked checkout 直接切目标目录分支（跳过 fetch），共享目录零写入。"""
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    await rm.checkout(WS, "shared", "dev")
+    assert "dev content" in (target / "README.md").read_text()
+    # 共享目录零写入：不落 meta / events（spec §7 不变量）
+    assert not (target / ".supernova-repo.json").exists()
+    assert not (target / "clone.ndjson").exists()
+    # linked view 每次现读 .git → branch=dev
+    view = rm.get_repo(WS, "shared")
+    assert view["source"]["branch"] == "dev"
+
+
+@pytest.mark.asyncio
+async def test_checkout_linked_dirty_reports_git_message(tmp_path, monkeypatch):
+    """spec §4.2：dirty 工作树 checkout 被拒时如实带 git 原文（不再误报「分支不存在」）。"""
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    (target / "README.md").write_text("uncommitted local work")  # 与 dev 冲突的未提交改动
+    with pytest.raises(ValueError, match="本地有未提交改动") as excinfo:
+        await rm.checkout(WS, "shared", "dev")
+    assert "README.md" in str(excinfo.value)  # git 原文摘要在消息里
+
+
+@pytest.mark.asyncio
+async def test_checkout_linked_missing_branch_raises(tmp_path, monkeypatch):
+    """spec §4.2：分支（本地与 remotes 皆无）不存在 → ValueError（端点映射 422）。"""
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="分支不存在"):
+        await rm.checkout(WS, "shared", "no-such-branch")
+
+
+@pytest.mark.asyncio
+async def test_pull_linked_updates_worktree_synchronously(tmp_path, monkeypatch):
+    """spec §4.3：linked pull 同步 --ff-only——await 返回即完成（非私有仓的 202 后台
+    模式），共享目录零写入（不落 meta / events）。"""
+    import subprocess
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    # origin 侧追加一个 commit（helper 克隆 → commit → push）
+    origin = tmp_path / "external" / "shared.origin.git"
+    helper = tmp_path / "external" / "helper"
+    subprocess.run(["git", "clone", "-q", str(origin), str(helper)], check=True)
+    subprocess.run(["git", "-C", str(helper), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(helper), "config", "user.name", "t"], check=True)
+    (helper / "README.md").write_text("main content v2")
+    subprocess.run(["git", "-C", str(helper), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(helper), "commit", "-qm", "v2"], check=True)
+    subprocess.run(["git", "-C", str(helper), "push", "-q", "origin", "main"], check=True)
+    await rm.pull(WS, "shared")
+    # 同步语义：await 返回时工作树已更新
+    assert "main content v2" in (target / "README.md").read_text()
+    # 共享目录零写入（spec §7 不变量）
+    assert not (target / ".supernova-repo.json").exists()
+    assert not (target / "clone.ndjson").exists()
+
+
+@pytest.mark.asyncio
+async def test_list_branches_linked_merges_heads_and_remotes(tmp_path, monkeypatch):
+    """spec §4.4：linked 分支列表 = refs/heads ∪ refs/remotes/origin（strip 前缀去重、
+    本地名优先）——pull 后新分支只在 remotes，不合并则下拉看不到。"""
+    import subprocess
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    # 造仅存在于远端的分支：helper 建并 push，shared 不 fetch
+    origin = tmp_path / "external" / "shared.origin.git"
+    helper = tmp_path / "external" / "helper"
+    subprocess.run(["git", "clone", "-q", str(origin), str(helper)], check=True)
+    subprocess.run(["git", "-C", str(helper), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(helper), "config", "user.name", "t"], check=True)
+    subprocess.run(["git", "-C", str(helper), "checkout", "-qb", "feature"], check=True)
+    subprocess.run(["git", "-C", str(helper), "push", "-q", "origin", "feature"], check=True)
+    # spec §5.4 闭环：pull（隐含 fetch）后 origin/feature 才落 refs/remotes
+    await rm.pull(WS, "shared")
+    branches = await rm.list_branches(WS, "shared")
+    assert "main" in branches and "dev" in branches   # 本地 heads
+    assert "feature" in branches                       # pull 后仅存于 remotes 的新分支
+    assert "origin/feature" not in branches            # 去前缀、无重复
+    # spec §4.2 DWIM：仅 remotes 有的分支可直接 checkout（git 自动建本地跟踪分支）
+    await rm.checkout(WS, "shared", "feature")
+    assert (target / ".git" / "refs" / "heads" / "feature").exists()
+
+
+@pytest.mark.asyncio
+async def test_linked_git_subprocess_disables_terminal_prompt(tmp_path, monkeypatch):
+    """spec §4.5 安全护栏：linked 的 git 子进程必须带 GIT_TERMINAL_PROMPT=0——
+    .git/config 里的原始远端缺凭据时 git 默认等终端输入，进程挂死。"""
+    import supernova_web.components.repo_manager as rm_mod
+    calls: list[dict] = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def spy_exec(*argv, **kw):
+        calls.append({"argv": [str(a) for a in argv], "env": kw.get("env")})
+        return await real_exec(*argv, **kw)
+
+    monkeypatch.setattr(rm_mod.asyncio, "create_subprocess_exec", spy_exec)
+    rm, target = _link_real_repo(tmp_path, monkeypatch)
+    await rm.checkout(WS, "shared", "dev")
+    await rm.list_branches(WS, "shared")
+    linked_calls = [c for c in calls
+                    if c["argv"][:1] == ["git"] and str(target) in c["argv"]]
+    assert linked_calls, "应捕获到作用于 linked 目录的 git 子进程"
+    for c in linked_calls:
+        assert c["env"] is not None
+        assert c["env"].get("GIT_TERMINAL_PROMPT") == "0"
+
+
 # ---- 批量关联目录（link_repos_in_dir）----
 
 def _git_dir(p: Path) -> Path:

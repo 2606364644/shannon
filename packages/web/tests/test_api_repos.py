@@ -206,16 +206,86 @@ def test_delete_linked_unlinks_keeps_files(tmp_path, monkeypatch):
     assert target.exists() and (target / "README.md").exists()  # 源文件未删
 
 
+def _real_ext_repo(tmp_path, name="shared"):
+    """真 git 工作仓（main/dev 两分支、bare origin 作 remote、dev 带 upstream）——
+    linked 可写 API 测试用（spec 2026-09-04）。"""
+    import subprocess
+    target = tmp_path / "external" / name
+    origin = tmp_path / "external" / f"{name}.origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    subprocess.run(["git", "clone", "-q", str(origin), str(target)], check=True)
+    for cfg in (("user.email", "t@t.t"), ("user.name", "t")):
+        subprocess.run(["git", "-C", str(target), "config", *cfg], check=True)
+    (target / "README.md").write_text("main content")
+    subprocess.run(["git", "-C", str(target), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(target), "commit", "-qm", "init"], check=True)
+    subprocess.run(["git", "-C", str(target), "push", "-q", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", str(target), "checkout", "-qb", "dev"], check=True)
+    (target / "README.md").write_text("dev content")
+    subprocess.run(["git", "-C", str(target), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(target), "commit", "-qm", "dev"], check=True)
+    subprocess.run(["git", "-C", str(target), "push", "-q", "-u", "origin", "dev"], check=True)
+    subprocess.run(["git", "-C", str(target), "checkout", "-q", "main"], check=True)
+    return target
+
+
 def test_pull_and_checkout_linked_405(tmp_path, monkeypatch):
-    target = _ext_repo(tmp_path)
+    """[2026-09-04 spec 推翻旧断言] 旧：linked 只读 405。新：admin 可写、ws 成员 403。
+    保留函数名改语义同 TDD 改写；详见 spec 2026-09-04 §5。"""
+    target = _real_ext_repo(tmp_path)
     app = _app(tmp_path, monkeypatch, {})
     app.state.repo_manager.link_repo(WS, "ftoa", str(target))
-    client = _authed(app)
-    tok = _csrf(client)
-    assert client.post(f"{BASE}/ftoa/pull", headers={"X-CSRF-Token": tok}).status_code == 405
-    r = client.post(f"{BASE}/ftoa/checkout", json={"branch": "main"},
-                    headers={"X-CSRF-Token": tok})
-    assert r.status_code == 405
+    admin = _authed(app)
+    tok = _csrf(admin)
+    # admin：branches（含 dev）→ checkout → pull 全通
+    r = admin.get(f"{BASE}/ftoa/branches")
+    assert r.status_code == 200
+    assert "dev" in r.json()["branches"]
+    r = admin.post(f"{BASE}/ftoa/checkout", json={"branch": "dev"},
+                   headers={"X-CSRF-Token": tok})
+    assert r.status_code == 200
+    assert "dev content" in (target / "README.md").read_text()
+    assert admin.post(f"{BASE}/ftoa/pull", headers={"X-CSRF-Token": tok}).status_code == 202
+    # 共享目录零写入（spec §7）
+    assert not (target / ".supernova-repo.json").exists()
+    # ws 成员（user 角色）：三端点 403（admin-only），且打不改文件
+    from supernova_web.auth.passwords import hash_password
+    store = app.state.auth_store
+    if store.get_user_by_username("member") is None:
+        store.create_user("member", hash_password("test-pw"), role="user")
+    store.ensure_workspace_member(WS, store.get_user_by_username("member").id, "member")
+    member = TestClient(app)
+    mtok = member.get("/api/auth/csrf").json()["csrf_token"]
+    member.post("/api/auth/login", json={"username": "member", "password": "test-pw"},
+                headers={"X-CSRF-Token": mtok})
+    assert member.get(f"{BASE}/ftoa/branches").status_code == 403
+    assert member.post(f"{BASE}/ftoa/pull", headers={"X-CSRF-Token": mtok}).status_code == 403
+    assert member.post(f"{BASE}/ftoa/checkout", json={"branch": "main"},
+                       headers={"X-CSRF-Token": mtok}).status_code == 403
+    assert "dev content" in (target / "README.md").read_text()
+
+
+def test_checkout_linked_scan_ref_409_and_dirty_422(tmp_path, monkeypatch):
+    """spec §5.3 错误档：扫描引用中 checkout → 409；dirty 冲突 → 422 带 git 原文。"""
+    target = _real_ext_repo(tmp_path)
+    app = _app(tmp_path, monkeypatch, {})
+    app.state.repo_manager.link_repo(WS, "ftoa", str(target))
+    admin = _authed(app)
+    tok = _csrf(admin)
+    # 扫描引用锁（spec 2026-08-21 §2b 同款，linked 直读共享路径同样适用）
+    app.state.scan_manager.active_repo_sources = lambda: {(WS, "ftoa")}
+    r = admin.post(f"{BASE}/ftoa/checkout", json={"branch": "dev"},
+                   headers={"X-CSRF-Token": tok})
+    assert r.status_code == 409
+    assert "扫描" in r.json()["detail"]
+    # 解除引用 → dirty 冲突 422（git 原文在 detail）
+    app.state.scan_manager.active_repo_sources = lambda: set()
+    (target / "README.md").write_text("dirty local work")
+    r = admin.post(f"{BASE}/ftoa/checkout", json={"branch": "dev"},
+                   headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+    assert "未提交改动" in r.json()["detail"]
+    assert "README.md" in r.json()["detail"]
 
 
 @pytest.mark.asyncio

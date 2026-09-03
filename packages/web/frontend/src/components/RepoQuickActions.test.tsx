@@ -1,9 +1,11 @@
 /** RepoQuickActions（2026-09-03 仓库入口整合 C 段）：扫描表单选中仓库后的快捷
  *  操作条——当前分支切换（checkout）+ 更新（pull），免去跑去仓库页。
- *  linked 只读不渲染；upload 无 pull（静态快照）但保留本地分支切换。 */
+ *  linked 非 admin 不渲染（admin-only，spec 2026-09-04）；upload 无 pull（静态
+ *  快照）但保留本地分支切换。 */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { SWRConfig } from "swr";
+import { AuthProvider } from "@/auth/AuthContext";
 import { RepoQuickActions } from "./RepoQuickActions";
 
 vi.mock("react-i18next", () => {
@@ -31,11 +33,18 @@ const GIT_REPO = {
   source: { kind: "git", url: "https://gitlab.example/nodegoat.git", branch: "main" },
 };
 
-function renderActions(repo: typeof GIT_REPO, ws = "ws1") {
+function renderActions(repo: typeof GIT_REPO, ws = "ws1", role = "user",
+                       responses: Record<string, { status: number; body: unknown }> = {}) {
+  mockFetch({
+    "/auth/me": { status: 200, body: { user: { id: 1, username: "alice", role } } },
+    ...responses,
+  });
   return render(
-    <SWRConfig value={{ provider: () => new Map() }}>
-      <RepoQuickActions workspace={ws} repo={repo as never} />
-    </SWRConfig>,
+    <AuthProvider>
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <RepoQuickActions workspace={ws} repo={repo as never} />
+      </SWRConfig>
+    </AuthProvider>,
   );
 }
 
@@ -44,11 +53,10 @@ afterEach(() => { vi.restoreAllMocks(); cleanup(); });
 
 describe("RepoQuickActions", () => {
   it("ready git 仓库：渲染当前分支（BranchCombobox）+ 更新按钮；点更新 → POST pull → toast + 延迟刷新 repos", async () => {
-    mockFetch({
+    renderActions(GIT_REPO, "ws1", "user", {
       "/repos/nodegoat/pull": { status: 202, body: { pulling: "nodegoat" } },
       "/repos": { status: 200, body: [] },
     });
-    renderActions(GIT_REPO);
     expect(screen.getByText("main")).toBeTruthy();
     const btn = screen.getByTestId("repo-pull-btn");
     fireEvent.click(btn);
@@ -64,12 +72,11 @@ describe("RepoQuickActions", () => {
   });
 
   it("切分支 → POST checkout → 成功 toast + repos 立即刷新", async () => {
-    mockFetch({
+    renderActions(GIT_REPO, "ws1", "user", {
       "/repos/nodegoat/branches": { status: 200, body: { branches: ["dev", "main"] } },
       "/repos/nodegoat/checkout": { status: 200, body: { checked_out: "dev" } },
       "/repos": { status: 200, body: [] },
     });
-    renderActions(GIT_REPO);
     fireEvent.click(screen.getByLabelText("repoDetail.switchAria"));
     const dev = await screen.findByText("dev");
     fireEvent.click(dev);
@@ -85,19 +92,17 @@ describe("RepoQuickActions", () => {
   });
 
   it("checkout 409（被扫描引用）→ toast 错误", async () => {
-    mockFetch({
+    renderActions(GIT_REPO, "ws1", "user", {
       "/repos/nodegoat/branches": { status: 200, body: { branches: ["dev", "main"] } },
       "/repos/nodegoat/checkout": { status: 409, body: { detail: "仓库正被扫描引用" } },
       "/repos": { status: 200, body: [] },
     });
-    renderActions(GIT_REPO);
     fireEvent.click(screen.getByLabelText("repoDetail.switchAria"));
     fireEvent.click(await screen.findByText("dev"));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
   });
 
   it("upload 仓库：无更新按钮（静态快照不可 pull），保留分支切换", () => {
-    mockFetch({});
     renderActions({
       ...GIT_REPO,
       source: { kind: "upload", url: "", branch: "main" },
@@ -106,10 +111,34 @@ describe("RepoQuickActions", () => {
     expect(screen.getByText("main")).toBeTruthy(); // 分支切换仍在
   });
 
-  it("linked 仓库：不渲染任何操作（只读共享路径）", () => {
-    mockFetch({});
+  it("linked 仓库（非 admin）：不渲染任何操作（admin-only，spec 2026-09-04）", () => {
     const { container } = renderActions({ ...GIT_REPO, linked: true });
     expect(screen.queryByTestId("repo-quick-actions")).toBeNull();
     expect(container.textContent).toBe("");
+  });
+
+  it("linked 仓库（admin）：渲染分支切换 + 更新按钮（spec 2026-09-04）", async () => {
+    renderActions({ ...GIT_REPO, linked: true, source: { kind: "linked", url: "", branch: "main" } },
+                  "ws1", "admin");
+    await waitFor(() => expect(screen.getByTestId("repo-quick-actions")).toBeTruthy());
+    expect(screen.getByText("main")).toBeTruthy();          // BranchCombobox 当前分支
+    expect(screen.getByTestId("repo-pull-btn")).toBeTruthy(); // pull 也在
+  });
+
+  it("checkout 422 dirty 冲突 → toast 透出后端 detail（git 原文，spec 2026-09-04 §6）", async () => {
+    renderActions(GIT_REPO, "ws1", "user", {
+      "/repos/nodegoat/branches": { status: 200, body: { branches: ["dev", "main"] } },
+      "/repos/nodegoat/checkout": {
+        status: 422,
+        body: { detail: "本地有未提交改动与目标分支冲突：README.md would be overwritten" },
+      },
+      "/repos": { status: 200, body: [] },
+    });
+    fireEvent.click(screen.getByLabelText("repoDetail.switchAria"));
+    fireEvent.click(await screen.findByText("dev"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const msg = String(vi.mocked(toast.error).mock.calls[0]?.[0]);
+    expect(msg).toContain("未提交改动");   // 后端 detail 直显，非「分支不存在」误导
+    expect(msg).toContain("README.md");
   });
 });

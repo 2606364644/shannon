@@ -92,6 +92,8 @@ interface Props {
 export function ReposTab({ workspace: wsProp }: Props) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  // linked 写操作 admin-only（spec 2026-09-04 §6）：非 admin 对 linked 仍只读
+  const isAdmin = user?.role === "admin";
   const params = useParams<{ workspace: string }>();
   const workspace = wsProp ?? params.workspace ?? "";
   const [addOpen, setAddOpen] = useState(false);
@@ -173,12 +175,17 @@ export function ReposTab({ workspace: wsProp }: Props) {
       if (pullTimerRef.current) clearTimeout(pullTimerRef.current);
       pullTimerRef.current = setTimeout(() => void refresh(), PULL_REFRESH_DELAY_MS);
     } catch (e) {
-      if (e instanceof ApiError) toast.error(t("repos.errors.updateFailed", { status: e.status }));
+      if (e instanceof ApiError) {
+        // 后端 detail（linked pull 失败/超时带 git 原文，spec 2026-09-04 §5.3）优先透出
+        const detail = (e.body as { detail?: string } | null)?.detail;
+        toast.error(detail ?? t("repos.errors.updateFailed", { status: e.status }));
+      }
     }
   }
 
-  // 切换分支（spec 2026-08-21 §3）：后端 checkout + meta 回写，刷新取新 branch/commit。
-  // 409=被扫描引用（与删除同文案）；422=分支不存在；405 不会到这（linked 行不渲染下拉）。
+  // 切换分支（spec 2026-08-21 §3；linked 放开见 spec 2026-09-04）：后端 checkout，
+  // 私有仓 meta 回写 / linked 现读 .git，刷新取新 branch/commit。
+  // 409=被扫描引用（与删除同文案）；422=分支不存在或 dirty 冲突（detail 优先）。
   async function doCheckout(name: string, branch: string) {
     try {
       await checkoutRepo(workspace, name, branch);
@@ -190,7 +197,9 @@ export function ReposTab({ workspace: wsProp }: Props) {
           e.status === 409
             ? t("repos.errors.inUse")
             : e.status === 422
-              ? t("repoDetail.errors.branchNotFound", { branch })
+              // 后端 detail 优先（dirty 冲突带 git 原文；分支不存在带分支名，spec 2026-09-04 §4.2）
+              ? ((e.body as { detail?: string } | null)?.detail
+                  ?? t("repoDetail.errors.branchNotFound", { branch }))
               : t("repoDetail.errors.checkoutFailed", { status: e.status }),
         );
       }
@@ -359,15 +368,15 @@ export function ReposTab({ workspace: wsProp }: Props) {
                           </span>
                         )}
                       </TableCell>
-                      {/* 分支列：ready+私有仓（git 克隆 / upload）→ 行内切换下拉（点开 lazy
-                          拉分支——clone 问远端、upload 枚举本地 refs，手输兜底）；linked（后端
-                          405）/ 非 ready 退化为只读文本 */}
+                      {/* 分支列：ready+私有仓（git 克隆 / upload）或 linked+admin → 行内切换
+                          下拉（点开 lazy 拉分支——clone 问远端、upload/linked 枚举本地 refs，
+                          手输兜底）；linked 且非 admin / 非 ready 退化为只读文本（spec 2026-09-04） */}
                       <TableCell className="py-2.5 px-3">
-                        {!r.linked && r.state === "ready" && (r.source?.kind === "git" || r.source?.kind === "upload") ? (
+                        {r.state === "ready" && (r.source?.kind === "git" || r.source?.kind === "upload" || (r.linked && isAdmin)) ? (
                           <BranchCombobox
                             ws={workspace}
                             repo={r.name}
-                            value={r.source.branch ?? null}
+                            value={r.source?.branch ?? null}
                             onSwitch={(b) => doCheckout(r.name, b)}
                           />
                         ) : (
@@ -386,8 +395,9 @@ export function ReposTab({ workspace: wsProp }: Props) {
                       <TableCell className="py-2.5 px-3 text-center">
                         <span className="inline-flex justify-center gap-1">
                           {/* 空壳目录（empty）无更新入口——pull 对其必报"仓库不存在"；
-                              upload 仓是静态快照（后端 405），更新走重新上传 */}
-                          {!r.linked && r.state !== "empty" && r.source?.kind !== "upload" && (
+                              upload 仓是静态快照（后端 405），更新走重新上传；linked
+                              共享路径可写但 admin-only（spec 2026-09-04 §6） */}
+                          {(isAdmin || !r.linked) && r.state !== "empty" && r.source?.kind !== "upload" && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button

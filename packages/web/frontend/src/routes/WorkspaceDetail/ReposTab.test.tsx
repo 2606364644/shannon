@@ -219,12 +219,12 @@ describe("ReposTab", () => {
 
   // ---- 分支列行内切换（spec 2026-08-21 §3）：ready+git+私有克隆 → BranchCombobox ----
 
-  function mockFetchByRoute(handlers: Record<string, unknown>) {
+  function mockFetchByRoute(handlers: Record<string, unknown>, role = "user") {
     const fm = vi.spyOn(window, "fetch");
     fm.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : (input as Request).url;
       if (url.includes("/auth/me")) {
-        return new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 });
+        return new Response(JSON.stringify({ user: { id: 1, username: "alice", role } }), { status: 200 });
       }
       for (const [frag, body] of Object.entries(handlers)) {
         if (url.includes(frag)) return new Response(JSON.stringify(body), { status: 200 });
@@ -248,6 +248,18 @@ describe("ReposTab", () => {
     expect(screen.getByText("main")).toBeTruthy();
     // linked：无切换入口（后端 405），只有一处 switchAria（私有克隆行）
     expect(screen.getAllByLabelText("repoDetail.switchAria")).toHaveLength(1);
+  });
+
+  it("分支列：admin 看 linked 仓库渲染切换下拉 + 更新按钮（spec 2026-09-04）", async () => {
+    mockFetchByRoute({ "/repos": [
+      { name: "ftoa", linked: true, state: "ready", source: { kind: "linked", branch: "main" } },
+    ] }, "admin");
+    render(
+      <AuthProvider><SWRConfig value={{ provider: () => new Map() }}><MemoryRouter><ReposTab workspace="ws1" /></MemoryRouter></SWRConfig></AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("ftoa")).toBeTruthy());
+    expect(screen.getByLabelText("repoDetail.switchAria")).toBeTruthy(); // admin：linked 也有切换下拉
+    expect(screen.getByLabelText("repos.updateAria")).toBeTruthy();     // admin：linked 也有更新(pull)
   });
 
   it("分支列：非 ready（cloning）保持只读，不渲染下拉", async () => {

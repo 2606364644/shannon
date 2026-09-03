@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from supernova_web.auth.dependencies import require_admin, workspace_member
+from supernova_web.auth.dependencies import current_user, require_admin, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 from supernova_web.components.link_resolver import (
@@ -26,6 +26,21 @@ from supernova_web.components.repo_manager import (
 )
 
 router = APIRouter(prefix="/api/workspaces", tags=["repos"])
+
+
+def repo_write_guard(request: Request, ws: str, name: str,
+                     user: User = Depends(current_user)) -> User:
+    """仓库写操作权限（spec 2026-09-04 §5.2）：linked → admin-only，私有仓 → ws 成员。
+
+    linked 是共享路径（admin 关联的宿主任意目录），写操作（checkout/pull）收紧到
+    与 link 同级，避免 member 借道改动。先做 workspace_member 同款校验（ws 名合法 +
+    成员），linked 再查 admin。
+    """
+    member = workspace_member(request, ws, user=user)
+    rm = request.app.state.repo_manager
+    if rm._is_linked(ws, name) and user.role != "admin":
+        raise HTTPException(403, "admin required")
+    return member
 
 
 class CreateRepoBody(BaseModel):
@@ -296,19 +311,18 @@ async def repo_events(ws: str, name: str, request: Request,
 
 @router.get("/{ws}/repos/{name:path}/branches")
 async def list_repo_branches(ws: str, name: str, request: Request,
-                             _: User = Depends(workspace_member)):
+                             _: User = Depends(repo_write_guard)):
     """列分支（分支列 combobox 数据源）：clone 仓 ls-remote 问远端，upload 仓
-    枚举本地 refs（纯本地，无凭据需求）。
+    枚举本地 refs（纯本地，无凭据需求），linked 仓 heads ∪ remotes 合并（spec
+    2026-09-04 §4.4）。
 
-    错误分档：仓库级 404/405/409（对齐 pull/checkout）；ls-remote 是网络调用，
+    错误分档：仓库级 404/409；ls-remote / 本地枚举是网络或仓库级调用，
     失败/超时 → 502（前端降级为手输分支名），区别于服务器错误 500。
     声明须在 GET /{name:path} 之前——{name:path} 贪婪匹配会吞掉 /branches 后缀。
     """
     rm = request.app.state.repo_manager
     if rm.get_repo(ws, name) is None:
         raise HTTPException(404, "repo not found")
-    if rm._is_linked(ws, name):
-        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
     try:
         branches = await rm.list_branches(ws, name)
     except ValueError as e:        # clone/pull 忙碌
@@ -345,28 +359,27 @@ async def delete_repo(ws: str, name: str, request: Request,
 
 @router.post("/{ws}/repos/{name:path}/pull", status_code=202)
 async def pull_repo(ws: str, name: str, request: Request,
-                    _: User = Depends(workspace_member)):
+                    _: User = Depends(repo_write_guard)):
     rm = request.app.state.repo_manager
-    if rm._is_linked(ws, name):
-        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
     if rm._is_upload(ws, name):
         raise HTTPException(405, "上传仓库为静态快照，不可 pull（请重新上传更新）")
     try:
         await rm.pull(ws, name)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    except RuntimeError as e:  # linked pull 失败/超时（spec 2026-09-04 §5.3）
+        raise HTTPException(502, str(e))
     return {"pulling": name}
 
 
 @router.post("/{ws}/repos/{name:path}/checkout")
 async def checkout_repo(ws: str, name: str, body: CheckoutBody, request: Request,
-                        _: User = Depends(workspace_member)):
+                        _: User = Depends(repo_write_guard)):
     rm = request.app.state.repo_manager
     sm = request.app.state.scan_manager
-    if rm._is_linked(ws, name):
-        raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
-    # 扫描 worker 直读仓库工作树（共享 volume）：运行中切换会让 worker 读到混合
-    # 分支代码 → 与 delete 同款引用锁拒绝（spec 2026-08-21 §2b）。
+    # 扫描 worker 直读仓库工作树（共享 volume，linked 同样直读共享路径）：运行中
+    # 切换会让 worker 读到混合分支代码 → 与 delete 同款引用锁拒绝（spec 2026-08-21
+    # §2b；linked 覆盖见 spec 2026-09-04 §5.3）。
     if (ws, name) in sm.active_repo_sources():
         raise HTTPException(409, "仓库正被扫描引用")
     try:

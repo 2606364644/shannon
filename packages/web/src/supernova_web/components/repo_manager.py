@@ -118,6 +118,16 @@ class RepoExists(Exception):
         super().__init__(f"仓库已存在：{name}")
 
 
+def _no_prompt_env() -> dict:
+    """linked git 子进程 env（spec 2026-09-04 §4.5）：GIT_TERMINAL_PROMPT=0。
+
+    linked 的 .git/config 存原始远端 URL，凭据不在 supernova 体系——缺凭据时 git
+    默认等终端输入，进程挂死；继承当前 env 再覆写（不动 PATH/HOME 等）。私有 clone
+    管线不设（凭据在 URL 里不触发，行为不变）。
+    """
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+
 class UploadTooLarge(Exception):
     """上传 zip 文件本体超过大小上限（→ API 413）。"""
     def __init__(self, size: int, limit: int) -> None:
@@ -521,6 +531,9 @@ class RepoManager:
             self._job_phase.pop((ws, name), None)
 
     async def pull(self, ws: str, name: str) -> None:
+        if self._is_linked(ws, name):
+            await self._pull_linked(ws, name)
+            return
         target = self._repo_dir(ws, name)
         if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
@@ -547,6 +560,38 @@ class RepoManager:
         finally:
             self._jobs.pop((ws, name), None)
             self._job_phase.pop((ws, name), None)
+
+    # linked pull 超时上限（spec 2026-09-04 §4.3）：同步等待防悬挂；远端凭据不在
+    # supernova 体系，慢网/大仓可能久等，超时如实报（端点 502）。
+    LINKED_PULL_TIMEOUT_S = 120
+
+    async def _pull_linked(self, ws: str, name: str) -> None:
+        """linked pull（spec 2026-09-04 §4.3）：请求内同步 --ff-only。
+
+        不复用私有仓的 202 + _run_git_with_progress 后台管线——那套的 clone.ndjson /
+        meta / size 全写私有 clone 目录，对共享路径 = 污染用户目录（spec §7 零写入）。
+        失败 / 超时 → RuntimeError（端点映射 502 带 stderr 摘要）。并发保护靠 git 自身
+        index.lock 串行化（与 _checkout_linked 同约定，不引入锁）。
+        """
+        raw = resolve_linked_repo_path(self._workspaces_dir, ws, name)
+        if raw is None:
+            raise ValueError(f"仓库不存在：{name}")
+        target = Path(raw)
+        if not target.is_dir() or not _is_repo(target):
+            raise ValueError(f"仓库不存在：{name}")
+        if (ws, name) in self._jobs:
+            raise ValueError(f"仓库正忙：{name}")
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(target), "pull", "--ff-only",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=_no_prompt_env())
+        try:
+            _, err = await asyncio.wait_for(proc.communicate(), self.LINKED_PULL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise RuntimeError(f"pull 超时（> {self.LINKED_PULL_TIMEOUT_S}s），请在本地执行")
+        if proc.returncode != 0:
+            raise RuntimeError(f"pull 失败：{err.decode(errors='replace').strip()[:200]}")
 
     # ---- 上传 ZIP（upload repos）----
     async def upload_zip(self, ws: str, zip_path: Path, filename: str,
@@ -682,6 +727,9 @@ class RepoManager:
 
     # ---- checkout / delete ----
     async def checkout(self, ws: str, name: str, branch: str) -> None:
+        if self._is_linked(ws, name):
+            await self._checkout_linked(ws, name, branch)
+            return
         target = self._repo_dir(ws, name)
         if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
@@ -708,6 +756,33 @@ class RepoManager:
         src["branch"] = branch; src["commit"] = head
         self._write_meta(ws, name, source=src)
 
+    async def _checkout_linked(self, ws: str, name: str, branch: str) -> None:
+        """linked checkout（spec 2026-09-04 §4.2）：直接切目标目录分支。
+
+        跳过 fetch——linked 远端凭据不在 supernova 凭据体系（非本系统 clone，
+        .git/config 存原始 URL），fetch 会交互式挂起；仅 refs/remotes 有该分支时
+        git checkout 的 DWIM 自动建本地跟踪分支。共享目录零写入：不回写 meta
+        （_linked_repo_view 每次现读 .git 推断 branch，切完刷新即见）。
+        """
+        raw = resolve_linked_repo_path(self._workspaces_dir, ws, name)
+        if raw is None:
+            raise ValueError(f"仓库不存在：{name}")
+        target = Path(raw)
+        if not target.is_dir() or not _is_repo(target):
+            raise ValueError(f"仓库不存在：{name}")
+        if (ws, name) in self._jobs:
+            raise ValueError(f"仓库正忙：{name}")
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(target), "checkout", branch,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=_no_prompt_env())
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            text = err.decode(errors="replace").strip()
+            if "would be overwritten" in text or "Please commit" in text:
+                raise ValueError(f"本地有未提交改动与目标分支冲突：{text[:200]}")
+            raise ValueError(f"分支不存在：{branch}")
+
     # ls-remote 是网络调用（问远端，不依赖本地 ref），大仓/慢网需上限防悬挂
     LS_REMOTE_TIMEOUT_S = 15
 
@@ -722,6 +797,16 @@ class RepoManager:
         错误约定（branches 端点映射）：仓库不存在/忙 → ValueError；ls-remote /
         本地枚举失败、超时 → RuntimeError（前端降级手输）。
         """
+        if self._is_linked(ws, name):
+            raw = resolve_linked_repo_path(self._workspaces_dir, ws, name)
+            if raw is None:
+                raise ValueError(f"仓库不存在：{name}")
+            linked_target = Path(raw)
+            if not linked_target.is_dir() or not _is_repo(linked_target):
+                raise ValueError(f"仓库不存在：{name}")
+            if (ws, name) in self._jobs:
+                raise ValueError(f"仓库正忙：{name}")
+            return await self._list_branches_linked(linked_target)
         target = self._repo_dir(ws, name)
         if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
@@ -751,6 +836,34 @@ class RepoManager:
         return sorted({ln.split("\t")[1][len("refs/heads/"):]
                        for ln in out.decode(errors="replace").splitlines()
                        if "\trefs/heads/" in ln})
+
+    async def _list_branches_linked(self, target: Path) -> list[str]:
+        """linked 分支枚举（spec 2026-09-04 §4.4）：refs/heads ∪ refs/remotes/origin。
+
+        纯本地 for-each-ref（同 upload 路径），不问远端——linked 凭据不在体系；
+        remotes 条目 strip ``origin/`` 前缀去重（for-each-ref 字典序 heads 先出，
+        本地名优先天然成立）。origin/HEAD 符号引用跳过。失败 → RuntimeError
+        （端点 502，前端降级手输）。
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(target), "for-each-ref",
+            "refs/heads", "refs/remotes/origin", "--format=%(refname:short)",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=_no_prompt_env())
+        out, err = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"本地分支枚举失败：{err.decode(errors='replace').strip()[:200]}")
+        names: list[str] = []
+        seen: set[str] = set()
+        for ln in out.decode(errors="replace").splitlines():
+            short = ln.strip().removeprefix("origin/")
+            if not short or short == "HEAD":
+                continue
+            if short not in seen:
+                seen.add(short)
+                names.append(short)
+        return names
 
     async def delete(self, ws: str, name: str) -> None:
         if (ws, name) in self._jobs:

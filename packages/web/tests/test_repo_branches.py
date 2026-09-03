@@ -156,13 +156,19 @@ def test_branches_endpoint_404(tmp_path, monkeypatch):
     assert client.get(f"{BASE}/ghost/branches").status_code == 404
 
 
-def test_branches_endpoint_405_linked(tmp_path, monkeypatch):
-    from tests.test_api_repos import _ext_repo
-    target = _ext_repo(tmp_path)
+def test_branches_endpoint_linked_admin_ok_member_403(tmp_path, monkeypatch):
+    """[2026-09-04 spec 撤 405] linked branches：admin 200（heads∪remotes 本地枚举），
+    非 admin 403（repo_write_guard admin-only）。旧断言 405 已被 spec 2026-09-04 推翻。"""
+    from tests.test_api_repos import _real_ext_repo, _authed_as
+    target = _real_ext_repo(tmp_path, "shared")
     app = _app(tmp_path, monkeypatch, {})
     app.state.repo_manager.link_repo(WS, "ftoa", str(target))
     client = _authed(app)
-    assert client.get(f"{BASE}/ftoa/branches").status_code == 405
+    r = client.get(f"{BASE}/ftoa/branches")
+    assert r.status_code == 200
+    assert {"main", "dev"} <= set(r.json()["branches"])
+    member = _authed_as(app, "member", "user")
+    assert member.get(f"{BASE}/ftoa/branches").status_code == 403
 
 
 async def test_branches_endpoint_409_busy(tmp_path, monkeypatch):
