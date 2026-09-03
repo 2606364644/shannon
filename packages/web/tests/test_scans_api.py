@@ -775,6 +775,50 @@ def test_get_scan_detail_exposes_host_source_for_rerun(authed_client, tmp_worksp
     assert d["host_mapping_count"] == 2
 
 
+def test_scan_detail_exposes_combined_rerun_fields(authed_client, tmp_workspaces):
+    """组合扫描 detail 返 bb_url + 认证档案引用（bb_auth_ref），供重跑预填黑盒段。
+
+    D3 黑盒并入组合扫描后，列表行「重跑」是重建黑盒段的唯一路径——目标 url 与
+    profile 模式认证档案（非敏感 profile_id/cred_ids 引用）须随 detail 暴露。
+    前端 RerunPreset（authProfileId/authCredentialIds/url）早已就位等这组字段。
+    """
+    _make_scan(
+        tmp_workspaces,
+        "WS",
+        scan_id="s-comb",
+        combined=True,
+        bb_url="https://target.example.com",
+        bb_auth_ref={"profile_id": "auth_profile_1", "cred_id": None,
+                     "cred_ids": ["cred-a", "cred-b"]},
+    )
+    d = authed_client.get("/api/workspaces/WS/scans/s-comb").json()
+    assert d["bb_url"] == "https://target.example.com"
+    assert d["auth_profile_id"] == "auth_profile_1"
+    assert d["auth_credential_ids"] == ["cred-a", "cred-b"]
+
+
+def test_scan_detail_combined_rerun_fields_inline_and_absent(authed_client, tmp_workspaces):
+    """inline 认证（bb_auth_ref.profile_id=None）-> 档案字段 None + cred_ids 归一 []；
+    纯白盒（无 bb_url/bb_auth_ref）-> 全空——不阻塞详情、不误导预填。"""
+    _make_scan(
+        tmp_workspaces, "WS", scan_id="s-inline",
+        combined=True, bb_url="https://target.example.com",
+        bb_auth_ref={"profile_id": None},
+    )
+    d = authed_client.get("/api/workspaces/WS/scans/s-inline").json()
+    assert d["bb_url"] == "https://target.example.com"
+    assert d["auth_profile_id"] is None
+    assert d["auth_credential_ids"] == []
+    # inline 登录配置仍在 scan-config.yaml 读路径（authentication 字段）
+    assert d["authentication"] is None  # 无 scan-config.yaml -> None（既有语义）
+
+    _make_scan(tmp_workspaces, "WS", scan_id="s-pure-wb")
+    d2 = authed_client.get("/api/workspaces/WS/scans/s-pure-wb").json()
+    assert d2["bb_url"] is None
+    assert d2["auth_profile_id"] is None
+    assert d2["auth_credential_ids"] == []
+
+
 def test_scan_detail_bb_phase_merged_from_latest_run(authed_client, tmp_workspaces):
     """detail 的 bb_phase/bb_reason/progress 合并 latest run（与 list 同视图）。
 

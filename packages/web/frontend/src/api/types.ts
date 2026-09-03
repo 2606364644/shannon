@@ -259,9 +259,11 @@ export interface SessionData {
   source_repo?: string | null;
   reuse_whitebox_scan_id?: string | null;
   authentication?: ScanAuthentication | null;
-  // auth-profile-vault（Task 14）：profile 模式重跑预填——后端 _scan_detail 暂未返此字段，
-  // 前端先就位（补返时自动生效）。与 authentication 互斥。
+  // auth-profile-vault（Task 14）：profile 模式重跑预填（后端已返，读 bb_auth_ref）。
+  // 与 authentication 互斥。
   auth_profile_id?: string | null;
+  // 组合扫描黑盒目标（session.json bb_url 透传）：列表「重跑」预填 url + combined 开关。
+  bb_url?: string | null;
   // 多角色子集（2026-08-06）：profile 模式选多个角色，空=全选该档案所有角色。
   auth_credential_ids?: string[] | null;
   // HOST source for new-scan rerun; resolved mappings remain scan-scoped and are not exposed.

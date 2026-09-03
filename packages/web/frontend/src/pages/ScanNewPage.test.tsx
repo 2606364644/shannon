@@ -414,6 +414,36 @@ describe("ScanNewPage 重跑预填（location.state）", () => {
     expect(screen.queryByPlaceholderText(/http:\/\/example\.com/)).toBeNull();
     expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
   });
+
+  // ── 组合扫描重跑预填（2026-09-03）：ScanList.onRerun 带 url + combined=true ──
+  // combined 不预填的话，url 填了也会被 buildBody 剥掉——重跑退化纯白盒、黑盒段丢失。
+  it("组合扫描 preset：combined 开关打开 + 黑盒目标 url 预填", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+      ])),
+    );
+    renderPage("/scan/new", {
+      type: "whitebox", workspace: "ws1", repo: "foo",
+      url: "https://target.example.com", combined: true,
+      authProfileId: "ap1", authCredentialIds: ["cred-a"],
+      hostProfileId: "hp1",
+    });
+    // 开关打开 + 黑盒目标 url 已填（combined=true 才展开 url 输入区）
+    const toggle = screen.getByRole("switch", { name: "同时发起黑盒扫描" });
+    expect(toggle).toBeChecked();
+    expect(screen.getByDisplayValue("https://target.example.com")).toBeInTheDocument();
+  });
+
+  it("preset 无 combined（白盒旧 preset）→ 开关保持关闭（url 不误展开）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "foo", state: "ready", source: { kind: "git", url: "https://gitlab.example/foo.git" } },
+      ])),
+    );
+    renderPage("/scan/new", { type: "whitebox", workspace: "ws1", repo: "foo" });
+    expect(screen.getByRole("switch", { name: "同时发起黑盒扫描" })).not.toBeChecked();
+  });
 });
 
 // === D3: 跨仓关联（correlation）类型切换 + 提交 body ===

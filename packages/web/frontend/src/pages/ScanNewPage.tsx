@@ -129,6 +129,9 @@ export interface RerunPreset {
   reuseScanId?: string;
   /** inline 模式登录配置（旧字段，与 authProfileId 互斥）。 */
   auth?: ScanAuthentication;
+  /** 组合扫描标志（2026-09-03）：ScanList.onRerun 对组合任务（bb_url 非空）传 true——
+   *  不传则 url 填了也被 buildBody 剥掉，重跑退化纯白盒、黑盒段丢失。 */
+  combined?: boolean;
   /** profile 模式（auth-profile-vault Task 14）：原扫描使用了某条认证档案+角色，
    *  重跑时预填到 source=profile 分支。后端 _scan_detail 暂未返此字段（前端先就位）。 */
   authProfileId?: string;
@@ -367,7 +370,9 @@ export function ScanNewPage() {
     auth: presetToAuthState(preset),
     host: presetToHostState(preset),
     yaml: "repos:\n  a:\n    url: https://gitlab.example/a.git\n    branch: main",
-    combined: false,
+    // 组合任务重跑预填：开关随 preset 打开（显式字段——correlation preset 也带 url
+    // 但不吃 combined，不按 url 推导误开）。
+    combined: preset.combined ?? false,
   });
   // —— 跨仓关联表单态（D3 单向数据流）：yaml 是派生态——表单交互路径 formToYaml(state)
   //    重生成；YAML 编辑路径仅校验（yamlToForm 试解析），回填表单只经显式「应用到表单」。 ——

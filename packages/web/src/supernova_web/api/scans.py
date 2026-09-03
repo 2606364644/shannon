@@ -82,6 +82,10 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
     # 接力」、run 级实时进度不可见（list/detail 口径一致，修 run 版本化重构遗留）。
     bb_phase, bb_reason, progress_data = merge_latest_run_view(scan_dir, data)
     status = effective_scan_status(raw_status, combined, bb_phase)
+    # 组合扫描重跑预填（2026-09-03）：bb_url=黑盒目标；bb_auth_ref=profile 模式认证
+    # 档案引用（非敏感 profile_id/cred_ids，inline 模式 profile_id=None——明文在
+    # scan-config.yaml，走下方 authentication）。前端 RerunPreset 早已就位等这组字段。
+    bb_auth_ref = data.get("bb_auth_ref") or {}
     host_config = data.get("host_config") or {}
     host_enabled = bool(host_config.get("enabled")) if isinstance(host_config, dict) else False
     host_source = host_config.get("source") if host_enabled else None
@@ -112,6 +116,11 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "source_repo": data.get("source_repo"),
         "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
         "authentication": _read_auth_config(scan_dir),
+        # 组合扫描黑盒段重跑预填：目标 url + 认证档案引用（与 authentication 互斥——
+        # profile 模式时后者的 scan-config.yaml 不 dump 认证明文，profile 引用是唯一来源）。
+        "bb_url": data.get("bb_url"),
+        "auth_profile_id": bb_auth_ref.get("profile_id"),
+        "auth_credential_ids": bb_auth_ref.get("cred_ids") or [],
         # HOST 来源仅用于新建扫描重跑预填；mapping 内容不随详情暴露。
         "host_profile_id": host_config.get("profile_id") if host_source == "profile" else None,
         "host_url": host_config.get("source_url") if host_source == "url" else None,

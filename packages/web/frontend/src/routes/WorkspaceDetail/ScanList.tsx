@@ -370,6 +370,8 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   // 调 getScan 拿原配置（白盒 source_repo）-> location state 传 ScanNewPage 预填。
   // 黑盒分支已删（D3 删 ScanNewPage 黑盒表单 + D4 删本列表黑盒行重跑入口）；
   // correlation 重跑只带类型（多仓配置不可从 detail 重建，落空关联表单手填）。
+  // 组合扫描（bb_url 非空，2026-09-03）：黑盒段配置一并预填——目标 url + combined
+  // 开关 + 认证（profile 档案优先，inline authentication 兜底）+ HOST 来源。
   async function onRerun() {
     setBusy(true);
     try {
@@ -377,6 +379,18 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
       const state: Record<string, unknown> = { type: scan.scan_type, workspace: ws };
       if (scan.scan_type === "whitebox" && detail.source_repo) {
         state.repo = detail.source_repo;
+      }
+      if (detail.bb_url) {
+        state.url = detail.bb_url;
+        state.combined = true;
+        if (detail.auth_profile_id) {
+          state.authProfileId = detail.auth_profile_id;
+          state.authCredentialIds = detail.auth_credential_ids ?? [];
+        } else if (detail.authentication) {
+          state.auth = detail.authentication;
+        }
+        if (detail.host_profile_id) state.hostProfileId = detail.host_profile_id;
+        else if (detail.host_url) state.hostUrl = detail.host_url;
       }
       nav(`/scan/new?workspace=${encodeURIComponent(ws)}`, { state });
     } catch {

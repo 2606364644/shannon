@@ -400,6 +400,70 @@ describe("ScanList 操作调 API + 列表刷新", () => {
     });
   });
 
+  it("重跑（组合扫描）-> 预填黑盒目标 + 认证档案 + HOST 来源 + combined 开关", async () => {
+    // D3 黑盒并入组合扫描后，组合任务重跑是重建黑盒段的唯一路径——detail 的
+    // bb_url/auth_profile_id/host_* 须全部进 location.state（ScanNewPage preset）。
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+        { scan_id: "s-c", scan_type: "whitebox", status: "failed", created_at: 5000,
+          completed_at: 6000, vuln_count: 2, total_cost_usd: 1.0, cost_currency: "USD",
+          is_running: false, workflow_id: "ws-s-c", combined: true }])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({
+          scan_type: "whitebox", source_repo: "group/repo-a",
+          combined: true, bb_url: "https://target.example.com",
+          auth_profile_id: "auth_profile_1", auth_credential_ids: ["cred-a", "cred-b"],
+          host_profile_id: "host_profile_1",
+        })),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-s-c")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
+    await waitFor(() => expect(navMock).toHaveBeenCalled());
+    expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
+      state: {
+        type: "whitebox", workspace: "ws", repo: "group/repo-a",
+        url: "https://target.example.com",
+        combined: true,
+        authProfileId: "auth_profile_1",
+        authCredentialIds: ["cred-a", "cred-b"],
+        hostProfileId: "host_profile_1",
+      },
+    });
+  });
+
+  it("重跑（组合扫描 inline 认证）-> authentication 走 auth 兜底，无档案字段", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([
+        { scan_id: "s-i", scan_type: "whitebox", status: "failed", created_at: 5000,
+          completed_at: 6000, vuln_count: 0, total_cost_usd: 0.1, cost_currency: "USD",
+          is_running: false, workflow_id: "ws-s-i", combined: true }])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({
+          scan_type: "whitebox", source_repo: "group/repo-a",
+          bb_url: "https://target.example.com",
+          auth_profile_id: null, auth_credential_ids: [],
+          authentication: { login_type: "form", login_url: "https://target.example.com/login",
+                            credentials: { username: "admin" } },
+          host_url: "https://hosts.example/hosts",
+        })),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-s-i")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
+    await waitFor(() => expect(navMock).toHaveBeenCalled());
+    expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
+      state: {
+        type: "whitebox", workspace: "ws", repo: "group/repo-a",
+        url: "https://target.example.com",
+        combined: true,
+        auth: { login_type: "form", login_url: "https://target.example.com/login",
+                credentials: { username: "admin" } },
+        hostUrl: "https://hosts.example/hosts",
+      },
+    });
+  });
+
   it("重跑 getScan 失败 -> 降级跳转（无 state）+ toast 提示", async () => {
     const { toast } = await import("sonner");
     server.use(
