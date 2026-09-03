@@ -111,6 +111,9 @@
 ### MR 增量扫描
 - [mr-incremental-scan](specs/2026-09-03-mr-incremental-scan-design.md) — 合并请求 diff 扫描：MrScanWorkflow 独立编排 + 轻量单索引 + 三来源增量范围合成（新增代码/新入口/删防护反向链）+ 双轨铁律合规接入 📐
 
+### 黑盒验证缺口留痕
+- [blackbox-verification-gap-traceability](specs/2026-09-03-blackbox-verification-gap-traceability-design.md) — 黑盒验证失败留痕：verdicts.json 扩 gaps/agent_run/端点痕迹 + 融合四态（已实证/复验失败/中断未结论/未覆盖）+ run 级 completed-with-gaps 传导放行手动续跑 📐
+
 ### authz 演进
 - [authz-attack-chain-confidence](specs/2026-06-17-authz-attack-chain-confidence-design.md) — authz 攻击链置信度（仅 spec）📐
 - [authz-optimization-roadmap](specs/2026-06-17-authz-optimization-roadmap-design.md) — authz 优化路线图（仅 spec）📐
