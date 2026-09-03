@@ -108,6 +108,9 @@
 ### workspace
 - [workspace-human-readable-timestamp](plans/2026-06-28-workspace-human-readable-timestamp.md) / [spec](specs/2026-06-28-workspace-human-readable-timestamp-design.md) — workspace 目录名人类可读化 🔧
 
+### MR 增量扫描
+- [mr-incremental-scan](specs/2026-09-03-mr-incremental-scan-design.md) — 合并请求 diff 扫描：MrScanWorkflow 独立编排 + 轻量单索引 + 三来源增量范围合成（新增代码/新入口/删防护反向链）+ 双轨铁律合规接入 📐
+
 ### authz 演进
 - [authz-attack-chain-confidence](specs/2026-06-17-authz-attack-chain-confidence-design.md) — authz 攻击链置信度（仅 spec）📐
 - [authz-optimization-roadmap](specs/2026-06-17-authz-optimization-roadmap-design.md) — authz 优化路线图（仅 spec）📐
