@@ -161,6 +161,120 @@ async def test_openai_append_tool_array_arguments_returns_error_not_crash():
     assert collector.get_all() == {}
 
 
+# ---------- required 字段校验（openai） ----------
+# 回归真机 NodeGoat-20260903-025516 xss-vuln：GLM submit_finding 首条带 title、
+# 后续 6 条漏 title——合法 JSON 缺 required 字段被静默收下（"recorded (N total)"），
+# 模型无感知不补交，一路裸落 report_data.json title=null。
+# 修复：合法 JSON 但缺 schema required 字段 → 与「非法 JSON」同待遇返错让模型重发。
+
+BOOL_SCHEMA = SectionSchema(
+    tool_name="submit_finding",
+    section_key="findings",
+    description="finding tool",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "ID": {"type": "string"},
+            "externally_exploitable": {"type": "boolean"},
+            "title": {"type": "string"},
+        },
+        "required": ["ID", "externally_exploitable", "title"],
+    },
+    mode="append",
+)
+
+
+def _bool_collector():
+    return CollectorBase([BOOL_SCHEMA])
+
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_missing_required_returns_error_not_recorded():
+    """缺 required 字段（键不存在）→ 返错让模型重发，不静默收录。"""
+    from agents import RunContextWrapper
+
+    collector = _bool_collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(
+        RunContextWrapper(context=None),
+        json.dumps({"ID": "XSS-VULN-02", "externally_exploitable": True}),
+    )
+    assert "ERROR" in str(result)
+    assert "title" in str(result)                 # 报错点名缺失字段
+    assert "Resend" in str(result)
+    assert collector.get_all() == {}              # 未收录
+
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_blank_required_returns_error():
+    """required 字段空串（title=""）与缺失同罪 → 返错重发。"""
+    from agents import RunContextWrapper
+
+    collector = _bool_collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(
+        RunContextWrapper(context=None),
+        json.dumps({"ID": "X-1", "externally_exploitable": True, "title": "  "}),
+    )
+    assert "ERROR" in str(result)
+    assert collector.get_all() == {}
+
+
+@pytest.mark.asyncio
+async def test_openai_append_tool_false_bool_required_is_accepted():
+    """externally_exploitable=False 是合法实质值，不得被空值判定误伤。"""
+    from agents import RunContextWrapper
+
+    collector = _bool_collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(
+        RunContextWrapper(context=None),
+        json.dumps({"ID": "X-1", "externally_exploitable": False, "title": "t"}),
+    )
+    assert "recorded" in str(result)
+    assert collector.get_all() == {
+        "findings": [{"ID": "X-1", "externally_exploitable": False, "title": "t"}]}
+
+
+@pytest.mark.asyncio
+async def test_openai_set_tool_missing_required_returns_error():
+    """set 模式同样校验 required。"""
+    from agents import RunContextWrapper
+
+    collector = _collector()
+    (tool,) = build_openai_tools(collector)
+    result = await tool.on_invoke_tool(RunContextWrapper(context=None), json.dumps({}))
+    assert "ERROR" in str(result)
+    assert "x" in str(result)
+    assert collector.get_all() == {}
+
+
+# ---------- required 字段校验（claude） ----------
+
+@pytest.mark.asyncio
+async def test_claude_append_tool_missing_required_is_error_envelope():
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
+
+    collector = _bool_collector()
+    sdk_tool = _make_claude_sdk_tool(collector, BOOL_SCHEMA)
+    res = await sdk_tool.handler({"ID": "X-1", "externally_exploitable": True})
+    assert res.get("is_error") is True
+    assert "title" in res["content"][0]["text"]
+    assert collector.get_all() == {}
+
+
+@pytest.mark.asyncio
+async def test_claude_set_tool_missing_required_is_error_envelope():
+    from supernova_core.collectors.bridge import _make_claude_sdk_tool
+
+    collector = _collector()
+    sdk_tool = _make_claude_sdk_tool(collector, SCHEMA)
+    res = await sdk_tool.handler({})
+    assert res.get("is_error") is True
+    assert "x" in res["content"][0]["text"]
+    assert collector.get_all() == {}
+
+
 # ---------- claude ----------
 
 @pytest.mark.asyncio

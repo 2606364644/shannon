@@ -15,7 +15,10 @@ from supernova_core.utils.paths import intermediate_path
 
 from supernova_core.agents.runner import UsageSink, run_claude_prompt
 from supernova_core.agents.validators import get_queue_filename, validate_deliverable
-from supernova_core.agents.vuln_queue_reconcile import reconcile_findings
+from supernova_core.agents.vuln_queue_reconcile import (
+    backfill_titles_from_roster,
+    reconcile_findings,
+)
 from supernova_core.agents.progress_tool import make_progress
 from supernova_core.collectors import make_collector
 from supernova_core.git_manager import GitManager
@@ -502,6 +505,16 @@ class AgentExecutor:
                             agent_name.value, len(still_missing), still_missing,
                         )
                 rec.merged = list(merged_by_id.values())
+                # roster title 回填（2026-09-03 NodeGoat 空标题回归）：submit_finding
+                # 漏 title 的条目（含 targeted recheck 追加的）由 finding_roster
+                # 全量账本兜底回填——零 LLM 成本，写盘前统一过一遍。
+                filled_ids = backfill_titles_from_roster(rec.merged, roster)
+                if filled_ids:
+                    logger.warning(
+                        "agent %s: %d finding(s) missing title backfilled "
+                        "from finding_roster: %s",
+                        agent_name.value, len(filled_ids), filled_ids,
+                    )
                 queue_path = intermediate_path(deliverables, queue_filename)
                 atomic_write_json(
                     queue_path, {"vulnerabilities": rec.merged})

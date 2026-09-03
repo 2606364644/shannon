@@ -70,3 +70,42 @@ def test_no_roster_but_submitted_writes_and_skips_reconcile():
 def test_none_submitted_with_roster_means_all_missing():
     rec = reconcile_findings(None, [_roster(1), _roster(2)])
     assert rec.missing == [_roster(1), _roster(2)] and not rec.skip_write
+
+
+# ---------- roster title 回填（2026-09-03 NodeGoat 空标题回归） ----------
+# GLM submit_finding 7 条中 6 条漏 title（合法 JSON 缺字段，工具层静默收录），
+# 但 finding_roster 里 7 条 {id,title} 全有——roster 是全量账本，写盘前用它
+# 回填缺空 title，零 LLM 成本修复空标题。
+
+from supernova_core.agents.vuln_queue_reconcile import backfill_titles_from_roster
+
+
+def test_backfill_fills_missing_title_key():
+    items = [{"ID": "A", "title": "kept"}, {"ID": "B"}]
+    roster = [{"id": "A", "title": "roster-a"}, {"id": "B", "title": "roster-b"}]
+    filled = backfill_titles_from_roster(items, roster)
+    assert filled == ["B"]
+    assert items[0]["title"] == "kept"        # 已有不覆盖
+    assert items[1]["title"] == "roster-b"    # 缺 → roster 回填
+
+
+def test_backfill_fills_blank_and_null_titles():
+    items = [{"ID": "A", "title": None}, {"ID": "B", "title": "  "}]
+    roster = [{"id": "A", "title": "ra"}, {"id": "B", "title": "rb"}]
+    filled = backfill_titles_from_roster(items, roster)
+    assert filled == ["A", "B"]
+    assert items[0]["title"] == "ra" and items[1]["title"] == "rb"
+
+
+def test_backfill_skips_when_roster_title_blank_or_absent():
+    items = [{"ID": "A"}, {"ID": "B"}]
+    roster = [{"id": "A", "title": ""}, {"id": "A", "title": "  "}]
+    filled = backfill_titles_from_roster(items, roster)
+    assert filled == []
+    assert "title" not in items[0]            # roster 没有可用 title，不动
+
+
+def test_backfill_no_roster_is_noop():
+    items = [{"ID": "A"}]
+    assert backfill_titles_from_roster(items, None) == []
+    assert items == [{"ID": "A"}]

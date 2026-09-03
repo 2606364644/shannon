@@ -13,6 +13,13 @@
   首次调用生效。
 - mode="append"：闭包调 collector.append_section（不抛 DuplicateError），返
     ``f"{tool_name}: recorded (N total)"``（N=当前累积数）。append 可多次调。
+
+required 字段校验（2026-09-03 NodeGoat 首扫回归）：合法 JSON 但缺 schema
+required 字段（如 submit_finding 漏 title）曾与非法 JSON 不同罪——被静默
+收录返 "recorded"，模型无感知不补交，空 title 一路裸落 report_data.json。
+现与「非法 JSON / 非对象」同待遇：返错让模型重发（含缺失字段名，方便补）。
+空值判定：None / 空白串算缺失；bool False、数字 0 是合法实质值不误伤
+（externally_exploitable=False 必须放行）。
 """
 from __future__ import annotations
 
@@ -20,6 +27,29 @@ import json
 
 from supernova_core.agents.llm_json import repair_json_arguments
 from supernova_core.collectors.base import CollectorBase, DuplicateCallError, SectionSchema
+
+
+def _missing_required(json_schema: dict, payload: dict) -> list[str]:
+    """schema 顶层 required 字段中，payload 缺键或值为空的字段名列表。
+
+    空 = None 或空白串（required 字段须有实质值）；bool/int 不做空判定，
+    False/0 是合法值（externally_exploitable=False 必须放行）。
+    """
+    missing: list[str] = []
+    for key in (json_schema or {}).get("required") or []:
+        if key not in payload:
+            missing.append(key)
+            continue
+        v = payload.get(key)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            missing.append(key)
+    return missing
+
+
+def _required_error(tool_name: str, missing: list[str]) -> str:
+    return (f"{tool_name}: ERROR — missing required field(s): "
+            f"{', '.join(missing)}. Resend {tool_name} with every required "
+            f"field filled with a meaningful value.")
 
 
 def build_openai_tools(collector: CollectorBase):
@@ -47,6 +77,9 @@ def _make_openai_function_tool(collector: CollectorBase, schema: SectionSchema):
             if not isinstance(parsed, dict):
                 return (f"{tool_name}: ERROR — arguments must be a JSON object. "
                         f"Resend {tool_name} with a JSON object matching the schema.")
+            missing = _missing_required(schema.json_schema, parsed)
+            if missing:
+                return _required_error(tool_name, missing)
             collector.append_section(tool_name, parsed)
             items = collector.get_all().get(schema.section_key, [])
             return f"{tool_name}: recorded ({len(items)} total)"
@@ -68,6 +101,9 @@ def _make_openai_function_tool(collector: CollectorBase, schema: SectionSchema):
             if not isinstance(parsed, dict):
                 return (f"{tool_name}: ERROR — arguments must be a JSON object. "
                         f"Resend {tool_name} with a JSON object matching the schema.")
+            missing = _missing_required(schema.json_schema, parsed)
+            if missing:
+                return _required_error(tool_name, missing)
             try:
                 collector.set_section(tool_name, parsed)
             except DuplicateCallError:
@@ -102,6 +138,14 @@ def _make_claude_sdk_tool(collector: CollectorBase, schema: SectionSchema):
 
     if schema.mode == "append":
         async def _handler_append(args: dict) -> dict:
+            missing = _missing_required(schema.json_schema, args or {})
+            if missing:
+                return {
+                    "content": [
+                        {"type": "text", "text": _required_error(tool_name, missing)}
+                    ],
+                    "is_error": True,
+                }
             collector.append_section(tool_name, args or {})
             items = collector.get_all().get(schema.section_key, [])
             return {
@@ -113,6 +157,14 @@ def _make_claude_sdk_tool(collector: CollectorBase, schema: SectionSchema):
         handler = _handler_append
     else:
         async def _handler_set(args: dict) -> dict:
+            missing = _missing_required(schema.json_schema, args or {})
+            if missing:
+                return {
+                    "content": [
+                        {"type": "text", "text": _required_error(tool_name, missing)}
+                    ],
+                    "is_error": True,
+                }
             try:
                 collector.set_section(tool_name, args or {})
             except DuplicateCallError:

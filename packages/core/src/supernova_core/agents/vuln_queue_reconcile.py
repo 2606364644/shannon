@@ -42,6 +42,33 @@ def dedupe_by_id(items: list[dict]) -> tuple[list[dict], list[str]]:
     return list(by_id.values()), overwritten
 
 
+def backfill_titles_from_roster(items: list[dict],
+                                roster: list[dict] | None) -> list[str]:
+    """用 roster 的 {id, title} 回填 items 里缺空 title 的条目（原地改）。
+
+    2026-09-03 NodeGoat 首扫回归：GLM submit_finding 可交合法 JSON 但漏
+    title（工具层 required 校验管新数据，旧 queue / 漏网数据由本层兜），
+    而 finding_roster（set_findings_summary 全量账本）里 title 齐全。
+    仅回填缺/None/空白 title；已有实质值不覆盖；roster 条目 title 空或
+    id 不在 roster 的条目不动。返回回填成功的 ID 列表（可观测日志用）。
+    """
+    by_id = {
+        str(r.get("id", "")): str(r.get("title", "") or "").strip()
+        for r in (roster or [])
+    }
+    filled: list[str] = []
+    for it in items or []:
+        cur = it.get("title")
+        if isinstance(cur, str) and cur.strip():
+            continue
+        fid = str(it.get("ID", ""))
+        roster_title = by_id.get(fid, "")
+        if roster_title:
+            it["title"] = roster_title
+            filled.append(fid)
+    return filled
+
+
 def reconcile_findings(
     submitted_items: list[dict] | None, roster: list[dict] | None
 ) -> ReconcileResult:

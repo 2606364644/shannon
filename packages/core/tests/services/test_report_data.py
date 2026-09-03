@@ -464,3 +464,40 @@ async def test_build_report_data_skips_not_vulnerable(tmp_path):
 # ---------- T1 md 导出（report_markdown_exporter）----------
 # 已迁出至 test_report_markdown_exporter.py（spec 2026-08-26 单源化，
 # builder 与 exporter 测试文件分离）。
+
+
+async def test_build_report_data_vuln_title_fallback(tmp_path):
+    """主卡片 title 缺省回退 _type_title（2026-09-03 NodeGoat 空标题回归）。
+
+    XSS-VULN-02~07 title=None 裸落 report_data.json → 前端空标题；速查表
+    （_quick_reference_row）本就有 `or _type_title(vuln)` 兜底，主卡片对齐。
+    """
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "xss_exploitation_queue.json", [
+        {   # title 完全缺失 → 回退 vulnerability_type 原值
+            "ID": "XSS-VULN-01", "vulnerability_type": "Reflected",
+            "severity": "high", "confidence": "high",
+            "externally_exploitable": True,
+        },
+        {   # title=None 同罪；title 有实质值的下一条不受影响
+            "ID": "XSS-VULN-02", "vulnerability_type": "Stored",
+            "title": None,
+            "severity": "high", "confidence": "high",
+            "externally_exploitable": True,
+        },
+        {
+            "ID": "XSS-VULN-03", "vulnerability_type": "Stored",
+            "title": "存储型 XSS：POST /memos",
+            "severity": "high", "confidence": "high",
+            "externally_exploitable": True,
+        },
+    ])
+
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+    titles = {v.id: v.title for v in rd.vulnerabilities}
+    assert titles["XSS-VULN-01"] == "reflected"      # 回退 _type_title
+    assert titles["XSS-VULN-02"] == "stored"         # None 同罪
+    assert titles["XSS-VULN-03"] == "存储型 XSS：POST /memos"  # 实质值不动
