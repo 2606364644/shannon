@@ -1,0 +1,254 @@
+{
+  "vulnerabilities": [
+    {
+      "ID": "INJ-VULN-01",
+      "title": "命令注入/RCE：POST /contributions 将 preTax/afterTax/roth 直接传入 eval() 执行任意 JavaScript",
+      "vulnerability_type": "CommandInjection",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "critical",
+      "source": "preTax (body) — app/routes/contributions.js:32（同路由另有 afterTax@:33、roth@:34 两个等价源）",
+      "authentication_required": "true",
+      "accessible_routes": "POST /contributions [isLoggedInMiddleware]",
+      "path": "POST /contributions → contributionsHandler.handleContributionsUpdate (app/routes/contributions.js:28) → eval(req.body.preTax) (contributions.js:32) → 后置 isNaN 校验 (contributions.js:47) → contributionsDAO.update → MongoDB",
+      "sink_call": "eval() — app/routes/contributions.js:32 (preTax)、:33 (afterTax)、:34 (roth)",
+      "slot_type": "CMD-part-of-string",
+      "sanitization_observed": "无前置清洗；仅 eval 之后有 isNaN/负值/>30% 数值校验 (app/routes/contributions.js:47-63)，无法阻止已执行的代码",
+      "concat_occurrences": "eval 调用无字符串拼接；如需同时通过 isNaN 校验，payload 用逗号运算符返回数值（见 witness_payload）",
+      "verdict": "vulnerable",
+      "mismatch_reason": "req.body.preTax/afterTax/roth 未经任何清洗直接作为 JavaScript 代码交给 eval() 执行，唯一校验（isNaN/负值）发生在代码执行之后，属于典型 sanitize-then-validate 顺序颠倒。",
+      "witness_payload": "(process.mainModule.require(\"child_process\").execSync(\"touch /tmp/pwned\"),1)",
+      "impact": "任意登录用户在 Node 进程内执行任意 JavaScript 与系统命令，直接获取服务器代码执行能力（RCE），并可顺势读写文件系统、反弹 Shell。",
+      "remediation": "将 app/routes/contributions.js:32-34 的三处 eval() 改为 parseInt(req.body.preTax, 10) 等数值解析（对应文件中已注释的修复块），并先做类型与范围校验再落库。",
+      "cwe_id": "CWE-95",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H 8.8",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "需先登录，但 POST /signup 公开注册即可获得会话，门槛极低。body-parser 同时启用 json 与 urlencoded，表单字符串与 JSON 均可到达 eval。Node 容器为 node:12-alpine，process.mainModule 可用；payload 用逗号运算符使 eval 返回 1 以通过 isNaN 校验并完成 DB 写入，即使校验失败代码也已执行。",
+      "endpoints": [
+        "POST /contributions"
+      ],
+      "affected_parameters": [
+        "preTax (body)",
+        "afterTax (body)",
+        "roth (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "POST /contributions 路由（isLoggedIn 门控）",
+          "file": "app/routes/index.js",
+          "line": 52,
+          "protection": "isLoggedInMiddleware"
+        },
+        {
+          "label": "handleContributionsUpdate 解构 req.body 三个字段",
+          "file": "app/routes/contributions.js",
+          "line": 28,
+          "protection": null
+        },
+        {
+          "label": "eval(req.body.preTax) 直接执行用户字符串",
+          "file": "app/routes/contributions.js",
+          "line": 32,
+          "protection": null
+        },
+        {
+          "label": "isNaN/负值校验（eval 之后，无效防护）",
+          "file": "app/routes/contributions.js",
+          "line": 47,
+          "protection": "isNaN（后置）"
+        },
+        {
+          "label": "contributionsDAO.update 写入 MongoDB（次要数据 sink）",
+          "file": "app/data/contributions-dao.js",
+          "line": 28,
+          "protection": null
+        }
+      ]
+    },
+    {
+      "ID": "INJ-VULN-02",
+      "title": "NoSQL 注入：GET /allocations/:userId 的 threshold 查询参数被字符串插值进 MongoDB $where 子句，服务端执行任意 JavaScript",
+      "vulnerability_type": "SQLi",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "threshold (query) — app/routes/allocations.js:21 → app/data/allocations-dao.js:78",
+      "authentication_required": "true",
+      "accessible_routes": "GET /allocations/:userId [isLoggedInMiddleware]",
+      "path": "GET /allocations/:userId?threshold= → allocationsHandler.displayAllocations (app/routes/allocations.js:11) → allocationsDAO.getByUserIdAndThreshold (app/data/allocations-dao.js:57) → $where 模板字符串插值 (allocations-dao.js:78) → allocationsCol.find() 服务端执行 JS (allocations-dao.js:86)",
+      "sink_call": "allocationsCol.find(searchCriteria()) 执行 $where — app/data/allocations-dao.js:77-79、86",
+      "slot_type": "SQL-like",
+      "sanitization_observed": "无；仅 userId 经 parseInt (allocations-dao.js:58) 不受注入影响，threshold 完全未处理。已注释的修复（parseInt(threshold,10)+0-99 范围校验，allocations-dao.js:63-76）未生效",
+      "concat_occurrences": "模板字符串插值 ${threshold} — allocations-dao.js:78（无任何 sanitization，属直接拼接）",
+      "verdict": "vulnerable",
+      "mismatch_reason": "threshold 查询参数未做 parseInt/白名单即拼接进 $where 字符串，MongoDB 在服务端把该字符串当 JavaScript 表达式执行，注释中的修复代码被整体禁用。",
+      "witness_payload": "1'; return 1=='1",
+      "impact": "认证用户可向 MongoDB $where 注入任意 JavaScript：while(true){} 造成服务端拒绝服务，布尔/时序盲注可侧信道提取任意文档数据。",
+      "remediation": "启用注释中的修复：在 allocations-dao.js getByUserIdAndThreshold 中对 threshold 先 parseInt(threshold,10) 并校验 0-99 范围，再拼入 $where（或改为参数化查询而非 $where）。",
+      "cwe_id": "CWE-943",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:H 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "需登录（POST /signup 公开注册即可）。parsedUserId 经 parseInt 安全，注入面仅 threshold。$where 在 MongoDB 4.4 服务端执行，盲注利用以布尔/时序侧信道为主；另可尝试重载 process 相关全局对象（视 mongo 版本沙箱而定）。",
+      "endpoints": [
+        "GET /allocations/:userId"
+      ],
+      "affected_parameters": [
+        "threshold (query)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "GET /allocations/:userId 路由（isLoggedIn 门控）",
+          "file": "app/routes/index.js",
+          "line": 63,
+          "protection": "isLoggedInMiddleware"
+        },
+        {
+          "label": "displayAllocations 读取 req.query.threshold（无校验）",
+          "file": "app/routes/allocations.js",
+          "line": 21,
+          "protection": null
+        },
+        {
+          "label": "getByUserIdAndThreshold 构造查询条件",
+          "file": "app/data/allocations-dao.js",
+          "line": 57,
+          "protection": null
+        },
+        {
+          "label": "$where 模板字符串插值 ${threshold}",
+          "file": "app/data/allocations-dao.js",
+          "line": 78,
+          "protection": null
+        },
+        {
+          "label": "find() 服务端执行 $where JS",
+          "file": "app/data/allocations-dao.js",
+          "line": 86,
+          "protection": null
+        }
+      ]
+    },
+    {
+      "ID": "INJ-VULN-03",
+      "title": "SSRF：GET /research 将未校验的 url+symbol 拼接后交给 needle.get，任意内网/云元数据地址响应原样回显",
+      "vulnerability_type": "RFI",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "url (query) — app/routes/research.js:15（同路由另有 symbol (query) 拼接进 URL 末尾）",
+      "authentication_required": "true",
+      "accessible_routes": "GET /research [isLoggedInMiddleware]",
+      "path": "GET /research?url=&symbol= → researchHandler.displayResearch (app/routes/research.js:12) → url = req.query.url + req.query.symbol (research.js:15) → needle.get(url) (research.js:16) → res.write(body) 原样回显 (research.js:25)",
+      "sink_call": "needle.get(url, callback) — app/routes/research.js:16",
+      "slot_type": "FILE-path",
+      "sanitization_observed": "无；对 req.query.url 无协议/主机/端口/内网地址任何校验，symbol 直接拼接",
+      "concat_occurrences": "req.query.url + req.query.symbol — research.js:15（无 sanitization 的直接拼接）",
+      "verdict": "vulnerable",
+      "mismatch_reason": "用户可控 url 未做协议/主机白名单校验即作为 HTTP 目标发起服务端请求，且响应体以 text/html 原样回显，构成 SSRF 数据外带通道。",
+      "witness_payload": "http://169.254.169.254/latest/meta-data/",
+      "impact": "认证用户可让服务器向任意内网主机或云元数据地址（169.254.169.254、127.0.0.1:27017 无鉴权 MongoDB、自服务 4000 端口等）发起 HTTP 请求并读取完整响应，窃取云凭据与内网信息。",
+      "remediation": "在 app/routes/research.js:15 用 new URL(req.query.url) 解析并做协议（仅 https）+ 主机白名单校验（仅允许 finance.yahoo.com 等），拒绝内网/链路本地/元数据地址后再拼接 symbol。",
+      "cwe_id": "CWE-918",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N 7.4",
+      "owasp_category": "A10:2021-Server-Side Request Forgery",
+      "notes": "needle 2.2.4 仅支持 http/https，无法 file://。symbol 拼在 url 末尾，可借其控制路径后缀（如 url=http://169.254.169.254/latest/&symbol=meta-data/ 取完整元数据树）。isLoggedIn 门控可经公开注册绕过。SSRF 虽不在标准注入类别，属注入分析范围外的同类可利用原语，此处以 RFI 类别记录供利用阶段提取内部数据。",
+      "endpoints": [
+        "GET /research"
+      ],
+      "affected_parameters": [
+        "url (query)",
+        "symbol (query)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "GET /research 路由（isLoggedIn 门控）",
+          "file": "app/routes/index.js",
+          "line": 76,
+          "protection": "isLoggedInMiddleware"
+        },
+        {
+          "label": "displayResearch 判断 req.query.symbol 存在",
+          "file": "app/routes/research.js",
+          "line": 14,
+          "protection": null
+        },
+        {
+          "label": "拼接 url = req.query.url + req.query.symbol",
+          "file": "app/routes/research.js",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "needle.get(url) 服务端发起 HTTP 请求",
+          "file": "app/routes/research.js",
+          "line": 16,
+          "protection": null
+        },
+        {
+          "label": "响应体原样写回客户端",
+          "file": "app/routes/research.js",
+          "line": 25,
+          "protection": null
+        }
+      ]
+    },
+    {
+      "ID": "INJ-VULN-04",
+      "title": "NoSQL 操作符注入：POST /login 的 userName 经 bodyParser.json 以对象（$ne）嵌入 findOne 查询，未认证绕过用户名匹配",
+      "vulnerability_type": "SQLi",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": "userName (body JSON) — app/routes/session.js:54 → app/data/user-dao.js:91",
+      "authentication_required": "false",
+      "accessible_routes": "POST /login []（无认证中间件，匿名可达）",
+      "path": "POST /login（Content-Type: application/json）→ sessionHandler.handleLoginRequest (app/routes/session.js:53) → userDAO.validateLogin (app/data/user-dao.js:57) → usersCol.findOne({userName: userName}) (user-dao.js:91)",
+      "sink_call": "usersCol.findOne({ userName: userName }, validateUserDoc) — app/data/user-dao.js:91-93",
+      "slot_type": "SQL-val",
+      "sanitization_observed": "无类型校验；bodyParser.json (server.js:71) 允许 userName 为任意 JSON 对象，未强制 string 即嵌入查询文档",
+      "concat_occurrences": "无字符串拼接——对象字面量直接作为查询文档（操作符注入载体）",
+      "verdict": "vulnerable",
+      "mismatch_reason": "userName 查询值槽位未做字符串类型校验，JSON body 携带的 {\"$ne\":\"\"} 被 MongoDB 解析为操作符而非字符串，绕过用户名精确匹配；password 因应用层 === 比较无法同样绕过，故需要已知口令。",
+      "witness_payload": "{\"userName\":{\"$ne\":\"\"},\"password\":\"Admin_123\"}",
+      "impact": "未认证攻击者可通过操作符注入实现与用户名无关的登录——配合仓库公开的默认口令（admin/Admin_123）直接获得 admin 会话，同时利用 $ne/$gt/$regex 与不同错误文案枚举全部用户名。",
+      "remediation": "在 app/data/user-dao.js validateLogin（及 getUserByUserName）中先校验 typeof userName === 'string' && typeof password === 'string'，拒绝对象后再构造查询文档。",
+      "cwe_id": "CWE-943",
+      "cvss": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "password 在应用层以严格 === 与存储值比较（user-dao.js:60-67），对象型 password 必然失败，故不是完全无口令绕过；但 admin 默认口令公开（artifacts/db-reset.js:18），配合 $ne 注入即无需猜用户名。该漏洞同时是进入其余三个认证后注入 sink（eval RCE/$where/SSRF）的钥匙之一。注册接口 getUserByUserName (user-dao.js:103) 存在同类对象注入面。",
+      "endpoints": [
+        "POST /login"
+      ],
+      "affected_parameters": [
+        "userName (body JSON)",
+        "password (body JSON)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "POST /login 路由（无认证中间件）",
+          "file": "app/routes/index.js",
+          "line": 34,
+          "protection": null
+        },
+        {
+          "label": "bodyParser.json 将 body 解析为任意 JSON 对象",
+          "file": "server.js",
+          "line": 71,
+          "protection": null
+        },
+        {
+          "label": "handleLoginRequest 解构 userName/password 并传入 DAO",
+          "file": "app/routes/session.js",
+          "line": 53,
+          "protection": null
+        },
+        {
+          "label": "validateLogin findOne({userName}) 无类型校验，操作符对象被嵌入查询",
+          "file": "app/data/user-dao.js",
+          "line": 91,
+          "protection": null
+        }
+      ]
+    }
+  ]
+}

