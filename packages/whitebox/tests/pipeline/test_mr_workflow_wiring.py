@@ -68,6 +68,21 @@ def test_filter_flows_none_scope_returns_pgraph_untouched():
     assert out is pgraph            # 无 scope → 原对象直通（全量扫描零开销）
 
 
+def test_filter_flows_empty_scope_filters_to_zero_not_passthrough():
+    """空集 ≠ None（2026-09-03 修复）：MR scope 合成为空（增量内无链）时过滤为
+    零候选——曾把空集当直通致 MR 退化全量判定（违背增量语义 + 撞容量窗口）。"""
+    from supernova_core.code_index.parameter_models import (
+        ParameterPropagationGraph, TaintFlow,
+    )
+
+    pgraph = ParameterPropagationGraph(taint_flows=[
+        TaintFlow(flow_id="f1", entry_point_id="e", source_param="q",
+                  source_type="query", sink_call_site_id="s1"),
+    ])
+    out = filter_flows_by_mr_scope(pgraph, set())
+    assert out.taint_flows == []    # 零候选，非全量直通
+
+
 def test_incremental_guidance_ignores_scope_products_even_if_mr_meta_polluted():
     """铁律前瞻锁定（spec §5.2）：mr_meta 将来混入确定性层产物字段（scope/
     flow/sink 明细）也不得泄漏进 LLM 轨 prompt——guidance 只从 base/head 派生。

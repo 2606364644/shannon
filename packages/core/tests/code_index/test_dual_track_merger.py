@@ -1,4 +1,6 @@
 from supernova_core.code_index.dual_track_merger import (
+    _canonical_vtype,
+    _finding_key,
     merge_dual_track_queues,
 )
 from supernova_core.models.queue_schemas import (
@@ -669,3 +671,44 @@ def test_both_safe_pairing_still_merges():
     assert len(out) == 1
     assert out[0].merge_source == "both"
     assert out[0].verdict == "vulnerable"
+
+
+# --- spec 2026-09-03 §3 F2/F3：vtype 类级归一（仅 key 计算，不动展示字段）---
+
+def _inj_vt(id_, vtype, path, sink):
+    return InjectionVulnerability(
+        ID=id_, vulnerability_type=vtype, externally_exploitable=True,
+        confidence="low", source="preTax (app/routes/contributions.js:ContributionsHandler:7)",
+        path=path, sink_call=sink, verdict="vulnerable", source_track="gitnexus")
+
+
+def test_canonical_vtype_maps_llm_gn():
+    assert _canonical_vtype("CommandInjection") == "injection"
+    assert _canonical_vtype("injection") == "injection"
+    assert _canonical_vtype("URL_Manipulation") == "ssrf"
+    assert _canonical_vtype("Reflected") == "xss"
+    assert _canonical_vtype("Stored") == "xss"
+    assert _canonical_vtype("Horizontal") == "Horizontal"  # authz 特判依赖
+
+
+def test_injection_cross_track_keys_now_collide():
+    # 修前：LLM 'CommandInjection' vs GN 'injection' → key 不同（交集 0）
+    llm = _inj_vt("LLM-1", "CommandInjection", "POST /contributions → c",
+                  "eval() @ app/routes/contributions.js:32")
+    gn = _inj_vt("GN-1", "injection", "POST /contributions → c",
+                 "app/routes/contributions.js:ContributionsHandler:eval:32:23")
+    assert _finding_key(llm) == _finding_key(gn)
+
+
+def test_xss_stored_reflected_same_class_key():
+    # Stored/Reflected 细型类级化：同 endpoint+sink 的两轨卡 key 对齐
+    llm = XssVulnerability(
+        ID="L", vulnerability_type="Stored", externally_exploitable=True,
+        confidence="low", source="benefitStartDate (app/routes/benefits.js:BenefitsHandler:30)",
+        path="POST /benefits → x", sink_call="swig {{user.benefitStartDate}} in value", verdict="vulnerable")
+    gn = XssVulnerability(
+        ID="G", vulnerability_type="Reflected", externally_exploitable=True,
+        confidence="low", source="benefitStartDate (app/routes/benefits.js:BenefitsHandler:30)",
+        path="POST /benefits → x", sink_call="app/routes/benefits.js:BenefitsHandler:render:51:23",
+        verdict="vulnerable")
+    assert _finding_key(llm)[0] == _finding_key(gn)[0] == "xss"

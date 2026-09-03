@@ -92,10 +92,30 @@ with workflow.unsafe.imports_passed_through():
     from supernova_core.models.retry import retry_for
     from supernova_core.models.errors import classify_error_for_temporal
 
+def _derive_workspace_path(input: PipelineInput) -> str:
+    """web（event_file 同目录）/ CLI（repo 同级 workspaces/<ws>）/ 兜底 三级派生
+    （2026-07-14 路径分歧修复的口径）。WhiteboxScanWorkflow 主线与 MrScanWorkflow
+    前置 activities 共用（曾各自内联，MrScanWorkflow 抄错成不存在的
+    input.workspace_path——workflow 级测试抓出）。"""
+    if input.event_file:
+        return str(Path(input.event_file).parent)
+    if input.workspace_name:
+        return str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
+    return input.repo_path
+
+
 @workflow.defn
 class WhiteboxScanWorkflow:
     def __init__(self):
         self._state = PipelineState()
+        # MR 增量（spec 2026-09-03 §5.1 容量铁律）：run_incremental_scope 算好的
+        # GN verdict 窗口分钟数；None = 非 MR / 未跑 scope（回落全量 15min）。
+        self._mr_verdict_timeout_minutes: int | None = None
+
+    @staticmethod
+    def _derive_workspace_path(input: PipelineInput) -> str:
+        """child 主线兼容入口（历史内联点）——委托模块级实现。"""
+        return _derive_workspace_path(input)
 
     def _build_finalize_summary(self, error_fallback: str | None = None) -> dict:
         """构造 finalize_summary 用的 summary dict(success/failed 路径共用,DRY).
@@ -166,7 +186,9 @@ class WhiteboxScanWorkflow:
             cfg.vuln_classes if cfg else None,
         )
         if _mr_classes is not None:
-            selected_classes: list[VulnType] = [VulnType(c) for c in _mr_classes]
+            # VulnType 是 Literal 别名（非 enum）——字符串直传即可（曾误
+            # VulnType(c) 实例化 typing.Literal 炸 workflow task，测试抓出）。
+            selected_classes: list[VulnType] = [c for c in _mr_classes]
         else:
             selected_classes = select_vuln_classes(
                 input.vuln_classes,
@@ -179,12 +201,7 @@ class WhiteboxScanWorkflow:
         # <ws>/heartbeat)/报告读取(get_workspace_vuln_counts)对齐。CLI 路径(无 event_file): 走
         # repo_path.parent/workspaces(CLI 习惯, run_scan 外层建)。修路径分歧(2026-07-14 端到端暴露:
         # worker 产物原落 /app/repos/.../workspaces/<ws>, web 找不到 heartbeat → 判活失效 + 报告空).
-        if input.event_file:
-            workspace_path = str(Path(input.event_file).parent)
-        elif input.workspace_name:
-            workspace_path = str(Path(input.repo_path).parent / "workspaces" / input.workspace_name)
-        else:
-            workspace_path = input.repo_path
+        workspace_path = self._derive_workspace_path(input)
 
         act_input = ActivityInput(
             repo_path=input.repo_path,
@@ -345,11 +362,15 @@ class WhiteboxScanWorkflow:
                 # 预过滤 + 报告增量段消费。非 MR（mr_meta=None）跳过，零行为变化。
                 if input.mr_meta:
                     from . import mr_activities
-                    await workflow.execute_activity(
+                    _mr_scope = await workflow.execute_activity(
                         mr_activities.run_incremental_scope, act_input,
                         start_to_close_timeout=timedelta(minutes=2),
                         retry_policy=retry_for("standard"),
                     )
+                    # 容量铁律（spec §5.1）：GN verdict 窗口按增量链数重估
+                    # （activity 层算好的分钟数，workflow 只透传——沙箱禁 env 读）
+                    self._mr_verdict_timeout_minutes = (
+                        _mr_scope or {}).get("verdict_timeout_minutes")
                 await workflow.execute_activity(
                     activities.log_phase_complete_activity,
                     ActivityInput(**{**act_input.__dict__, "phase": "pre-recon"}),
@@ -532,9 +553,16 @@ class WhiteboxScanWorkflow:
             # Produces <vuln>_gitnexus_queue.json for the dual-track merger.
             # Task 4 fail-fast: 删 try/except; activity 返 failed_classes/fail_reasons,
             # workflow 据返回值判 fail-fast(关轨 + DEGRADABLE fail -> 终止).
+            # MR 增量（spec §5.1 容量铁律）：窗口按增量链数重估（链数 ÷ 并发 ×
+            # 60s/轮，下限 5min——run_incremental_scope 算好穿来）；全量扫描保持
+            # 15min（多轮 agent 窗口，spec-0）。未跑 scope（resume 跳过 pre-recon
+            # 段）回落全量窗口——宁可宽不可爆。
+            _gn_timeout = timedelta(minutes=15)
+            if input.mr_meta is not None and self._mr_verdict_timeout_minutes:
+                _gn_timeout = timedelta(minutes=int(self._mr_verdict_timeout_minutes))
             _gn_verdict = await workflow.execute_activity(
                 activities.run_gitnexus_chain_verdict, act_input,
-                start_to_close_timeout=timedelta(minutes=15),  # 原 5；多轮 agent 窗口（spec-0）
+                start_to_close_timeout=_gn_timeout,
                 retry_policy=retry_for("standard"),
             )
 
@@ -934,6 +962,38 @@ class WhiteboxScanWorkflow:
 _MR_CHILD_TIMEOUT = timedelta(hours=6)
 
 
+def _mr_child_input(input: PipelineInput, prepared: dict, diff_result: dict) -> PipelineInput:
+    """MrScanWorkflow → child 的 PipelineInput 构造（纯函数，单测锁定穿线语义）。
+
+    mr_meta 摘要：base/head commit（diff_result 优先、repo_prepare 兜底）+
+    MR 启发式 vuln 类 + verdict_flow_count=0（child 侧 run_incremental_scope
+    后回填实际计数经实例变量供 verdict 窗口重估）。
+    """
+    child_meta = {
+        "base_commit": diff_result.get("base_commit") or prepared.get("base_commit", ""),
+        "head_commit": diff_result.get("head_commit") or prepared.get("head_commit", ""),
+        "selected_vuln_classes": diff_result.get("selected_vuln_classes", []),
+        "verdict_flow_count": 0,
+    }
+    return PipelineInput(
+        repo_path=input.repo_path,
+        web_url=input.web_url,
+        config_path=input.config_path,
+        workspace_name=input.workspace_name,
+        deliverables_subdir=input.deliverables_subdir,
+        pipeline_testing_mode=input.pipeline_testing_mode,
+        api_key=input.api_key,
+        prompt_override=input.prompt_override,
+        max_concurrent=input.max_concurrent,
+        enable_llm_track=input.enable_llm_track,
+        event_file=input.event_file,
+        provider_config=input.provider_config,
+        combined=input.combined,
+        env_overrides=input.env_overrides,
+        mr_meta=child_meta,
+    )
+
+
 @workflow.defn
 class MrScanWorkflow:
     def __init__(self):
@@ -954,7 +1014,7 @@ class MrScanWorkflow:
             pipeline_testing_mode=input.pipeline_testing_mode,
             api_key=input.api_key,
             prompt_override=input.prompt_override,
-            workspace_path=input.workspace_path,
+            workspace_path=_derive_workspace_path(input),
             event_file=input.event_file,
             provider_config=input.provider_config,
             combined=input.combined,
@@ -975,6 +1035,17 @@ class MrScanWorkflow:
             start_to_close_timeout=timedelta(minutes=2),
             retry_policy=retry_for("standard"),
         )
+        # 空 diff 快速终态（spec §7）：base==head（stats.files==0）→ 不跑双轨
+        # （删防护判定/child 全跳过），finalize 产「无变更」报告即 completed。
+        if not (diff_result.get("stats") or {}).get("files"):
+            await workflow.execute_activity(
+                mr_activities.run_mr_empty_diff_finalize, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+            self._state.status = "completed"
+            self._state.current_phase = "mr-empty-diff"
+            return self._state
         # 3. diff.patch → 删防护 LLM 判定（降级不阻塞）
         await workflow.execute_activity(
             mr_activities.run_protection_removal_analysis, act_input,
@@ -983,29 +1054,10 @@ class MrScanWorkflow:
         )
 
         # mr_meta 摘要穿给 child：base/head/verdict 候选计数 + MR 启发式 vuln 类
-        child_meta = {
-            "base_commit": diff_result.get("base_commit") or prepared.get("base_commit", ""),
-            "head_commit": diff_result.get("head_commit") or prepared.get("head_commit", ""),
-            "selected_vuln_classes": diff_result.get("selected_vuln_classes", []),
-            "verdict_flow_count": 0,  # 子适配 pre-recon 后 run_incremental_scope 填补
-        }
-        child_input = PipelineInput(
-            repo_path=input.repo_path,
-            web_url=input.web_url,
-            config_path=input.config_path,
-            workspace_name=input.workspace_name,
-            deliverables_subdir=input.deliverables_subdir,
-            pipeline_testing_mode=input.pipeline_testing_mode,
-            api_key=input.api_key,
-            prompt_override=input.prompt_override,
-            max_concurrent=input.max_concurrent,
-            enable_llm_track=input.enable_llm_track,
-            event_file=input.event_file,
-            provider_config=input.provider_config,
-            combined=input.combined,
-            env_overrides=input.env_overrides,
-            mr_meta=child_meta,
-        )
+        # （构造收口 _mr_child_input 纯函数——穿线语义单测锁定，workflow 级端到端
+        # 由独立脚本验证：pytest WorkflowEnvironment + child workflow 在本机有
+        # 预存挂起（CLAUDE.md 测试陷阱，heartbeat 基准同挂），不引入挂起测试。）
+        child_input = _mr_child_input(input, prepared, diff_result)
 
         # 4. child workflow 跑全量主体（MR 消费点在其内生效）
         child_state = await workflow.execute_child_workflow(

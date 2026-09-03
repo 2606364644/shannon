@@ -47,9 +47,12 @@ def build_mr_incremental_guidance(mr_meta: dict | None) -> str:
 def filter_flows_by_mr_scope(pgraph, scope_flow_ids):
     """GN verdict 候选按 IncrementalScope 过滤（spec §5.1）。
 
-    scope_flow_ids 为 None/空集 → 原对象直通（全量扫描零开销、空 diff 零候选）。
+    scope_flow_ids 为 None → 原对象直通（全量扫描零开销）。**空集 ≠ None**：
+    MR 扫描 scope 合成为空（增量内无链）时过滤为零候选——若把空集当直通，
+    MR 会退化成全量判定（违背增量语义 + 撞容量窗口）。调用方
+    （run_gitnexus_chain_verdict）已用 `is not None` 区分两种缺席。
     """
-    if not scope_flow_ids:
+    if scope_flow_ids is None:
         return pgraph
     wanted = set(scope_flow_ids)
     return pgraph.model_copy(update={

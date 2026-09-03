@@ -24,15 +24,21 @@ logger = logging.getLogger(__name__)
 MR_DIR_NAME = "mr"
 
 
-def _mr_dir(input: ActivityInput) -> Path:
-    """deliverables/whitebox/intermediate/mr/（与 _get_paths 同源的桶内路径）。"""
+def _mr_deliverables(input: ActivityInput) -> Path:
+    """deliverables/whitebox/（与 _get_paths 同源的桶内路径）。"""
     from supernova_core.utils.paths import WHITEBOX_SUBDIR
     if input.workspace_path:
         deliverables = Path(input.workspace_path) / input.deliverables_subdir
     else:  # activity 直调（无 workspace_path）回落 repo 同级 workspaces —— 与测试/调试兼容
         deliverables = Path(input.repo_path).parent / "workspaces"
     track_dir = deliverables / WHITEBOX_SUBDIR
-    mr_dir = intermediate_dir(track_dir) / MR_DIR_NAME
+    track_dir.mkdir(parents=True, exist_ok=True)
+    return track_dir
+
+
+def _mr_dir(input: ActivityInput) -> Path:
+    """deliverables/whitebox/intermediate/mr/（与 _get_paths 同源的桶内路径）。"""
+    mr_dir = intermediate_dir(_mr_deliverables(input)) / MR_DIR_NAME
     mr_dir.mkdir(parents=True, exist_ok=True)
     return mr_dir
 
@@ -212,9 +218,31 @@ async def run_incremental_scope(input: ActivityInput) -> dict:
         diff=manifest, index=index, pgraph=pgraph, removed_protections=protections,
     )
     (mr_dir / "incremental_scope.json").write_text(scope.model_dump_json(indent=2))
+    # 容量铁律（spec §5.1，CLAUDE.md §1）：GN verdict 窗口 = 链数 ÷ 并发 ×
+    # 单链上界（60s/轮），下限 5min。activity 层算好穿 workflow（workflow 沙箱
+    # 禁 env 读非确定性源），child 调 run_gitnexus_chain_verdict 时用。
+    import math
+    from supernova_core.config.concurrency import get_chain_verdict_concurrency
+    conc = max(get_chain_verdict_concurrency(), 1)
+    verdict_timeout_minutes = max(5, math.ceil(len(scope.verdict_flow_ids) / conc))
     return {
         "verdict_flow_count": len(scope.verdict_flow_ids),
+        "verdict_timeout_minutes": verdict_timeout_minutes,
         "selected_vuln_classes": scope.selected_vuln_classes,
         "new_entry_point_count": len(scope.new_entry_point_ids),
         "removed_protection_count": len(scope.removed_protection_flows),
     }
+
+
+@activity.defn
+async def run_mr_empty_diff_finalize(input: ActivityInput) -> dict:
+    """空 diff 快速终态（spec §7）：base==head（stats.files==0）→ 不跑双轨，
+    复用全量报告组装器产「无变更」报告（queue 缺席 → 空 vulns；scan 带增量
+    refs——builder 读 intermediate/mr/diff_manifest.json 自动补）。
+    """
+    from supernova_whitebox.pipeline.activities import _build_report_data_initial
+
+    deliverables = _mr_deliverables(input)
+    rd = await _build_report_data_initial(input, deliverables)
+    return {"vuln_count": len(rd.vulnerabilities),
+            "report_data": str(deliverables / "report_data.json")}

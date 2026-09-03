@@ -41,6 +41,14 @@ from supernova_whitebox.pipeline.activities import (
     setup_display, finalize_summary, cleanup_auth_state_activity,
     persist_completed_agents,
 )
+# MR 增量扫描（spec 2026-09-03）：前置 activities 在独立模块 mr_activities
+# （b40a1a5a 曾漏 import——activities 列表引用未导入名，run_worker() 调用即
+# NameError，本 import 补齐并加注册冒烟测试锁定）。
+from supernova_whitebox.pipeline.mr_activities import (
+    run_mr_repo_prepare, run_git_diff,
+    run_protection_removal_analysis, run_incremental_scope,
+    run_mr_empty_diff_finalize,
+)
 from supernova_blackbox.pipeline.workflows import BlackboxScanWorkflow, AuthValidationWorkflow, BatchAuthValidationWorkflow
 from supernova_blackbox.pipeline.activities import (
     run_blackbox_preflight, run_blackbox_auth_validation,
@@ -141,9 +149,10 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, finalize_summary, cleanup_auth_state_activity,
             persist_completed_agents,
-            # MR 增量扫描（spec 2026-09-03）：前置 activities
+            # MR 增量扫描（spec 2026-09-03）：前置 activities + 空 diff 快速终态
             run_mr_repo_prepare, run_git_diff,
             run_protection_removal_analysis, run_incremental_scope,
+            run_mr_empty_diff_finalize,
         ],
         # P3c 阶段 3：AuditSession/LogBus/heartbeat 已 contextvar 化（按 workflow_id 隔离），
         # 多 scan 并发不再串台 → max_concurrent 放开（默认 4，env 可配）。
