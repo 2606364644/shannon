@@ -712,3 +712,19 @@ def test_xss_stored_reflected_same_class_key():
         path="POST /benefits → x", sink_call="app/routes/benefits.js:BenefitsHandler:render:51:23",
         verdict="vulnerable")
     assert _finding_key(llm)[0] == _finding_key(gn)[0] == "xss"
+
+
+# --- spec 2026-09-03 §3 F3 配套：LLM 轨同 key 多卡折叠（不吞卡）---
+
+def test_llm_same_key_cards_fold_not_dropped():
+    # 类级化后两卡同 key（同 endpoint+sink）；修前 setdefault 静默留一丢一
+    llm = []
+    for i, t in enumerate(("Reflected", "Stored")):
+        llm.append(XssVulnerability(
+            ID=f"L{i}", vulnerability_type=t, externally_exploitable=True,
+            confidence="low", source=f"p{i} (app/routes/session.js:SessionHandler:8)",
+            path="POST /login → x", sink_call="render", verdict="vulnerable"))
+    merged = merge_dual_track_queues(llm, [], mode="verdict")
+    # 折叠：一条主卡 + merged_from 挂靠另一条 ID；不吞卡
+    assert len(merged) == 1
+    assert sorted(getattr(merged[0], "merged_from") or []) == ["L1"]

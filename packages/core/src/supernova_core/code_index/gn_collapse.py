@@ -16,6 +16,23 @@ def _normalize_placeholders(path: str) -> str:
     """路由占位符归一：:userId → {userId}（Express :param ↔ OpenAPI {param} 同义路由）。"""
     return _PARAM_PLACEHOLDER_RE.sub(r"{\1}", path)
 
+
+# 漏洞类级归一（仅 key 计算用，不动卡上展示字段）。authz 原样返回——
+# _finding_key 的 Horizontal endpoint-only 特判依赖其原始形态。
+# 定义在此、dual_track_merger 反向 import（merger → gn_collapse 方向已存在，无环）。
+_VTYPE_CLASS_MAP = {
+    "CommandInjection": "injection", "RCE": "injection", "OSCommandInjection": "injection",
+    "SQLi": "injection", "Eval": "injection", "NoSQL": "injection",
+    "URL_Manipulation": "ssrf", "SSRF": "ssrf",
+    "Reflected": "xss", "Stored": "xss",
+}
+
+
+def _canonical_vtype(vtype: object) -> str:
+    if vtype is None:
+        return None
+    return _VTYPE_CLASS_MAP.get(str(vtype), str(vtype))
+
 def parse_sink_call_site_id(s: str) -> tuple[str | None, str | None]:
     parts = s.split(":")
     if len(parts) < 4:
@@ -49,14 +66,14 @@ def _unit_key(f):
     endpoint = (getattr(f, "endpoint", None)
                 and extract_endpoint(f.endpoint)) or extract_endpoint(getattr(f, "path", None))
     if endpoint:
-        return (getattr(f, "vulnerability_type", None), endpoint, sink_func)
+        return (_canonical_vtype(getattr(f, "vulnerability_type", None)), endpoint, sink_func)
     # 文件级回退（spec 2026-08-26 §7/F1）：path 无路由前缀时（XSS 常态——
     # http_route_label join miss），按 文件+sink 函数 折叠——同文件同函数不同行
     # 是同一漏洞单元的多调用点（对齐 endpoint 分支的折叠粒度；含行号的 file:line
     # 会让每行各成一组，15 条参数×行笛卡尔积链一条不折）。跨文件绝不合并。
     sink_file = _sink_file(sink_call)
     if sink_func and sink_file:
-        return (getattr(f, "vulnerability_type", None), sink_file, sink_func)
+        return (_canonical_vtype(getattr(f, "vulnerability_type", None)), sink_file, sink_func)
     return ("__strict__", id(f))
 
 def collapse_gn_entries(findings: list) -> list:

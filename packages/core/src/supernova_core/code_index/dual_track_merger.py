@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 
 from supernova_core.code_index.gn_collapse import (
+    _canonical_vtype,
     collapse_gn_entries,
     extract_endpoint,
     parse_sink_call_site_id,
@@ -69,7 +70,7 @@ def _strict_key(finding: Vulnerability) -> tuple:
     """Legacy strict key: full location + sink field tuples (exact-match)."""
     loc = tuple(getattr(finding, field, None) for field in _LOCATION_FIELDS)
     sink = tuple(getattr(finding, field, None) for field in _SINK_FIELDS)
-    return (getattr(finding, "vulnerability_type", None), loc, sink)
+    return (_canonical_vtype(getattr(finding, "vulnerability_type", None)), loc, sink)
 
 
 def _finding_key(finding: Vulnerability) -> tuple:
@@ -91,8 +92,9 @@ def _finding_key(finding: Vulnerability) -> tuple:
     route-less chains), fall back to the strict key: keying everything of a
     class under (vtype, None, None) would blindly merge distinct findings.
     """
-    vtype = getattr(finding, "vulnerability_type", None)
-    if vtype == "Horizontal":
+    raw_vtype = getattr(finding, "vulnerability_type", None)
+    vtype = _canonical_vtype(raw_vtype)
+    if raw_vtype == "Horizontal":
         norm = _normalize_endpoint(getattr(finding, "endpoint", None))
         if norm:
             return ("Horizontal", norm)
@@ -226,7 +228,21 @@ def merge_dual_track_queues(
 
     llm_by_key: dict[tuple, Vulnerability] = {}
     for finding in llm_findings:
-        llm_by_key.setdefault(_finding_key(finding), finding)
+        key = _finding_key(finding)
+        if key in llm_by_key:
+            # 同 key 多卡折叠（F3 配套）：主卡 merged_from 挂靠其余卡 ID，
+            # 不吞卡——避免类级化后 Stored/Reflected 细型被静默丢弃。
+            existing = llm_by_key[key]
+            data = existing.model_dump()
+            mf = list(data.get("merged_from") or [])
+            if finding.ID not in mf:
+                mf.append(finding.ID)
+            data["merged_from"] = mf
+            llm_by_key[key] = type(existing).model_validate(data)
+            logger.info("llm-track collapse: %s folded into %s (same unit key)",
+                        finding.ID, existing.ID)
+        else:
+            llm_by_key[key] = finding
 
     gitnexus_by_key: dict[tuple, Vulnerability] = {}
     for finding in gitnexus_findings:
