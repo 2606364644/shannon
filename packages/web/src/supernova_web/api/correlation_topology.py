@@ -45,6 +45,14 @@ async def start_analysis(ws: str, body: StartTopologyBody, request: Request,
         raise HTTPException(422, detail={
             "code": "provider_invalid", "message": str(exc),
         })
+    except ValueError as exc:
+        # 兜底：store 层 ws 名/路径校验（__legacy__ 时代 500 回归）。注意须排在
+        # TopologyValidationError/TopologyProviderConfigError（均为 ValueError 子类）
+        # 之后，勿抢子类语义。转 422 JSON，勿让 500 纯文本把前端 json() 解析炸成
+        # "body stream already read"。
+        raise HTTPException(422, detail={
+            "code": "invalid_workspace", "message": str(exc),
+        })
     return {"analysis_id": analysis_id}
 
 

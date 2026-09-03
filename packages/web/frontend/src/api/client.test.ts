@@ -45,6 +45,21 @@ describe("api client", () => {
     }
   });
 
+  it("非 JSON 错误体（500 纯文本/代理 502 HTML）抛 ApiError，而非 body stream already read", async () => {
+    // 回归 2026-09-03：__legacy__ ws 触发后端 500 纯文本 "Internal Server Error"，
+    // request() 旧错误分支 res.json()（失败、已消费 stream）→ fallback res.text()
+    // 双读同一 stream → TypeError "Failed to execute 'text' on 'Response':
+    // body stream already read"，掩盖真实状态码。须单次 text() 后 JSON.parse。
+    (globalThis.fetch as any).mockResolvedValue(
+      new Response("Internal Server Error", { status: 500 }));
+    let err: unknown;
+    try { await apiPost("/workspaces/__legacy__/correlation-topology/analyses", { repos: [] }); }
+    catch (e) { err = e; }
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
+    expect((err as ApiError).body).toBe("Internal Server Error");
+  });
+
   it("apiDelete 成功（204 无 body）", async () => {
     (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 204, text: async () => "" });
     const r = await apiDelete<{ ok: true }>("/workspaces/ws");

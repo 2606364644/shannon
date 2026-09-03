@@ -55,11 +55,15 @@ async function request<T>(path: string, init?: RequestInit, opts?: ReqOptions): 
   });
   if (!res.ok) {
     if (res.status === 401 && !opts?.silent) onUnauthorized();
-    let body: unknown;
+    // 单次 text() 后再 parse：json() 失败时 body stream 已被消费，fallback 再
+    // text() 会抛 "body stream already read"（500 纯文本/代理 502 HTML 必踩），
+    // 掩盖真实状态码（2026-09-03 __legacy__ 自动关联分析 500 回归）。
+    const text = await res.text();
+    let body: unknown = text;
     try {
-      body = await res.json();
+      body = JSON.parse(text);
     } catch {
-      body = await res.text();
+      /* 非 JSON 错误体保留原文 */
     }
     throw new ApiError(res.status, body);
   }
