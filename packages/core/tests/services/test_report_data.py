@@ -501,3 +501,169 @@ async def test_build_report_data_vuln_title_fallback(tmp_path):
     assert titles["XSS-VULN-01"] == "reflected"      # 回退 _type_title
     assert titles["XSS-VULN-02"] == "stored"         # None 同罪
     assert titles["XSS-VULN-03"] == "存储型 XSS：POST /memos"  # 实质值不动
+
+
+# ---------- MR 增量段（spec 2026-09-03 §6）----------
+
+def _write_mr_products(d, manifest_dict=None, protections=None, scope=None):
+    """写 intermediate/mr/ 产物（incremental_scope.json 缺省不写 = 非 MR 扫描）。"""
+    import json
+    mr_dir = d / "intermediate" / "mr"
+    mr_dir.mkdir(parents=True, exist_ok=True)
+    if manifest_dict is not None:
+        (mr_dir / "diff_manifest.json").write_text(
+            json.dumps(manifest_dict, ensure_ascii=False), encoding="utf-8")
+    if protections is not None:
+        (mr_dir / "removed_protections.json").write_text(
+            json.dumps(protections, ensure_ascii=False), encoding="utf-8")
+    if scope is not None:
+        (mr_dir / "incremental_scope.json").write_text(
+            json.dumps(scope, ensure_ascii=False), encoding="utf-8")
+
+
+async def test_build_report_data_mr_incremental_summary_and_trigger_source(tmp_path):
+    """MR 扫描：scan 补 base/head/diff_stat + 顶层 incremental_summary +
+    GN 轨卡（both/gitnexus-only）按 flow_id 反查标 trigger_source；LLM-only 不标。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+    import json
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "xss_exploitation_queue.json", [
+        {   # 双轨合并卡（GN flow fa 命中来源 A）→ 标 new_code
+            "ID": "XSS-VULN-01", "vulnerability_type": "Reflected",
+            "externally_exploitable": True, "confidence": "high",
+            "merge_source": "both", "flow_id": "fa",
+            "verdict": "vulnerable", "severity": "high",
+        },
+        {   # LLM-only 卡（即使带 flow_id 也不标——只标 GN 轨可归因发现）
+            "ID": "XSS-VULN-02", "vulnerability_type": "Stored",
+            "externally_exploitable": True, "confidence": "high",
+            "merge_source": "llm-only", "flow_id": "fz",
+            "verdict": "vulnerable", "severity": "high",
+        },
+    ])
+    _write_mr_products(
+        d,
+        manifest_dict={
+            "base_commit": "b1", "head_commit": "h1", "hunks": [],
+            "stats": {"files": 2, "insertions": 10, "deletions": 3},
+        },
+        protections={
+            "degraded": False,
+            "protections": [{
+                "file_path": "app/utils.js", "base_line_no": 42,
+                "removed_text": "q = sanitize(q)", "function_name": "sanitize_input",
+                "protection_kind": "sanitize", "rationale": "escapes",
+                "confidence": 0.9,
+            }],
+        },
+        scope={
+            "selected_vuln_classes": ["xss"],
+            "new_entry_point_ids": ["app/routes.js:handler:10"],
+            "verdict_flow_ids": ["fa", "fb", "fc1"],
+            "removed_protection_flows": [{
+                "protection": {
+                    "file_path": "app/utils.js", "base_line_no": 42,
+                    "removed_text": "q = sanitize(q)",
+                    "function_name": "sanitize_input",
+                    "protection_kind": "sanitize", "rationale": "escapes",
+                    "confidence": 0.9,
+                },
+                "func_block_id": "app/utils.js:sanitize_input:40",
+                "flow_ids": ["fc1"],
+            }],
+            "source_a_flow_ids": ["fa"],
+            "source_b_flow_ids": ["fb"],
+            "source_c_flow_ids": ["fc1"],
+        },
+    )
+    # code_index.json：new_entry_point join 路由明细用
+    (d / "intermediate").mkdir(exist_ok=True)
+    (d / "intermediate" / "code_index.json").write_text(
+        json.dumps({
+            "repository": "r", "language": "javascript",
+            "total_blocks": 1, "total_entry_points": 1, "total_chains": 0,
+            "blocks": [], "edges": [], "chains": [],
+            "sink_call_sites": [], "source_points": [],
+            "entry_points": [{
+                "func_block_id": "app/routes.js:handler:10",
+                "entry_type": "http_route", "route": "/memos",
+                "http_method": "POST", "confidence": 1.0, "evidence": "e",
+                "needs_llm_review": False,
+            }],
+        }, ensure_ascii=False), encoding="utf-8")
+
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+
+    # scan MR 元信息（builder 内部从 intermediate/mr/ 补，调用方零改动）
+    assert rd.scan.base_commit == "b1"
+    assert rd.scan.head_commit == "h1"
+    assert rd.scan.diff_stat == {"files": 2, "insertions": 10, "deletions": 3}
+    # 顶层增量摘要
+    assert rd.incremental_summary is not None
+    inc = rd.incremental_summary
+    assert inc.degraded is False
+    assert inc.new_entry_points[0].route == "/memos"
+    assert inc.new_entry_points[0].method == "POST"
+    assert inc.removed_protections[0].function == "sanitize_input"
+    assert inc.removed_protections[0].followed_by_chains is True
+    assert inc.flow_counts == {"new_code": 1, "new_entry": 1,
+                               "removed_protection": 1, "affected_flows": 3}
+    # trigger_source：GN 合并卡标 / LLM-only 卡不标
+    by_id = {v.id: v for v in rd.vulnerabilities}
+    assert by_id["XSS-VULN-01"].trigger_source == "new_code"
+    assert by_id["XSS-VULN-02"].trigger_source is None
+
+
+async def test_build_report_data_mr_degraded_and_unfollowed_protection(tmp_path):
+    """删防护判定降级标注；函数被删（无 flow）→ followed_by_chains=False 供人审。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    _write_mr_products(
+        d,
+        protections={"degraded": True, "protections": []},
+        scope={
+            "selected_vuln_classes": [], "new_entry_point_ids": [],
+            "verdict_flow_ids": [], "removed_protection_flows": [{
+                "protection": {
+                    "file_path": "app/gone.js", "base_line_no": 3,
+                    "removed_text": "@login_required", "function_name": None,
+                    "protection_kind": "authz_check",
+                },
+                "func_block_id": None, "flow_ids": [],
+            }],
+            "source_a_flow_ids": [], "source_b_flow_ids": [],
+            "source_c_flow_ids": [],
+        },
+    )
+
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+
+    assert rd.incremental_summary is not None
+    assert rd.incremental_summary.degraded is True
+    assert rd.incremental_summary.removed_protections[0].followed_by_chains is False
+
+
+async def test_build_report_data_non_mr_zero_regression(tmp_path):
+    """非 MR 扫描（无 intermediate/mr/）：incremental_summary=None、scan 无 MR 字段。"""
+    from supernova_core.services.report_data_builder import build_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    d = tmp_path / "deliverables"
+    await _write_queue(d, "xss_exploitation_queue.json", [
+        {"ID": "XSS-VULN-01", "vulnerability_type": "Stored",
+         "externally_exploitable": True, "confidence": "high",
+         "merge_source": "llm-only", "flow_id": "fa",
+         "verdict": "vulnerable", "severity": "high"},
+    ])
+
+    rd = await build_report_data(d, ScanMeta(id="s1", track="whitebox"))
+
+    assert rd.incremental_summary is None
+    assert rd.scan.base_commit is None
+    assert rd.scan.head_commit is None
+    assert rd.scan.diff_stat is None
+    assert rd.vulnerabilities[0].trigger_source is None

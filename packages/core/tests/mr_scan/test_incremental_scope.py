@@ -10,7 +10,9 @@ from supernova_core.code_index.parameter_models import (
 from supernova_core.mr_scan.diff_manifest import (
     DiffHunk, DiffLine, DiffManifest, DiffStats,
 )
-from supernova_core.mr_scan.incremental_scope import build_incremental_scope
+from supernova_core.mr_scan.incremental_scope import (
+    build_incremental_scope, trigger_source_of,
+)
 
 
 _DIFF = DiffManifest(
@@ -294,3 +296,58 @@ def test_source_c_base_side_path_normalized_via_rename_mapping():
                                     removed_protections=[protection])
 
     assert scope.removed_protection_flows[0].func_block_id == "app/utils.py:sanitize_input:40"
+
+
+# --- 来源明细 + trigger_source 归并（spec §6 报告层）---
+
+def test_scope_records_per_source_flow_ids_and_trigger_source_priority_c():
+    """三来源明细分别记录（报告层 trigger_source 归并依据）；C > B > A；
+    stored# 复合 flow（XSS 存储型 write#read）拆分判，任一子 flow 命中即标。"""
+    flows = [
+        _flow("fc1", "app/routes.py:handler:10", "app/routes.py:handler:15:sink",
+              steps=[_step("app/routes.py:handler:10", "app/utils.py:sanitize_input:40",
+                           "app/routes.py:12")]),
+        _flow("fc2", "app/routes.py:handler:10", "app/other.py:handler2:30:sink"),
+        _flow("fc3", "app/other.py:handler2:1", "app/other.py:handler2:30:sink"),
+    ]
+    chains = [CallChain(entry_point_id="app/routes.py:handler:10",
+                        path=["app/routes.py:handler:10", "app/utils.py:sanitize_input:40"],
+                        depth=1, has_unresolved=False)]
+    protection = RemovedProtection(
+        file_path="app/utils.py", base_line_no=42, removed_text="q = sanitize(q)",
+        function_name="sanitize_input", protection_kind="sanitize")
+
+    scope = build_incremental_scope(diff=_DIFF_B, index=_index_c(flows, chains),
+                                    pgraph=ParameterPropagationGraph(taint_flows=flows),
+                                    removed_protections=[protection])
+
+    # 明细：A 空（_DIFF_B added={18} 不触 sink/step/source 行）；B=新入口 handler
+    # 全链；C=防护反向链（直接级 fc1 + 扩展级 fc2）
+    assert scope.source_a_flow_ids == []
+    assert set(scope.source_b_flow_ids) == {"fc1", "fc2"}
+    assert set(scope.source_c_flow_ids) == {"fc1", "fc2"}
+    assert set(scope.verdict_flow_ids) == {"fc1", "fc2"}   # 并集（过滤集）不变
+
+    # 归并：C 优先；未命中 → None（非增量 flow 不标）
+    assert trigger_source_of("fc1", scope) == "removed_protection"
+    assert trigger_source_of("fc3", scope) is None
+    # stored# 复合：write 侧 fc1 命中 → 标 C；两侧均未命中 → None
+    assert trigger_source_of("stored#fc1#fc3", scope) == "removed_protection"
+    assert trigger_source_of("stored#fc3#fc9", scope) is None
+
+
+def test_trigger_source_priority_b_over_a():
+    """同 flow 命中 A+B（无 C）→ new_entry（B 优先）。"""
+    # _DIFF added={11,12}：fa sink@11 → A；fa entry=handler 行范围相交 → B
+    flows = [
+        _flow("fa", "app/routes.py:handler:10", "app/routes.py:handler:11:sink"),
+        _flow("fz", "app/other.py:handler2:1", "app/other.py:handler2:30:sink"),
+    ]
+    scope = build_incremental_scope(diff=_DIFF, index=_index(flows),
+                                    pgraph=ParameterPropagationGraph(taint_flows=flows),
+                                    removed_protections=[])
+
+    assert set(scope.source_a_flow_ids) == {"fa"}
+    assert set(scope.source_b_flow_ids) == {"fa"}
+    assert trigger_source_of("fa", scope) == "new_entry"
+    assert trigger_source_of("fz", scope) is None

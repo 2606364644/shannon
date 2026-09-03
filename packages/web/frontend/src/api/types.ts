@@ -348,6 +348,11 @@ export interface ReportScanMeta {
   cost?: number | null;
   currency?: string | null;
   model?: string | null;
+  // MR 增量扫描元信息（spec 2026-09-03 §6）：builder 从 intermediate/mr/ 补；
+  // 全量扫描为 null。
+  base_commit?: string | null;
+  head_commit?: string | null;
+  diff_stat?: { files?: number; insertions?: number; deletions?: number } | null;
 }
 
 /** 接口一体表行：接口 + 参数 + 认证 + 三处行号（file:line）。 */
@@ -448,6 +453,9 @@ export interface ReportVulnerability {
   poc?: PocBlock | null;
   evidence?: VulnEvidence | null;
   attack_chain_refs: string[];
+  // MR 增量来源标注（spec 2026-09-03 §6）：只标 GitNexus 轨可归因发现（C>B>A 归并）；
+  // LLM 轨产物与全量扫描为 null。
+  trigger_source?: "new_code" | "new_entry" | "removed_protection" | null;
 }
 
 /** 执行摘要「最高风险发现」单条。 */
@@ -500,6 +508,38 @@ export interface QuickReferenceRow {
   confidence?: string | null;
 }
 
+/** MR 增量摘要 · 新增入口行（来源 B 攻击面明细；join miss 只留 func_block_id）。 */
+export interface MrNewEntryPoint {
+  func_block_id: string;
+  function?: string | null;
+  route?: string | null;
+  method?: string | null;
+  authentication?: string | null;
+}
+
+/** MR 增量摘要 · 删除防护行（来源 C；followed_by_chains=false 函数被删未追链供人审）。 */
+export interface MrRemovedProtection {
+  file: string;
+  line: number;
+  kind: string;
+  function?: string | null;
+  rationale?: string | null;
+  followed_by_chains: boolean;
+}
+
+/** MR 增量扫描报告顶部摘要段（spec 2026-09-03 §6；仅 MR 扫描出现）。 */
+export interface IncrementalSummary {
+  degraded: boolean;
+  new_entry_points: MrNewEntryPoint[];
+  removed_protections: MrRemovedProtection[];
+  flow_counts: {
+    new_code?: number;
+    new_entry?: number;
+    removed_protection?: number;
+    affected_flows?: number;
+  };
+}
+
 /** 顶层 SSOT。attack_chains 步骤为自由 dict（组装器透传）。 */
 export interface ReportData {
   schema_version: number;
@@ -510,6 +550,8 @@ export interface ReportData {
   attack_chains: Array<{ id: string; steps?: Record<string, unknown>[]; narrative?: string | null }>;
   quick_reference?: QuickReferenceRow[];
   qa?: ReportQA | null;
+  // MR 增量扫描专属（spec 2026-09-03 §6）；全量扫描为 null。
+  incremental_summary?: IncrementalSummary | null;
 }
 
 export interface DeliverablesFile {

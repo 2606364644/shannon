@@ -76,6 +76,32 @@ class IncrementalScope(BaseModel):
     new_entry_point_ids: list[str] = []            # 来源 B：新增入口（报告呈现攻击面明细）
     verdict_flow_ids: list[str] = []               # 三来源并集（GitNexus 轨候选过滤集）
     removed_protection_flows: list[RemovedProtectionFlow] = []
+    # 三来源各自明细（spec §6 报告层）：trigger_source 归并依据（C > B > A）。
+    # 并集字段 verdict_flow_ids 语义不变（GN 轨过滤集），明细仅供报告反查打标。
+    source_a_flow_ids: list[str] = []              # A：新增代码引入漏洞
+    source_b_flow_ids: list[str] = []              # B：新增入口 = 新攻击面
+    source_c_flow_ids: list[str] = []              # C：删防护反向链
+
+
+def trigger_source_of(flow_id: str | None, scope: "IncrementalScope") -> str | None:
+    """flow → trigger_source（spec §6）：命中来源集按 C > B > A 归并取一。
+
+    - XSS 存储型复合 flow_id（``stored#<write>#<read>``）拆子 flow 判，
+      任一子 flow 命中即标（读/写侧任一增量即该卡是增量发现）。
+    - 未命中 → None（非增量 flow / LLM 轨卡不标——调用方先按 merge_source 过滤）。
+    """
+    if not flow_id:
+        return None
+    parts = flow_id.split("#") if "#" in flow_id else [flow_id]
+    for ids, label in (
+        (scope.source_c_flow_ids, "removed_protection"),
+        (scope.source_b_flow_ids, "new_entry"),
+        (scope.source_a_flow_ids, "new_code"),
+    ):
+        wanted = set(ids)
+        if any(p in wanted for p in parts):
+            return label
+    return None
 
 
 def _line_added(diff: DiffManifest, file_path: str, line: int | None) -> bool:
@@ -205,17 +231,20 @@ def build_incremental_scope(
     removed_protections = removed_protections or []
     # 来源 B（§4.3）：新入口 → 其全部链路
     new_entry_ids = _new_entry_point_ids(diff, index)
-    flow_ids: list[str] = []
-    flow_ids.extend(_source_a_flow_ids(diff, index, pgraph))
-    flow_ids.extend(_flows_of_entries(pgraph, new_entry_ids))
+    a_ids = _source_a_flow_ids(diff, index, pgraph)
+    b_ids = _flows_of_entries(pgraph, new_entry_ids)
     rp_flows = _source_c_flows(diff, index, pgraph, removed_protections)
+    c_ids: list[str] = []
     for rp in rp_flows:
-        flow_ids.extend(rp.flow_ids)
-    # 去重保序
-    verdict_flow_ids = list(dict.fromkeys(flow_ids))
+        c_ids.extend(rp.flow_ids)
+    # 去重保序（并集 = GN 轨候选过滤集）
+    flow_ids = list(dict.fromkeys(a_ids + b_ids + c_ids))
     return IncrementalScope(
         selected_vuln_classes=select_vuln_classes(diff),
         new_entry_point_ids=new_entry_ids,
-        verdict_flow_ids=verdict_flow_ids,
+        verdict_flow_ids=flow_ids,
         removed_protection_flows=rp_flows,
+        source_a_flow_ids=list(dict.fromkeys(a_ids)),
+        source_b_flow_ids=list(dict.fromkeys(b_ids)),
+        source_c_flow_ids=list(dict.fromkeys(c_ids)),
     )

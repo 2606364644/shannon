@@ -5,6 +5,7 @@ import type { ReportData } from "@/api/types";
 import { focusAnchor } from "@/utils/focusAnchor";
 import { ExecutiveSummary } from "./ExecutiveSummary";
 import { StatsRow } from "./StatsRow";
+import { MrIncrementalSummary } from "./MrIncrementalSummary";
 import { QuickReferenceTable } from "./QuickReferenceTable";
 import { VulnerabilityCard } from "./VulnerabilityCard";
 import { RichText } from "./RichText";
@@ -57,6 +58,11 @@ export function ReportView({ data }: { data: ReportData }) {
 
   const body = (
     <div className="min-w-0 space-y-5">
+      {/* MR 增量摘要（spec 2026-09-03 §6）：仅 MR 扫描（incremental_summary 非空）渲染，
+          置于执行摘要之前——增量上下文是本次扫描的定性前提。 */}
+      {data.incremental_summary && (
+        <MrIncrementalSummary summary={data.incremental_summary} scan={data.scan} />
+      )}
       {data.executive_summary && (
         <ExecutiveSummary summary={data.executive_summary} onLocateRisk={locateVuln} />
       )}

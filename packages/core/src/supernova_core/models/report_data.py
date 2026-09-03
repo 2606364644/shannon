@@ -29,6 +29,11 @@ class ScanMeta(BaseModel):
     cost: float | None = None
     currency: str | None = None
     model: str | None = None
+    # MR 增量扫描元信息（spec 2026-09-03 §6）：builder 读 intermediate/mr/
+    # diff_manifest.json 自动补（调用方零改动）；全量扫描为 None（零感知）。
+    base_commit: str | None = None
+    head_commit: str | None = None
+    diff_stat: dict[str, int] | None = None
 
 
 class EndpointEntry(BaseModel):
@@ -157,6 +162,10 @@ class ReportVulnerability(BaseModel):
     # 白盒/黑盒单轨产物为 None。
     cross_verification: Literal[
         "verified", "untested", "failed-to-verify", "blackbox-only"] | None = None
+    # MR 增量扫描来源标注（spec 2026-09-03 §6）：只标 GitNexus 轨可归因发现
+    # （merge_source ∈ both/gitnexus-only 且 flow_id 命中 IncrementalScope 来源集，
+    # C > B > A 归并取一）；LLM 轨产物与全量扫描为 None。
+    trigger_source: Literal["new_code", "new_entry", "removed_protection"] | None = None
     # 原始 queue entry（md 导出复用 render_vuln_card；JSON 消费方忽略）
     raw: dict[str, Any] | None = None
 
@@ -228,6 +237,46 @@ class QuickReferenceRow(BaseModel):
     confidence: str | None = None
 
 
+class MrNewEntryPoint(BaseModel):
+    """MR 增量摘要 · 新增入口行（spec 2026-09-03 §6，来源 B 攻击面明细）。
+
+    builder 从 IncrementalScope.new_entry_point_ids join code_index.entry_points
+    派生；join miss（索引漂移）时仅 func_block_id 有值，渲染层跳空段。
+    """
+
+    func_block_id: str
+    function: str | None = None
+    route: str | None = None
+    method: str | None = None
+    authentication: str | None = None
+
+
+class MrRemovedProtection(BaseModel):
+    """MR 增量摘要 · 删除防护行（来源 C）。
+
+    followed_by_chains=False = 函数被整体删除/无法定位，未追链——留档供人审
+    （spec §4.4 第 3 分支）；True = 已并入 verdict 重判（flow_ids 非空）。
+    """
+
+    file: str
+    line: int
+    kind: str = ""
+    function: str | None = None
+    rationale: str | None = None
+    followed_by_chains: bool = False
+
+
+class IncrementalSummary(BaseModel):
+    """MR 增量扫描报告顶部摘要段（spec 2026-09-03 §6；仅 MR 扫描出现）。"""
+
+    degraded: bool = False                  # 删防护 LLM 判定降级（A/B 照常）
+    new_entry_points: list[MrNewEntryPoint] = Field(default_factory=list)
+    removed_protections: list[MrRemovedProtection] = Field(default_factory=list)
+    # 三来源分布 + 并集：{"new_code": nA, "new_entry": nB, "removed_protection":
+    # nC, "affected_flows": len(verdict_flow_ids)}
+    flow_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class ReportData(BaseModel):
     schema_version: int = 1
     scan: ScanMeta
@@ -239,3 +288,6 @@ class ReportData(BaseModel):
     qa: ReportQA | None = None
     # T8 融合版专属：白盒发现黑盒未覆盖清单 [{vuln_id, reason}]
     verification_gaps: list[dict[str, Any]] = Field(default_factory=list)
+    # MR 增量扫描专属（spec 2026-09-03 §6）：仅 MR 扫描（intermediate/mr/ 存在）
+    # 由 builder 组装；全量扫描为 None（零感知）。
+    incremental_summary: IncrementalSummary | None = None

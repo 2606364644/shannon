@@ -456,7 +456,8 @@ def _derive_sink_parts(sink_id: str) -> tuple[str | None, int | None, str | None
 
 
 def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict,
-                          derive_ctx: "_GnDeriveCtx | None" = None) -> ReportVulnerability:
+                          derive_ctx: "_GnDeriveCtx | None" = None,
+                          trigger_source: str | None = None) -> ReportVulnerability:
     auth = getattr(vuln, "authentication_required", None)
     if auth is not None:
         auth = str(auth)
@@ -474,6 +475,7 @@ def _report_vulnerability(vuln, vuln_class: str, raw_entry: dict,
         authentication_required=auth,
         merge_source=getattr(vuln, "merge_source", None),
         merged_from=list(getattr(vuln, "merged_from", None) or []),
+        trigger_source=trigger_source,
         narrative=_narrative(vuln),
         problem_points=_problem_points(vuln, vuln_class),
         endpoints=_endpoint_entries(vuln),
@@ -590,13 +592,120 @@ async def _read_attack_chains(deliverables_path) -> list[AttackChainEntry]:
     return entries
 
 
+async def _load_mr_summary(deliverables_path):
+    """读 intermediate/mr/ 产物 → (summary | None, scope | None, scan_update | None)。
+
+    非 MR 扫描（incremental_scope.json 不存在）→ (None, None, None) 零感知；
+    scope 损坏同上（报告组装不因 MR 中间产物坏而失败）；diff_manifest 单独
+    容错——缺失只丢 scan 元信息（base/head/diff_stat），摘要段照常。
+    来源 B 的路由 join 直接读 code_index.json（MR join 只需 entry_points，
+    不随 _load_derive_ctx 的 parameter_graph 前置条件走）。
+    """
+    from supernova_core.models.report_data import (
+        IncrementalSummary, MrNewEntryPoint, MrRemovedProtection,
+    )
+    from supernova_core.mr_scan.incremental_scope import IncrementalScope
+
+    mr_dir = deliverables_path / "intermediate" / "mr"
+    scope_path = mr_dir / "incremental_scope.json"
+    if not await async_path_exists(scope_path):
+        return None, None, None
+    try:
+        scope = IncrementalScope.model_validate_json(
+            await async_read_file(scope_path))
+    except Exception as exc:  # noqa: BLE001 — scope 坏按非 MR 处理
+        logger.warning("report_data: incremental_scope unreadable: %s", exc)
+        return None, None, None
+
+    manifest: dict = {}
+    manifest_path = mr_dir / "diff_manifest.json"
+    if await async_path_exists(manifest_path):
+        try:
+            loaded = json.loads(await async_read_file(manifest_path))
+            if isinstance(loaded, dict):
+                manifest = loaded
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass
+
+    # 来源 B join code_index.entry_points（路由明细；join miss 只留 func id）
+    code_index: dict = {}
+    ci_path = resolve_intermediate(deliverables_path, "code_index.json")
+    if ci_path is not None and await async_path_exists(ci_path):
+        try:
+            loaded = json.loads(await async_read_file(ci_path))
+            if isinstance(loaded, dict):
+                code_index = loaded
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass
+    entry_map: dict[str, dict] = {}
+    for ep in code_index.get("entry_points") or []:
+        if isinstance(ep, dict) and ep.get("func_block_id"):
+            entry_map[ep["func_block_id"]] = ep
+    block_func: dict[str, str] = {}
+    for b in code_index.get("blocks") or []:
+        if isinstance(b, dict) and b.get("id"):
+            block_func[b["id"]] = str(b.get("function_name") or "")
+
+    new_entries = [
+        MrNewEntryPoint(
+            func_block_id=fid,
+            function=block_func.get(fid),
+            route=entry_map.get(fid, {}).get("route"),
+            method=entry_map.get(fid, {}).get("http_method"),
+            authentication=entry_map.get(fid, {}).get("authentication"),
+        )
+        for fid in scope.new_entry_point_ids
+    ]
+    removed = [
+        MrRemovedProtection(
+            file=rp.protection.file_path,
+            line=rp.protection.base_line_no,
+            kind=rp.protection.protection_kind,
+            function=rp.protection.function_name,
+            rationale=rp.protection.rationale or None,
+            followed_by_chains=bool(rp.flow_ids),
+        )
+        for rp in scope.removed_protection_flows
+    ]
+    degraded = False
+    rp_path = mr_dir / "removed_protections.json"
+    if await async_path_exists(rp_path):
+        try:
+            degraded = bool(json.loads(
+                await async_read_file(rp_path)).get("degraded"))
+        except Exception:  # noqa: BLE001 — 降级标志缺失按 False
+            pass
+    summary = IncrementalSummary(
+        degraded=degraded,
+        new_entry_points=new_entries,
+        removed_protections=removed,
+        flow_counts={
+            "new_code": len(scope.source_a_flow_ids),
+            "new_entry": len(scope.source_b_flow_ids),
+            "removed_protection": len(scope.source_c_flow_ids),
+            "affected_flows": len(scope.verdict_flow_ids),
+        },
+    )
+    scan_update = {
+        "base_commit": manifest.get("base_commit"),
+        "head_commit": manifest.get("head_commit"),
+        "diff_stat": manifest.get("stats"),
+    }
+    return summary, scope, scan_update
+
+
 async def build_report_data(
     deliverables_path, scan_meta: ScanMeta,
 ) -> ReportData:
     """读 SSOT queue 组装 ReportData（确定性；无 LLM）。"""
+    from supernova_core.mr_scan.incremental_scope import trigger_source_of
+
     vulns_by_class: dict[str, list[ReportVulnerability]] = {}
     queue_vulns_by_class: dict[str, list] = {}
     derive_ctx = await _load_derive_ctx(deliverables_path)
+    # MR 增量（spec 2026-09-03 §6）：增量摘要 + scope（trigger_source 反查用）
+    mr_summary, mr_scope, mr_scan_update = await _load_mr_summary(
+        deliverables_path)
     for vuln_class, cfg in CLASS_CONFIG.items():
         queue_path = resolve_intermediate(deliverables_path, cfg.queue_file)
         if queue_path is None or not await async_path_exists(queue_path):
@@ -623,19 +732,30 @@ async def build_report_data(
                     "dismissed archive has it)", vuln.ID, vuln_class)
                 continue
             raw = vuln.model_dump(exclude_none=True)
+            # trigger_source 只标 GN 轨可归因发现（both / gitnexus-only 且
+            # flow_id 命中 scope 来源集，C > B > A 归并）；LLM-only 一律不标。
+            _trigger = None
+            if mr_scope is not None and getattr(vuln, "merge_source", None) in (
+                    "both", "gitnexus-only"):
+                _trigger = trigger_source_of(
+                    getattr(vuln, "flow_id", None), mr_scope)
             report_vulns.append(
-                _report_vulnerability(vuln, vuln_class, raw, derive_ctx))
+                _report_vulnerability(vuln, vuln_class, raw, derive_ctx,
+                                      trigger_source=_trigger))
             kept_vulns.append(vuln)
         vulns_by_class[vuln_class] = report_vulns
         queue_vulns_by_class[vuln_class] = kept_vulns
 
     all_vulns = [v for vs in vulns_by_class.values() for v in vs]
+    if mr_scan_update:
+        scan_meta = scan_meta.model_copy(update=mr_scan_update)
     return ReportData(
         scan=scan_meta,
         stats=_build_stats(vulns_by_class),
         vulnerabilities=all_vulns,
         attack_chains=await _read_attack_chains(deliverables_path),
         quick_reference=_quick_reference(queue_vulns_by_class),
+        incremental_summary=mr_summary,
     )
 
 

@@ -1150,7 +1150,12 @@
     },
     "severityTooltip": "Inferred via type/exposure/auth/confidence heuristics; not an authoritative rating",
     "pocWitness": "PoC / witness",
-    "viewDataflow": "View data flow"
+    "viewDataflow": "View data flow",
+    "triggerSource": {
+      "new_code": "New code",
+      "new_entry": "New entry",
+      "removed_protection": "Protection removed"
+    }
   },
   "markdown": {
     "topRisksTitle": "Top risk findings (sorted by business impact)",
@@ -1243,7 +1248,19 @@
       "narrative_complete": "Incomplete narrative (cause/impact/remediation)",
       "endpoint_rows_have_locations": "Endpoints missing file:line chain"
     },
-    "pocSelfCheckFail": "PoC correctness self-check FAILED (agent-reported; verify manually before replaying)"
+    "pocSelfCheckFail": "PoC correctness self-check FAILED (agent-reported; verify manually before replaying)",
+    "mr": {
+      "title": "MR Incremental Summary",
+      "files": "files",
+      "degraded": "Protection-removal analysis degraded — source C chains not auto-followed; review removed protections manually",
+      "newEntry": "New entries (attack surface)",
+      "removedProtections": "Removed protections",
+      "affectedFlows": "Affected flows",
+      "showDetails": "Increment details",
+      "hideDetails": "Hide details",
+      "chainFollowed": "Chains re-judged",
+      "unfollowed": "Function deleted · not followed (manual review)"
+    }
   },
   "theme": {
     "toggleAria": "Toggle theme",

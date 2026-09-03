@@ -249,8 +249,7 @@
       "allStatus": "全部状态",
       "allType": "全部类型",
       "whitebox": "白盒",
-      "correlation": "跨仓关联"
-   ,
+      "correlation": "跨仓关联",
       "mr": "MR 增量"
     },
     "newScan": "新建扫描",
@@ -1151,7 +1150,12 @@
     },
     "severityTooltip": "依据类型/公网/认证/置信度启发式推断，非权威评级",
     "pocWitness": "PoC / 见证",
-    "viewDataflow": "查看数据流"
+    "viewDataflow": "查看数据流",
+    "triggerSource": {
+      "new_code": "新增代码",
+      "new_entry": "新增入口",
+      "removed_protection": "防护删除"
+    }
   },
   "markdown": {
     "topRisksTitle": "最高风险发现（按业务影响排序）",
@@ -1244,7 +1248,19 @@
       "narrative_complete": "叙事缺段（成因/危害/修复建议）",
       "endpoint_rows_have_locations": "接口缺行号链"
     },
-    "pocSelfCheckFail": "PoC 正确性自检未通过（agent 自报，复现前请人工核对）"
+    "pocSelfCheckFail": "PoC 正确性自检未通过（agent 自报，复现前请人工核对）",
+    "mr": {
+      "title": "MR 增量摘要",
+      "files": "个文件",
+      "degraded": "防护删除分析降级——来源 C 未自动追链，建议人工复核删除的防护行",
+      "newEntry": "新增入口（攻击面）",
+      "removedProtections": "删除防护",
+      "affectedFlows": "受影响链",
+      "showDetails": "增量明细",
+      "hideDetails": "收起明细",
+      "chainFollowed": "已追链重判",
+      "unfollowed": "函数已删 · 未追链（供人审）"
+    }
   },
   "theme": {
     "toggleAria": "切换主题",

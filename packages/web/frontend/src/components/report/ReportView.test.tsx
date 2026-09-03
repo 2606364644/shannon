@@ -764,3 +764,78 @@ describe("qa 横幅升级（逐卡缺口清单，spec §6）", () => {
     expect(screen.queryAllByTestId("qa-gap-vuln").length).toBe(0);
   });
 });
+
+// === MR 增量段（spec 2026-09-03 §6）===
+describe("MrIncrementalSummary（MR 增量摘要）", () => {
+  const mrData: ReportData = {
+    ...data,
+    scan: {
+      id: "nodegoat-mr-1", track: "whitebox",
+      base_commit: "abc1234567890", head_commit: "def9876543210",
+      diff_stat: { files: 3, insertions: 25, deletions: 8 },
+    },
+    incremental_summary: {
+      degraded: false,
+      new_entry_points: [
+        { func_block_id: "app/routes.js:handler:10", function: "handler",
+          route: "/memos", method: "POST", authentication: "isLoggedIn" },
+      ],
+      removed_protections: [
+        { file: "app/utils.js", line: 42, kind: "sanitize",
+          function: "sanitize_input", rationale: "escapes", followed_by_chains: true },
+        { file: "app/gone.js", line: 3, kind: "authz_check",
+          function: null, rationale: null, followed_by_chains: false },
+      ],
+      flow_counts: { new_code: 3, new_entry: 1, removed_protection: 2, affected_flows: 5 },
+    },
+  };
+
+  it("非 MR 扫描（incremental_summary null）零渲染——全量报告零感知", () => {
+    render(<ReportView data={data} />);
+    expect(screen.queryByTestId("mr-incremental-summary")).toBeNull();
+  });
+
+  it("三统计卡 + base..head 头 + diff stat；明细折叠交互", async () => {
+    render(<ReportView data={mrData} />);
+    const section = screen.getByTestId("mr-incremental-summary");
+    // 三统计卡（受影响链=affected_flows）
+    expect(within(section).getByTestId("mr-stat-new-entry").textContent).toContain("1");
+    expect(within(section).getByTestId("mr-stat-removed-protection").textContent).toContain("2");
+    expect(within(section).getByTestId("mr-stat-affected-flows").textContent).toContain("5");
+    // base..head 短显（>10 字符截断）+ diff stat
+    expect(within(section).getByText("abc1234567..def9876543")).toBeInTheDocument();
+    expect(within(section).getByText(/\+25 \/ −8 · 3/)).toBeInTheDocument();
+    // 明细默认收起，点开见入口/防护明细（未追链行显人审提示）
+    expect(screen.queryByTestId("mr-new-entry-details")).toBeNull();
+    fireEvent.click(screen.getByTestId("mr-details-toggle"));
+    const entries = await screen.findByTestId("mr-new-entry-details");
+    expect(within(entries).getByText("POST /memos")).toBeInTheDocument();
+    const removed = screen.getByTestId("mr-removed-protection-details");
+    expect(within(removed).getByText("app/utils.js:42")).toBeInTheDocument();
+    expect(within(removed).getByText(/未追链/)).toBeInTheDocument();
+  });
+
+  it("degraded=true 显式标注（来源 C 降级不阻塞，提示人工复核）", () => {
+    render(<ReportView data={{
+      ...mrData,
+      incremental_summary: { ...mrData.incremental_summary!, degraded: true },
+    }} />);
+    expect(screen.getByText(/防护删除分析降级/)).toBeInTheDocument();
+  });
+});
+
+describe("VulnerabilityCard trigger_source 徽章（MR 来源标注）", () => {
+  it("trigger_source 非空 → ∆ 徽章（i18n 文案）；null 不渲染", () => {
+    const { rerender } = render(
+      <VulnerabilityCard v={{ ...vuln, trigger_source: "removed_protection" }}
+        collapsed={false} onToggleCollapse={() => {}} />,
+    );
+    const badge = screen.getByTestId("trigger-source-badge");
+    expect(badge.textContent).toContain("防护删除");
+    rerender(
+      <VulnerabilityCard v={{ ...vuln, trigger_source: null }}
+        collapsed={false} onToggleCollapse={() => {}} />,
+    );
+    expect(screen.queryByTestId("trigger-source-badge")).toBeNull();
+  });
+});
