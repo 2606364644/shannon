@@ -286,6 +286,7 @@ class AgentExecutor:
         queue_root: str | None = None,   # spec 2026-08-08：读 queue 的根（黑盒=白盒 repo_path/deliverables），透传到 render_deliverable
         proxy_url: str | None = None,   # Task 4：per-scan 出口代理穿线（host_profile → CLI env / ToolContext）
         tool_policy: "ToolPolicy" = "default",
+        prompt_suffix: str | None = None,   # MR 增量引导段（spec 2026-09-03 §5.2）：模板渲染后追加
     ) -> AgentMetrics:
         defn = AGENTS[agent_name]
         repo = Path(repo_path)
@@ -339,6 +340,8 @@ class AgentExecutor:
             config=distributed,
             pipeline_testing=pipeline_testing,
         )
+        if prompt_suffix:
+            prompt = prompt + prompt_suffix
 
         await GitManager.create_checkpoint(deliverables, agent_name)
 

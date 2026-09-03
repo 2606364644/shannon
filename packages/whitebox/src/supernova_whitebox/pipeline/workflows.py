@@ -157,12 +157,21 @@ class WhiteboxScanWorkflow:
             from supernova_core.config.parser import parse_config
             cfg = parse_config(input.config_path)
 
-        # vuln 类优先级链: CLI/env override(经 input.vuln_classes) > YAML(cfg.vuln_classes) > 默认全跑。
+        # vuln 类优先级链: CLI/env override(经 input.vuln_classes) > MR 启发式(mr_meta,
+        # spec 2026-09-03 §4.5) > YAML(cfg.vuln_classes) > 默认全跑。
         # 修通 pre-existing 断链（旧: input.vuln_classes or ALL_VULN_CLASSES，丢弃 cfg.vuln_classes）。
-        selected_classes: list[VulnType] = select_vuln_classes(
-            input.vuln_classes,
+        from .mr_wiring import resolve_mr_vuln_classes
+        _mr_classes = resolve_mr_vuln_classes(
+            input.vuln_classes, input.mr_meta,
             cfg.vuln_classes if cfg else None,
         )
+        if _mr_classes is not None:
+            selected_classes: list[VulnType] = [VulnType(c) for c in _mr_classes]
+        else:
+            selected_classes = select_vuln_classes(
+                input.vuln_classes,
+                cfg.vuln_classes if cfg else None,
+            )
 
         # Compute workspace_path so activities know where to write 产物(heartbeat/deliverables/
         # activity_failures/agents/workflow.log/session). WEB 路径(event_file 非 None): 用 event_file
@@ -191,6 +200,9 @@ class WhiteboxScanWorkflow:
             provider_config=input.provider_config,   # P3c 阶段 1：一处灌入，全链 **act_input.__dict__ 继承
             combined=input.combined,   # D1 组合扫描：透传到 finalize_summary 做阶段分支
             env_overrides=input.env_overrides,
+            mr_base_ref=input.mr_base_ref,   # MR 增量（spec 2026-09-03）：前置 activity 消费
+            mr_head_ref=input.mr_head_ref,
+            mr_meta=input.mr_meta,           # 消费点：prompt 引导段 / verdict 过滤 / 报告
         )
         # C1 Phase B: worker 路径前导 setup_display(注入 AuditSession + event_file) + 并行
         # run_heartbeat(长驻写 heartbeat). CLI 路径跳过(外层 run_scan 已做).
@@ -328,6 +340,16 @@ class WhiteboxScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=2),
                     retry_policy=retry_for("standard"),
                 )
+                # MR 增量模式（spec 2026-09-03 §3.1 步骤 6）：head 索引已产，
+                # 合成 IncrementalScope（三来源 verdict 候选过滤集）供 GitNexus 轨
+                # 预过滤 + 报告增量段消费。非 MR（mr_meta=None）跳过，零行为变化。
+                if input.mr_meta:
+                    from . import mr_activities
+                    await workflow.execute_activity(
+                        mr_activities.run_incremental_scope, act_input,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=retry_for("standard"),
+                    )
                 await workflow.execute_activity(
                     activities.log_phase_complete_activity,
                     ActivityInput(**{**act_input.__dict__, "phase": "pre-recon"}),

@@ -25,6 +25,11 @@ class PipelineInput(BasePipelineInput):
     # D1 组合扫描：True=白盒阶段结束调 log_phase_complete（写 PhaseEvent，非 scan_end），
     # 留 scan 非终态供编排器追加黑盒；False（默认）=纯白盒调 log_workflow_complete（不变）。
     combined: bool = False
+    # MR 增量扫描（spec 2026-09-03）：base/head ref（分支名或 commit sha）。
+    # None = 全量扫描（零行为变化）。MrScanWorkflow 前置消费后把摘要塞 child 的 mr_meta。
+    mr_base_ref: str | None = None
+    mr_head_ref: str | None = None
+    mr_meta: dict | None = None   # child workflow 消费点用（MrScanWorkflow 填）
 
 
 @dataclass
@@ -66,6 +71,13 @@ class ActivityInput:
     combined: bool = False
     # 扫描期 per-workspace env 覆盖（scan_env 覆盖层用）；由 workflow 从 PipelineInput 灌入。
     env_overrides: dict[str, str] = field(default_factory=dict)
+    # MR 增量扫描（spec 2026-09-03）：base/head ref（分支名或 commit sha）。
+    # None = 全量扫描（零行为变化）；MR 模式由 MrScanWorkflow 前置 activity 消费。
+    mr_base_ref: str | None = None
+    mr_head_ref: str | None = None
+    # MR 元信息（MrScanWorkflow 前置产物摘要，穿给 child workflow 消费点）：
+    # {base_commit, head_commit, selected_vuln_classes, verdict_flow_count}
+    mr_meta: dict | None = None
 
 
 @dataclass

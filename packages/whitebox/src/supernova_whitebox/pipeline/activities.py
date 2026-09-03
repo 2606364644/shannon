@@ -55,6 +55,9 @@ from supernova_core.audit.session_recovery import (
 )
 
 from .shared import ActivityInput
+from .mr_wiring import (
+    build_mr_incremental_guidance, filter_flows_by_mr_scope, load_mr_scope_flow_ids,
+)
 from .step_intents import intent_for
 from .step_cache import (
     STEP_AUTHZ_GITNEXUS_JUDGE,
@@ -223,6 +226,7 @@ async def run_agent(input: ActivityInput) -> dict:
             max_turns=_vuln_max_turns(agent_name.value),
             structured_output_schema=_vuln_output_schema(agent_name),
             provider_config=input.provider_config,   # P3c 阶段 1
+            prompt_suffix=build_mr_incremental_guidance(input.mr_meta),  # MR 增量引导段（§5.2）
         )
         await tool_audit_logger.close(success=True, duration_ms=metrics.duration_ms)
         await session.end_agent(agent_name.value, AgentEndResult(
@@ -3318,6 +3322,15 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 "failed_classes": failed_classes,
                 "fail_reasons": fail_reasons,
             }
+
+        # MR 增量模式（spec 2026-09-03 §5.1）：候选按 IncrementalScope 预过滤——
+        # verdict 只判增量链（新 sink 链/新入口链/删防护反向链），容量窗口自然收窄。
+        # 非 MR 扫描（incremental_scope.json 不存在）→ load 返回 None → 原图直通零开销。
+        _mr_scope_ids = load_mr_scope_flow_ids(deliverables)
+        if _mr_scope_ids is not None:
+            pgraph = filter_flows_by_mr_scope(pgraph, _mr_scope_ids)
+            logger.info("MR 增量模式：chain verdict 候选 %d/%d 条",
+                        len(pgraph.taint_flows), len(_mr_scope_ids) or 0)
 
         # XSS routes by SinkCallSite.category == XSS (SlotContext has no render
         # context), so read code_index.json for the sink call sites.
