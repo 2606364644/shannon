@@ -106,7 +106,11 @@ class TopologyAnalysisManager:
     def _workspace_names(self) -> list[str]:
         if not self._root.exists():
             return []
-        return sorted(p.name for p in self._root.iterdir() if p.is_dir())
+        # dot 开头是保留段（.system=全局认证档案、.master_key），不是 ws——列进去
+        # 会让 store.list 校验抛 ValueError 落 route 兜底 422，start 每次必挂
+        # （_recovered 不置位）。对齐 workspaces_indexer 的 dot-dir 约定。
+        return sorted(p.name for p in self._root.iterdir()
+                      if p.is_dir() and not p.name.startswith("."))
 
     async def start(self, ws: str, repos: list[str], *, refresh: bool = False) -> str:
         # Serialize validation/cache/task creation to prevent duplicate cache misses.

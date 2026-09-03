@@ -201,6 +201,25 @@ async def test_manager_submits_to_worker_and_completes(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_manager_start_ignores_dot_reserved_dirs(tmp_path):
+    # workspaces 根下的 dot 保留段（.system=全局认证档案、.master_key 等）不是 ws：
+    # _recover_orphans 首跑遍历目录名 → store.list('.system') 曾被 ws 名校验拒绝，
+    # 抛 ValueError 落 route 兜底 422 invalid_workspace——进程首点"自动关联分析"
+    # 必挂且 _recovered 不置位次次挂（2026-09-03 admin ws 实证）。对齐
+    # workspaces_indexer 的 dot-dir 约定：保留段不进 ws 名单。
+    _make_repos(tmp_path)
+    reserved = tmp_path / "workspaces" / ".system"
+    reserved.mkdir()
+    (reserved / "auth-profiles.yaml").write_text("profiles: []\n", encoding="utf-8")
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
+    assert manager.get("ws1", analysis_id)["status"] == "queued"
+    assert len(temporal.submitted) == 1
+
+
+@pytest.mark.asyncio
 async def test_manager_submit_failure_fails_analysis(tmp_path):
     # temporal 不可达（提交失败）→ 写 failed/provider_failed 终态并返回 id——
     # 前端轮询即见失败，用户重跑（spec：失败重跑哲学，不自动重试）。
@@ -403,3 +422,25 @@ async def test_api_lifecycle_errors_auth_and_no_scan_side_effects(authed_client,
                   headers={"X-CSRF-Token": token})
     response = outsider.get(f"/api/workspaces/ws1/correlation-topology/analyses/{analysis_id}")
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_manager_ignores_system_workspace_directory(tmp_path):
+    """跨仓自动关联 422 回归：`.system` 是全局存储目录，不是 workspace。
+
+    `_workspace_names()` 若把它交给 topology store，`list('.system')` 会被
+    `_safe_ws` 拒绝并抛 ValueError，API 兜底成 422。恢复/并发扫描必须跳过。
+    """
+    _make_repos(tmp_path)
+    system_dir = tmp_path / "workspaces" / ".system"
+    system_dir.mkdir()
+    (system_dir / "auth-profiles.yaml").write_text("profiles: []\n", encoding="utf-8")
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+
+    assert manager._workspace_names() == ["ws1"]
+    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
+
+    assert manager.get("ws1", analysis_id)["status"] == "queued"
+    assert len(temporal.submitted) == 1
