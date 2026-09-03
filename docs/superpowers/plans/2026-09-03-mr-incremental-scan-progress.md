@@ -1,117 +1,50 @@
-# MR 增量扫描——实施进度交接（2026-09-03 晚）
+# MR 增量扫描——实施进度（2026-09-03 夜 · 全部任务完成）
 
-> 状态：📐 设计定稿 + 核心已落地，**剩余工作待续**（本人暂停，交交接）。
+> 状态：✅ **#11/#12/#13 + §3.3/§4.2 全部落地**（本文件原为交接文档，续做会话完成后改写为完成记录）。
 > spec：`docs/superpowers/specs/2026-09-03-mr-incremental-scan-design.md`（已提交 `ac359c72`）
-> 主题索引：`docs/superpowers/README.md`「MR 增量扫描」节（已提交 `0900a404`）
-> 分支：`feat/fork-py`
+> 分支：`feat/fork-py`（注意：该分支另有并行会话在做双轨去重修复——git 操作须精确到文件，勿宽域 add/reset）
 
 ---
 
-## 0. 一句话状态
+## 0. 完成总览（按提交序）
 
-**core 三层（diff 解析 / 增量范围合成 / 删防护判定）+ whitebox 前置 activities + 全量 workflow 消费点接线已提交；web 后端 API/models/scan_manager 与 worker 注册已改（待提交）；前端 MR 表单渲染分支未写；报告层（#12）与 E2E/铁律锁定（#13）未开始。**
+| commit | 内容 |
+|---|---|
+| `338716cd`/`924985a7`/`8de038d0`/`20f70c3b` | core 三层 + whitebox 前置 activities（交接前已提交） |
+| `07b0221e`/`b40a1a5a`/`947d54d5` | web 后端/worker/前端半成品（交接前已提交） |
+| `9d4bffc8` | **#11 收尾**：ScanNewPage MR 表单渲染分支（type=mr 排 corrMode===auto 之前）+ ScanList MR 徽标/base..head/类型档/重跑预填 + `_scan_detail`/`ScanSummary` 透出 mr refs + 前端 7 测试 |
+| `1f5349dd` | **#12 报告层**：IncrementalScope 三来源明细 + `trigger_source_of`（C>B>A 归并、stored# 复合拆分）+ ReportData 增量段（ScanMeta refs/`IncrementalSummary`/`ReportVulnerability.trigger_source`）+ builder 组装打标（merge_source ∈ both/gitnexus-only 且 flow 命中）+ 前端 `MrIncrementalSummary`/∆ 徽章 |
+| `ca08b179` | **#13**：NodeGoat 缩影 E2E fixture（真实 git diff → scope → 报告打标全链，三来源各标正确）+ 铁律前瞻锁定（mr_meta 污染不泄漏进 guidance） |
+| `f69fd8f9` | **§3.3/§4.2**：空 diff 快速终态 + GN verdict 容量窗口重估 + workflow 级编排测试——**修 3 个潜伏 bug**（见 §2） |
 
----
-
-## 1. 已提交（git log 按序）
-
-| commit | 内容 | 测试 |
-|---|---|---|
-| `338716cd` | core `mr_scan.diff_manifest`：git diff -U3 解析（hunk 行号坐标系/新删文件 flag/rename 归一/added_line_set） | 6 单元 + 真实 git 契约测试 ✅ |
-| `924985a7` | core `mr_scan.incremental_scope`：三来源合成（A 新增代码/B 新入口全链/C 删防护两级反向链+函数定位三分支）+ `select_vuln_classes` 启发式 | 10 测试 ✅ |
-| `8de038d0` | core `mr_scan.protection_removal`：删防护轻量 LLM 判定（内联 prompt/schema/LLMClient 注入），失败·超时·垃圾三态降级 | 5 测试 ✅ |
-| `1cdc3ded` | whitebox `mr_activities`（repo_prepare/git_diff/protection_removal/incremental_scope）+ `mr_wiring` 纯函数（vuln 类优先级/增量引导段/verdict 过滤/scope 读）+ executor `prompt_suffix` 通道 + GN verdict 按 scope 预过滤 | whitebox 6+4 测试、core executor 2 测试 ✅ |
-
-**全部已提交测试均绿**（`packages/core/tests/mr_scan/`、`packages/whitebox/tests/pipeline/test_mr_*`、`packages/core/tests/agents/test_executor_prompt_suffix.py`）。
+测试口径：core mr_scan 27 + services（含新增 MR 组）+ whitebox mr 19 + 前端 vitest 218 + `npx tsc -b` 全绿；唯一失败 `test_build_report_data_maps_queue_fields` 为**预存失败**（断言已退役的 `poc.witness_payload` 字段，HEAD 上同挂，非本项目引入）。
 
 ---
 
-## 2. 工作区未提交改动（半成品，勿忘）
+## 1. 实现要点（偏离 spec 处与决策记录）
 
-`git status` 显示以下 `M`（全部未提交）：
+- **base/head 输入用手输文本框**（spec §6 原文写复用 BranchCombobox）：BranchCombobox 是仓库列表行内切换控件（无边框小按钮 trigger），非表单样式；i18n 键已按文本输入注入（"分支名或 commit sha"）。
+- **trigger_source 打标在报告组装时反查**（spec/进度原文的另一选项是 verdict queue 产出处打标）：builder 读 `incremental_scope.json` 三来源明细反查——queue SSOT 保持薄、不动 merger/findings 模型链。LLM-only 卡一律不标（merge_source 双条件）。
+- **空 diff 语义**（spec §7 兑现）：`stats.files==0` → 跳过删防护判定与 child，`run_mr_empty_diff_finalize` 复用 `_build_report_data_initial` 产「无变更」报告（scan 带增量 refs）。曾有的隐患：空 diff 时 `select_vuln_classes([])` 返全类 + scope 空集 filter 直通 → 双轨全量空烧，已一并修掉。
+- **容量窗口**（§4.2 兑现）：`run_incremental_scope` 返 `verdict_timeout_minutes`（链数 ÷ 并发 × 60s/轮，下限 5min；activity 层算好——workflow 沙箱禁 env 读），child 据此收窄 `run_gitnexus_chain_verdict` 窗口；全量 15min 不变，未跑 scope 回落全量窗口。
+- **空集 ≠ None**：`filter_flows_by_mr_scope` 空集过滤为零候选（曾直通致 MR 退化全量判定）。
 
-| 文件 | 改了什么 | 完成度 |
-|---|---|---|
-| `packages/whitebox/.../pipeline/workflows.py` | `MrScanWorkflow` 类（前置 3 activities → child `WhiteboxScanWorkflow`）+ 全量 workflow 消费点（vuln 类 MR 启发式优先 / act_input 灌 mr_meta / pre-recon 后插 `run_incremental_scope`） | 已写，**语法+import 验证过**，**无 workflow 级测试** |
-| `packages/worker/src/supernova_worker/runner.py` | wb_worker 注册 `MrScanWorkflow` + 4 个 MR activities | 已写，**未验证注册加载** |
-| `packages/web/src/supernova_web/models.py` | `ScanRequest.type` 加 `"mr"` + `base_ref`/`head_ref` + validator | ✅ 测试绿 |
-| `packages/web/src/supernova_web/components/scan_manager.py` | import `MrScanWorkflow` + `_submit_mr` + `start()` 的 mr 分发分支 | 已写，**无单测** |
-| `packages/web/tests/test_models_repo_source.py` | MR validator 3 测试 | ✅ 绿 |
-| `packages/web/tests/test_api_scan_repo_source.py` | MR 422 两测试 | ✅ 绿 |
-| `packages/web/frontend/src/api/types.ts` | `ScanRequest.type` 加 mr + `base_ref`/`head_ref` | ✅ |
-| `packages/web/frontend/src/locales/en.json` + `zh.json` | MR i18n 键（type.mr / subtitleMr / refs / selectRefs） | ✅ |
-| `packages/web/frontend/src/pages/ScanNewPage.tsx` | `ScanType` 加 mr / `FormState` 加 refs / `buildBody` mr 分支 / 类型切换数组 / isValid / 文案分支 | ⚠️ **缺 MR 表单渲染分支**（见 §4.1） |
+## 2. f69fd8f9 修的 3 个潜伏 bug（MrScanWorkflow 此前只有语法验证）
 
----
+1. `workflows.py` 构造 ActivityInput 读不存在的 `PipelineInput.workspace_path`（AttributeError 炸 workflow task）→ 抽 `_derive_workspace_path` 模块函数（child 三级派生共用）。
+2. MR vuln 类消费点 `VulnType(c)` 实例化 `typing.Literal`（TypeError）→ 字符串直传。
+3. `worker/runner.py` activities 列表引用 MR activity 名但**缺 import**（`run_worker()` 调用即 NameError）→ 补 import + 静态冒烟。
 
-## 3. 剩余任务清单
+## 3. 已知边界 / 后续
 
-### #11（续）web + 前端收尾
+- 同 repo 并发 MR 扫描 checkout 互斥（spec §7「提交前校验」）：未实现，靠现有并发治理兜底。
+- MR resume 语义未定（前端 mr 行无续跑入口，`canResume` 限 whitebox）。
+- **pytest WorkflowEnvironment + child workflow 在本机有预存挂起**（CLAUDE.md 测试陷阱；heartbeat 基准测试同挂）→ child 穿线由 `_mr_child_input` 纯函数单测锁定 + 独立脚本验证（`/tmp/mr_repro.py` 模式），未引入挂起测试。空 diff workflow 测试（无 child）正常。
+- 真机 E2E（temporal + worker 容器 + 真 LLM 的 NodeGoat MR 扫描）待部署环境跑一次冒烟——单测层链路已全覆盖。
 
-#### 3.1 ⚠️ ScanNewPage MR 表单渲染分支（唯一编译不报错但运行会落错分支的缺口）
+## 4. 复验命令（改动 mr 相关后）
 
-`packages/web/frontend/src/pages/ScanNewPage.tsx` 表单区（约 L645）现在只有三支：
-```tsx
-{type === "whitebox" ? ( <ScanFormFields .../> )
- : corrMode === "auto" ? ( <CorrelationTopologyFields .../> )
- : ( <CorrelationFormFields .../> )}
 ```
-`type === "mr"` 时 `corrMode === "auto"` 恒真 → 会错误渲染跨仓拓扑表单。**需加 `type === "mr"` 优先分支**，内联最小表单：
-
-- 工作区下拉（复刻 `ScanFormFields.tsx` L873-895 的 `wsSelectInner`：`Select value={workspace}` + `wsList`/`wsLoading`，i18n 键 `scan.fields.wsSelectLabel` / `scan.fields.wsSelectPlaceholder` / `scan.fields.wsEmptyOption` 已存在）；
-- 仓库选择（`RepoCombobox`，`useRepos(workspace)` 已有 import，i18n 键 `scan.repo.selectPlaceholder` 等已存在）；
-- 两个文本输入：`base_ref` / `head_ref`，绑定 `f.mrBaseRef` / `f.mrHeadRef`，i18n 键 `scan.mrBaseRef` / `scan.mrHeadRef`（已注入）；
-- 错误提示：`mrRefsErr`（`scan.errors.selectRefs`）与 `sourceErr` 已接好。
-
-参考已有 i18n 键确认：`grep scan.mr packages/web/frontend/src/locales/zh.json`。
-
-#### 3.2 ScanList mr 标识
-
-`ScanList.tsx` 现在按 `scan_type` 渲染类型标签。加 `scan_type === "mr"` 时显示「MR」徽标 + `base..head`（`session.json` 里 `_submit_mr` 已写 `mr_base_ref`/`mr_head_ref`，`_scan_detail` 需透出或用现有字段）。规格：`specs/...-design.md` §6 前端。
-
-#### 3.3 workflow 级测试（TDD 缺口，建议补）
-
-- `MrScanWorkflow` 编排测试：mock 前置 3 activities + child，验证 mr_meta 穿线（`event_file`/`provider_config` 透传、`selected_vuln_classes` 来自 diff_result）。参照 `packages/whitebox/tests/pipeline/test_attack_chain_workflow.py` 的 Temporal test-env 模式。
-- 空 diff 快速终态（spec §7：diff 为空不跑双轨）：当前实现**未做**——`MrScanWorkflow` 无条件跑 child；child 里 `selected_vuln_classes=[]` 会让 vuln agents 不 fan-out，但 pre-recon/recon 仍跑。若严格执行 spec 需在 `run_git_diff` 返回空 stats 时短路（产空报告）。**决定后再实现**。
-
-### #12 报告层（未开始）
-
-- `ReportData`（`packages/core/src/supernova_core/models/report_data.py`）：`scan` 加可选 `base_commit`/`head_commit`/`diff_stat`；新顶层可选段 `incremental_summary`（`new_entry_points[]`/`removed_protections[]`/三来源分布）；每条 vulnerability 加可选 `trigger_source`（`new_code`|`new_entry`|`removed_protection`，**只标 GitNexus 轨可归因发现**，C>B>A 归并）。
-- `assemble_report`（`packages/whitebox/.../activities.py` L2053）读 `intermediate/mr/*.json` → report_data 增量段。
-- **`trigger_source` 打标时机**：`run_gitnexus_chain_verdict` 产出 `<vuln>_gitnexus_queue.json` 时按 flow 命中哪个来源过滤集打标（`IncrementalScope` 需携带 flow→来源映射，当前 `incremental_scope.json` 只有 `verdict_flow_ids` 平铺——**需在 scope 模型加来源明细或打标时从三来源集合反查**）。
-- 前端 `MrIncrementalSummary` 组件 + 漏洞卡片徽章。
-
-### #13 E2E 冒烟 + 铁律锁定（未开始）
-
-- NodeGoat MR fixture：base 为带 sanitize/无新路由，head 删 sanitize + 加新路由 → 验证来源 A/B/C 各出标注正确的发现 + 增量摘要段。
-- 铁律锁定测试：`build_mr_incremental_guidance` 输出不含确定性产物字段（**已测**，见 `test_mr_workflow_wiring.py`）；补：`run_vuln_agent` 的 prompt_suffix 全链路不掺 scope 产物。
-- 前端 vitest + `npx tsc -b`。
-
----
-
-## 4. 关键实现笔记（续做时必读）
-
-### 4.1 架构决策回顾
-- **child workflow 复用**（对 spec 方案 X 的实现层细化）：`MrScanWorkflow` = 前置 3 activities（repo_prepare → git_diff → protection_removal，串行）+ `workflow.execute_child_workflow(WhiteboxScanWorkflow.run, child_input)`；全量 workflow 只加可选消费点（mr_meta=None 零行为变化）。
-- **增量产物落盘**：`deliverables/whitebox/intermediate/mr/{diff_manifest.json, diff.patch, removed_protections.json, incremental_scope.json}`（`mr_activities._mr_dir`）。
-- **双轨合规**：LLM 轨增量信息 = 只有 `build_mr_incremental_guidance(mr_meta)`（git 派生：ref/路径/命令提示），经 executor `prompt_suffix` 尾拼；GN 轨按 scope 过滤在 `run_gitnexus_chain_verdict` 内 `filter_flows_by_mr_scope`。
-
-### 4.2 容量铁律未兑现项
-GN verdict 窗口在 workflows.py 仍固定 15min（增量链数少时自然快，不会撞窗，但 spec §5.1 承诺「按增量链数重估」）。`run_incremental_scope` 返回 `verdict_flow_count`，child 可在 `mr_meta` 拿到——**若要兑现，需在 GN verdict 前算窗口**（链数 ÷ 并发 × 60s 上界，下限 5min）。非必须，标注决定。
-
-### 4.3 已知边界/后续
-- 同 repo 并发 MR 扫描 checkout 互斥（spec §7 承诺「提交前校验」）：**未实现**，当前靠现有并发治理兜底。
-- `_submit_mr` 未走 `resume` 路径（MR 扫描 resume 语义后续定）。
-
----
-
-## 5. 建议的续做顺序
-
-1. **ScanNewPage MR 表单渲染分支**（§3.1）——不补则运行错分支。
-2. 提交工作区半成品（分两笔：whitebox+worker 一笔，web+前端一笔；或一笔也可）。
-3. #12 报告层（含 scope 来源明细的模型小改）。
-4. #13 E2E 冒烟 + 铁律锁定 + 前端 tsc。
-5. 按需补 §3.3 workflow 级测试与 §4.2 容量窗口。
-
-> 测试纪律（CLAUDE.md）：只跑改动相关测试文件，勿广跑全套。改动 mr 相关后跑：
-> `packages/core/tests/mr_scan/` + `packages/whitebox/tests/pipeline/test_mr_*` + `packages/web/tests/test_models_repo_source.py` + `test_api_scan_repo_source.py` + `packages/core/tests/agents/test_executor_prompt_suffix.py`。
+uv run --no-sync python -m pytest packages/core/tests/mr_scan/ packages/whitebox/tests/pipeline/test_mr_* packages/core/tests/agents/test_executor_prompt_suffix.py
+cd packages/web/frontend && npx vitest run src/pages/ScanNewPage.test.tsx src/routes/WorkspaceDetail/ScanList.test.tsx src/components/report/ && npx tsc -b
+```
