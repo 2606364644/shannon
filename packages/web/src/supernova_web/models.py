@@ -22,10 +22,14 @@ Source = Union[PathSource, RepoSource]
 
 
 class ScanRequest(BaseModel):
-    type: Literal["whitebox", "blackbox", "correlation"]
+    type: Literal["whitebox", "blackbox", "correlation", "mr"]
     source: Source | None = None
     url: str | None = None
     workspace: str | None = None
+    # MR 增量扫描（spec 2026-09-03）：type="mr" 必填 base_ref / head_ref
+    # （分支名或 commit sha），source.kind=="repo" 必填。
+    base_ref: str | None = None
+    head_ref: str | None = None
     reuse_latest: bool = False
     # 黑盒「复用白盒结果」：要复用的白盒 scan_id（工作区内某 whitebox scan）。
     # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，model_validator
@@ -83,6 +87,19 @@ class ScanRequest(BaseModel):
                 raise ValueError(
                     "blackbox 扫描不支持 source（恒复用白盒结果），请改用 reuse_whitebox_scan_id"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _mr_requires_base_head_repo(self) -> "ScanRequest":
+        """MR 增量扫描校验（spec 2026-09-03 §3.2）：type=mr 必填 repo + base_ref/head_ref。
+
+        非法 → ValidationError → FastAPI 422。
+        """
+        if self.type == "mr":
+            if self.source is None or self.source.kind != "repo":
+                raise ValueError("MR 扫描必须选择工作区已下载仓库（source.kind=repo）")
+            if not self.base_ref or not self.head_ref:
+                raise ValueError("MR 扫描必须指定 base_ref 与 head_ref（分支名或 commit sha）")
         return self
 
     def _validate_auth_fields(self) -> None:

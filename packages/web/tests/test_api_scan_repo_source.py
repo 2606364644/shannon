@@ -75,3 +75,26 @@ def test_scan_git_kind_422(tmp_path, monkeypatch):
         "type": "whitebox", "source": {"kind": "git", "value": "https://x.git"}, "url": "http://x"},
         headers={"X-CSRF-Token": tok})
     assert r.status_code == 422
+
+
+def test_scan_mr_missing_head_422(tmp_path, monkeypatch):
+    """MR 类型缺 head_ref → 请求解析期 422（validator 在 scan_manager.start 之前拦截）。"""
+    app = _app_with_repos(tmp_path, monkeypatch, {"foo": "ready"})
+    client = _authed(app)
+    tok = client.get("/api/auth/csrf").json()["csrf_token"]
+    r = client.post("/api/scan", json={
+        "type": "mr", "source": {"kind": "repo", "value": "foo"},
+        "workspace": "ws1", "base_ref": "main"},
+        headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422
+
+
+def test_scan_mr_non_repo_source_422(tmp_path, monkeypatch):
+    app = _app_with_repos(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    tok = client.get("/api/auth/csrf").json()["csrf_token"]
+    r = client.post("/api/scan", json={
+        "type": "mr", "source": {"kind": "path", "value": "/tmp/x"},
+        "workspace": "ws1", "base_ref": "main", "head_ref": "feature/x"},
+        headers={"X-CSRF-Token": tok})
+    assert r.status_code == 422

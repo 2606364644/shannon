@@ -24,7 +24,7 @@ from supernova_core.utils.paths import (
     combined_run_dir, deliverables_dir_for_workspace, whitebox_dir)
 from supernova_multi.correlation_event_writer import CorrelationEventWriter
 from supernova_multi.orchestrator import plan_repo_scans
-from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow, MrScanWorkflow
 from supernova_whitebox.pipeline.shared import PipelineInput
 from supernova_whitebox.pipeline.whitebox_resume import WhiteboxResumeStateBuilder
 from supernova_web.models import ScanRequest
@@ -518,6 +518,15 @@ class ScanManager:
                 self._tasks[scan_key] = asyncio.create_task(
                     self._watch(scan_key, event_file, scan_dir))
                 return ws, scan_id
+            elif req.type == "mr":
+                # MR 增量扫描（spec 2026-09-03 §3.2）：纯白盒语义 + diff 前置，
+                # 无组合/认证/HOST。提交 MrScanWorkflow（worker 内 child 跑全量主体）。
+                handle = await self._submit_mr(
+                    target, ws, scan_id, scan_dir, event_file,
+                    req.base_ref, req.head_ref)
+                SessionManager(scan_dir.parent).update_session(
+                    scan_dir, {"source_repo": req.source.value if req.source else None,
+                               "mr_base_ref": req.base_ref, "mr_head_ref": req.head_ref})
         except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
             self._handles.pop(scan_key, None)
@@ -846,6 +855,37 @@ class ScanManager:
         )
         # 提交成功后锚定 submitted_at(scan_liveness 提交宽限门据此判冷启动窗口, 防误杀).
         # 失败分支(start_workflow 抛)不会到达此处 -> 提交失败不写 submitted_at.
+        self._mark_submitted_at(scan_dir)
+        return handle
+
+    async def _submit_mr(self, target: str | None, ws: str, scan_id: str,
+                         scan_dir: Path, event_file: Path,
+                         base_ref: str | None, head_ref: str | None) -> Any:
+        """提交 MrScanWorkflow（MR 增量扫描，spec 2026-09-03 §3.2）。
+
+        与 _submit_whitebox 同源：先解析 provider 配置，再 start_workflow 到
+        WEB_TASK_QUEUE_WHITEBOX（worker 注册了 MrScanWorkflow）。base/head ref
+        经 PipelineInput.mr_base_ref/mr_head_ref 穿给 workflow 前置 activities。
+        """
+        provider_config = self._resolve_provider_config(ws)
+        client = await Client.connect(self._temporal_address())
+        workflow_id = self._resolve_workflow_id(ws, scan_id)
+        inp = PipelineInput(
+            repo_path=target or "",
+            web_url="",
+            workspace_name=scan_id,
+            event_file=str(event_file),
+            provider_config=provider_config,
+            env_overrides=self._resolve_env_overrides(ws),
+            enable_llm_track=self._resolve_llm_track(ws),
+            mr_base_ref=base_ref,
+            mr_head_ref=head_ref,
+        )
+        handle = await client.start_workflow(
+            MrScanWorkflow.run, inp, id=workflow_id,
+            task_queue=WEB_TASK_QUEUE_WHITEBOX,
+            run_timeout=workflow_run_timeout(),
+        )
         self._mark_submitted_at(scan_dir)
         return handle
 
