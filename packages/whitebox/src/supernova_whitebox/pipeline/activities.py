@@ -3339,6 +3339,9 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
         # 按 func_block_id join 给 builder，让 GN 轨漏洞带 "METHOD /path"（PoC
         # 模板层直接命中，免 gap-fill LLM）。join miss → builder 保持原样兜底。
         entry_point_map: dict[str, EntryPoint] = {}
+        # F6-B 白名单（spec 2026-09-03 §2 R2）：全量路由集合，绕开
+        # entry_point_map 同 func_block_id 多路由被 dict 折叠的 bug。
+        all_routes: set[str] = set()
         code_index_path = resolve_intermediate(deliverables, "code_index.json")  # tiering 双路径
         if code_index_path is not None:
             try:
@@ -3346,6 +3349,11 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                 sink_call_sites = {s.id: s for s in index.sink_call_sites}
                 entry_point_map = {
                     ep.func_block_id: ep for ep in index.entry_points if ep.route
+                }
+                all_routes = {
+                    f"{ep.http_method.strip().upper()} {ep.route}"
+                    for ep in index.entry_points
+                    if ep.route and ep.http_method
                 }
             except Exception as exc:
                 logger.warning("gitnexus chain-verdict: code_index.json parse failed (%s)", exc)
@@ -3510,6 +3518,12 @@ async def run_gitnexus_chain_verdict(input: ActivityInput) -> dict:
                         vc, len(findings) - len(queue_findings),
                     )
                 if queue_findings:
+                    # F6-B：endpoint 缺失回填（LLM 提名 + 全量路由白名单验证 +
+                    # 唯一命中采信，spec 2026-09-03 §3）。
+                    from supernova_core.code_index.endpoint_backfill import (
+                        backfill_endpoints,
+                    )
+                    queue_findings = backfill_endpoints(queue_findings, all_routes)
                     # tiering：*_gitnexus_queue.json 属中间产物 → 桶内 intermediate/
                     atomic_write_json(
                         intermediate_path(deliverables, f"{vc}_gitnexus_queue.json"),
