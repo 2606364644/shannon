@@ -9,6 +9,7 @@ import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { RepoCombobox } from "../components/RepoCombobox";
 import { LinkResolveBox } from "../components/LinkResolveBox";
+import { RefRangeInput } from "../components/RefRangeInput";
 import { RepoQuickActions } from "../components/RepoQuickActions";
 import type { ResolveLinkResult } from "../api/types";
 import { useRepos } from "../api/useRepos";
@@ -17,8 +18,6 @@ import { CorrelationTopologyFields } from "../components/correlation/Correlation
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -575,8 +574,11 @@ export function ScanNewPage() {
   };
   /** 链接解析回填（2026-09-03 仓库入口整合 B 段）：仓库立即选中（cloning 也选中，
    *  下载提示由页面级 CloneWatch 承担）；MR 链接附 refs 回填，且在非 MR 表单解析到
-   *  MR 时自动切类型（白盒粘 MR 链接 → setType("mr")，refs 已就位）。 */
+   *  MR 时自动切类型（白盒粘 MR 链接 → setType("mr")，refs 已就位）。
+   *  MR refs 回填时同步 mrFlashAt（2026-09-04 重排）：RefRangeInput 收到新时间戳做
+   *  一次 coral 环脉冲——回填成功的「答案式」确认动效。 */
   const [pendingClone, setPendingClone] = useState<string | null>(null);
+  const [mrFlashAt, setMrFlashAt] = useState(0);
   const handleLinkResolved = (r: ResolveLinkResult) => {
     const patch: Partial<FormState> = { selectedRepo: r.repo };
     if (r.kind === "mr") {
@@ -585,7 +587,10 @@ export function ScanNewPage() {
     }
     set(patch);
     if (r.repo_state === "cloning") setPendingClone(r.repo);
-    if (r.kind === "mr" && type !== "mr") setType("mr");
+    if (r.kind === "mr") {
+      setMrFlashAt(Date.now());
+      if (type !== "mr") setType("mr");
+    }
   };
 
   const selectTopologyRepos = (repos: string[]) => {
@@ -761,96 +766,102 @@ export function ScanNewPage() {
               onLinkResolved={handleLinkResolved}
             />
           ) : type === "mr" ? (
-            /* MR 增量扫描（spec 2026-09-03 §3.1/§6）：最小表单——工作区 + 仓库 + base/head ref。
-               必须在 corrMode === "auto" 判断之前（corrMode 初始恒 "auto"，否则 mr 会错渲染跨仓拓扑表单）。
-               base/head 为手输文本（分支名或 commit sha 均可，BranchCombobox 是行内切换控件非表单样式，
-               且枚举分支列表对 commit sha 无增益）。 */
+            /* MR 增量扫描（spec 2026-09-03 §3.1/§6；2026-09-04 布局重排）：
+               ① 工作区 + 代码源 两列并排（对齐白盒布局语言；IA 不变量：repo 按 ws
+               隔离，选仓前必须先选 ws）→ ② MR 链接导入（hero 粘贴框，贴链接自动回填
+               仓库 + refs）→ ③ 变更范围区间控件（base⟷head 一体 + swap + 就绪摘要）。
+               必须在 corrMode === "auto" 判断之前（corrMode 初始恒 "auto"，否则 mr 会
+               错渲染跨仓拓扑表单）。base/head 为手输文本（分支名或 commit sha 均可，
+               BranchCombobox 是行内切换控件非表单样式，且枚举分支列表对 commit sha
+               无增益）。纯白盒语义——无 url/认证/HOST。 */
             <div className="space-y-5" data-testid="mr-form">
-              {/* ① 工作区（IA 不变量：repo 列表按 ws 隔离，选仓前必须先选 ws） */}
-              <section className="space-y-2">
-                <GroupLabel>{t("scan.fields.wsSelectLabel")}</GroupLabel>
-                <div className="space-y-1.5">
-                  <Select value={workspace} onValueChange={setWorkspace}>
-                    <SelectTrigger className="w-full font-mono text-xs">
-                      <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {wsEmpty ? (
-                        <SelectItem value="__empty__" disabled>{t("scan.fields.wsEmptyOption")}</SelectItem>
-                      ) : wsList.map((w) => (
-                        <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {wsEmpty && (
-                    <div className="flex items-center gap-1.5 text-xs text-amber">
-                      <AlertCircle className="h-3.5 w-3.5" />{t("scan.fields.wsEmptyHintUser")}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* ①a 工作区 */}
+                <section className="space-y-2">
+                  <GroupLabel>{t("scan.fields.wsSelectLabel")}</GroupLabel>
+                  <div className="space-y-1.5">
+                    <Select value={workspace} onValueChange={setWorkspace}>
+                      <SelectTrigger className="w-full font-mono text-xs">
+                        <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {wsEmpty ? (
+                          <SelectItem value="__empty__" disabled>{t("scan.fields.wsEmptyOption")}</SelectItem>
+                        ) : wsList.map((w) => (
+                          <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {wsEmpty && (
+                      <div className="flex items-center gap-1.5 text-xs text-amber">
+                        <AlertCircle className="h-3.5 w-3.5" />{t("scan.fields.wsEmptyHintUser")}
+                      </div>
+                    )}
+                  </div>
+                </section>
+                {/* ①b 代码源：repo 复用 RepoCombobox（与白盒/跨仓同一选择器）+
+                    state 显示 + 快捷操作条（cloning/pulling 进度、ready 切分支/更新）。 */}
+                <section className="space-y-2">
+                  <GroupLabel>{t("scan.steps.source")}</GroupLabel>
+                  {!workspace ? (
+                    <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <RepoCombobox
+                        repos={mrRepos}
+                        value={f.selectedRepo || null}
+                        onChange={(v) => set({ selectedRepo: v })}
+                        placeholder={t("scan.repo.selectPlaceholder")}
+                        searchPlaceholder={t("scan.repo.searchPlaceholder")}
+                        emptyText={t("scan.repo.noMatch")}
+                        ungroupedLabel={t("scan.repo.ungrouped")}
+                        linkedLabel={t("repos.linkedBadge")}
+                      />
+                      {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
+                      {f.selectedRepo && mrSelectedRepo && mrSelectedRepo.state !== "ready" && (
+                        mrSelectedRepo.state === "cloning" || mrSelectedRepo.state === "pulling"
+                          ? <div className="text-xs text-muted-foreground">{t("scan.link.cloning", { name: f.selectedRepo })}</div>
+                          : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: mrSelectedRepo.state })}</div>
+                      )}
+                      {mrSelectedRepo?.state === "ready" && (
+                        <RepoQuickActions workspace={workspace} repo={mrSelectedRepo} />
+                      )}
                     </div>
                   )}
-                </div>
-              </section>
+                </section>
+              </div>
 
-              {/* ② 代码源 + MR refs：repo 复用 RepoCombobox（与白盒/跨仓同一选择器）；
-                  base/head 双列（窄屏纵排）。纯白盒语义——无 url/认证/HOST。 */}
-              <section className="space-y-2">
-                <GroupLabel>{t("scan.steps.source")}</GroupLabel>
-                {!workspace ? (
-                  <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
-                ) : (
-                  <div className="space-y-3">
-                    <RepoCombobox
-                      repos={mrRepos}
-                      value={f.selectedRepo || null}
-                      onChange={(v) => set({ selectedRepo: v })}
-                      placeholder={t("scan.repo.selectPlaceholder")}
-                      searchPlaceholder={t("scan.repo.searchPlaceholder")}
-                      emptyText={t("scan.repo.noMatch")}
-                      ungroupedLabel={t("scan.repo.ungrouped")}
-                      linkedLabel={t("repos.linkedBadge")}
+              {workspace && (
+                <>
+                  {/* ② 从 MR 链接导入（hero）：贴 GitLab MR 链接自动回填仓库 + refs——
+                      MR 场景最高频入口（回填后区间控件一次 coral 脉冲确认）。 */}
+                  <section className="space-y-2">
+                    <GroupLabel>{t("scan.mr.importGroup")}</GroupLabel>
+                    <LinkResolveBox
+                      workspace={workspace}
+                      accepts={["mr"]}
+                      onResolved={handleLinkResolved}
+                      variant="hero"
                     />
-                    {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
-                    {/* 选中仓库的 state 显示 + 快捷操作条（对齐白盒表单：cloning/pulling 进度、
-                        ready 切分支/更新——免跑去仓库页） */}
-                    {f.selectedRepo && mrSelectedRepo && mrSelectedRepo.state !== "ready" && (
-                      mrSelectedRepo.state === "cloning" || mrSelectedRepo.state === "pulling"
-                        ? <div className="text-xs text-muted-foreground">{t("scan.link.cloning", { name: f.selectedRepo })}</div>
-                        : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: mrSelectedRepo.state })}</div>
-                    )}
-                    {mrSelectedRepo?.state === "ready" && (
-                      <RepoQuickActions workspace={workspace} repo={mrSelectedRepo} />
-                    )}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium" htmlFor="mr-base-ref">{t("scan.mrBaseRef")}</Label>
-                        <Input
-                          id="mr-base-ref"
-                          data-testid="mr-base-ref"
-                          value={f.mrBaseRef ?? ""}
-                          onChange={(e) => set({ mrBaseRef: e.target.value })}
-                          placeholder="main"
-                          size="sm"
-                          className="font-mono"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium" htmlFor="mr-head-ref">{t("scan.mrHeadRef")}</Label>
-                        <Input
-                          id="mr-head-ref"
-                          data-testid="mr-head-ref"
-                          value={f.mrHeadRef ?? ""}
-                          onChange={(e) => set({ mrHeadRef: e.target.value })}
-                          placeholder="feature/branch"
-                          size="sm"
-                          className="font-mono"
-                        />
-                      </div>
+                  </section>
+
+                  {/* ③ 变更范围：base⟷head 区间控件（swap + 就绪摘要 base..head）。 */}
+                  <section className="space-y-2">
+                    <div className="flex items-baseline justify-between gap-x-3">
+                      <GroupLabel>{t("scan.mr.rangeGroup")}</GroupLabel>
+                      <span className="text-[11px] text-muted-foreground">{t("scan.mr.rangeHint")}</span>
                     </div>
-                    {mrRefsErr && <div className="text-destructive text-xs">{mrRefsErr}</div>}
-                    {/* 或直接粘 MR 链接解析回填（仓库链接在此提示切白盒，accepts=["mr"]） */}
-                    <LinkResolveBox workspace={workspace} accepts={["mr"]} onResolved={handleLinkResolved} />
-                  </div>
-                )}
-              </section>
+                    <RefRangeInput
+                      base={f.mrBaseRef ?? ""}
+                      head={f.mrHeadRef ?? ""}
+                      onBase={(v) => set({ mrBaseRef: v })}
+                      onHead={(v) => set({ mrHeadRef: v })}
+                      error={mrRefsErr}
+                      flashAt={mrFlashAt}
+                    />
+                  </section>
+                </>
+              )}
             </div>
           ) : corrMode === "auto" ? (
             <CorrelationTopologyFields

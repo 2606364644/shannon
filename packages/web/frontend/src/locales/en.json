@@ -638,9 +638,17 @@
       "colTo": "To"
     },
     "subtitleMr": "Give base..head diff range; only incremental changes are scanned",
-    "mrBaseRef": "Base ref (branch or commit sha)",
-    "mrHeadRef": "Head ref (branch or commit sha)",
     "mrBaseHeadHint": "Only code added/deleted between base and head is analyzed incrementally",
+    "mr": {
+      "importGroup": "Import from MR link",
+      "importHint": "Paste a GitLab MR link to fill the repo and diff range automatically",
+      "rangeGroup": "Diff range",
+      "rangeHint": "Branch name or commit sha",
+      "baseLabel": "Base",
+      "headLabel": "Head",
+      "swap": "Swap base and head",
+      "rangeReady": "Incremental scan will cover this range"
+    },
     "link": {
       "inputLabel": "Or paste a repo / MR link",
       "placeholder": "https://gitlab.example.com/group/repo/-/merge_requests/123",

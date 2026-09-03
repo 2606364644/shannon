@@ -554,12 +554,14 @@ describe("ScanNewPage MR 增量扫描", () => {
     expect(screen.queryByText("目标服务")).toBeNull();
     // 未选 ws → 先选 workspace 提示（repo/refs 区未解锁）
     expect(screen.getByText(/请先选择 workspace/)).toBeInTheDocument();
-    // 选 ws → 仓库下拉 + base/head 输入出现（提示消失）
+    // 选 ws → 仓库下拉 + 链接导入 + base/head 区间控件出现（提示消失）
     await switchToMrAndSelectWs();
     await waitFor(() => expect(screen.queryByText(/请先选择 workspace/)).toBeNull());
     expect(within(form).getByText("选择仓库")).toBeInTheDocument();
-    expect(within(form).getByText("Base 引用（分支名或 commit sha）")).toBeInTheDocument();
-    expect(within(form).getByText("Head 引用（分支名或 commit sha）")).toBeInTheDocument();
+    expect(within(form).getByText("从 MR 链接导入")).toBeInTheDocument();
+    expect(within(form).getByText("变更范围")).toBeInTheDocument();
+    expect(within(form).getByLabelText("Base")).toBeInTheDocument();
+    expect(within(form).getByLabelText("Head")).toBeInTheDocument();
   });
 
   it("MR 校验：repo/base/head 缺一即拦（错误文案 + 提交 disabled）；补齐后可提交", async () => {
@@ -585,9 +587,10 @@ describe("ScanNewPage MR 增量扫描", () => {
     fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
     expect(screen.getByText("请填写 base 与 head 引用")).toBeInTheDocument();
     expect(submit).toBeDisabled();
-    // 补 head → 全部错误消失 + enabled
+    // 补 head → 全部错误消失 + 就绪摘要（base..head）出现 + enabled
     fireEvent.change(screen.getByTestId("mr-head-ref"), { target: { value: "feature/xss" } });
     expect(screen.queryByText("请填写 base 与 head 引用")).toBeNull();
+    expect(screen.getByTestId("mr-range-summary")).toHaveTextContent("main..feature/xss");
     expect(submit).toBeEnabled();
   });
 

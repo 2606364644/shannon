@@ -638,9 +638,17 @@
       "colTo": "被调用方"
     },
     "subtitleMr": "指定 base..head 变更范围，只对增量改动做安全检测",
-    "mrBaseRef": "Base 引用（分支名或 commit sha）",
-    "mrHeadRef": "Head 引用（分支名或 commit sha）",
     "mrBaseHeadHint": "仅对 base 到 head 之间的新增/删除代码做增量检测",
+    "mr": {
+      "importGroup": "从 MR 链接导入",
+      "importHint": "贴入 GitLab MR 链接，自动填好仓库与变更范围",
+      "rangeGroup": "变更范围",
+      "rangeHint": "分支名或 commit sha 均可",
+      "baseLabel": "Base",
+      "headLabel": "Head",
+      "swap": "交换 Base 与 Head",
+      "rangeReady": "将检测此范围内的增量变更"
+    },
     "link": {
       "inputLabel": "或直接粘贴仓库 / MR 链接",
       "placeholder": "https://gitlab.example.com/group/repo/-/merge_requests/123",
