@@ -157,7 +157,7 @@ uv run supernova-blackbox start --url https://target.example.com --repo /path/to
 uv run supernova-blackbox start --url https://target.example.com --repo /path/to/repo --config scan.yaml --output ./results --workspace my-scan
 ```
 
-> **注意**：`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，黑盒才能读取白盒产出的漏洞队列。详见 [白盒→黑盒交接运行手册](docs/whitebox-blackbox-handoff.md)。
+> **注意**：`--repo` 必须与白盒扫描的 `--repo` 指向同一仓库，黑盒才能读取白盒产出的漏洞队列。详见 [白盒→黑盒交接运行手册](docs/architecture/blackbox-verification.md)。
 
 查看工作区和日志：
 
@@ -259,20 +259,23 @@ bash scripts/cleanup-supernova.sh --rm        # 连容器实例一起删
 supernova 有两个核心架构特性，理解它们有助于调参与排障：
 
 - **双引擎**：业务流程（白盒/黑盒）不感知底层用哪个 SDK；同一份 vuln prompt 在两引擎下行为对齐、可互换。切引擎 = 改 profile 里的 `SUPERNOVA_AI_PROVIDER`。
-- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（确定性代码索引 → 候选链 → 轻量 LLM 判定）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SUPERNOVA_LLM_TRACK_ENABLED=0` **只关 inj/xss/ssrf 的 vuln agent**（靠 GitNexus 轨兜底）；authz / auth 的 LLM agent 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果）。
+- **双轨检测**（白盒注入/XSS/SSRF）：GitNexus 轨（代码索引 → 候选链 → 多轮 chain verdict agent 深判）与 LLM 轨（纯 LLM agent 自给自足分析）**各自独立**，只在合并器做 verdict OR，互为兜底。token 紧张时可用 `SUPERNOVA_LLM_TRACK_ENABLED=0` **只关 inj/xss/ssrf 的 vuln agent**（靠 GitNexus 轨兜底）；authz / auth 的 LLM agent 仍跑（GitNexus 做不了 authz Vertical/Context + auth，关了会降安全效果）。
 
-深入设计见 [GitNexus 轨生命周期分析](docs/gitnexus-track-analysis.md) 与 [系统架构](docs/architecture.md)。架构不变量与开发约定见根目录 `CLAUDE.md`。
+深入设计见 [双轨分析](docs/architecture/dual-track-analysis.md) 与 [系统架构](docs/architecture/overview.md)。架构不变量与开发约定见根目录 `CLAUDE.md`。
 
 ## 文档
 
 - [快速开始](docs/getting-started.md)
-- [系统架构](docs/architecture.md)
+- [架构文档目录](docs/architecture/README.md)
+- [系统架构](docs/architecture/overview.md)
 - [Agent 说明](docs/agents.md)
 - [API 参考](docs/api-reference.md)
 - [Prompt 工程](docs/prompt-engineering.md)
 - [配置指南](docs/configuration.md)
-- [GitNexus 轨生命周期分析](docs/gitnexus-track-analysis.md)
-- [白盒→黑盒交接运行手册](docs/whitebox-blackbox-handoff.md)
+- [双轨分析](docs/architecture/dual-track-analysis.md)
+- [双 Agent 引擎](docs/architecture/agent-engines.md)
+- [双浏览器引擎](docs/architecture/browser-engines.md)
+- [白盒→黑盒交接运行手册](docs/architecture/blackbox-verification.md)
 - [Web 平台部署与运维脚本](docs/web-deployment.md)
 
 ## 项目结构

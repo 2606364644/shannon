@@ -2,7 +2,7 @@
 
 - 日期：2026-08-20
 - 状态：已定稿（与用户逐节确认：双轨覆盖 / auth-authz 降级 / 全局 tab 入口 / 节点代码预览 / 方案 B 写时组装 / 双轨×双引擎横切不变量）
-- 关联：`docs/architecture.md`（双轨/双引擎）、`docs/superpowers/specs/2026-08-19-vuln-queue-delivery-hardening*`（在途交付通道，本设计 append-only 不冲突）
+- 关联：`docs/architecture/dual-track-analysis.md` 与 `docs/architecture/agent-engines.md`、`docs/superpowers/specs/2026-08-19-vuln-queue-delivery-hardening*`（在途交付通道，本设计 append-only 不冲突）
 
 ---
 

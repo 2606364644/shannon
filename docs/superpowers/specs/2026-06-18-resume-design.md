@@ -21,7 +21,7 @@ if AgentName.PRE_RECON.value not in self._state.completed_agents:
 但这些守卫**永远空转**，因为 `self._state.completed_agents` 是 `PipelineState` 的实例字段（`shared.py:25`），每次 `WhiteboxScanWorkflow` 启动都是空的。**没有任何"开机时把已有进度读回来"的环节**——这是断掉的唯一一环。
 
 由此带来的误导性声明：
-- `README.md:9`、`docs/architecture.md:172`、`packages/whitebox/README.md:19` 都宣称"支持断点续扫"
+- `README.md:9`、`docs/architecture/overview.md`（迁移前旧架构文档）、`packages/whitebox/README.md:19` 都宣称"支持断点续扫"
 - `cli/main.py:33` 的 `-w/--workspace` 标注 "supports resume"
 - `models/base.py:14` 有 `resume_from_workspace` 字段，但全代码库从未被读取
 

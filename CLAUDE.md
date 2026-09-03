@@ -25,7 +25,7 @@ supernova 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 
 **auth / authz 特殊：** 它们不是 source→sink taint（属 missing-control），确定性 sink 规则不覆盖。authz 有自己的"GitNexus 风格"轨（`run_authz_gitnexus_judge`：IDOR 候选 + **深度 agent 判定**——`run_gitnexus_verdict_agent` 多轮，候选>0 吃候选深判 owner 检查、候选=0 自主探索 IDOR；候选来源扩展 OpenAPI/框架 2026-07-02 spec-1b 落地）。**auth 走纯 LLM 轨**（`vuln-auth` agent 9 类方法论，对齐原始 shannon；曾有的 auth GitNexus 轨——config 扫描器 `auth_config_scanner` + 深度 agent `run_auth_gitnexus_judge`——已于 2026-07-14 删除：`auth_config_scanner` 踩本节铁律「确定性产物不喂 LLM 轨 prompt」+ CORS 越界被裁的 misconfig，详见 plan zazzy-roaming-shamir；authz GitNexus 轨保留）。所以"扫不出"时先分清是哪条轨、哪个 vuln 类。
 
-详见 `docs/architecture.md`、`docs/superpowers/specs/2026-06-25-injection-recall-port-design.md`。
+详见 `docs/architecture/overview.md`、`docs/superpowers/specs/2026-06-25-injection-recall-port-design.md`。
 
 ---
 
@@ -50,7 +50,7 @@ supernova 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 ## 3. 关键参考
 
 - **设计 / 计划**：`docs/superpowers/`（spec/plan 工作目录，**先看 `README.md` 主题索引**）；活跃层 `specs/`、`plans/`（日期 >2026-06-15）+ 归档 `specs/archive/`、`plans/archive/`（≤2026-06-15，历史已完成）。例：`2026-06-25-injection-recall-port-{design,plan}.md`。
-- **架构总览**：`docs/architecture.md`、`docs/whitebox-refactoring-assessment.md`、`docs/gap/`（gap 分析）。
+- **架构总览**：`docs/architecture/overview.md`、`docs/whitebox-refactoring-assessment.md`、`docs/gap/`（gap 分析）。
 - **测试陷阱**：全套 pytest 有预存挂起 / 失败（见各 package 的 test 说明）——只跑改动相关测试文件，勿广跑全套。
 - **分支**：`feat/fork-py`（本地多项改动未 push；动代码前先看 `git log` 与 memory 了解在途工作）。
 - **预存问题（真根因 2026-07-08 已修）**：pre-recon 的 `run_code_index`(GitNexus) 曾卡死（step 0 数十分钟、$0 LLM 成本）。**真根因不是"大仓索引慢 >10min 超时"（那是叠加症状），而是 `GitNexusEngine.ensure_indexed()` 漏调 `gitnexus index` 注册进全局 registry（`~/.gitnexus/registry.json`）**：`.gitnexus/` 已存在就被 skip analyze、永不补注册 → `gitnexus mcp` 从 registry 发现 0 个仓（不读仓内 `.gitnexus/`）→ 查询解析不到 repo → readline 死锁。GitNexus 1.6.8 是两步式：`analyze` 建仓内 `.gitnexus/`、`index` 注册全局 registry。修复：`ensure_indexed` analyze/skip 后幂等调 `gitnexus index <repo>`，index 失败→`success=False` 走 `PentestError` fail-fast 不再死等（TDD，15 测试绿，feat/fork-py 本地未 push）。现场止血：`gitnexus index <repo>`（秒级，不重新分析）。GitNexus 真不可用（CLI 没装 / 索引坏）仍会影响所有确定性轨。

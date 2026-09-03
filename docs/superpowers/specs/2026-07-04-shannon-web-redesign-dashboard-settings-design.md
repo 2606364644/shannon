@@ -175,7 +175,7 @@ packages/web/tests/
 **5.2.3 关于 / 版本**
 
 - shannon-py 版本(同 5.2.2 的 `version`)。
-- 文档链接(`docs/architecture.md` / `docs/superpowers/README.md`)+ repo 链接(hardcode)。
+- 文档链接(`docs/architecture/overview.md` / `docs/superpowers/README.md`)+ repo 链接(hardcode)。
 - 可并入 5.2.2 面板底部,不单列成区。
 
 ### 5.3 后端 `GET /api/system-status` 契约(新)
