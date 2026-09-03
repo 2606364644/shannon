@@ -368,7 +368,8 @@
       "authCredentialRequired": "请选择登录角色",
       "hostProfileRequired": "请选择 HOST 档案",
       "hostUrlRequired": "请填写 HOST 来源链接",
-      "hostUrlScheme": "HOST 来源链接需以 http(s):// 开头"
+      "hostUrlScheme": "HOST 来源链接需以 http(s):// 开头",
+      "selectRefs": "请填写 base 与 head 引用"
     },
     "title": "新建扫描",
     "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
@@ -466,7 +467,8 @@
     },
     "type": {
       "whitebox": "白盒扫描",
-      "correlation": "跨仓关联"
+      "correlation": "跨仓关联",
+      "mr": "MR 增量扫描"
     },
     "correlation": {
       "subtitle": "串联多个仓库的调用链，发起跨仓关联分析",
@@ -631,7 +633,11 @@
       },
       "colFrom": "调用方",
       "colTo": "被调用方"
-    }
+    },
+    "subtitleMr": "指定 base..head 变更范围，只对增量改动做安全检测",
+    "mrBaseRef": "Base 引用（分支名或 commit sha）",
+    "mrHeadRef": "Head 引用（分支名或 commit sha）",
+    "mrBaseHeadHint": "仅对 base 到 head 之间的新增/删除代码做增量检测"
   },
   "dashboard": {
     "title": "仪表盘",

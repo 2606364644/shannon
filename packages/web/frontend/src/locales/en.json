@@ -368,7 +368,8 @@
       "authCredentialRequired": "Please select a login role",
       "hostProfileRequired": "Please select a HOST profile",
       "hostUrlRequired": "Please fill in the HOST provider URL",
-      "hostUrlScheme": "HOST provider URL must start with http(s)://"
+      "hostUrlScheme": "HOST provider URL must start with http(s)://",
+      "selectRefs": "Fill in both base and head refs"
     },
     "title": "New Scan",
     "subtitleWhitebox": "Select a code source to start a whitebox security audit",
@@ -466,7 +467,8 @@
     },
     "type": {
       "whitebox": "Whitebox",
-      "correlation": "Correlation"
+      "correlation": "Correlation",
+      "mr": "MR Incremental Scan"
     },
     "correlation": {
       "subtitle": "Chain calls across repositories and run a cross-repo correlation analysis",
@@ -631,7 +633,11 @@
       },
       "colFrom": "From",
       "colTo": "To"
-    }
+    },
+    "subtitleMr": "Give base..head diff range; only incremental changes are scanned",
+    "mrBaseRef": "Base ref (branch or commit sha)",
+    "mrHeadRef": "Head ref (branch or commit sha)",
+    "mrBaseHeadHint": "Only code added/deleted between base and head is analyzed incrementally"
   },
   "dashboard": {
     "title": "Dashboard",

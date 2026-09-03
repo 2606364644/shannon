@@ -852,10 +852,13 @@ export interface HostProfile {
 }
 
 export interface ScanRequest {
-  type: "whitebox" | "blackbox" | "correlation";
+  type: "whitebox" | "blackbox" | "correlation" | "mr";
   // 扫描入口已收窄为「工作区已下载仓库」——本地路径入口移除（source.kind 恒为 repo）。
   source?: { kind: "repo"; value: string };
   url?: string;
+  // MR 增量扫描（spec 2026-09-03）：type="mr" 必填 base/head ref（分支名或 commit sha）。
+  base_ref?: string;
+  head_ref?: string;
   // final-review C2: 字段名必须与 backend ScanRequest (models.py) 一致 = `workspace`。
   // pydantic v2 默认不容未知键, 旧 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422。
   workspace?: string;

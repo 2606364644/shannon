@@ -26,7 +26,7 @@ import {
 
 /** 页面可达类型（D3）：白盒 | 跨仓关联，顶部 segmented 切换。黑盒只读分支已删除——
  *  黑盒一律是组合任务的嵌套 run 或经 ScanDetail addBlackboxToWhitebox，无独立创建入口。 */
-type ScanType = "whitebox" | "correlation";
+type ScanType = "whitebox" | "correlation" | "mr";
 
 export type LoginType = "form" | "sso" | "api" | "basic";
 
@@ -231,6 +231,9 @@ export interface FormState {
   /** 白盒「同时发起黑盒扫描」组合开关（Task 9）。可选——旧 FormState 字面量（如单测 baseF）不传 = false。
    *  true 时 buildBody whitebox 分支附 url + 认证字段，后端 Task 1 识别为组合扫描。 */
   combined?: boolean;
+  /** MR 增量扫描（spec 2026-09-03）：type="mr" 用的 base/head ref（分支名或 commit sha）。 */
+  mrBaseRef?: string;
+  mrHeadRef?: string;
 }
 
 /** 将 AuthFormState 写入 ScanRequest 认证字段（auth-profile-vault 双来源）：
@@ -283,6 +286,14 @@ function assignHostToBody(body: ScanRequest, h: HostFormState): void {
  * （与白盒组合扫描共用 assignAuthToBody/assignHostToBody，字段映射一致）。
  */
 export function buildBody(type: ScanType, f: FormState, workspace: string, corrYaml = ""): ScanRequest {
+  if (type === "mr") {
+    // MR 增量扫描（spec 2026-09-03）：repo + base_ref/head_ref，纯白盒语义（无 url/认证/HOST）。
+    const body: ScanRequest = { type, workspace: workspace || undefined };
+    body.source = { kind: "repo", value: f.selectedRepo };
+    body.base_ref = f.mrBaseRef?.trim() || undefined;
+    body.head_ref = f.mrHeadRef?.trim() || undefined;
+    return body;
+  }
   if (type === "correlation") {
     // gateway url 开 = 段③黑盒验证：HOST 同组合模式校验（enabled 须有具体来源，拒绝静默降级）。
     if (f.url.trim()) {
@@ -502,7 +513,10 @@ export function ScanNewPage() {
   // YAML 错 + ws（gateway url 可选，开了才纳入 url/auth/host 校验——同白盒组合扫描）。
   const combined = type === "whitebox" && !!f.combined;
   const corrGatewayOn = type === "correlation" && !!f.url.trim();
-  const sourceErr = type === "whitebox" ? validateSource(f.selectedRepo, t) : null;
+  const sourceErr = type === "whitebox" || type === "mr" ? validateSource(f.selectedRepo, t) : null;
+  const mrRefsErr = type === "mr"
+    ? (f.mrBaseRef?.trim() && f.mrHeadRef?.trim() ? null : t("scan.errors.selectRefs"))
+    : null;
   const urlErr = combined
     ? (f.url.trim() ? (/^https?:\/\//.test(f.url.trim()) ? null : t("scan.errors.urlScheme")) : t("scan.errors.urlEmpty"))
     : validateUrl(f.url, t);
@@ -516,8 +530,8 @@ export function ScanNewPage() {
     && validateTopologyDraft(topologyState.draft).length === 0
     && (confirmedTopologyYaml === null || corrYaml === confirmedTopologyYaml)
   );
-  const isValid = !sourceErr && !urlErr && !authErr && !hostErr && !!workspace
-    && (type === "whitebox" || (corrIssues.length === 0 && !yamlErr && topologyConfirmed));
+  const isValid = !sourceErr && !urlErr && !authErr && !hostErr && !mrRefsErr && !!workspace
+    && (type === "mr" || type === "whitebox" || (corrIssues.length === 0 && !yamlErr && topologyConfirmed));
 
   async function onSubmit() {
     try {
@@ -540,11 +554,13 @@ export function ScanNewPage() {
     }
   }
 
-  const subtitleKey = type === "correlation" ? "scan.correlation.subtitle" : "scan.subtitleWhitebox";
+  const subtitleKey = type === "correlation" ? "scan.correlation.subtitle"
+    : type === "mr" ? "scan.subtitleMr" : "scan.subtitleWhitebox";
   const submitLabel = type === "correlation"
     ? (corrMode === "auto" ? t("scan.correlation.topology.submit") : t("scan.correlation.submit"))
     : t("scan.submit");
-  const footerHint = type === "correlation" ? t("scan.correlation.footerHint") : t("scan.footerHintWhitebox");
+  const footerHint = type === "correlation" ? t("scan.correlation.footerHint")
+    : type === "mr" ? t("scan.mrBaseHeadHint") : t("scan.footerHintWhitebox");
 
   return (
     <div className="space-y-4">
@@ -554,9 +570,10 @@ export function ScanNewPage() {
       {/* 整张卡片：类型 segmented + 单栏表单 + 底部操作 */}
       <Card className="overflow-hidden">
         <div className="p-5 space-y-4">
-          {/* 类型切换 segmented（D3）：白盒 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run） */}
+          {/* 类型切换 segmented（D3）：白盒 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run）；
+              MR 增量扫描（spec 2026-09-03）：base..head 增量检测 */}
           <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-            {(["whitebox", "correlation"] as const).map((v) => (
+            {(["whitebox", "correlation", "mr"] as const).map((v) => (
               <button
                 key={v}
                 type="button"
