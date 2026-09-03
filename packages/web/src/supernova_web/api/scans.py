@@ -13,7 +13,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from supernova_web.auth.dependencies import current_user, workspace_member
 from supernova_web.components.workspace_provisioner import is_global_admin
@@ -113,7 +113,11 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "session": data.get("session", {}),
         "workflow_id": resolve_workflow_id(ws, scan_dir, scan_id),
         # 重跑预填用：白盒 repo 名 / 黑盒复用白盒 scan_id / 黑盒登录配置。
-        "source_repo": data.get("source_repo"),
+        # source_repo 缺失时从 repo_path basename 兜底（2026-09-04）：存量组合扫描
+        # precheck 失败路径未落 source_repo（写盘时序 bug，scan_manager 已修），兜底让
+        # 这些 failed 任务重跑仍能预填仓库；web 入口仓库名默认 flat 命名 = basename。
+        "source_repo": data.get("source_repo") or (
+            PurePosixPath(data["repo_path"]).name if data.get("repo_path") else None),
         "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
         "authentication": _read_auth_config(scan_dir),
         # MR 增量扫描 refs（spec 2026-09-03 §6）：重跑预填 base/head（非 MR 未写 → None）。

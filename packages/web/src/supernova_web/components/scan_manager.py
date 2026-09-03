@@ -416,6 +416,12 @@ class ScanManager:
                         # 进度分母（spec §9.5）：白盒部分提交时写；blackbox 部分由
                         # _run_blackbox_phase 在白盒 queue 已知后补（按发现的 vuln 类）。
                         "expected_agents": self._compute_expected_agents(req),
+                        # 重跑预填 repo 名（2026-09-04）：属提交请求固有属性，须在 precheck
+                        # 之前落盘——原位置在 _submit_whitebox 旁（precheck 之后），组合扫描
+                        # precheck 失败（认证失败/目标不可达）提前 return 永不写入，failed
+                        # 任务重跑拿不到 source_repo（下方同步分支/kickoff 内的同款写入
+                        # 由此变为幂等重复，保留无害）。
+                        "source_repo": req.source.value if req.source else None,
                     })
                     if config_path:
                         # 带认证 → precheck 登录目标站（可达数分钟）。异步化：写完 session
