@@ -318,8 +318,11 @@ def normalize_topology_result(
         try:
             parsed = TopologyAnalysisResult.model_validate(dict(raw))
         except ValidationError as exc:
+            # pydantic v2 ValidationError 无 error_message()（曾调之必炸 AttributeError，
+            # 被 web _run 的 except Exception 吞成 provider_failed——2026-09-03 迁移
+            # worker 的 TDD 首次暴露）。str(exc) 含完整字段级错误描述，审计可读。
             invalid = [TopologyInvalidItem(
-                reason="malformed_output", message=exc.error_message(), raw={}
+                reason="malformed_output", message=str(exc), raw={}
             )]
             return NormalizedTopologyResult(invalid=invalid)
     invalid: list[TopologyInvalidItem] = []

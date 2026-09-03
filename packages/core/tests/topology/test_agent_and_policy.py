@@ -153,18 +153,34 @@ async def test_claude_permission_callback_confines_read_search_roots(tmp_path):
 
 @pytest.mark.asyncio
 async def test_manager_passes_selected_repos_as_provider_allowed_roots(tmp_path):
+    # 迁移 worker 后（2026-09-03）：selected repos 以 repo_paths 穿线进
+    # TopologyAnalysisInput（worker activity 据此组 allowed_roots——后者由 multi 的
+    # test_topology_analysis_worker.test_activity_success_path 锁定）。此处锁 web
+    # 提交参数的 repos 穿线不丢。
     from supernova_web.components.topology_analysis import TopologyAnalysisManager
-    seen = []
-    async def runner(**kwargs):
-        seen.append(kwargs)
-        from supernova_core.agents.runner import ClaudeRunResult
-        return ClaudeRunResult(success=True, structured_output={"nodes": [], "edges": [], "uncertain": [], "coverage": []})
-    manager = TopologyAnalysisManager(tmp_path, repo_manager=None, runner=runner)
+    submitted = []
+
+    class _Handle:
+        async def result(self):
+            return {"status": "completed"}
+
+    class _Temporal:
+        async def connect(self):
+            return self
+
+        async def start_workflow(self, run, inp, *, id, task_queue):
+            submitted.append(inp)
+            return _Handle()
+
+        def get_workflow_handle(self, workflow_id):
+            return _Handle()
+
     for name in ("a", "b"):
         (tmp_path / "ws" / "repos" / name / ".git").mkdir(parents=True)
+    manager = TopologyAnalysisManager(
+        tmp_path, repo_manager=None, temporal_client_factory=_Temporal().connect)
     analysis_id = await manager.start("ws", ["a", "b"])
-    await manager.wait(analysis_id)
-    assert [Path(root).name for root in seen[0]["allowed_roots"]] == ["a", "b"]
+    assert [Path(p).name for p in submitted[0].repo_paths.values()] == ["a", "b"]
 
 
 def test_real_provider_contracts_accept_root_and_pricing_overrides():

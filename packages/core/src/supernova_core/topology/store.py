@@ -1,4 +1,9 @@
-"""Atomic, workspace-scoped persistence for topology analysis jobs."""
+"""Atomic, workspace-scoped persistence for topology analysis jobs.
+
+自 web 包 `topology_analysis_store.py` 平移（2026-09-03 预分析迁移 worker 步骤 1）：
+web（create/cancel）与 worker activity（running/progress/终态）经共享卷双写同一
+state.json，store 归属 core 供两侧共用。磁盘路径不变，历史数据零迁移。
+"""
 from __future__ import annotations
 
 import json
@@ -9,9 +14,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SAFE_WS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SAFE_ID = re.compile(r"^topology-[a-f0-9]{12}$")
 _ACTIVE_STATUSES = {"queued", "running"}
+
+
+def _safe_ws(name: str) -> bool:
+    """ws 目录名安全判定，语义对齐 workspace_provisioner.is_safe_workspace_name
+    （不以 . 开头、无路径分隔、无控制字符；_ 开头/中文等均合法——存量迁移 ws
+    `__legacy__` 合法）。一致性由 test_store_ws_validation_agrees_with_provisioner
+    锁定，勿单侧改动。"""
+    return (
+        bool(name)
+        and not name.startswith(".")
+        and "/" not in name
+        and "\\" not in name
+        and all(ord(ch) >= 32 and ord(ch) != 127 for ch in name)
+    )
 
 
 class TopologyAnalysisStore:
@@ -19,7 +37,7 @@ class TopologyAnalysisStore:
         self._root = Path(workspaces_dir).resolve()
 
     def _dir(self, ws: str, analysis_id: str | None = None) -> Path:
-        if not _SAFE_WS.fullmatch(ws or ""):
+        if not _safe_ws(ws):
             raise ValueError(f"invalid workspace: {ws!r}")
         base = (self._root / ws / "correlation-topology" / "analyses").resolve()
         if not base.is_relative_to(self._root):
@@ -106,7 +124,7 @@ class TopologyAnalysisStore:
         recovered: list[str] = []
         if not self._root.exists():
             return recovered
-        for workspace in sorted(p.name for p in self._root.iterdir() if p.is_dir() and _SAFE_WS.fullmatch(p.name)):
+        for workspace in sorted(p.name for p in self._root.iterdir() if p.is_dir() and _safe_ws(p.name)):
             for state in self.list(workspace):
                 if state.get("status") not in _ACTIVE_STATUSES:
                     continue
@@ -123,7 +141,7 @@ class TopologyAnalysisStore:
     def cleanup(self, *, max_records: int = 100) -> None:
         if not self._root.exists() or max_records < 1:
             return
-        for workspace in sorted(p.name for p in self._root.iterdir() if p.is_dir() and _SAFE_WS.fullmatch(p.name)):
+        for workspace in sorted(p.name for p in self._root.iterdir() if p.is_dir() and _safe_ws(p.name)):
             states = self.list(workspace)
             excess = len(states) - max_records
             if excess <= 0:

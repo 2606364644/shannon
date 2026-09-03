@@ -1,26 +1,29 @@
-"""Asynchronous, workspace-isolated cross-repo topology analysis manager."""
+"""Asynchronous, workspace-isolated cross-repo topology analysis manager.
+
+2026-09-03 迁移 worker（spec 2026-09-03-topology-preanalysis-worker-migration）：
+agent 执行段经 temporal 提交 worker（TopologyAnalysisWorkflow，bb 队列），web 只做
+前置校验/manifest/fingerprint/缓存/建 state + 提交 + await 兜底——**web 进程不再
+执行任何 agent / 加载任何 prompt**（守护测试 test_web_never_runs_agents 锁定）。
+执行段实现见 supernova_multi.pipeline.workflows（worker 侧）。
+"""
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from supernova_core.agents.runner import ClaudeRunResult, UsageSink, run_claude_prompt
-from supernova_core.agents.tool_audit_logger import ToolAuditLogger
-from supernova_core.prompts.manager import PromptManager
 from supernova_core.topology.discovery import (
     build_topology_fingerprint,
     collect_navigation_manifest,
-    normalize_topology_result,
 )
-from supernova_core.topology.schema import TOPOLOGY_DISCOVERY_SCHEMA
+from supernova_core.topology.store import TopologyAnalysisStore
 
-from .topology_analysis_store import TopologyAnalysisStore
+logger = logging.getLogger(__name__)
 
 
 class TopologyValidationError(ValueError):
@@ -39,44 +42,6 @@ class AnalysisNotFound(KeyError):
 
 class TopologyProviderConfigError(ValueError):
     pass
-    pass
-
-
-class _NdjsonToolAuditLogger(ToolAuditLogger):
-    def __init__(self, path: Path):
-        self._path = path
-        self._lock = asyncio.Lock()
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.touch(exist_ok=True)
-
-    async def log_tool_start(self, tool_name: str, parameters: Any) -> None:
-        await self._write({"type": "tool_start", "tool": tool_name,
-                           "parameters": str(parameters)[:2000]})
-
-    async def log_tool_end(self, result: Any) -> None:
-        await self._write({"type": "tool_end", "result": str(result)[:2000]})
-
-    async def log_error(self, error: str, *, turn_count: int = 0, duration_ms: int = 0) -> None:
-        await self._write({"type": "error", "error": error, "turn_count": turn_count,
-                           "duration_ms": duration_ms})
-
-    async def log_assistant_turn(self, turn: int, content: str) -> None:
-        await self._write({"type": "assistant_turn", "turn": turn, "content": content[:2000]})
-
-    async def _write(self, event: dict[str, Any]) -> None:
-        payload = json_line(event)
-        async with self._lock:
-            await asyncio.to_thread(self._append_sync, payload)
-
-    def _append_sync(self, payload: str) -> None:
-        with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(payload)
-            fh.flush()
-
-
-def json_line(event: dict[str, Any]) -> str:
-    import json
-    return json.dumps({"ts": _now_iso(), **event}, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
 def _now_iso() -> str:
@@ -90,21 +55,19 @@ class TopologyAnalysisManager:
         *,
         repo_manager: Any | None,
         ws_config_store: Any | None = None,
-        runner: Callable[..., Awaitable[ClaudeRunResult]] | None = None,
+        temporal_client_factory: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         self._root = Path(workspaces_dir).resolve()
         self.store = TopologyAnalysisStore(self._root)
         self._repo_manager = repo_manager
         self._ws_config_store = ws_config_store
-        self._runner = runner or run_claude_prompt
+        self._temporal_client_factory = temporal_client_factory
+        self._client: Any | None = None  # 懒连接 + 复用（勿每次提交新建）
         self._tasks: dict[str, asyncio.Task] = {}
+        self._handles: dict[str, Any] = {}
         self._task_ws: dict[str, str] = {}
-        self._usage_sinks: dict[str, UsageSink] = {}
-        self._provider_configs: dict[str, dict] = {}
-        self._active_count = 0
-        self._active_ids: set[str] = set()
         self._start_lock = asyncio.Lock()
-        self.store.recover_interrupted()
+        self._recovered = False  # 孤儿 recover 懒触发一次/进程（需 async，构造不宜）
         self.store.cleanup(max_records=self.max_stored_analyses)
 
     @property
@@ -131,9 +94,26 @@ class TopologyAnalysisManager:
     def max_stored_analyses(self) -> int:
         return max(1, int(os.getenv("SUPERNOVA_TOPOLOGY_MAX_STORED_ANALYSES", "100")))
 
+    @property
+    def _active_count(self) -> int:
+        """并发门读 store：跨进程后内存计数在 web 重启归零但 worker 仍在跑，
+        store 的 active（queued/running）计数才正确（spec §4.3）。"""
+        return sum(
+            len([s for s in self.store.list(ws) if s.get("status") in {"queued", "running"}])
+            for ws in self._workspace_names()
+        )
+
+    def _workspace_names(self) -> list[str]:
+        if not self._root.exists():
+            return []
+        return sorted(p.name for p in self._root.iterdir() if p.is_dir())
+
     async def start(self, ws: str, repos: list[str], *, refresh: bool = False) -> str:
         # Serialize validation/cache/task creation to prevent duplicate cache misses.
         async with self._start_lock:
+            if not self._recovered:
+                await self._recover_orphans()
+                self._recovered = True
             return await self._start(ws, repos, refresh=refresh)
 
     async def _start(self, ws: str, repos: list[str], *, refresh: bool = False) -> str:
@@ -179,16 +159,124 @@ class TopologyAnalysisManager:
             "error": None,
         }
         self.store.create(ws, state)
-        self._provider_configs[analysis_id] = provider_config
         self._task_ws[analysis_id] = ws
-        self._usage_sinks[analysis_id] = UsageSink()
-        self._active_count += 1
-        self._active_ids.add(analysis_id)
-        task = asyncio.create_task(self._run(analysis_id), name=analysis_id)
+
+        from supernova_core.services.temporal_infra import WEB_TASK_QUEUE_BLACKBOX
+        from supernova_multi.pipeline.shared import TopologyAnalysisInput
+        from supernova_multi.pipeline.workflows import TopologyAnalysisWorkflow
+
+        try:
+            client = await self._temporal()
+            handle = await client.start_workflow(
+                TopologyAnalysisWorkflow.run,
+                TopologyAnalysisInput(
+                    analysis_id=analysis_id, ws=ws,
+                    workspaces_dir=str(self._root),
+                    repos=names,
+                    repo_paths={name: str(path) for name, path in paths.items()},
+                    manifest=manifest.model_dump(),
+                    provider_config=provider_config,
+                    timeout_seconds=self.timeout_seconds,
+                    max_turns=self.max_turns,
+                ),
+                id=f"topo-{ws}-{analysis_id}",
+                task_queue=WEB_TASK_QUEUE_BLACKBOX,
+            )
+        except Exception as exc:
+            # 提交失败（temporal 不可达等）→ 写 failed 终态返回 id：前端轮询即见
+            # provider_failed，用户重跑（失败重跑哲学，不自动重试）。
+            await self._fail(ws, analysis_id, {
+                "code": "provider_failed", "message": f"temporal submit failed: {exc}",
+                "retryable": True,
+            })
+            return analysis_id
+
+        self._handles[analysis_id] = handle
+        task = asyncio.create_task(self._await_workflow(handle, ws, analysis_id),
+                                   name=analysis_id)
         self._tasks[analysis_id] = task
-        # A task cancelled before its coroutine starts never reaches _run's finally.
         task.add_done_callback(lambda _task, analysis_id=analysis_id: self._cleanup_analysis(analysis_id, _task))
         return analysis_id
+
+    async def _temporal(self) -> Any:
+        if self._client is None:
+            if self._temporal_client_factory is not None:
+                self._client = await self._temporal_client_factory()
+            else:
+                from temporalio.client import Client
+                self._client = await Client.connect(self._temporal_address())
+        return self._client
+
+    def _temporal_address(self) -> str:
+        """SUPERNOVA_TEMPORAL_HOST:PORT（默认 localhost:7233），与 scan_manager
+        同语义：web 容器内 temporal 在 compose 服务名 `temporal` 上（非 localhost）。"""
+        host = os.environ.get("SUPERNOVA_TEMPORAL_HOST", "localhost")
+        port = int(os.environ.get("SUPERNOVA_TEMPORAL_PORT", "7233"))
+        return f"{host}:{port}"
+
+    async def _await_workflow(self, handle: Any, ws: str, analysis_id: str) -> None:
+        """await workflow 结果。终态由 worker activity 写——web 只做兜底：
+        正常返回但 state 仍 active（activity 没写终态的异常路径）/ workflow 失败
+        （worker 崩溃）时写 failed，state 不卡 running。"""
+        try:
+            await handle.result()
+            state = self.store.get(ws, analysis_id)
+            if state is not None and state.get("status") in {"queued", "running"}:
+                logger.warning(
+                    "topology workflow %s returned without terminal state", analysis_id)
+                await self._fail(ws, analysis_id, {
+                    "code": "provider_failed",
+                    "message": "workflow returned without terminal state",
+                    "retryable": True,
+                })
+        except asyncio.CancelledError:
+            raise  # cancel() 路径：终态已由 cancel() 先写
+        except Exception as exc:
+            state = self.store.get(ws, analysis_id)
+            if state is not None and state.get("status") in {"queued", "running"}:
+                await self._fail(ws, analysis_id, {
+                    "code": "provider_failed", "message": f"workflow failed: {exc}",
+                    "retryable": True,
+                })
+        finally:
+            self.store.cleanup(max_records=self.max_stored_analyses)
+
+    async def _recover_orphans(self) -> None:
+        """进程启动后的孤儿清理（弱化版 recover，spec §4.3 语义修正）：
+        running 的执行者是 worker——web 重启不得打断，让 workflow 跑完自写终态；
+        仅「temporal 查无 workflow」的 active 态才是孤儿（提交前 web 崩的窗口），
+        标 interrupted。temporal 不可达时保守不动（不误杀在跑分析），只记 warning。"""
+        orphans: list[tuple[str, str, dict]] = []
+        for ws in self._workspace_names():
+            for state in self.store.list(ws):
+                if state.get("status") in {"queued", "running"}:
+                    orphans.append((ws, state["analysis_id"], state))
+        if not orphans:
+            return
+        try:
+            client = await self._temporal()
+        except Exception:
+            logger.warning("topology recover: temporal unreachable, leaving %d active "
+                           "analyses untouched", len(orphans))
+            return
+        for ws, analysis_id, state in orphans:
+            handle = client.get_workflow_handle(f"topo-{ws}-{analysis_id}")
+            alive = False
+            try:
+                await handle.describe()
+                alive = True
+            except Exception:
+                alive = False
+            if not alive:
+                state.update({
+                    "status": "interrupted",
+                    "error": {"code": "interrupted",
+                              "message": "analysis orphaned before worker pickup",
+                              "retryable": True},
+                    "updated_at": _now_iso(),
+                })
+                self.store.write(state)
+                logger.info("topology recover: orphan %s marked interrupted", analysis_id)
 
     async def wait(self, analysis_id: str) -> None:
         task = self._tasks.get(analysis_id)
@@ -210,15 +298,19 @@ class TopologyAnalysisManager:
     async def cancel(self, ws: str, analysis_id: str) -> dict[str, Any]:
         state = self.get(ws, analysis_id)
         if state.get("status") in {"queued", "running"}:
-            task = self._tasks.get(analysis_id)
-            if task is not None and not task.done():
-                task.cancel()
+            # 先写终态再 cancel：worker 侧 status guard 据此跳过晚到结果（spec R2）。
             state.update({
                 "status": "cancelled", "updated_at": _now_iso(), "progress": 100,
                 "error": {"code": "cancelled", "message": "analysis cancelled by user", "retryable": True},
-                "usage": _usage_from_sink(self._usage_sinks.get(analysis_id)) or state.get("usage"),
             })
             self.store.write(state)
+            handle = self._handles.get(analysis_id)
+            if handle is not None:
+                try:
+                    await handle.cancel()
+                except Exception:
+                    logger.warning("topology cancel rpc failed for %s (guard converges)",
+                                   analysis_id, exc_info=True)
         return self.get(ws, analysis_id)
 
     async def _resolve_repo_path(self, ws: str, name: str) -> Path:
@@ -248,117 +340,14 @@ class TopologyAnalysisManager:
             raise TopologyValidationError(f"repository path is not available: {name}", repos=[name])
         return candidate
 
-    async def _run(self, analysis_id: str) -> None:
-        ws = self._task_ws[analysis_id]
-        try:
-            state = self.get(ws, analysis_id)
-            state.update({"status": "running", "progress": 20, "updated_at": _now_iso()})
-            self.store.write(state)
-            try:
-                result = await asyncio.wait_for(self._run_agent(analysis_id), timeout=self.timeout_seconds)
-            except asyncio.TimeoutError:
-                await self._fail(ws, analysis_id, {
-                    "code": "timeout", "message": f"analysis exceeded {self.timeout_seconds:g}s",
-                    "retryable": True,
-                })
-                return
-            except asyncio.CancelledError:
-                # cancel() normally writes terminal state before task cancellation. The provider
-                # may still flush UsageSink after that write, so preserve late partial accounting.
-                state = self.get(ws, analysis_id)
-                sink_usage = _usage_from_sink(self._usage_sinks.get(analysis_id))
-                if state.get("status") in {"queued", "running"}:
-                    await self._fail(ws, analysis_id, {
-                        "code": "cancelled", "message": "analysis cancelled", "retryable": True,
-                    })
-                elif sink_usage is not None:
-                    state["usage"] = sink_usage
-                    self.store.write(state)
-                raise
-            except Exception as exc:  # provider infrastructure failures must not auto-retry
-                await self._fail(ws, analysis_id, {
-                    "code": "provider_failed", "message": str(exc), "retryable": True,
-                }, result=None)
-                return
-
-            usage = _usage(result)
-            if not result.success:
-                await self._fail(ws, analysis_id, {
-                    "code": "provider_failed", "message": result.error or "provider returned failure",
-                    "retryable": bool(result.retryable),
-                }, result=result)
-                return
-            payload = result.structured_output
-            if not isinstance(payload, dict):
-                await self._fail(ws, analysis_id, {
-                    "code": "malformed_output", "message": "agent did not return a JSON object",
-                    "retryable": True,
-                }, result=result)
-                return
-            normalized = normalize_topology_result(payload, self._repo_paths_from_state(state))
-            if any(item.reason == "malformed_output" for item in normalized.invalid):
-                await self._fail(ws, analysis_id, {
-                    "code": "malformed_output", "message": "agent output failed schema validation",
-                    "retryable": True,
-                }, result=result)
-                return
-            state = self.get(ws, analysis_id)
-            state.update({
-                "status": "completed", "progress": 100,
-                "completed_at": _now_iso(), "updated_at": _now_iso(),
-                "result": normalized.model_dump(by_alias=True, exclude_none=True),
-                "raw_output": payload, "usage": usage, "error": None,
-            })
-            self.store.write(state)
-            self.store.cleanup(max_records=self.max_stored_analyses)
-        finally:
-            self._cleanup_analysis(analysis_id)
-
     def _cleanup_analysis(self, analysis_id: str, task: asyncio.Task | None = None) -> None:
-        """Idempotently release registry/concurrency state for every terminal path."""
+        """Idempotently release registry state for every terminal path."""
         current_task = self._tasks.get(analysis_id)
         if task is not None and current_task is not None and current_task is not task:
             return
-        if analysis_id in self._active_ids:
-            self._active_ids.discard(analysis_id)
-            self._active_count = max(0, self._active_count - 1)
         self._tasks.pop(analysis_id, None)
         self._task_ws.pop(analysis_id, None)
-        self._usage_sinks.pop(analysis_id, None)
-        self._provider_configs.pop(analysis_id, None)
-
-    async def _run_agent(self, analysis_id: str) -> ClaudeRunResult:
-        ws = self._task_ws[analysis_id]
-        state = self.get(ws, analysis_id)
-        manifest = state["manifest"]
-        names = state["repos"]
-        paths = self._repo_paths_from_state(state)
-        repositories = {name: str(path) for name, path in paths.items()}
-        prompt = PromptManager(Path(__file__).resolve().parents[5] / "prompts").load_sync(
-            "cross-repo-topology-discovery",
-            {
-                "repositories_json": _json(repositories),
-                "navigation_manifest_json": _json(manifest),
-            },
-        )
-        return await self._runner(
-            prompt=prompt,
-            model_tier="large",
-            structured_output_schema=TOPOLOGY_DISCOVERY_SCHEMA,
-            provider_config=self._provider_configs.get(analysis_id) or self._provider_config(ws),
-            repo_path=str(self.store.path(ws, analysis_id)),
-            tool_audit_logger=_NdjsonToolAuditLogger(
-                self.store.path(ws, analysis_id) / "tool-audit.ndjson"),
-            max_turns=self.max_turns,
-            usage_sink=self._usage_sinks.get(analysis_id),
-            allowed_roots=[str(path) for path in paths.values()],
-            tool_policy="readonly-code",
-        )
-
-    def _repo_paths_from_state(self, state: dict[str, Any]) -> dict[str, Path]:
-        paths = state.get("repo_paths") or {}
-        return {name: Path(paths.get(name) or self._root / state["workspace"] / "repos" / name).resolve()
-                for name in state["repos"]}
+        self._handles.pop(analysis_id, None)
 
     def api_view(self, ws: str, analysis_id: str) -> dict[str, Any]:
         """Minimal frontend response; persisted paths/manifests/raw output stay server-side."""
@@ -397,59 +386,15 @@ class TopologyAnalysisManager:
                 provider_config = {**provider_config, "pricing_override": str(pricing_override)}
             return provider_config
         from supernova_core.agents.providers import build_provider_config
+        from dataclasses import asdict
         return asdict(build_provider_config())
 
-    async def _fail(
-        self, ws: str, analysis_id: str, error: dict[str, Any],
-        *, result: ClaudeRunResult | None = None,
-    ) -> None:
+    async def _fail(self, ws: str, analysis_id: str, error: dict[str, Any]) -> None:
         state = self.get(ws, analysis_id)
         state.update({
             "status": "failed", "progress": 100, "updated_at": _now_iso(), "error": error,
-            "usage": (
-                _usage(result) if result is not None
-                else _usage_from_sink(self._usage_sinks.get(analysis_id)) or state.get("usage")
-            ),
-            "raw_output": getattr(result, "text", None) if result is not None else state.get("raw_output"),
         })
         self.store.write(state)
-
-
-def _usage(result: ClaudeRunResult) -> dict[str, Any]:
-    tokens = result.tokens
-    return {
-        "input_tokens": tokens.input_tokens,
-        "output_tokens": tokens.output_tokens,
-        "cache_read_tokens": tokens.cache_read_input_tokens,
-        "cache_creation_tokens": tokens.cache_creation_input_tokens,
-        "cost_usd": result.cost,
-        "cost_currency": result.cost_currency,
-        "model": result.model,
-        "turns": result.turns,
-    }
-
-
-def _usage_from_sink(sink: UsageSink | None) -> dict[str, Any] | None:
-    if sink is None:
-        return None
-    if not any((sink.input_tokens, sink.output_tokens, sink.cache_read_tokens,
-                sink.cache_creation_tokens, sink.cost_usd)):
-        return None
-    return {
-        "input_tokens": sink.input_tokens,
-        "output_tokens": sink.output_tokens,
-        "cache_read_tokens": sink.cache_read_tokens,
-        "cache_creation_tokens": sink.cache_creation_tokens,
-        "cost_usd": sink.cost_usd,
-        "cost_currency": sink.cost_currency or "USD",
-        "model": sink.model,
-        "turns": 0,
-    }
-
-
-def _json(value: Any) -> str:
-    import json
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 __all__ = [

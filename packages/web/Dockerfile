@@ -29,6 +29,9 @@ RUN pip install --no-cache-dir -i https://mirrors.cloud.tencent.com/pypi/simple/
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages ./packages
+# 注：不 COPY prompts——web 进程零 agent 执行点（2026-09-03 拓扑预分析迁 worker 后，
+# 守护测试 test_web_never_runs_agents 锁定）。曾因漏拷 prompts 致预分析必失败的
+# 止血 COPY 已随迁移删除，勿再加回。
 
 # 装全部 workspace 包（含 supernova-whitebox/-blackbox/-multi CLI + supernova-web）
 # 不用 --frozen：frozen 模式下 uv 严格按 lockfile 里的 files.pythonhosted.org URL 下载，

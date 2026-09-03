@@ -43,6 +43,7 @@ supernova 的注入 / xss / ssrf 白盒检测是**双轨**，两条轨**各自�
 - **能力对齐已落实**（Task 5，`feat/fork-py`）：openai 引擎经 `tools_openai/task.py` 的 `task` function_tool + provider 注入 `_make_subagent_runner`，对齐 CLI 的 `Agent` 子代理委派——两引擎跑同一份 vuln prompt（**prompt 不改**），双引擎流程对齐。
 - **两个引擎都要支持、流程一致（可互换）**——不要"切到 glm-anthropic 了事"丢 openai 引擎，也不要让 openai 退化成单 agent 使两引擎行为分叉。
 - **实测**：GLM 在 claude-agent-sdk 能正确驱动 `Agent` 子代理委派（`scripts/validate_glm_task_probe.py`，2/2 可复现）；glm-anthropic 不瘫、与原始 TS 一致。openai 引擎已补 `task` 工具（Task 5），**glm-openai 侧 `scripts/validate_openai_task_probe.py` 真机已验证 PASS 且可复现**（GLM 正确发起 `task` 子代理委派，子代理读码追链，产出 SQLi 判定；2026-06-27 首跑 68.7s、2026-06-28 复跑 57.8s，均 3 turns/success=True/不违规直接读）。改 agent/tool 行为后，用 `scripts/validate_*_task_probe.py` 类探针在对应引擎实测。
+- **web 进程零 agent 执行点（2026-09-03 起，守护测试锁定）**——web 侧 LLM 能力一律经 temporal 提交 worker（`AuthValidationWorkflow` / `TopologyAnalysisWorkflow` 模式），web 包不得 import `PromptManager` / `supernova_core.agents.runner`（`packages/web/tests/test_web_never_runs_agents.py` 锁定）。踩坑史：拓扑预分析曾在 web 进程内跑 agent，web 镜像漏拷 prompts 致必失败 + web 镜像不带 node/claude（claude-agent-sdk 引擎即失败）——worker 容器天然资源齐（prompts/node/claude/chromium）。**给 web 加新 LLM 功能时走 temporal 提交，勿在 web 进程起 agent**；web Dockerfile 也别再 COPY prompts。
 
 ---
 

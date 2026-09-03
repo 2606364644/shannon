@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from supernova_core.agents.runner import ClaudeRunResult, TokenUsage
 from supernova_web.components.topology_analysis import (
-    AnalysisNotFound,
     TooManyTopologyAnalyses,
     TopologyAnalysisManager,
     TopologyAnalysisStore,
@@ -27,32 +23,6 @@ def _make_repos(root: Path, ws: str = "ws1") -> dict[str, Path]:
         (path / "README.md").write_text(f"# {name}\n", encoding="utf-8")
         out[name] = path
     return out
-
-
-def _result(payload: dict | None = None, *, success: bool = True, error: str | None = None) -> ClaudeRunResult:
-    return ClaudeRunResult(
-        success=success,
-        text="" if payload is not None else "not json",
-        structured_output=payload,
-        turns=3,
-        cost=0.125,
-        cost_currency="CNY",
-        model="glm-test",
-        tokens=TokenUsage(input_tokens=11, output_tokens=7, cache_read_input_tokens=3),
-        error=error,
-    )
-
-
-def _payload() -> dict:
-    return {
-        "nodes": [{"repo": "gateway", "roles": ["entrypoint", "backend"]}],
-        "edges": [{
-            "from": "gateway", "to": "order-svc", "protocol": "grpc", "confidence": "medium",
-            "client_evidence": [], "handler_evidence": [],
-        }],
-        "uncertain": [],
-        "coverage": [{"repo": name, "complete": True, "reason": "test"} for name in ("gateway", "order-svc", "user-svc")],
-    }
 
 
 @pytest.mark.asyncio
@@ -84,80 +54,145 @@ async def test_store_atomic_cache_recovery_and_cleanup(tmp_path):
     assert len(store.list("ws1")) == 10
 
 
+@pytest.mark.parametrize("ws", ["__legacy__", "_internal", "中文空间", "ws-1", "a.b", "sp ace"])
+def test_store_accepts_provisioner_legal_workspace_names(tmp_path, ws):
+    # 回归 2026-09-03：存量迁移 ws `__legacy__` 通过正式校验 is_safe_workspace_name
+    # （不以 . 开头即可），却被 store 的 _SAFE_WS 首字符规则拒绝 -> start_analysis
+    # 未捕获 ValueError -> 500 纯文本 -> 前端 json() 失败后 fallback text() 抛
+    # "body stream already read"。store 的 ws 校验不得严于正式校验。
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    state = store.create(ws, {
+        "analysis_id": "topology-aaaaaaaaaaaa", "workspace": ws, "status": "running",
+        "repos": ["a", "b"], "fingerprint": "f1",
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+        "progress": 10,
+    })
+    assert store.get(ws, "topology-aaaaaaaaaaaa") == state
+    assert [s["workspace"] for s in store.list(ws)] == [ws]
+    completed = dict(state, status="completed",
+                     updated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+    store.write(completed)
+    assert store.find_cached(ws, "f1", ttl_seconds=3600)["analysis_id"] == "topology-aaaaaaaaaaaa"
+    # recover_interrupted/cleanup 的目录扫描同样不得跳过此类 ws
+    store.write(dict(state, analysis_id="topology-bbbbbbbbbbbb", status="queued", fingerprint="f2"))
+    assert store.recover_interrupted() == ["topology-bbbbbbbbbbbb"]
+
+
+@pytest.mark.parametrize("ws", ["", ".", "..", ".system", "../evil", "a/b", "a\\b", "bad\x7f", "ta\tb"])
+def test_store_still_rejects_unsafe_workspace_names(tmp_path, ws):
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    with pytest.raises(ValueError):
+        store.create(ws, {"analysis_id": "topology-aaaaaaaaaaaa", "workspace": ws})
+
+
+def test_store_ws_validation_agrees_with_provisioner():
+    # 锁定两套校验一致（分叉即红）：store 判定 vs 正式校验 is_safe_workspace_name。
+    from supernova_core.topology.store import _safe_ws
+    from supernova_web.components.workspace_provisioner import is_safe_workspace_name
+    names = ["__legacy__", "_x", "中文", "ws1", "-x", ".x", ".", "..", "", "a/b",
+             "a\\b", "sp ace", "ta\tb", "x" * 64, "nul\x00", "del\x7f"]
+    for name in names:
+        assert _safe_ws(name) == is_safe_workspace_name(name), name
+
+
+class _FakeHandle:
+    """Fake WorkflowHandle：result() 挂在 future 上，测试控制完成/抛错/取消。"""
+
+    def __init__(self, workflow_id: str, inp):
+        self.id = workflow_id
+        self.input = inp
+        self.cancel_calls = 0
+        self.cancelled = False
+        self._done: asyncio.Future | None = None
+
+    def _future(self) -> asyncio.Future:
+        if self._done is None:
+            self._done = asyncio.get_running_loop().create_future()
+        return self._done
+
+    async def result(self):
+        if self.cancelled:
+            raise asyncio.CancelledError()  # temporal cancel 后 await result() 即抛
+        return await self._future()
+
+    async def cancel(self):
+        self.cancel_calls += 1
+        self.cancelled = True
+        fut = self._done
+        if fut is not None and not fut.done():
+            fut.cancel()
+
+    async def describe(self):
+        class _Desc:
+            status = "RUNNING"
+        return _Desc()
+
+
+class _FakeTemporal:
+    """Fake temporal client factory：记录提交、返回可控 handle。"""
+
+    def __init__(self):
+        self.submitted: list[tuple] = []
+        self.fail_submit = False
+        self.handles: dict[str, _FakeHandle] = {}
+
+    async def connect(self):
+        return self
+
+    async def start_workflow(self, run, inp, *, id: str, task_queue: str):
+        if self.fail_submit:
+            raise RuntimeError("temporal unreachable")
+        handle = _FakeHandle(id, inp)
+        self.submitted.append((run, inp, id, task_queue))
+        self.handles[id] = handle
+        return handle
+
+    def get_workflow_handle(self, workflow_id: str) -> _FakeHandle:
+        # 默认：describe 成功 → workflow 视为在跑（recover 不打断）；测试按需覆盖
+        return _FakeHandle(workflow_id, None)
+
+
+def _finish(handle: _FakeHandle, value) -> None:
+    handle._future().set_result(value)
+
+
 @pytest.mark.asyncio
-async def test_manager_lifecycle_cache_failure_timeout_and_cancel(tmp_path, monkeypatch):
-    monkeypatch.setenv("SUPERNOVA_TOPOLOGY_TIMEOUT_SECONDS", "0.02")
-    repos = _make_repos(tmp_path)
-    calls: list[dict] = []
-    release = asyncio.Event()
-
-    async def runner(**kwargs):
-        calls.append(kwargs)
-        if "slow" in kwargs["prompt"]:
-            kwargs["usage_sink"].record(
-                model="glm-test", input_tokens=5, output_tokens=3,
-                cache_read_tokens=1, cache_creation_tokens=0,
-                cost_usd=0.07, cost_currency="CNY")
-            await release.wait()
-        return _result(_payload())
-
-    manager = TopologyAnalysisManager(tmp_path / "workspaces", repo_manager=None, runner=runner)
+async def test_manager_submits_to_worker_and_completes(tmp_path, monkeypatch):
+    # 迁移后核心链路（spec §4.3）：_start 保留全部前置（校验/manifest/fingerprint/
+    # 缓存/store.create），执行段换 temporal 提交 bb 队列；终态由 worker activity
+    # 写（此处 fake handle 模拟），web await result 后不重复写。
+    _make_repos(tmp_path)
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
     analysis_id = await manager.start("ws1", ["gateway", "order-svc", "user-svc"])
+
+    assert manager.get("ws1", analysis_id)["status"] == "queued"
+    run, inp, wid, queue = temporal.submitted[0]
+    assert wid == f"topo-ws1-{analysis_id}"
+    assert queue == "supernova-bb-web"  # bb 队列 = 交互式轻任务的家（spec §3）
+    assert inp.analysis_id == analysis_id and inp.ws == "ws1"
+    assert inp.repos == ["gateway", "order-svc", "user-svc"]
+    assert inp.repo_paths["gateway"].endswith("/repos/gateway")
+    assert inp.manifest["repositories"] == ["gateway", "order-svc", "user-svc"]
+    assert inp.workspaces_dir == str(manager._root)
+    assert inp.timeout_seconds == manager.timeout_seconds
+    assert inp.max_turns == manager.max_turns
+
+    # 模拟 worker activity 写终态后 workflow 返回（时间戳须新鲜，缓存 TTL 判定用）
+    state = manager.get("ws1", analysis_id)
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    state.update({"status": "completed", "progress": 100,
+                  "updated_at": now, "completed_at": now})
+    manager.store.write(state)
+    _finish(temporal.handles[wid], {"status": "completed"})
     await manager.wait(analysis_id)
     completed = manager.get("ws1", analysis_id)
-    assert completed["status"] == "completed"
-    assert completed["repos"] == ["gateway", "order-svc", "user-svc"]
-    assert completed["result"]["edges"][0]["from"] == "gateway"
-    assert completed["usage"] == {
-        "input_tokens": 11, "output_tokens": 7, "cache_read_tokens": 3,
-        "cache_creation_tokens": 0, "cost_usd": 0.125,
-        "cost_currency": "CNY", "model": "glm-test", "turns": 3,
-    }
-    assert completed["manifest"]["repositories"] == ["gateway", "order-svc", "user-svc"]
-    assert calls[0]["tool_policy"] == "readonly-code"
-    assert calls[0]["structured_output_schema"]["title"] == "CrossRepositoryTopologyDiscovery"
-    assert calls[0]["repo_path"].endswith(analysis_id)
-    assert calls[0]["repo_path"] != str(tmp_path / "workspaces" / "ws1")
-    audit = (tmp_path / "workspaces" / "ws1" / "correlation-topology" / "analyses" / analysis_id / "tool-audit.ndjson")
-    assert audit.exists()
+    assert completed["status"] == "completed"  # web 未复写终态
 
+    # 缓存命中不重复提交（fingerprint 24h 缓存零变化）
     cached_id = await manager.start("ws1", ["user-svc", "gateway", "order-svc"])
-    assert cached_id == analysis_id and len(calls) == 1
-    refreshed_id = await manager.start("ws1", ["gateway", "order-svc", "user-svc"], refresh=True)
-    await manager.wait(refreshed_id)
-    assert refreshed_id != analysis_id and len(calls) == 2
-
-    drained_id = await manager.start("ws1", ["gateway", "order-svc"], refresh=True)
-    await manager.wait(drained_id)
-    async def failing(**kwargs):
-        calls.append(kwargs)
-        return _result(None, success=False, error="provider down")
-    manager._runner = failing
-    failed_id = await manager.start("ws1", ["gateway", "order-svc"], refresh=True)
-    await manager.wait(failed_id)
-    failed = manager.get("ws1", failed_id)
-    assert failed["status"] == "failed" and failed["error"]["code"] == "provider_failed"
-
-    async def timeout(**kwargs):
-        calls.append(kwargs)
-        await asyncio.sleep(1)
-        return _result(_payload())
-    manager._runner = timeout
-    timed_id = await manager.start("ws1", ["gateway", "order-svc"], refresh=True)
-    await manager.wait(timed_id)
-    assert manager.get("ws1", timed_id)["status"] == "failed"
-
-    manager._runner = runner
-    slow_id = await manager.start("ws1", ["gateway", "order-svc", "slow"], refresh=True)
-    await asyncio.sleep(0)
-    await manager.cancel("ws1", slow_id)
-    release.set()
-    await manager.wait(slow_id)
-    cancelled = manager.get("ws1", slow_id)
-    assert cancelled["status"] == "cancelled"
-    assert cancelled["usage"]["input_tokens"] == 5
-    assert cancelled["usage"]["cost_usd"] == 0.07
-    assert cancelled["usage"]["cost_currency"] == "CNY"
+    assert cached_id == analysis_id and len(temporal.submitted) == 1
 
     with pytest.raises(TopologyValidationError):
         await manager.start("ws1", ["gateway"])
@@ -166,38 +201,164 @@ async def test_manager_lifecycle_cache_failure_timeout_and_cancel(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_manager_restart_recovery_and_concurrency(tmp_path):
-    repos = _make_repos(tmp_path)
+async def test_manager_submit_failure_fails_analysis(tmp_path):
+    # temporal 不可达（提交失败）→ 写 failed/provider_failed 终态并返回 id——
+    # 前端轮询即见失败，用户重跑（spec：失败重跑哲学，不自动重试）。
+    _make_repos(tmp_path)
+    temporal = _FakeTemporal()
+    temporal.fail_submit = True
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
+    await manager.wait(analysis_id)
+    failed = manager.get("ws1", analysis_id)
+    assert failed["status"] == "failed"
+    assert failed["error"]["code"] == "provider_failed"
+    assert "temporal" in failed["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_manager_workflow_failure_fails_active_analysis(tmp_path):
+    # workflow 失败（worker 崩溃 / activity 未写终态）→ web await 兜底写 failed，
+    # state 不卡 running（spec §4.3 兜底路径）。
+    _make_repos(tmp_path)
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
+    wid = f"topo-ws1-{analysis_id}"
+    state = manager.get("ws1", analysis_id)
+    state.update({"status": "running", "progress": 20})
+    manager.store.write(state)
+    temporal.handles[wid]._future().set_exception(RuntimeError("worker crashed"))
+    await manager.wait(analysis_id)
+    failed = manager.get("ws1", analysis_id)
+    assert failed["status"] == "failed"
+    assert failed["error"]["code"] == "provider_failed"
+    assert "worker crashed" in failed["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_manager_cancel_writes_terminal_before_handle_cancel(tmp_path):
+    # cancel 顺序锁定：先写 cancelled 终态再 handle.cancel()（worker 侧 status
+    # guard 据此跳过晚到结果，spec R2）。
+    _make_repos(tmp_path)
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
+    wid = f"topo-ws1-{analysis_id}"
+    state = manager.get("ws1", analysis_id)
+    state.update({"status": "running", "progress": 20})
+    manager.store.write(state)
+
+    cancelled = await manager.cancel("ws1", analysis_id)
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["error"]["code"] == "cancelled"
+    assert temporal.handles[wid].cancel_calls == 1
+    await manager.wait(analysis_id)  # cancel 是终态：wait 正常返回（不向 caller 抛）
+    # cancel 后并发槽释放：下一个分析能提交
+    next_id = await manager.start("ws1", ["gateway", "order-svc"], refresh=True)
+    assert manager.get("ws1", next_id)["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_manager_concurrency_gate_reads_store(tmp_path):
+    # 跨进程后并发门必须读 store（web 重启内存归零但 worker 仍在跑，spec §4.3）。
+    _make_repos(tmp_path)
     store = TopologyAnalysisStore(tmp_path / "workspaces")
     store.create("ws1", {
         "analysis_id": "topology-cccccccccccc", "workspace": "ws1", "status": "running",
         "repos": ["gateway", "order-svc"], "fingerprint": "f",
         "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
     })
-    manager = TopologyAnalysisManager(tmp_path / "workspaces", repo_manager=None, runner=None)
-    assert manager.get("ws1", "topology-cccccccccccc")["status"] == "interrupted"
-
-    manager._active_count = 1
+    temporal = _FakeTemporal()
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    assert manager._active_count == 1  # 从 store 数出 running
     with pytest.raises(TooManyTopologyAnalyses):
         await manager.start("ws1", ["gateway", "order-svc"])
 
 
 @pytest.mark.asyncio
-async def test_api_lifecycle_errors_auth_and_no_scan_side_effects(authed_client, tmp_path, monkeypatch):
+async def test_manager_restart_leaves_worker_running_analysis_alone(tmp_path):
+    # recover 语义修正（spec §4.3，行为变更正向）：running 的执行者是 worker——
+    # web 重启不得标 interrupted；queued 且 temporal 查无 workflow 的孤儿才清。
+    _make_repos(tmp_path)
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    store.create("ws1", {
+        "analysis_id": "topology-cccccccccccc", "workspace": "ws1", "status": "running",
+        "repos": ["gateway", "order-svc"], "fingerprint": "f",
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+    })
+    store.create("ws1", {
+        "analysis_id": "topology-dddddddddddd", "workspace": "ws1", "status": "queued",
+        "repos": ["gateway", "order-svc"], "fingerprint": "f2",
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+    })
+    temporal = _FakeTemporal()
+
+    class _MissingWorkflowHandle:
+        async def describe(self):
+            raise KeyError("workflow not found")  # queued 孤儿：temporal 查无此 workflow
+
+    def get_workflow_handle(workflow_id: str):
+        if workflow_id == "topo-ws1-topology-dddddddddddd":
+            return _MissingWorkflowHandle()
+        return _FakeHandle(workflow_id, None)  # running：workflow 在跑
+
+    temporal.get_workflow_handle = get_workflow_handle
+    manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None, temporal_client_factory=temporal.connect)
+    # 首次 _start 触发 recover：running 不打断（worker 仍占并发槽），queued 孤儿清
+    running_state = store.get("ws1", "topology-cccccccccccc")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    running_state.update({"status": "completed", "progress": 100,
+                          "updated_at": now, "completed_at": now})  # 模拟 worker 跑完腾出槽位
+    store.write(running_state)
+    await manager.start("ws1", ["gateway", "order-svc"])
+    assert manager.get("ws1", "topology-cccccccccccc")["status"] == "completed"  # 未被打断
+    assert manager.get("ws1", "topology-dddddddddddd")["status"] == "interrupted"  # 孤儿清
+
+
+@pytest.mark.asyncio
+async def test_api_start_invalid_workspace_returns_422_not_500(authed_client, tmp_path):
+    # 回归 2026-09-03：store 层 ValueError（ws 名不合法路径）曾未被端点捕获 ->
+    # 500 纯文本 -> 前端只见 "body stream already read"。须转 422 JSON 且 body
+    # 可解析，前端才拿得到 code/message。（auth 依赖层先按 is_safe_workspace_name
+    # 拦真非法名，此处 stub 触达的是「过 auth 但 store 拒」的残余分叉面——defense
+    # in depth：即使未来再分叉也不许 500。）
+    app = authed_client.app
+    # global admin 直通 workspace_member，无需建 ws 目录/成员关系
+    class RaisingManager(TopologyAnalysisManager):
+        async def start(self, ws, repos, refresh=False):
+            raise ValueError(f"invalid workspace: {ws!r}")
+
+    app.state.topology_manager = RaisingManager(
+        tmp_path / "workspaces", repo_manager=None)
+    csrf = authed_client.get("/api/auth/csrf").json()["csrf_token"]
+    bad = authed_client.post(
+        "/api/workspaces/ws1/correlation-topology/analyses",
+        json={"repos": ["gateway", "order-svc"]},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert bad.status_code == 422
+    assert bad.json()["detail"]["code"] == "invalid_workspace"
+
+
+@pytest.mark.asyncio
+async def test_api_lifecycle_errors_auth_and_no_scan_side_effects(authed_client, tmp_path):
     app = authed_client.app
     _make_repos(tmp_path)
-    calls = 0
+    temporal = _FakeTemporal()
 
     class Manager(TopologyAnalysisManager):
         async def _resolve_repo_path(self, ws: str, name: str) -> Path:
             return tmp_path / "workspaces" / ws / "repos" / name
 
-        async def _run_agent(self, analysis_id: str):
-            nonlocal calls
-            calls += 1
-            return _result(_payload())
-
-    app.state.topology_manager = Manager(tmp_path / "workspaces", repo_manager=app.state.repo_manager, runner=None)
+    app.state.topology_manager = Manager(
+        tmp_path / "workspaces", repo_manager=app.state.repo_manager,
+        temporal_client_factory=temporal.connect)
     csrf = authed_client.get("/api/auth/csrf").json()["csrf_token"]
     created = authed_client.post(
         "/api/workspaces/ws1/correlation-topology/analyses",
@@ -206,13 +367,16 @@ async def test_api_lifecycle_errors_auth_and_no_scan_side_effects(authed_client,
     )
     assert created.status_code == 202
     analysis_id = created.json()["analysis_id"]
+    # 模拟 worker 写终态（api 层测试只关心 API 契约：直接写 completed state）
+    state = app.state.topology_manager.get("ws1", analysis_id)
+    state.update({"status": "completed", "progress": 100,
+                  "result": {"edges": [], "nodes": [], "raw": None}})
+    app.state.topology_manager.store.write(state)
     state = authed_client.get(f"/api/workspaces/ws1/correlation-topology/analyses/{analysis_id}").json()
     assert state["status"] == "completed"
     assert "manifest" not in state
     assert "repo_paths" not in state
     assert "raw_output" not in state
-    assert state["result"]["raw"] is None
-    assert all(item["raw"] == {} for item in state["result"].get("invalid", []))
     assert not (tmp_path / "workspaces" / "ws1" / "scans").exists()
 
     bad = authed_client.post(
@@ -239,22 +403,3 @@ async def test_api_lifecycle_errors_auth_and_no_scan_side_effects(authed_client,
                   headers={"X-CSRF-Token": token})
     response = outsider.get(f"/api/workspaces/ws1/correlation-topology/analyses/{analysis_id}")
     assert response.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_cancel_before_coroutine_start_releases_registry_and_slot(tmp_path):
-    _make_repos(tmp_path)
-    async def runner(**kwargs):
-        return _result(_payload())
-    manager = TopologyAnalysisManager(tmp_path / "workspaces", repo_manager=None, runner=runner)
-    analysis_id = await manager.start("ws1", ["gateway", "order-svc"])
-    task = manager._tasks[analysis_id]
-    task.cancel()
-    await manager.wait(analysis_id)
-    assert manager._active_count == 0
-    assert analysis_id not in manager._tasks
-    assert analysis_id not in manager._task_ws
-    assert analysis_id not in manager._usage_sinks
-    next_id = await manager.start("ws1", ["gateway", "order-svc"], refresh=True)
-    await manager.wait(next_id)
-    assert manager.get("ws1", next_id)["status"] == "completed"

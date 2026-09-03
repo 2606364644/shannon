@@ -24,6 +24,44 @@ class _FakeHandle:
         self.tag = tag
 
 
+class _WorkerHandle:
+    """fake WorkflowHandle：result() 直接跑真 activity（迁移后 worker 行为模拟）——
+    e2e 验证 web 提交的 TopologyAnalysisInput 与 worker activity 消费完全契合。"""
+
+    def __init__(self, inp):
+        self.input = inp
+        self.cancelled = False
+
+    async def result(self):
+        if self.cancelled:
+            raise asyncio.CancelledError()
+        from supernova_multi.pipeline import workflows as wf
+        return await wf.run_topology_analysis_activity(self.input)
+
+    async def cancel(self):
+        self.cancelled = True
+
+    async def describe(self):
+        class _Desc:
+            status = "RUNNING"
+        return _Desc()
+
+
+class _WorkerSimulatingTemporal:
+    def __init__(self):
+        self.submitted: list[tuple] = []
+
+    async def connect(self):
+        return self
+
+    async def start_workflow(self, run, inp, *, id: str, task_queue: str):
+        self.submitted.append((run, inp, id, task_queue))
+        return _WorkerHandle(inp)
+
+    def get_workflow_handle(self, workflow_id: str) -> _WorkerHandle:
+        return _WorkerHandle(None)
+
+
 def _seed_repo(root: Path, name: str) -> Path:
     repo = root / "ws" / "repos" / name
     (repo / ".git").mkdir(parents=True, exist_ok=True)
@@ -92,7 +130,12 @@ async def test_four_repo_analysis_confirmation_scan_and_correlation_deliverables
             tokens=TokenUsage(input_tokens=10, output_tokens=5),
         )
 
-    topology_manager = TopologyAnalysisManager(tmp_path, repo_manager=None, runner=topology_runner)
+    # agent 在「worker 侧」执行：patch multi workflows 模块（activity 的 import 点）
+    from supernova_multi.pipeline import workflows as multi_workflows
+    monkeypatch.setattr(multi_workflows, "run_claude_prompt", topology_runner)
+    temporal = _WorkerSimulatingTemporal()
+    topology_manager = TopologyAnalysisManager(
+        tmp_path, repo_manager=None, temporal_client_factory=temporal.connect)
     analysis_id = await topology_manager.start("ws", list(REPOS))
     await topology_manager.wait(analysis_id)
     analysis = topology_manager.api_view("ws", analysis_id)

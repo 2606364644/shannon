@@ -56,7 +56,12 @@ from supernova_blackbox.pipeline.activities import (
     cleanup_auth_state_activity as bb_cleanup_auth_state_activity,
     persist_completed_agents as bb_persist_completed_agents,
 )
-from supernova_multi.pipeline.workflows import CorrelationScanWorkflow, run_correlation_activity
+from supernova_multi.pipeline.workflows import (
+    CorrelationScanWorkflow,
+    TopologyAnalysisWorkflow,
+    run_correlation_activity,
+    run_topology_analysis_activity,
+)
 from supernova_core.runtime.heartbeat import snapshot_heartbeat_workflows
 
 _GRACEFUL_SHUTDOWN = timedelta(seconds=10)
@@ -148,8 +153,10 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
     bb_worker = Worker(
         client=client,
         task_queue=WEB_TASK_QUEUE_BLACKBOX,
-        workflows=[BlackboxScanWorkflow, AuthValidationWorkflow, BatchAuthValidationWorkflow],
+        workflows=[BlackboxScanWorkflow, AuthValidationWorkflow, BatchAuthValidationWorkflow,
+                   TopologyAnalysisWorkflow],
         activities=[
+            run_topology_analysis_activity,
             run_blackbox_preflight, run_blackbox_auth_validation,
             run_auth_validation_probe,
             run_exploit_agent, run_endpoint_verify, validate_exploitation_queue, bb_assemble_report,

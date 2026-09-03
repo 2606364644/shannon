@@ -112,8 +112,13 @@ async def test_run_worker_registers_all_defined_activities(monkeypatch):
         Path(bb_activities.__file__).read_text(encoding="utf-8"))
     # corr 的 @activity.defn 定义在 multi pipeline workflows 模块（单 activity 直通）。
     from supernova_multi.pipeline import workflows as corr_workflows
-    corr_expected = _activity_def_names(
+    multi_defined = _activity_def_names(
         Path(corr_workflows.__file__).read_text(encoding="utf-8"))
+    # 预分析 activity 定义在 multi workflows 但注册 bb 队列（spec 2026-09-03 拓扑
+    # 预分析迁 worker：bb = 交互式轻任务的家；corr 队列跑小时级扫描会饿死预分析）。
+    topology_activity = {"run_topology_analysis_activity"}
+    bb_expected |= topology_activity
+    corr_expected = multi_defined - topology_activity
 
     assert wb_registered == wb_expected, (
         f"whitebox worker 注册不一致：missing={sorted(wb_expected - wb_registered)}, "

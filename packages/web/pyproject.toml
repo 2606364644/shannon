@@ -5,6 +5,7 @@ description = "Shannon Web Platform backend (FastAPI)"
 requires-python = ">=3.12"
 dependencies = [
     "supernova-core",
+    "supernova-multi",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "bcrypt>=4.0",

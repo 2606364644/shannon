@@ -31,6 +31,8 @@ services:
   web:
     volumes:
       # Python 后端 + 各 workspace 包源码；editable install 指向这里，改 .py 实时可见
+      # 注：不挂 prompts——web 进程零 agent 执行点（2026-09-03 拓扑预分析迁 worker）；
+      # prompts 只挂 worker（下方）。
       - ./packages:/app/packages
 
   worker:
