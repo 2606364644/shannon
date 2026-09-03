@@ -75,7 +75,7 @@ describe("ReposTab", () => {
     expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy();  // icon-only 删除
   });
 
-  it("上传仓库：来源显 kind 文案、无更新按钮（静态快照 405）、有删除", async () => {
+  it("上传仓库：来源显 kind 文案、分支列可切（本地 refs）、无更新按钮（pull 405）、有删除", async () => {
     const fm = vi.spyOn(window, "fetch");
     fm.mockResolvedValueOnce(
       new Response(JSON.stringify({ user: { id: 1, username: "alice", role: "user" } }), { status: 200 }),
@@ -92,9 +92,10 @@ describe("ReposTab", () => {
     await waitFor(() => expect(screen.getByText("up1")).toBeTruthy());
     // 来源列：无 url → 本地化 kind 文案（i18n mock 返回 key）
     expect(screen.getByText("repos.kinds.upload")).toBeTruthy();
-    // 分支列：kind != git → 只读文本（非 combobox），显示 meta 的 branch
+    // 分支列：upload 也走 combobox（后端枚举本地分支，可切换；点开才拉，渲染零请求）
+    expect(screen.getByLabelText("repoDetail.switchAria")).toBeTruthy();
     expect(screen.getByText("main")).toBeTruthy();
-    // 静态快照无 pull（后端 405），删除仍可用
+    // 无 pull（凭据未进 ws auth，更新=重新上传），删除仍可用
     expect(screen.queryByLabelText("repos.updateAria")).toBeNull();
     expect(screen.getByLabelText("repos.deleteAria")).toBeTruthy();
   });

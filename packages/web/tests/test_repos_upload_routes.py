@@ -1,5 +1,5 @@
 """上传 zip 端点（POST /repos/upload）路由测试：multipart、权限、413/409、
-upload 仓 pull/checkout/branches 405。"""
+upload 仓 pull 405 / 分支操作本地化（branches + checkout 走本地 refs）。"""
 import io
 import zipfile
 
@@ -110,20 +110,47 @@ def test_upload_custom_name_and_group(_app):
     assert r.status_code == 202 and r.json() == {"name": "g/custom"}
 
 
-def test_upload_repo_git_endpoints_405(_app):
-    """upload 仓是静态快照：pull/checkout/branches 一律 405（对齐 linked 仓）。
+def test_upload_repo_pull_405_but_branch_ops_local(_app):
+    """upload 仓分支操作放开：pull 仍 405（凭据未进 ws auth，fetch 不了远端，
+    更新=重新上传）；branches / checkout 走本地 refs（zip 打包自完整 clone，
+    纯本地枚举/切换，无凭据需求）。
 
-    直接手写 ready 的 upload meta（405 挡板只依赖 meta.source.kind；后台 task 推进
-    与否不影响本断言——TestClient 下不推进，见 test_member_upload_accepted 注）。
+    手写 ready 的 upload meta + 真 git 仓（分支判定只依赖 meta.source.kind；
+    后台 task 推进与否不影响本断言——TestClient 下不推进，见
+    test_member_upload_accepted 注）。
     """
     import json as _json
+    import subprocess
     repo = _app.state.config.workspaces_dir / "ws1" / "repos" / "app"
-    (repo / ".git").mkdir(parents=True)
+    repo.mkdir(parents=True)
+    (repo / "a.py").write_text("main\n")
+    subprocess.run(["git", "-C", repo, "init", "-q", "-b", "main"], check=True)
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", "m"], check=True)
+    subprocess.run(["git", "-C", repo, "checkout", "-q", "-b", "dev"], check=True)
+    (repo / "a.py").write_text("dev\n")
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", "d"], check=True)
+    subprocess.run(["git", "-C", repo, "checkout", "-q", "main"], check=True)
     (repo / ".supernova-repo.json").write_text(_json.dumps({
-        "name": "app", "state": "ready", "source": {"kind": "upload", "branch": "main"}}))
+        "name": "app", "state": "ready",
+        "source": {"kind": "upload", "url": None, "branch": "main", "commit": "c"}}))
     alice = _login(_app, "alice")
     tok = {"X-CSRF-Token": _csrf(alice)}
     assert alice.post("/api/workspaces/ws1/repos/app/pull", headers=tok).status_code == 405
-    assert alice.post("/api/workspaces/ws1/repos/app/checkout",
-                      json={"branch": "main"}, headers=tok).status_code == 405
-    assert alice.get("/api/workspaces/ws1/repos/app/branches").status_code == 405
+    # 本地分支枚举（不走远端）
+    r = alice.get("/api/workspaces/ws1/repos/app/branches")
+    assert r.status_code == 200 and set(r.json()["branches"]) == {"main", "dev"}
+    # 纯本地 checkout：内容 + meta 同步
+    r = alice.post("/api/workspaces/ws1/repos/app/checkout",
+                   json={"branch": "dev"}, headers=tok)
+    assert r.status_code == 200 and r.json() == {"checked_out": "dev"}
+    assert (repo / "a.py").read_text() == "dev\n"
+    meta = _json.loads((repo / ".supernova-repo.json").read_text())
+    assert meta["source"]["branch"] == "dev"
+    # 本地没有的分支 → 422（fetch 不了远端，与 clone 侧「分支不存在」语义一致）
+    r = alice.post("/api/workspaces/ws1/repos/app/checkout",
+                   json={"branch": "nope"}, headers=tok)
+    assert r.status_code == 422

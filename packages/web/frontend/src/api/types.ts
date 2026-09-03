@@ -914,7 +914,8 @@ export type RepoState = "ready" | "cloning" | "pulling" | "extracting" | "failed
 export interface Repo {
   name: string;
   group?: string | null;  // 分组名（如 frontend/backend）；扁平仓库为 null
-  /** kind=upload：拖拽上传的 zip（无 remote，静态快照——不可 pull/checkout）。 */
+  /** kind=upload：拖拽上传的 zip。zip 自带 .git 时 url/branch/commit 呈现真实远端信息
+   *  （凭据剥净）；可切本地分支（不走远端），但不可 pull（凭据未进 ws auth，更新=重新上传）。 */
   source?: { kind: "git" | "linked" | "upload" | "unknown" | string; url?: string; branch?: string; commit?: string };
   state: RepoState;
   /** 关联仓库（admin 按绝对路径关联的已存在目录，非本 ws 私有克隆）→ true；只读（禁 pull/checkout）。 */

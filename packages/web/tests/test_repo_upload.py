@@ -141,6 +141,40 @@ async def test_upload_with_git_dir_kept_and_hooks_removed(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_upload_with_git_dir_infers_real_source(tmp_path, monkeypatch):
+    """zip 自带 .git（remote origin + 真实分支）→ source 字段语义与 clone 呈现一致：
+    url=远端地址（凭据剥净）、branch=真实分支名；kind 仍 upload（静态快照，不可
+    pull/checkout——上传仓凭据未进 ws auth，可变性语义不动）。
+    回归：曾因 _infer_from_git 解包反序（(url, branch) 被接成 (branch, _url)），
+    branch 落成 gitlab 地址、url 落 None——来源列显「上传」、分支列显地址。"""
+    src = tmp_path / "src-repo"
+    src.mkdir()
+    (src / "code.py").write_text("x = 1\n")
+    subprocess.run(["git", "-C", src, "init", "-q", "-b", "feature/x"], check=True)
+    subprocess.run(["git", "-C", src, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", src, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", "init"], check=True)
+    # remote URL 带用户本地凭据：落盘必须剥净（与 clone/迁移路径同一铁律）
+    subprocess.run(["git", "-C", src, "remote", "add", "origin",
+                    "https://user:tok@gitlab.example.com/grp/app.git"], check=True)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for p in sorted(src.rglob("*")):
+            zf.write(p, p.relative_to(src).as_posix())
+    z = tmp_path / "app.zip"
+    z.write_bytes(buf.getvalue())
+
+    rm = _rm(tmp_path, monkeypatch)
+    await rm.upload_zip(WS, z, "app.zip", None, None)
+    await _wait_job(rm, WS, "app")
+    srcm = _read_meta(tmp_path, "app")["source"]
+    assert srcm["kind"] == "upload"
+    assert srcm["url"] == "https://gitlab.example.com/grp/app.git"
+    assert srcm["branch"] == "feature/x"
+    assert srcm["commit"]
+
+
+@pytest.mark.asyncio
 async def test_upload_with_group(tmp_path, monkeypatch):
     """group=... 落 repos/<group>/<name>，返回 group/repo。"""
     rm = _rm(tmp_path, monkeypatch)
@@ -162,6 +196,54 @@ async def test_upload_custom_name_and_events(tmp_path, monkeypatch):
     ndjson = (_repos_base(tmp_path) / "custom" / "clone.ndjson").read_text()
     assert '"phase": "extracting"' in ndjson
     assert '"clone_end"' in ndjson and '"ready"' in ndjson
+
+
+@pytest.mark.asyncio
+async def test_upload_with_git_dir_lists_and_checks_out_local_branches(tmp_path, monkeypatch):
+    """zip 带 .git 上传仓：本地 refs 完整（zip 打包自完整 clone）——list_branches
+    枚举本地分支（不走 ls-remote，上传仓无凭据问不了远端），checkout 纯本地切换
+    （不 fetch origin），meta branch/commit 随切换更新。"""
+    src = tmp_path / "src-repo"
+    src.mkdir()
+    (src / "code.py").write_text("main\n")
+    subprocess.run(["git", "-C", src, "init", "-q", "-b", "main"], check=True)
+    subprocess.run(["git", "-C", src, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", src, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", "m1"], check=True)
+    subprocess.run(["git", "-C", src, "checkout", "-q", "-b", "feature/x"], check=True)
+    (src / "code.py").write_text("feature\n")
+    subprocess.run(["git", "-C", src, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", src, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "-m", "m2"], check=True)
+    subprocess.run(["git", "-C", src, "checkout", "-q", "main"], check=True)
+    feat_head = subprocess.run(["git", "-C", src, "rev-parse", "feature/x"],
+                               capture_output=True, text=True, check=True).stdout.strip()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for p in sorted(src.rglob("*")):
+            zf.write(p, p.relative_to(src).as_posix())
+    z = tmp_path / "app.zip"
+    z.write_bytes(buf.getvalue())
+
+    rm = _rm(tmp_path, monkeypatch)
+    await rm.upload_zip(WS, z, "app.zip", None, None)
+    await _wait_job(rm, WS, "app")
+
+    # 本地分支枚举：两条都在，无远端也不报错（快照仓同理，只是列表只有快照分支）
+    branches = await rm.list_branches(WS, "app")
+    assert set(branches) == {"main", "feature/x"}
+
+    # 纯本地 checkout：工作树内容 / meta 同步
+    await rm.checkout(WS, "app", "feature/x")
+    repo = _repos_base(tmp_path) / "app"
+    assert (repo / "code.py").read_text() == "feature\n"
+    meta = _read_meta(tmp_path, "app")
+    assert meta["source"]["branch"] == "feature/x"
+    assert meta["source"]["commit"] == feat_head
+
+    # 本地没有的分支 → ValueError（与 clone 侧「分支不存在」语义一致）
+    with pytest.raises(ValueError, match="分支不存在"):
+        await rm.checkout(WS, "app", "nope")
 
 
 # ---- 校验 / 安全 ----

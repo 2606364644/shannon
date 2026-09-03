@@ -223,7 +223,8 @@ async def repo_events(ws: str, name: str, request: Request,
 @router.get("/{ws}/repos/{name:path}/branches")
 async def list_repo_branches(ws: str, name: str, request: Request,
                              _: User = Depends(workspace_member)):
-    """列远端分支（分支列 combobox 数据源，ls-remote --heads 问远端不依赖本地 ref）。
+    """列分支（分支列 combobox 数据源）：clone 仓 ls-remote 问远端，upload 仓
+    枚举本地 refs（纯本地，无凭据需求）。
 
     错误分档：仓库级 404/405/409（对齐 pull/checkout）；ls-remote 是网络调用，
     失败/超时 → 502（前端降级为手输分支名），区别于服务器错误 500。
@@ -234,8 +235,6 @@ async def list_repo_branches(ws: str, name: str, request: Request,
         raise HTTPException(404, "repo not found")
     if rm._is_linked(ws, name):
         raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
-    if rm._is_upload(ws, name):
-        raise HTTPException(405, "上传仓库为静态快照，无远端分支")
     try:
         branches = await rm.list_branches(ws, name)
     except ValueError as e:        # clone/pull 忙碌
@@ -292,8 +291,6 @@ async def checkout_repo(ws: str, name: str, body: CheckoutBody, request: Request
     sm = request.app.state.scan_manager
     if rm._is_linked(ws, name):
         raise HTTPException(405, "关联仓库为共享路径，不可在此修改")
-    if rm._is_upload(ws, name):
-        raise HTTPException(405, "上传仓库为静态快照，不可切换分支（请重新上传更新）")
     # 扫描 worker 直读仓库工作树（共享 volume）：运行中切换会让 worker 读到混合
     # 分支代码 → 与 delete 同款引用锁拒绝（spec 2026-08-21 §2b）。
     if (ws, name) in sm.active_repo_sources():

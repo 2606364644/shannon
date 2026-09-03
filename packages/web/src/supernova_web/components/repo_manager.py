@@ -614,13 +614,16 @@ class RepoManager:
                 e.rename(target / e.name)
             tmp_dir.rmdir()
             if (target / ".git").exists():
-                # zip 自带 .git：保留真实历史，branch/commit 从工作树现状读
-                branch, _url = self._infer_from_git(target)
+                # zip 自带 .git：保留真实历史，url/branch/commit 从工作树现状读——
+                # 信息呈现与 clone/linked 一致（来源列显远端地址、分支列显真实分支）；
+                # url 可能带上传者本地凭据，落盘前剥净（与 clone/迁移路径同一铁律）
+                url, branch = self._infer_from_git(target)
                 head = await self._head_commit(target)
             else:
                 await self._append_event(ws, name, {
                     "ts": _now_iso(), "phase": "extracting", "status": "progress",
                     "message": "创建快照（git init + commit）"})
+                url = None  # 无 .git 快照无远端可言；分支列显快照分支
                 try:
                     branch, head = await self._git_snapshot(target)
                 except RuntimeError as e:
@@ -629,7 +632,7 @@ class RepoManager:
             self._write_meta(ws, name, state="ready", last_error=None,
                              cloned_at=_now_iso(), last_pull_at=_now_iso(),
                              size_bytes=_dir_size(target),
-                             source={"kind": "upload", "url": None,
+                             source={"kind": "upload", "url": strip_credentials(url),
                                      "branch": branch, "commit": head})
             await self._append_event(ws, name, {"ts": _now_iso(), "type": "clone_end", "status": "ready"})
         except Exception as e:  # 兜底：磁盘满等意外也落 failed（可见可删可重传）
@@ -672,8 +675,9 @@ class RepoManager:
             return None
 
     def _is_upload(self, ws: str, name: str) -> bool:
-        """私有仓库是否为上传来源（kind=upload）。上传仓是静态快照：无 remote 可
-        pull / checkout，端点据此挡 405（对齐 linked 仓做法）。"""
+        """私有仓库是否为上传来源（kind=upload）。上传仓凭据未进 ws auth：
+        pull（fetch 远端）端点据此挡 405，更新走重新上传；checkout / 列分支
+        不受影响——本地 refs 完整（zip 打包自完整 clone），纯本地操作。"""
         return self._read_meta(ws, name).get("source", {}).get("kind") == "upload"
 
     # ---- checkout / delete ----
@@ -683,17 +687,22 @@ class RepoManager:
             raise ValueError(f"仓库不存在：{name}")
         if (ws, name) in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
-        # checkout 同步（通常快，不写 ndjson）
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", str(target), "fetch", "origin", branch,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        _, err = await proc.communicate()
-        if proc.returncode != 0:
-            raise ValueError(f"分支不存在：{branch}")
+        if not self._is_upload(ws, name):
+            # clone 仓：先 fetch origin 同步远端分支（凭据已在 .git/config）
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(target), "fetch", "origin", branch,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise ValueError(f"分支不存在：{branch}")
+        # 上传仓跳过 fetch（无凭据问不了远端）直接本地 checkout——zip 自带 .git 的
+        # 本地 refs 完整；无 .git 快照仓单分支，切他支同样在这里报「分支不存在」
         proc = await asyncio.create_subprocess_exec(
             "git", "-C", str(target), "checkout", branch,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await proc.wait()
+        await proc.communicate()
+        if proc.returncode != 0:
+            raise ValueError(f"分支不存在：{branch}")
         head = await self._head_commit(target)
         src = self._read_meta(ws, name).get("source", {})
         src["branch"] = branch; src["commit"] = head
@@ -703,18 +712,31 @@ class RepoManager:
     LS_REMOTE_TIMEOUT_S = 15
 
     async def list_branches(self, ws: str, name: str) -> list[str]:
-        """列远端分支名（git ls-remote --heads origin，只列分支不列 tag）。
+        """列分支名（分支列 combobox 数据源）。
 
-        凭据零新工作：clone 时 _inject_auth 注入的带凭据 URL 已被 git 写进
-        .git/config remote origin，ls-remote origin 复用（与 checkout 的 fetch 同机制）。
-        错误约定（branches 端点映射）：仓库不存在/忙 → ValueError；ls-remote 失败/
-        超时 → RuntimeError（网络/凭据失效，前端降级手输）。
+        clone 仓问远端（git ls-remote --heads origin，不依赖本地 ref）——凭据零新
+        工作：clone 时 _inject_auth 注入的带凭据 URL 已被 git 写进 .git/config
+        remote origin。上传仓走本地枚举（git for-each-ref refs/heads）：凭据未进
+        ws auth 问不了远端，但 zip 打包自完整 clone、本地 refs 全在（无 .git 快照
+        仓退化为单元素列表）。
+        错误约定（branches 端点映射）：仓库不存在/忙 → ValueError；ls-remote /
+        本地枚举失败、超时 → RuntimeError（前端降级手输）。
         """
         target = self._repo_dir(ws, name)
         if not target.is_dir() or not _is_repo(target):
             raise ValueError(f"仓库不存在：{name}")
         if (ws, name) in self._jobs:
             raise ValueError(f"仓库正忙：{name}")
+        if self._is_upload(ws, name):
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(target), "for-each-ref", "refs/heads",
+                "--format=%(refname:short)",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"本地分支枚举失败：{err.decode(errors='replace').strip()[:200]}")
+            return [ln for ln in out.decode(errors="replace").splitlines() if ln]
         try:
             proc = await asyncio.wait_for(asyncio.create_subprocess_exec(
                 "git", "-C", str(target), "ls-remote", "--heads", "origin",

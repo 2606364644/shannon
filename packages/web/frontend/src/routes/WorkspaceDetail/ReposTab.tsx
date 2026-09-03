@@ -359,10 +359,11 @@ export function ReposTab({ workspace: wsProp }: Props) {
                           </span>
                         )}
                       </TableCell>
-                      {/* 分支列：ready+git+私有克隆 → 行内切换下拉（点开 lazy 拉远端分支，
-                          手输兜底）；linked（后端 405）/ 非 ready / 非 git 退化为只读文本 */}
+                      {/* 分支列：ready+私有仓（git 克隆 / upload）→ 行内切换下拉（点开 lazy
+                          拉分支——clone 问远端、upload 枚举本地 refs，手输兜底）；linked（后端
+                          405）/ 非 ready 退化为只读文本 */}
                       <TableCell className="py-2.5 px-3">
-                        {!r.linked && r.state === "ready" && r.source?.kind === "git" ? (
+                        {!r.linked && r.state === "ready" && (r.source?.kind === "git" || r.source?.kind === "upload") ? (
                           <BranchCombobox
                             ws={workspace}
                             repo={r.name}
