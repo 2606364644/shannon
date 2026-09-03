@@ -924,3 +924,101 @@ class WhiteboxScanWorkflow:
             completed_agents=self._state.completed_agents,
             status=self._state.status,
         )
+
+
+# === MR 增量扫描（spec 2026-09-03）===========================================
+# 独立 workflow：前置 diff/repo-prepare/删防护判定 activities → 填 mr_meta →
+# 调 WhiteboxScanWorkflow.run（child）跑全量主体（消费点消费 mr_meta 做增量收窄）。
+# 全量 WhiteboxScanWorkflow 仅加 5 个可选消费点，零回归。
+
+_MR_CHILD_TIMEOUT = timedelta(hours=6)
+
+
+@workflow.defn
+class MrScanWorkflow:
+    def __init__(self):
+        self._state = PipelineState()
+
+    @workflow.run
+    async def run(self, input: PipelineInput) -> PipelineState:
+        from . import mr_activities
+
+        self._state.start_time = workflow.time_ns() / 1e9
+        self._state.current_phase = "mr-setup"
+        act_input = ActivityInput(
+            repo_path=input.repo_path,
+            web_url=input.web_url,
+            config_path=input.config_path,
+            workspace_name=input.workspace_name,
+            deliverables_subdir=input.deliverables_subdir,
+            pipeline_testing_mode=input.pipeline_testing_mode,
+            api_key=input.api_key,
+            prompt_override=input.prompt_override,
+            workspace_path=input.workspace_path,
+            event_file=input.event_file,
+            provider_config=input.provider_config,
+            combined=input.combined,
+            env_overrides=input.env_overrides,
+            mr_base_ref=input.mr_base_ref,
+            mr_head_ref=input.mr_head_ref,
+        )
+
+        # 1. repo prepare（fetch→checkout head→merge-base）
+        prepared = await workflow.execute_activity(
+            mr_activities.run_mr_repo_prepare, act_input,
+            start_to_close_timeout=timedelta(minutes=2),
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+        # 2. diff 解析落盘（vuln 类启发式随返）
+        diff_result = await workflow.execute_activity(
+            mr_activities.run_git_diff, act_input,
+            start_to_close_timeout=timedelta(minutes=2),
+            retry_policy=retry_for("standard"),
+        )
+        # 3. diff.patch → 删防护 LLM 判定（降级不阻塞）
+        await workflow.execute_activity(
+            mr_activities.run_protection_removal_analysis, act_input,
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=retry_for("standard"),
+        )
+
+        # mr_meta 摘要穿给 child：base/head/verdict 候选计数 + MR 启发式 vuln 类
+        child_meta = {
+            "base_commit": diff_result.get("base_commit") or prepared.get("base_commit", ""),
+            "head_commit": diff_result.get("head_commit") or prepared.get("head_commit", ""),
+            "selected_vuln_classes": diff_result.get("selected_vuln_classes", []),
+            "verdict_flow_count": 0,  # 子适配 pre-recon 后 run_incremental_scope 填补
+        }
+        child_input = PipelineInput(
+            repo_path=input.repo_path,
+            web_url=input.web_url,
+            config_path=input.config_path,
+            workspace_name=input.workspace_name,
+            deliverables_subdir=input.deliverables_subdir,
+            pipeline_testing_mode=input.pipeline_testing_mode,
+            api_key=input.api_key,
+            prompt_override=input.prompt_override,
+            max_concurrent=input.max_concurrent,
+            enable_llm_track=input.enable_llm_track,
+            event_file=input.event_file,
+            provider_config=input.provider_config,
+            combined=input.combined,
+            env_overrides=input.env_overrides,
+            mr_meta=child_meta,
+        )
+
+        # 4. child workflow 跑全量主体（MR 消费点在其内生效）
+        child_state = await workflow.execute_child_workflow(
+            WhiteboxScanWorkflow.run,
+            args=[child_input],
+            id=f"{workflow.info().workflow_id}-wb",
+            retry_policy=RetryPolicy(maximum_attempts=1),
+            run_timeout=_MR_CHILD_TIMEOUT,
+        )
+        # 泡沫：child 完成了 MR 主流程，返回其 PipelineState（状态/错误沿用）
+        self._state.status = child_state.status
+        self._state.errors = list(child_state.errors)
+        self._state.completed_agents = list(child_state.completed_agents)
+        self._state.agent_metrics = dict(child_state.agent_metrics)
+        self._state.error_code = child_state.error_code
+        return self._state

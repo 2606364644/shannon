@@ -21,7 +21,7 @@ from supernova_core.services.temporal_infra import (
     WEB_TASK_QUEUE_BLACKBOX,
     WEB_TASK_QUEUE_CORRELATION,
 )
-from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow
+from supernova_whitebox.pipeline.workflows import WhiteboxScanWorkflow, MrScanWorkflow
 from supernova_whitebox.pipeline.activities import (
     render_findings, assemble_report, run_agent,
     run_recon_context_digest,
@@ -122,7 +122,7 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
     wb_worker = Worker(
         client=client,
         task_queue=WEB_TASK_QUEUE_WHITEBOX,
-        workflows=[WhiteboxScanWorkflow],
+        workflows=[WhiteboxScanWorkflow, MrScanWorkflow],
         activities=[
             render_findings, assemble_report, run_agent,
             run_recon_context_digest,
@@ -141,6 +141,9 @@ async def run_worker(temporal_address: str = "localhost:7233") -> None:
             log_phase_start_activity, log_phase_complete_activity, log_info_activity,
             setup_display, finalize_summary, cleanup_auth_state_activity,
             persist_completed_agents,
+            # MR 增量扫描（spec 2026-09-03）：前置 activities
+            run_mr_repo_prepare, run_git_diff,
+            run_protection_removal_analysis, run_incremental_scope,
         ],
         # P3c 阶段 3：AuditSession/LogBus/heartbeat 已 contextvar 化（按 workflow_id 隔离），
         # 多 scan 并发不再串台 → max_concurrent 放开（默认 4，env 可配）。
