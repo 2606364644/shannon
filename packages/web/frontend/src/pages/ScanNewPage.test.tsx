@@ -31,6 +31,10 @@ const server = setupServer(
   // 认证展开默认 source=profile（2026-08-14）→ BottomProfileBlock mount 即拉 auth-profiles；
   // 默认空列表，需具体档案的用例各自 server.use 注入。
   http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json([])),
+  // 刷新恢复（2026-09-04）：选 ws 后 mount 即查最近一条拓扑分析——默认 404=从未发起，
+  // 需恢复场景的用例各自 server.use 注入。
+  http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () =>
+    new HttpResponse(null, { status: 404 })),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -949,6 +953,10 @@ describe("correlation topology auto flow", () => {
   it("analyzes, confirms topology, gates submission, and posts confirmed YAML", async () => {
     let submitted: Record<string, unknown> | undefined;
     server.use(
+      // 隔离刷新恢复：本用例从"无历史分析"出发（默认 latest 404 会被下面的 :id
+      // 动态段拦截——msw use 优先且 :id 匹配字面量 latest——须显式再 use 一个 404）。
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () =>
+        new HttpResponse(null, { status: 404 })),
       http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
         { name: "web", state: "ready" }, { name: "order", state: "ready" },
         { name: "admin", state: "ready" }, { name: "user", state: "ready" },
@@ -1028,6 +1036,36 @@ describe("correlation topology auto flow", () => {
     expect(submittedYaml).toContain("from: admin");
     expect(submittedYaml).toContain("to: user");
     expect(submittedYaml).toContain("roles:\n      - entrypoint\n      - backend");
+  });
+
+  it("刷新恢复：选 ws 后找回 running 分析，恢复状态轮询并显示过程日志", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () =>
+        HttpResponse.json({
+          analysis_id: "topology-r1", workspace: "ws1", status: "running",
+          repos: ["web", "order"], progress: 20,
+        })),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/:id", () =>
+        HttpResponse.json({
+          analysis_id: "topology-r1", workspace: "ws1", status: "running",
+          repos: ["web", "order"], progress: 20,
+        })),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/:id/log", () =>
+        HttpResponse.json({
+          lines: [
+            { no: 0, ts: "2026-09-03T18:00:00Z", type: "tool_start", tool: "grep", summary: "pattern=identity" },
+            { no: 1, ts: "2026-09-03T18:00:02Z", type: "assistant_turn", summary: "turn 2: tracing gateway→identity" },
+          ],
+          next: 1,
+        })),
+    );
+    renderAutoPage();
+    fireEvent.click(screen.getByTestId("scan-type-correlation"));
+    await selectWorkspace("ws1");
+    // 面板恢复为 running（取消按钮语义）且日志尾窗出现
+    expect(await screen.findByRole("button", { name: /取消/ })).toBeInTheDocument();
+    expect(await screen.findByText(/tracing gateway→identity/)).toBeInTheDocument();
+    expect(screen.getByText(/pattern=identity/)).toBeInTheDocument();
   });
 });
 

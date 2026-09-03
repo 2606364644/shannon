@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { AuthFields, HostFields } from "@/components/ScanFormFields";
-import type { CorrelationTopologyAnalysis, Repo, Workspace } from "@/api/types";
+import type { CorrelationTopologyAnalysis, Repo, TopologyAuditLine, Workspace } from "@/api/types";
 import type { AuthFormState, HostFormState } from "@/pages/ScanNewPage";
 import type { CorrYamlError } from "@/lib/correlation-yaml";
 import type { TopologyDraftState } from "@/lib/correlation-topology-draft";
@@ -26,6 +26,8 @@ interface Props {
   analysis: CorrelationTopologyAnalysis | null;
   starting: boolean;
   analysisError: string | null;
+  logLines: TopologyAuditLine[];
+  logDropped?: number;
   onStart: () => void;
   onRetry: () => void;
   onCancel: () => void;
@@ -89,7 +91,8 @@ export function CorrelationTopologyFields(props: Props) {
         ) : <p className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</p>}
         <p className="text-[11px] text-muted-foreground">{t("scan.correlation.analysis.hint")}</p>
         <CorrelationTopologyAnalysisPanel analysis={props.analysis} starting={props.starting}
-          error={props.analysisError} onStart={props.onStart} onRetry={props.onRetry}
+          error={props.analysisError} logLines={props.logLines} logDropped={props.logDropped}
+          onStart={props.onStart} onRetry={props.onRetry}
           onCancel={props.onCancel} onManual={props.onManual} />
       </Section>
 

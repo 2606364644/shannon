@@ -9,6 +9,7 @@ agent 执行段经 temporal 提交 worker（TopologyAnalysisWorkflow，bb 队列
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -46,6 +47,26 @@ class TopologyProviderConfigError(ValueError):
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _clip(text: str, limit: int = 120) -> str:
+    """单行摘要裁剪：压平换行（ndjson 单行展示）+ 超限加省略号。"""
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= limit else flat[:limit] + "…"
+
+
+def _audit_summary(event: dict) -> str:
+    """tool-audit 行 → 一行摘要。与 worker _NdjsonToolAuditLogger 的 4 种事件对齐。"""
+    kind = event.get("type")
+    if kind == "tool_start":
+        return _clip(event.get("parameters", ""))
+    if kind == "tool_end":
+        return _clip(event.get("result", ""))
+    if kind == "assistant_turn":
+        return _clip(f"turn {event.get('turn', '?')}: {event.get('content', '')}")
+    if kind == "error":
+        return _clip(event.get("error", ""))
+    return _clip(str(event))
 
 
 class TopologyAnalysisManager:
@@ -352,6 +373,46 @@ class TopologyAnalysisManager:
         self._tasks.pop(analysis_id, None)
         self._task_ws.pop(analysis_id, None)
         self._handles.pop(analysis_id, None)
+
+    def tail_log(self, ws: str, analysis_id: str, *, after: int = -1,
+                 limit: int = 200) -> dict[str, Any]:
+        """过程日志尾读：worker 的 tool-audit.ndjson 按 after 行号游标增量返回。
+
+        服务端裁剪成一行摘要（result/parameters 可达 2000 字符，不回传全文）；
+        文件未创建（分析未启动）→ 空行而非 404——前端零日志态正常。
+        """
+        state = self.get(ws, analysis_id)
+        if state is None:
+            raise AnalysisNotFound(analysis_id)
+        audit = self.store.path(ws, analysis_id) / "tool-audit.ndjson"
+        lines: list[dict[str, Any]] = []
+        next_no = after
+        if audit.exists():
+            with audit.open("r", encoding="utf-8", errors="replace") as fh:
+                for no, raw in enumerate(fh):
+                    if no <= after or len(lines) >= limit:
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        event = {"type": "unparsed", "summary": raw.strip()[:120]}
+                    lines.append({
+                        "no": no,
+                        "ts": event.get("ts"),
+                        "type": event.get("type"),
+                        "tool": event.get("tool"),
+                        "summary": _audit_summary(event),
+                    })
+                    next_no = no
+        return {"lines": lines, "next": next_no}
+
+    def latest(self, ws: str) -> dict[str, Any]:
+        """刷新恢复：最近一条 analysis（created_at 降序）。无记录 → AnalysisNotFound。"""
+        records = self.store.list(ws)
+        if not records:
+            raise AnalysisNotFound("latest")
+        newest = max(records, key=lambda s: s.get("created_at") or "")
+        return self.api_view(ws, newest["analysis_id"])
 
     def api_view(self, ws: str, analysis_id: str) -> dict[str, Any]:
         """Minimal frontend response; persisted paths/manifests/raw output stay server-side."""

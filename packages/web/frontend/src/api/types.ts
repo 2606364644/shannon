@@ -833,6 +833,20 @@ export interface CorrelationTopologyAnalysis {
   updated_at?: string;
 }
 
+/** 拓扑预分析过程日志行（tool-audit.ndjson 尾读，服务端已裁剪成一行摘要）。 */
+export interface TopologyAuditLine {
+  no: number;
+  ts?: string;
+  type: "tool_start" | "tool_end" | "assistant_turn" | "error" | "unparsed";
+  tool?: string;
+  summary: string;
+}
+
+export interface TopologyAuditTail {
+  lines: TopologyAuditLine[];
+  next: number;
+}
+
 /** 黑盒登录配置（对齐 core Authentication schema：models/config.py:29-45）。
  *  字段名（snake_case）与后端 pydantic 模型一致——scan_manager Authentication.model_validate 校验。*/
 export interface ScanAuthentication {

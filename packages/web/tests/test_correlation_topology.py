@@ -444,3 +444,93 @@ async def test_manager_ignores_system_workspace_directory(tmp_path):
 
     assert manager.get("ws1", analysis_id)["status"] == "queued"
     assert len(temporal.submitted) == 1
+
+
+def _write_audit(store: TopologyAnalysisStore, ws: str, analysis_id: str, lines: list[dict]) -> None:
+    """模拟 worker 的 _NdjsonToolAuditLogger 落盘 tool-audit.ndjson。"""
+    state_dir = store.path(ws, analysis_id)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    payload = "".join(_json.dumps({"ts": "2026-09-03T18:00:00Z", **line},
+                                  ensure_ascii=False, separators=(",", ":")) + "\n"
+                      for line in lines)
+    (state_dir / "tool-audit.ndjson").write_text(payload, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_api_analysis_log_tail_incremental_and_summarized(authed_client, tmp_path):
+    # 过程日志端点：after 行号游标增量、服务端裁剪摘要（result/parameters 不回传全文）。
+    app = authed_client.app
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    store.create("ws1", {
+        "analysis_id": "topology-aaaaaaaaaaaa", "workspace": "ws1", "status": "running",
+        "repos": ["a", "b"], "fingerprint": "f1",
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+        "progress": 20,
+    })
+    _write_audit(store, "ws1", "topology-aaaaaaaaaaaa", [
+        {"type": "tool_start", "tool": "read_file", "parameters": "{'path': '/repos/gw/main.go'}"},
+        {"type": "tool_end", "result": "x" * 500},  # 长 result 必须被裁剪
+        {"type": "assistant_turn", "turn": 3, "content": "找到 gateway 调用 identity"},
+        {"type": "error", "error": "boom"},
+    ])
+    app.state.topology_manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None)
+
+    r = authed_client.get("/api/workspaces/ws1/correlation-topology/analyses/topology-aaaaaaaaaaaa/log")
+    assert r.status_code == 200
+    body = r.json()
+    assert [line["no"] for line in body["lines"]] == [0, 1, 2, 3]
+    assert body["next"] == 3
+    kinds = [line["type"] for line in body["lines"]]
+    assert kinds == ["tool_start", "tool_end", "assistant_turn", "error"]
+    assert body["lines"][0]["tool"] == "read_file"
+    assert "main.go" in body["lines"][0]["summary"]
+    assert len(body["lines"][1]["summary"]) <= 121  # 裁剪上限 120 + 省略号
+    assert "identity" in body["lines"][2]["summary"]
+    assert body["lines"][3]["summary"] == "boom"
+
+    # 游标增量：只要 after 之后的行
+    r2 = authed_client.get(
+        "/api/workspaces/ws1/correlation-topology/analyses/topology-aaaaaaaaaaaa/log?after=2")
+    assert [line["no"] for line in r2.json()["lines"]] == [3]
+    assert r2.json()["next"] == 3
+
+    # analysis 不存在 → 404（与 get_analysis 同语义）
+    assert authed_client.get(
+        "/api/workspaces/ws1/correlation-topology/analyses/topology-zzzzzzzzzzzz/log").status_code == 404
+
+    # 无日志文件（分析未启动）→ 空行而非 404
+    store.create("ws1", {
+        "analysis_id": "topology-bbbbbbbbbbbb", "workspace": "ws1", "status": "queued",
+        "repos": ["a", "b"], "fingerprint": "f2",
+        "created_at": "2026-01-02T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+        "progress": 5,
+    })
+    r3 = authed_client.get(
+        "/api/workspaces/ws1/correlation-topology/analyses/topology-bbbbbbbbbbbb/log")
+    assert r3.status_code == 200 and r3.json()["lines"] == [] and r3.json()["next"] == -1
+
+
+@pytest.mark.asyncio
+async def test_api_latest_analysis_for_refresh_recovery(authed_client, tmp_path):
+    # 刷新恢复端点：最近一条（created_at 降序）；无记录 404；路径不得被
+    # /analyses/{analysis_id} 动态段吞掉（latest 必须先注册）。
+    app = authed_client.app
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    app.state.topology_manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None)
+    assert authed_client.get(
+        "/api/workspaces/ws1/correlation-topology/analyses/latest").status_code == 404
+
+    def _state(aid: str, status: str, created: str) -> dict:
+        return {"analysis_id": aid, "workspace": "ws1", "status": status,
+                "repos": ["a", "b"], "fingerprint": aid,
+                "created_at": created, "updated_at": created, "progress": 100}
+
+    store.create("ws1", _state("topology-00000000000a", "completed", "2026-01-01T00:00:00Z"))
+    store.create("ws1", _state("topology-00000000000b", "running", "2026-01-02T00:00:00Z"))
+    r = authed_client.get("/api/workspaces/ws1/correlation-topology/analyses/latest")
+    assert r.status_code == 200
+    assert r.json()["analysis_id"] == "topology-00000000000b"
+    assert r.json()["status"] == "running"

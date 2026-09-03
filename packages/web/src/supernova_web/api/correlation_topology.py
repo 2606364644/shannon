@@ -56,6 +56,30 @@ async def start_analysis(ws: str, body: StartTopologyBody, request: Request,
     return {"analysis_id": analysis_id}
 
 
+@router.get("/{ws}/correlation-topology/analyses/latest")
+async def latest_analysis(ws: str, request: Request, _: User = Depends(workspace_member)):
+    """刷新恢复入口：页面 mount 时取最近一条 analysis 恢复状态/日志轮询。
+
+    必须注册在 /{analysis_id} 动态路由之前，否则 "latest" 会被当 analysis_id 吞掉。
+    """
+    try:
+        return request.app.state.topology_manager.latest(ws)
+    except AnalysisNotFound:
+        raise HTTPException(404, detail={"code": "analysis_not_found", "message": "no analyses"})
+
+
+@router.get("/{ws}/correlation-topology/analyses/{analysis_id}/log")
+async def analysis_log(ws: str, analysis_id: str, request: Request,
+                       after: int = -1, limit: int = 200,
+                       _: User = Depends(workspace_member)):
+    """过程日志尾读：tool-audit.ndjson 按 after 行号游标增量，服务端裁剪摘要。"""
+    try:
+        return request.app.state.topology_manager.tail_log(
+            ws, analysis_id, after=after, limit=max(1, min(limit, 1000)))
+    except AnalysisNotFound:
+        raise HTTPException(404, detail={"code": "analysis_not_found", "message": "analysis not found"})
+
+
 @router.get("/{ws}/correlation-topology/analyses/{analysis_id}")
 async def get_analysis(ws: str, analysis_id: str, request: Request,
                        _: User = Depends(workspace_member)):

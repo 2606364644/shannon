@@ -1,7 +1,7 @@
 import type {
   BlackboxRunSummary, CorrelationDetail, DataflowView, FsBrowseResult,
   MultiConfigSummary, Repo, RepoDetail, ScanRequest, ScanSummary, SessionData,
-  CorrelationTopologyAnalysis,
+  CorrelationTopologyAnalysis, TopologyAuditTail,
 } from "./types";
 
 export class ApiError extends Error {
@@ -387,6 +387,18 @@ export function cancelCorrelationTopologyAnalysis(
 ): Promise<CorrelationTopologyAnalysis> {
   return apiDelete<CorrelationTopologyAnalysis>(
     `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs(analysisId)}`);
+}
+// 过程日志尾读（after 行号游标增量；404=analysis 不存在，空 lines=未启动/无日志）
+export function getTopologyAnalysisLog(
+  ws: string, analysisId: string, after = -1,
+): Promise<TopologyAuditTail> {
+  return apiGet<TopologyAuditTail>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs(analysisId)}/log?after=${after}`);
+}
+// 刷新恢复：最近一条 analysis；404=该 ws 从未发起过
+export function getLatestTopologyAnalysis(ws: string): Promise<CorrelationTopologyAnalysis> {
+  return apiGet<CorrelationTopologyAnalysis>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs("latest")}`);
 }
 
 // ── 多仓配置（对齐 backend api/multi_configs.py + MultiRepoConfigStore）─────────

@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import type { CorrelationTopologyAnalysis, ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
-import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, startCorrelationTopologyAnalysis } from "../api/client";
+import type { CorrelationTopologyAnalysis, ScanRequest, ScanResponse, TopologyAuditLine, Workspace, ScanAuthentication } from "../api/types";
+import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, getLatestTopologyAnalysis, getTopologyAnalysisLog, startCorrelationTopologyAnalysis } from "../api/client";
 import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { RepoCombobox } from "../components/RepoCombobox";
@@ -438,6 +438,11 @@ export function ScanNewPage() {
   const [analysis, setAnalysis] = useState<CorrelationTopologyAnalysis | null>(null);
   const [analysisStarting, setAnalysisStarting] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  // 过程日志：after 行号游标 + 前端保留窗（200 行，更早累计进 dropped）
+  const [logLines, setLogLines] = useState<TopologyAuditLine[]>([]);
+  const [logDropped, setLogDropped] = useState(0);
+  const logCursor = useRef(-1);
+  const resetLog = () => { logCursor.current = -1; setLogLines([]); setLogDropped(0); };
   const [topologyState, setTopologyState] = useState<TopologyDraftState | null>(null);
   const updateCorr = (s: CorrFormState) => {
     setCorrState(s);
@@ -505,11 +510,44 @@ export function ScanNewPage() {
       } catch {
         /* GET 失败保留上一帧；下一次轮询继续。 */
       }
+      // 状态帧后顺带拉日志增量（游标幂等；终态帧也拉最后一次，收齐尾部）。
+      try {
+        const tail = await getTopologyAnalysisLog(workspace, analysisId, logCursor.current);
+        if (!cancelled && tail.lines.length) {
+          logCursor.current = tail.next;
+          setLogLines((prev) => {
+            const merged = [...prev, ...tail.lines];
+            const keep = merged.slice(-200);
+            setLogDropped((d) => d + merged.length - keep.length);
+            return keep;
+          });
+        }
+      } catch {
+        /* 日志拉取失败不影响状态轮询 */
+      }
     };
     void poll();
     const timer = window.setInterval(poll, 2000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [analysisId, analysisStatus, workspace]);
+
+  // 刷新恢复：进入页面（ws 确定且本会话未发起过新分析）时找回最近一条 analysis，
+  // active → 恢复状态/日志轮询；终态 → 直接展示结果（retry 语义不变）。404 静默。
+  // 仅 correlation+auto 模式查——白盒/MR 无拓扑分析，不白发请求。
+  useEffect(() => {
+    if (type !== "correlation" || corrMode !== "auto" || !workspace || analysisId) return;
+    let cancelled = false;
+    getLatestTopologyAnalysis(workspace)
+      .then((a) => {
+        if (cancelled) return;
+        resetLog();
+        setAnalysis(a);
+        setAnalysisId(a.analysis_id);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, corrMode, workspace]);
 
   useEffect(() => {
     if (analysis?.status !== "completed" || !selectedTopologyRepos.length) return;
@@ -524,6 +562,7 @@ export function ScanNewPage() {
     try {
       setAnalysisStarting(true); setAnalysisError(null);
       const result = await startCorrelationTopologyAnalysis(workspace, { repos: selectedTopologyRepos, refresh });
+      resetLog();
       setAnalysisId(result.analysis_id); setAnalysis(null); setTopologyState(null);
     } catch (e) {
       setAnalysisError(e instanceof Error ? e.message : String(e));
@@ -551,7 +590,7 @@ export function ScanNewPage() {
 
   const selectTopologyRepos = (repos: string[]) => {
     setSelectedTopologyRepos(repos);
-    setAnalysisId(null); setAnalysis(null); setAnalysisError(null);
+    setAnalysisId(null); setAnalysis(null); setAnalysisError(null); resetLog();
     // Selector changes are table-compatible graph edits: preserve compatible nodes/edges/sources.
     setTopologyState((previous) => previous ? updateTopologyRepositories(previous, repos) : null);
   };
@@ -827,6 +866,8 @@ export function ScanNewPage() {
               onSelectRepos={selectTopologyRepos}
               analysis={analysis}
               starting={analysisStarting}
+              logLines={logLines}
+              logDropped={logDropped}
               analysisError={analysisError}
               onStart={() => void startTopologyAnalysis(false)}
               onRetry={() => void startTopologyAnalysis(true)}
