@@ -118,7 +118,7 @@ export type WorkspaceStatus =
 
 export interface Workspace {
   name: string;
-  scan_type: "whitebox" | "blackbox" | "correlation";
+  scan_type: "whitebox" | "blackbox" | "correlation" | "mr";
   status: WorkspaceStatus;          // 归一后（见 §3.1 status 矛盾兜底）= latest scan 聚合
   created_at: number;               // unix（= latest scan created_at）
   completed_at?: number | null;
@@ -160,7 +160,7 @@ export interface BlackboxRunSummary {
 
 export interface ScanSummary {
   scan_id: string;
-  scan_type: "whitebox" | "blackbox" | "correlation";
+  scan_type: "whitebox" | "blackbox" | "correlation" | "mr";
   status: WorkspaceStatus | string;   // 归一后（终态优先 + heartbeat）
   created_at: number;                  // unix
   completed_at?: number | null;
@@ -201,6 +201,10 @@ export interface ScanSummary {
   // （scan_manager 提交子仓时写 {service, scan_id, reused}）。非 correlation scan 不返
   // -> 可选，消费方 null-safe。
   corr_children?: { service: string; scan_id: string; reused: boolean }[] | null;
+  // MR 增量扫描 refs（spec 2026-09-03 §6）：session.mr_base_ref/mr_head_ref 透传。
+  // 列表「MR」徽标 base..head 标识 + 重跑预填用；非 MR 扫描不返 -> 可选。
+  mr_base_ref?: string | null;
+  mr_head_ref?: string | null;
 }
 
 export interface SessionMetrics {
@@ -274,6 +278,9 @@ export interface SessionData {
   // 版本化黑盒 run（spec 2026-08-14 §5.2）：详情透传任务级 bb_runs[] + latest_bb_run。
   bb_runs?: BlackboxRunSummary[];
   latest_bb_run?: string | null;
+  // MR 增量扫描 refs（spec 2026-09-03 §6）：重跑预填 base/head（非 MR 不返）。
+  mr_base_ref?: string | null;
+  mr_head_ref?: string | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;

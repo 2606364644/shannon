@@ -518,6 +518,129 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
   });
 });
 
+// === MR 增量扫描（spec 2026-09-03）：type=mr 表单渲染 + 校验 + 提交 body ===
+describe("ScanNewPage MR 增量扫描", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  // SWR 缓存跨用例隔离（同 correlation describe 的 renderPageFresh 注释）
+  function renderPageFresh(state?: unknown) {
+    return render(
+      <MemoryRouter initialEntries={[state ? { pathname: "/scan/new", state } : "/scan/new"]}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <ScanNewPage />
+        </SWRConfig>
+      </MemoryRouter>,
+    );
+  }
+
+  /** 切到 MR 并选 ws（repos fixture 已由调用方 server.use 注入时再选仓库） */
+  async function switchToMrAndSelectWs() {
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+  }
+
+  it("类型切换到 MR 渲染 MR 表单（ws + 仓库 + base/head），不落跨仓拓扑表单", async () => {
+    renderPage();
+    // corrMode 初始恒 "auto"——MR 分支必须排在它之前，否则错渲染跨仓拓扑表单（进度 §3.1 的缺口）
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    const form = screen.getByTestId("mr-form");
+    expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
+    expect(screen.queryByText("自动拓扑")).toBeNull();
+    // 白盒表单（步骤分组）不再渲染
+    expect(screen.queryByText("目标服务")).toBeNull();
+    // 未选 ws → 先选 workspace 提示（repo/refs 区未解锁）
+    expect(screen.getByText(/请先选择 workspace/)).toBeInTheDocument();
+    // 选 ws → 仓库下拉 + base/head 输入出现（提示消失）
+    await switchToMrAndSelectWs();
+    await waitFor(() => expect(screen.queryByText(/请先选择 workspace/)).toBeNull());
+    expect(within(form).getByText("选择仓库")).toBeInTheDocument();
+    expect(within(form).getByText("Base 引用（分支名或 commit sha）")).toBeInTheDocument();
+    expect(within(form).getByText("Head 引用（分支名或 commit sha）")).toBeInTheDocument();
+  });
+
+  it("MR 校验：repo/base/head 缺一即拦（错误文案 + 提交 disabled）；补齐后可提交", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "nodegoat", state: "ready", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+        ]),
+      ),
+    );
+    renderPageFresh();
+    await switchToMrAndSelectWs();
+    await waitFor(() => screen.getByText("选择仓库"));
+    const submit = screen.getByRole("button", { name: /开始扫描/ });
+    // 未选 repo、未填 refs → 三错误齐显 + disabled
+    expect(screen.getByText("请选择仓库")).toBeInTheDocument();
+    expect(screen.getByText("请填写 base 与 head 引用")).toBeInTheDocument();
+    expect(submit).toBeDisabled();
+    // 选 repo、只填 base → refs 错误仍在
+    fireEvent.click(screen.getByText("选择仓库"));
+    fireEvent.click(await screen.findByText("nodegoat"));
+    await waitFor(() => expect(screen.queryByText("请选择仓库")).toBeNull());
+    fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
+    expect(screen.getByText("请填写 base 与 head 引用")).toBeInTheDocument();
+    expect(submit).toBeDisabled();
+    // 补 head → 全部错误消失 + enabled
+    fireEvent.change(screen.getByTestId("mr-head-ref"), { target: { value: "feature/xss" } });
+    expect(screen.queryByText("请填写 base 与 head 引用")).toBeNull();
+    expect(submit).toBeEnabled();
+  });
+
+  it("提交 mr body 含 type/source/base_ref/head_ref，无 url/认证字段", async () => {
+    let captured: Record<string, unknown> | undefined;
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "nodegoat", state: "ready", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+        ]),
+      ),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "nodegoat-mr-1" }, { status: 202 });
+      }),
+    );
+    renderPageFresh();
+    await switchToMrAndSelectWs();
+    await waitFor(() => screen.getByText("选择仓库"));
+    fireEvent.click(screen.getByText("选择仓库"));
+    fireEvent.click(await screen.findByText("nodegoat"));
+    fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "abc1234" } });
+    fireEvent.change(screen.getByTestId("mr-head-ref"), { target: { value: "def5678" } });
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.type).toBe("mr");
+    expect(captured!.workspace).toBe("ws1");
+    expect(captured!.source).toEqual({ kind: "repo", value: "nodegoat" });
+    expect(captured!.base_ref).toBe("abc1234");
+    expect(captured!.head_ref).toBe("def5678");
+    // 纯白盒语义：无 url / 认证 / HOST 字段
+    expect(captured!.url).toBeUndefined();
+    expect(captured!.authentication).toBeUndefined();
+    expect(captured!.auth_profile_id).toBeUndefined();
+  });
+
+  it("MR 重跑预填（location.state）：直达 MR 表单 + repo/refs 回填", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "nodegoat", state: "ready", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+        ]),
+      ),
+    );
+    renderPageFresh({
+      type: "mr", workspace: "ws1", repo: "nodegoat",
+      mrBaseRef: "main", mrHeadRef: "feature/xss",
+    });
+    // preset.type="mr" 直达 MR 表单（不落白盒默认）
+    expect(screen.getByTestId("mr-form")).toBeInTheDocument();
+    // repo 预填（RepoCombobox 显选中值——等 repos 拉回后 placeholder 换成选中名）；refs 原样回填
+    await waitFor(() => expect(screen.getByText("nodegoat")).toBeInTheDocument());
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
+    expect((screen.getByTestId("mr-head-ref") as HTMLInputElement).value).toBe("feature/xss");
+  });
+});
+
 describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调）", () => {
   beforeEach(() => i18n.changeLanguage("zh"));
 

@@ -410,6 +410,11 @@ class ScanSummary:
     # [{service, scan_id, reused, status?}]（提交时 web 写 SessionManager.update_session）。
     # 纯白盒/纯黑盒未写 → None（零回归）。
     corr_children: list[dict] | None = None
+    # MR 增量扫描 refs（spec 2026-09-03 §6）：session.mr_base_ref/mr_head_ref 透传
+    # （_submit_mr 提交时写）。列表行「MR」徽标 + base..head 标识与重跑预填用；
+    # 非 MR 扫描未写 → None（零回归）。
+    mr_base_ref: str | None = None
+    mr_head_ref: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -438,6 +443,8 @@ class ScanSummary:
             "repo_branch": self.repo_branch,
             "repo_commit": self.repo_commit,
             "corr_children": self.corr_children,
+            "mr_base_ref": self.mr_base_ref,
+            "mr_head_ref": self.mr_head_ref,
         }
 
 
@@ -743,6 +750,9 @@ class ScanStore:
             # 分支快照（spec 2026-08-21 §4）：存量报告/黑盒无快照 → None
             **_repo_snapshot_fields(scan_dir),
             corr_children=corr_children,
+            # MR refs（spec 2026-09-03 §6）：非 MR 扫描未写 → None（读法对齐 corr_children）
+            mr_base_ref=data.get("mr_base_ref") if isinstance(data, dict) else None,
+            mr_head_ref=data.get("mr_head_ref") if isinstance(data, dict) else None,
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

@@ -53,16 +53,18 @@ function segOf(s: ScanSummary): Seg | "other" {
  *  组合扫描 scan_type 仍为 whitebox、靠 combined 标记识别；黑盒一律是组合/关联任务的
  *  嵌套 run，无独立行/入口。注意 correlation 主行跑过段③黑盒验证后 session 亦被
  *  create_blackbox_run 置 combined=True——类型匹配须先判 correlation 再判 combined，
- *  否则关联行会漏进「组合」档。 */
-type TypeFilter = "all" | "whitebox" | "combined" | "correlation";
+ *  否则关联行会漏进「组合」档。MR 增量（spec 2026-09-03）：scan_type="mr" 独立档，
+ *  不入白盒/组合（纯白盒语义无黑盒段）。 */
+type TypeFilter = "all" | "whitebox" | "combined" | "correlation" | "mr";
 interface ListFilters { seg: "all" | Seg; type: TypeFilter; keyword: string }
 const DEFAULT_LIST_FILTERS: ListFilters = { seg: "all", type: "all", keyword: "" };
 
 function matchType(s: ScanSummary, type: TypeFilter): boolean {
   if (type === "all") return true;
   if (type === "correlation") return s.scan_type === "correlation";
-  // 「白盒」「组合」档均不含关联行（即使 combined=True，见上）——只入自己的档。
-  if (s.scan_type === "correlation") return false;
+  if (type === "mr") return s.scan_type === "mr";
+  // 「白盒」「组合」档均不含关联/MR 行——只入自己的档。
+  if (s.scan_type === "correlation" || s.scan_type === "mr") return false;
   if (type === "combined") return s.combined === true;
   return s.scan_type === "whitebox" && s.combined !== true;
 }
@@ -220,6 +222,7 @@ export function ScanList() {
             <SelectItem value="whitebox">{t("workspaces.filter.whitebox")}</SelectItem>
             <SelectItem value="combined">{t("workspaceDetail.scans.typeFilterCombined")}</SelectItem>
             <SelectItem value="correlation">{t("workspaces.filter.correlation")}</SelectItem>
+            <SelectItem value="mr">{t("workspaces.filter.mr")}</SelectItem>
           </SelectContent>
         </Select>
         </div>
@@ -301,6 +304,9 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   const [resumePreview, setResumePreview] = useState<ResumePreview | null>(null);
   const isCombined = scan.combined === true;
   const isCorr = scan.scan_type === "correlation";
+  // MR 增量行（spec 2026-09-03 §6）：「MR」徽标 + base..head refs 标识（session 透传，
+  // 无 refs 的存量/异常行只显徽标）。
+  const isMr = scan.scan_type === "mr";
   // 黑盒 run 子行：组合任务 + correlation 主行（段③黑盒验证经 create_blackbox_run
   // 写 bb_runs；该调用同笔写 combined=True，isCorr 并入判式兜底半写状态）。
   const hasRuns = (isCombined || isCorr) && (scan.bb_runs?.length ?? 0) > 0;
@@ -372,13 +378,18 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
   // correlation 重跑只带类型（多仓配置不可从 detail 重建，落空关联表单手填）。
   // 组合扫描（bb_url 非空，2026-09-03）：黑盒段配置一并预填——目标 url + combined
   // 开关 + 认证（profile 档案优先，inline authentication 兜底）+ HOST 来源。
+  // MR 增量（spec 2026-09-03 §6）：repo + base/head refs 预填（_scan_detail 透传）。
   async function onRerun() {
     setBusy(true);
     try {
       const detail = await getScan(ws, scan.scan_id);
       const state: Record<string, unknown> = { type: scan.scan_type, workspace: ws };
-      if (scan.scan_type === "whitebox" && detail.source_repo) {
+      if ((scan.scan_type === "whitebox" || scan.scan_type === "mr") && detail.source_repo) {
         state.repo = detail.source_repo;
+      }
+      if (scan.scan_type === "mr") {
+        if (detail.mr_base_ref) state.mrBaseRef = detail.mr_base_ref;
+        if (detail.mr_head_ref) state.mrHeadRef = detail.mr_head_ref;
       }
       if (detail.bb_url) {
         state.url = detail.bb_url;
@@ -500,12 +511,25 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
         {/* 类型格：correlation 主行显「跨仓关联」徽标（先于 combined 判——关联行跑过
             段③黑盒验证后 session 亦置 combined=True）；组合任务只显「组合」徽标——
             scan_type 底层仍为 whitebox（spec 2026-08-12 §6.2），whitebox+组合双徽标
-            冗余，2026-08-17 起组合单显 */}
+            冗余，2026-08-17 起组合单显；MR 行显「MR」徽标 + base..head refs（spec
+            2026-09-03 §6） */}
         <TableCell>
           {isCorr ? (
             <Badge variant="outline" className="border-primary/35 font-mono text-primary">
               {t("workspaceDetail.scans.typeCorrelation")}
             </Badge>
+          ) : isMr ? (
+            <div className="flex flex-col items-start gap-0.5">
+              <Badge variant="outline" className="border-primary/35 font-mono text-primary">MR</Badge>
+              {scan.mr_base_ref && scan.mr_head_ref && (
+                <span
+                  className="max-w-[160px] truncate font-mono text-[10.5px] text-muted-foreground/80"
+                  title={`${scan.mr_base_ref}..${scan.mr_head_ref}`}
+                >
+                  {scan.mr_base_ref}..{scan.mr_head_ref}
+                </span>
+              )}
+            </div>
           ) : scan.combined === true ? (
             <Badge variant="outline" className="border-primary/35 font-mono text-primary">
               {t("workspaceDetail.scans.typeCombined")}

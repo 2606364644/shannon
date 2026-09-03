@@ -249,7 +249,8 @@
       "allStatus": "All status",
       "allType": "All type",
       "whitebox": "whitebox",
-      "correlation": "Correlation"
+      "correlation": "Correlation",
+      "mr": "MR incremental"
     },
     "newScan": "New scan",
     "lastRefresh": "Last updated {{time}}",

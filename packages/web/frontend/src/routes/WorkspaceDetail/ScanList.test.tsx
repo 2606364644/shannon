@@ -482,6 +482,62 @@ describe("ScanList 操作调 API + 列表刷新", () => {
   });
 });
 
+// === MR 增量扫描（spec 2026-09-03 §6）：「MR」徽标 + base..head 标识 + 独立类型档 + 重跑预填 ===
+describe("ScanList MR 增量扫描", () => {
+  const mrScan = {
+    scan_id: "mr-1", scan_type: "mr", status: "completed", created_at: 8000,
+    completed_at: 8100, vuln_count: 1, total_cost_usd: 0.2, cost_currency: "CNY",
+    is_running: false, workflow_id: "ws-mr-1",
+    mr_base_ref: "main", mr_head_ref: "feature/xss",
+  } as const;
+
+  it("mr 行显「MR」徽标 + base..head refs；白盒行类型不变", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([mrScan, wbDone])),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-mr-1")).toBeInTheDocument());
+    expect(screen.getByText("MR")).toBeInTheDocument();
+    expect(screen.getByText("main..feature/xss")).toBeInTheDocument();
+    // 白盒行类型格仍显 scan_type 原文
+    expect(screen.getByText("whitebox")).toBeInTheDocument();
+  });
+
+  it("类型筛选「MR 增量」档只留 mr 行（白盒/组合档不含 mr）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([mrScan, wbDone])),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-mr-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("combobox", { name: "类型筛选" }));
+    fireEvent.click(await screen.findByRole("option", { name: "MR 增量" }));
+    await waitFor(() => expect(screen.queryByText("ws-s5")).toBeNull());
+    expect(screen.getByText("ws-mr-1")).toBeInTheDocument();
+  });
+
+  it("mr 行无续跑入口（resume 语义后续定）；重跑预填 repo + base/head refs", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([mrScan])),
+      http.get("/api/workspaces/:ws/scans/:scanId", () =>
+        HttpResponse.json({
+          scan_type: "mr", source_repo: "nodegoat",
+          mr_base_ref: "main", mr_head_ref: "feature/xss",
+        })),
+    );
+    renderList();
+    await waitFor(() => expect(screen.getByText("ws-mr-1")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /续跑/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /重跑/ }));
+    await waitFor(() => expect(navMock).toHaveBeenCalled());
+    expect(navMock).toHaveBeenCalledWith("/scan/new?workspace=ws", {
+      state: {
+        type: "mr", workspace: "ws", repo: "nodegoat",
+        mrBaseRef: "main", mrHeadRef: "feature/xss",
+      },
+    });
+  });
+});
+
 describe("ScanList 表格设计不变量（重设计 2026-08-15：漏洞数 hero 呈现）", () => {
   it("vuln_count > 0：漏洞数以 mono + 红色呈现（醒目）", async () => {
     server.use(http.get("/api/workspaces/:ws/scans", () => HttpResponse.json([completed])));

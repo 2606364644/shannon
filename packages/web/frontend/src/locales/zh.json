@@ -250,6 +250,8 @@
       "allType": "全部类型",
       "whitebox": "白盒",
       "correlation": "跨仓关联"
+   ,
+      "mr": "MR 增量"
     },
     "newScan": "新建扫描",
     "lastRefresh": "上次刷新 {{time}}",

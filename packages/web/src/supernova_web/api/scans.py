@@ -116,6 +116,9 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         "source_repo": data.get("source_repo"),
         "reuse_whitebox_scan_id": data.get("reuse_whitebox_scan_id"),
         "authentication": _read_auth_config(scan_dir),
+        # MR 增量扫描 refs（spec 2026-09-03 §6）：重跑预填 base/head（非 MR 未写 → None）。
+        "mr_base_ref": data.get("mr_base_ref"),
+        "mr_head_ref": data.get("mr_head_ref"),
         # 组合扫描黑盒段重跑预填：目标 url + 认证档案引用（与 authentication 互斥——
         # profile 模式时后者的 scan-config.yaml 不 dump 认证明文，profile 引用是唯一来源）。
         "bb_url": data.get("bb_url"),

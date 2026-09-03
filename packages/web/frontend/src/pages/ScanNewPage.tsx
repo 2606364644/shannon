@@ -8,10 +8,17 @@ import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrel
 import { useRepos } from "../api/useRepos";
 import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
+import { RepoCombobox } from "../components/RepoCombobox";
 import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
 import { CorrelationTopologyFields } from "../components/correlation/CorrelationTopologyFields";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
+import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { PageHeader } from "@/components/PageHeader";
 import { GroupLabel } from "@/components/GroupLabel";
 import { Card } from "@/components/ui/card";
@@ -122,7 +129,7 @@ export function authFromPayload(auth: ScanAuthentication): AuthFormState {
 /** 重跑预填数据（ScanList.onRerun 经 location.state 传入，优先于 query param）。
  *  D3：黑盒只读分支已删——type:"blackbox" 的历史 preset 落到白盒渲染（不触发黑盒表单）。 */
 export interface RerunPreset {
-  type?: "whitebox" | "blackbox" | "correlation";
+  type?: "whitebox" | "blackbox" | "correlation" | "mr";
   workspace?: string;
   repo?: string;
   url?: string;
@@ -140,6 +147,9 @@ export interface RerunPreset {
    *  hostProfileId 非空 → profile 模式；仅 hostUrl → url 模式；后端 _scan_detail 暂未返（前端先就位）。 */
   hostProfileId?: string;
   hostUrl?: string;
+  /** MR 增量（spec 2026-09-03 §6）：原扫描的 base/head refs，重跑时预填。 */
+  mrBaseRef?: string;
+  mrHeadRef?: string;
 }
 
 /** RerunPreset → AuthFormState：profile 模式（authProfileId 非空）优先于 inline（auth）。
@@ -372,8 +382,9 @@ export function ScanNewPage() {
   const preset = (useLocation().state ?? {}) as RerunPreset;
   // 类型切换（D3）：白盒 | 跨仓关联 segmented。黑盒只读分支已删——历史黑盒 preset
   // （location.state.type="blackbox"，ScanList 旧入口）落到白盒渲染；correlation preset
-  // 直达跨仓表单。
-  const [type, setType] = useState<ScanType>(preset.type === "correlation" ? "correlation" : "whitebox");
+  // 直达跨仓表单；mr preset（ScanList MR 行重跑）直达 MR 表单并预填 refs。
+  const [type, setType] = useState<ScanType>(
+    preset.type === "correlation" ? "correlation" : preset.type === "mr" ? "mr" : "whitebox");
   const [f, setF] = useState<FormState>({
     selectedRepo: preset.repo ?? presetRepo ?? "",
     url: preset.url ?? "",
@@ -384,6 +395,9 @@ export function ScanNewPage() {
     // 组合任务重跑预填：开关随 preset 打开（显式字段——correlation preset 也带 url
     // 但不吃 combined，不按 url 推导误开）。
     combined: preset.combined ?? false,
+    // MR 重跑预填（spec 2026-09-03 §6）：base/head refs 原样回填。
+    mrBaseRef: preset.mrBaseRef ?? "",
+    mrHeadRef: preset.mrHeadRef ?? "",
   });
   // —— 跨仓关联表单态（D3 单向数据流）：yaml 是派生态——表单交互路径 formToYaml(state)
   //    重生成；YAML 编辑路径仅校验（yamlToForm 试解析），回填表单只经显式「应用到表单」。 ——
@@ -431,6 +445,8 @@ export function ScanNewPage() {
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
   const topologyReposEnabled = type === "correlation" && corrMode === "auto";
   const { repos: topologyRepos } = useRepos(topologyReposEnabled ? workspace : "");
+  // MR 表单仓库下拉（与上面同 ["repos", ws] SWR key——浏览过仓库 tab / 白盒表单后即时填充）
+  const { repos: mrRepos } = useRepos(type === "mr" ? workspace : "");
   const { scans } = useScans(type === "correlation" ? workspace : "");
   const setAuth = (patch: Partial<AuthFormState>) => setF((prev) => ({ ...prev, auth: { ...prev.auth, ...patch } }));
   const setHost = (patch: Partial<HostFormState>) => setF((prev) => ({ ...prev, host: { ...prev.host, ...patch } }));
@@ -561,6 +577,8 @@ export function ScanNewPage() {
     : t("scan.submit");
   const footerHint = type === "correlation" ? t("scan.correlation.footerHint")
     : type === "mr" ? t("scan.mrBaseHeadHint") : t("scan.footerHintWhitebox");
+  // ws 空态判定（mr 表单 ws 下拉 + 提示共用；与 CorrelationFormFields/ScanFormFields 同式）
+  const wsEmpty = !wsLoading && wsList.length === 0;
 
   return (
     <div className="space-y-4">
@@ -657,6 +675,86 @@ export function ScanNewPage() {
               onWorkspaceChange={setWorkspace}
               wsLoading={wsLoading}
             />
+          ) : type === "mr" ? (
+            /* MR 增量扫描（spec 2026-09-03 §3.1/§6）：最小表单——工作区 + 仓库 + base/head ref。
+               必须在 corrMode === "auto" 判断之前（corrMode 初始恒 "auto"，否则 mr 会错渲染跨仓拓扑表单）。
+               base/head 为手输文本（分支名或 commit sha 均可，BranchCombobox 是行内切换控件非表单样式，
+               且枚举分支列表对 commit sha 无增益）。 */
+            <div className="space-y-5" data-testid="mr-form">
+              {/* ① 工作区（IA 不变量：repo 列表按 ws 隔离，选仓前必须先选 ws） */}
+              <section className="space-y-2">
+                <GroupLabel>{t("scan.fields.wsSelectLabel")}</GroupLabel>
+                <div className="space-y-1.5">
+                  <Select value={workspace} onValueChange={setWorkspace}>
+                    <SelectTrigger className="w-full font-mono text-xs">
+                      <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {wsEmpty ? (
+                        <SelectItem value="__empty__" disabled>{t("scan.fields.wsEmptyOption")}</SelectItem>
+                      ) : wsList.map((w) => (
+                        <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {wsEmpty && (
+                    <div className="flex items-center gap-1.5 text-xs text-amber">
+                      <AlertCircle className="h-3.5 w-3.5" />{t("scan.fields.wsEmptyHintUser")}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* ② 代码源 + MR refs：repo 复用 RepoCombobox（与白盒/跨仓同一选择器）；
+                  base/head 双列（窄屏纵排）。纯白盒语义——无 url/认证/HOST。 */}
+              <section className="space-y-2">
+                <GroupLabel>{t("scan.steps.source")}</GroupLabel>
+                {!workspace ? (
+                  <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>
+                ) : (
+                  <div className="space-y-3">
+                    <RepoCombobox
+                      repos={mrRepos}
+                      value={f.selectedRepo || null}
+                      onChange={(v) => set({ selectedRepo: v })}
+                      placeholder={t("scan.repo.selectPlaceholder")}
+                      searchPlaceholder={t("scan.repo.searchPlaceholder")}
+                      emptyText={t("scan.repo.noMatch")}
+                      ungroupedLabel={t("scan.repo.ungrouped")}
+                      linkedLabel={t("repos.linkedBadge")}
+                    />
+                    {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium" htmlFor="mr-base-ref">{t("scan.mrBaseRef")}</Label>
+                        <Input
+                          id="mr-base-ref"
+                          data-testid="mr-base-ref"
+                          value={f.mrBaseRef ?? ""}
+                          onChange={(e) => set({ mrBaseRef: e.target.value })}
+                          placeholder="main"
+                          size="sm"
+                          className="font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium" htmlFor="mr-head-ref">{t("scan.mrHeadRef")}</Label>
+                        <Input
+                          id="mr-head-ref"
+                          data-testid="mr-head-ref"
+                          value={f.mrHeadRef ?? ""}
+                          onChange={(e) => set({ mrHeadRef: e.target.value })}
+                          placeholder="feature/branch"
+                          size="sm"
+                          className="font-mono"
+                        />
+                      </div>
+                    </div>
+                    {mrRefsErr && <div className="text-destructive text-xs">{mrRefsErr}</div>}
+                  </div>
+                )}
+              </section>
+            </div>
           ) : corrMode === "auto" ? (
             <CorrelationTopologyFields
               workspace={workspace}
