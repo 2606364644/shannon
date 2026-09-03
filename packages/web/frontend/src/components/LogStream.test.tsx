@@ -139,17 +139,19 @@ describe("LogStream", () => {
     expect(rows[1].className).toContain("ev-agent-fail");
   });
 
-  // ── LlmTurnEvent 含 agent_prefix + turn + content snippet ──
-  it("LlmTurnEvent 行含 agent_prefix + turn + content snippet", () => {
+  // ── LlmTurnEvent：body 纯内容（归属不进正文），名在 title + gutter 指纹色带 ──
+  it("LlmTurnEvent 行含 turn + content snippet，归属名在 title（2026-09-03 撤 chip 前缀）", () => {
     const ev: NdjsonEvent = {
       ts: "2026-07-02T10:02:00.000Z", category: "LLM", type: "LlmTurnEvent",
       agent_name: "ssrf-vuln", turn: 3, content: "Found sink at line 42\nsecond line",
     };
     const { container } = render(<LogStream events={[ev]} />);
     const txt = rowText(container, "ev-llm");
-    expect(txt).toMatch(/\[SSRF\]/);
     expect(txt).toMatch(/Turn 3/);
     expect(txt).toContain("Found sink at line 42");
+    expect(txt).not.toContain("[SSRF]");  // 名字不进 body——彩色长名每行重复是文字噪音
+    const title = container.querySelector(".ev-llm")?.getAttribute("title") ?? "";
+    expect(title).toContain("[SSRF] ssrf-vuln");  // 渐进披露：悬停才见归属
   });
 
   // ── GitnexusLlmEvent progress ──
@@ -190,8 +192,8 @@ describe("LogStream", () => {
     expect(txt).toContain("https://example.com");
   });
 
-  // ── ToolCallEvent 含 agent_prefix + humanized params ──
-  it("ToolCallEvent 行含 agent_prefix + tool_name + params", () => {
+  // ── ToolCallEvent：body 纯内容，归属=title 披露 + gutter 指纹色带 ──
+  it("ToolCallEvent 行含 tool_name + params，归属名在 title、gutter 带指纹色", () => {
     const ev: NdjsonEvent = {
       ts: "2026-07-02T10:04:00.000Z", category: "TOOL", type: "ToolCallEvent",
       agent_name: "injection-vuln", tool_name: "Bash",
@@ -199,18 +201,21 @@ describe("LogStream", () => {
     };
     const { container } = render(<LogStream events={[ev]} />);
     const txt = rowText(container, "ev-tool");
-    expect(txt).toMatch(/\[Injection\]/);
     expect(txt).toContain("Bash");
+    expect(txt).not.toContain("[Injection]");
+    const title = container.querySelector(".ev-tool")?.getAttribute("title") ?? "";
+    expect(title).toContain("[Injection] injection-vuln");
+    // gutter = 归属指纹色带（ag-N class），agent 行专属（系统行 gutter 无 ag class）
+    const gutter = container.querySelector(".ev-tool .log-gutter");
+    expect(gutter?.className).toMatch(/^log-gutter ag-\d{1,2}$/);
   });
 
-  // ─── agent 身份显示 + 指纹色 chip（2026-09-03 撤缩进一级，归属改颜色分组）───
-  // chain-verdict-* 等未入 AGENT_PREFIX 表的 agent，TOOL/LLM 行原先只有 [Agent] 占位，
-  // 并发交错时无法分辨归属；统一 agentTitle（表内 [Prefix] 全名 / 未知名全名）。
-  // 2026-09-02 版「TOOL/LLM body 缩进一级」在真实数据流（并发平级 agent 交错 +
-  // LOG/GITNX 顶格穿插）里读不出规律，已撤——归属改由 ●chip 指纹色分组：
-  // 同 agent 的 AGENT/TOOL/LLM 行同色（首见顺序分配，SSE 重放稳定），AGENT
-  // start/end 成为可按色认领的锚点。
-  it("ToolCallEvent 未知 agent chip 显示全名（[Agent] 占位消失），body 无缩进 class", () => {
+  // ─── agent 归属 = 左缘指纹色带（2026-09-03 二次返工：撤 ●chip 文字前缀 + hover 聚焦）───
+  // 归属呈现三层：①gutter 色带（同 agent 全行同色带，并发交错=色带交错）；
+  // ②AGENT start/end 行 body 带全名作图例锚点；③TOOL/LLM 行 title 渐进披露。
+  // 撤因：彩色长名（chain-verdict-xss-40 等）每行重复是文字噪音、一行三色打架；
+  // hover kin/dim 划过全屏闪烁（用户实测「好奇怪、还没之前的好看、hover 不要高亮」）。
+  it("ToolCallEvent 未知 agent：body 无 [Agent] 占位无名字，title 含全名，gutter 带指纹色", () => {
     const ev: NdjsonEvent = {
       ts: "2026-09-02T09:47:48.000Z", category: "TOOL", type: "ToolCallEvent",
       agent_name: "chain-verdict-xss-40", tool_name: "bash",
@@ -218,16 +223,16 @@ describe("LogStream", () => {
     };
     const { container } = render(<LogStream events={[ev]} />);
     const txt = rowText(container, "ev-tool");
-    expect(txt).toContain("chain-verdict-xss-40");
-    expect(txt).not.toMatch(/\[Agent\]/);
     expect(txt).toContain("bash");
-    const chip = container.querySelector(".ev-tool .log-chip");
-    expect(chip?.textContent).toBe("●chain-verdict-xss-40");
-    expect(chip?.className).toMatch(/^log-chip ag-\d{1,2}$/);
-    expect(container.querySelector(".log-body--indent")).toBeNull();
+    expect(txt).not.toMatch(/\[Agent\]/);
+    expect(txt).not.toContain("chain-verdict-xss-40");  // 名字只在 title——零行内文字重复
+    const title = container.querySelector(".ev-tool")?.getAttribute("title") ?? "";
+    expect(title).toContain("chain-verdict-xss-40");
+    const gutter = container.querySelector(".ev-tool .log-gutter");
+    expect(gutter?.className).toMatch(/^log-gutter ag-\d{1,2}$/);
   });
 
-  it("LlmTurnEvent 未知 agent chip 显示全名", () => {
+  it("LlmTurnEvent 未知 agent：title 含全名，gutter 带指纹色", () => {
     const ev: NdjsonEvent = {
       ts: "2026-09-02T09:47:52.000Z", category: "LLM", type: "LlmTurnEvent",
       agent_name: "chain-verdict-xss-43", turn: 5,
@@ -235,14 +240,14 @@ describe("LogStream", () => {
     };
     const { container } = render(<LogStream events={[ev]} />);
     const txt = rowText(container, "ev-llm");
-    expect(txt).toContain("chain-verdict-xss-43");
-    expect(txt).not.toMatch(/\[Agent\]/);
     expect(txt).toMatch(/Turn 5/);
-    const chip = container.querySelector(".ev-llm .log-chip");
-    expect(chip?.textContent).toBe("●chain-verdict-xss-43");
+    expect(txt).not.toContain("chain-verdict-xss-43");
+    const title = container.querySelector(".ev-llm")?.getAttribute("title") ?? "";
+    expect(title).toContain("chain-verdict-xss-43");
+    expect(container.querySelector(".ev-llm .log-gutter")?.className).toMatch(/ag-\d{1,2}/);
   });
 
-  it("表内 agent 的 TOOL/LLM 行 chip 显示 [Prefix] 全名（对齐 CLI agent_title）", () => {
+  it("表内 agent 的 TOOL/LLM 行 title 含 [Prefix] 全名（对齐 CLI agent_title）", () => {
     const evs: NdjsonEvent[] = [
       { ts: "2026-09-02T09:48:00.000Z", category: "TOOL", type: "ToolCallEvent",
         agent_name: "injection-vuln", tool_name: "Bash", parameters: { command: "ls" } },
@@ -250,22 +255,19 @@ describe("LogStream", () => {
         agent_name: "ssrf-vuln", turn: 2, content: "Checking" },
     ];
     const { container } = render(<LogStream events={evs} />);
-    const toolTxt = rowText(container, "ev-tool");
-    expect(toolTxt).toContain("[Injection] injection-vuln");
-    const llmTxt = rowText(container, "ev-llm");
-    expect(llmTxt).toContain("[SSRF] ssrf-vuln");
+    const toolTitle = container.querySelector(".ev-tool")?.getAttribute("title") ?? "";
+    expect(toolTitle).toContain("[Injection] injection-vuln");
+    const llmTitle = container.querySelector(".ev-llm")?.getAttribute("title") ?? "";
+    expect(llmTitle).toContain("[SSRF] ssrf-vuln");
   });
 
-  // ─── hover 聚焦（归属可追踪）：并发交错时按 agent 追踪执行线 ───
-  // chip 同色解决「归属可判读」（每行看得出谁干的），没解决「归属可追踪」（跟一条
-  // agent 的完整故事线）——hover 有 chip 的行：同 agent 行 --kin 提亮、其余 --dim
-  // 压暗；hover 无 chip 行 / 移出容器 → 恢复全流。
-  it("hover agent 行 → 同 agent 行提亮、其余压暗；hover 无 chip 行恢复全流", async () => {
+  // ─── 无 hover 交互（2026-09-03 撤 kin/dim 聚焦与行 hover 背景）───
+  // 用户实测反馈：鼠标划过行不需要高亮，hover 聚焦划过全屏闪烁「好奇怪」。
+  // 行正常显示；归属追踪靠 gutter 色带 + AGENT 锚点行，agent 名悬停 title 披露。
+  it("hover 行无聚焦/高亮行为（无 kin/dim class 切换、无 chip 元素）", async () => {
     const evs: NdjsonEvent[] = [
       { ts: "2026-09-02T09:47:50.000Z", category: "AGENT", type: "AgentEvent",
         agent_name: "cv-xss-1", event: "start", attempt: 1 },
-      { ts: "2026-09-02T09:47:51.000Z", category: "TOOL", type: "ToolCallEvent",
-        agent_name: "cv-xss-2", tool_name: "grep", parameters: { pattern: "eval" } },
       { ts: "2026-09-02T09:47:52.000Z", category: "TOOL", type: "ToolCallEvent",
         agent_name: "cv-xss-1", tool_name: "bash", parameters: { command: "ls" } },
       { ts: "2026-09-02T09:47:53.000Z", category: "INFO", type: "LogEvent",
@@ -273,20 +275,13 @@ describe("LogStream", () => {
     ];
     const { container } = render(<LogStream events={evs} />);
     const rows = container.querySelectorAll(".log-row");
-    // 初始无聚焦 class
     rows.forEach((r) => expect(r.className).not.toContain("log-row--"));
-    // hover cv-xss-1 的 AGENT 行（第 0 行）
-    await fireEvent.mouseEnter(rows[0]);
-    expect(rows[0].className).toContain("log-row--kin");      // cv-xss-1 自己
-    expect(rows[1].className).toContain("log-row--dim");      // cv-xss-2
-    expect(rows[2].className).toContain("log-row--kin");      // cv-xss-1 散落的 TOOL 行
-    expect(rows[3].className).toContain("log-row--dim");      // LOG 系统行退后
-    // hover 无 chip 的 LOG 行 → 清除聚焦
-    await fireEvent.mouseEnter(rows[3]);
+    await fireEvent.mouseEnter(rows[0]);   // 划过 AGENT 行——渲染不变
     rows.forEach((r) => expect(r.className).not.toContain("log-row--"));
+    expect(container.querySelector(".log-chip")).toBeNull();  // chip 元素已裁撤
   });
 
-  it("同 agent 的 AGENT/TOOL/LLM 行 chip 同色，不同 agent 不同色，GITNX/LOG 行无 chip", () => {
+  it("同 agent 的 AGENT/TOOL/LLM 行 gutter 色带同色，不同 agent 不同色，GITNX/LOG 行无指纹色", () => {
     const evs: NdjsonEvent[] = [
       { ts: "2026-09-02T09:47:50.000Z", category: "AGENT", type: "AgentEvent",
         agent_name: "chain-verdict-xss-43", event: "start", attempt: 1 },
@@ -307,16 +302,20 @@ describe("LogStream", () => {
         logger_name: "mod", level: "INFO", message: "hi" } as NdjsonEvent,
     ];
     const { container } = render(<LogStream events={evs} />);
-    const chips = container.querySelectorAll(".log-chip");
-    expect(chips.length).toBe(5);  // 两个 agent 的 AGENT/TOOL/LLM 行，GITNX/LOG 行无 chip
-    const hueOf = (c: Element) => c.className.match(/ag-\d{1,2}/)?.[0] ?? "?";
-    // 同 agent（首见 xss-43）三行同色
-    expect(hueOf(chips[0])).toBe(hueOf(chips[1]));
-    expect(hueOf(chips[1])).toBe(hueOf(chips[2]));
+    const gutters = container.querySelectorAll(".log-gutter");
+    expect(gutters.length).toBe(7);  // 全部行都有 gutter；指纹色只在 agent 行
+    const agGutters = Array.from(gutters).filter((g) => /ag-\d/.test(g.className));
+    expect(agGutters.length).toBe(5);  // 两个 agent 的 AGENT/TOOL/LLM 行，GITNX/LOG 行走类型色
+    const hueOf = (g: Element) => g.className.match(/ag-\d{1,2}/)?.[0] ?? "?";
+    // 同 agent（首见 xss-43）三行色带同色
+    expect(hueOf(agGutters[0])).toBe(hueOf(agGutters[1]));
+    expect(hueOf(agGutters[1])).toBe(hueOf(agGutters[2]));
     // 不同 agent（inj-07 首见第二）不同色（首见顺序分配 ag-0/ag-1）
-    expect(hueOf(chips[3])).not.toBe(hueOf(chips[0]));
-    expect(hueOf(chips[3])).toBe(hueOf(chips[4]));
-    expect(chips[0].textContent).toBe("●chain-verdict-xss-43");
+    expect(hueOf(agGutters[3])).not.toBe(hueOf(agGutters[0]));
+    expect(hueOf(agGutters[3])).toBe(hueOf(agGutters[4]));
+    // AGENT start 行 body 带全名（图例锚点——色带的「这是什么颜色」由它回答）
+    const anchor = container.querySelector(".log-row[data-type='AgentEvent']");
+    expect(anchor?.textContent).toContain("chain-verdict-xss-43");
   });
 
   // ── StepEvent done 含 duration ──

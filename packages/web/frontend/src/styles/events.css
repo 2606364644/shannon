@@ -88,12 +88,16 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
    - ev-* 色留在行容器 .log-row（测试 ROW_SELECTOR 不变量，整行单点命中）；
    - ts/tag/metrics 降级 var(--trace) + normal weight，主体/icon 继承 ev-* 类别色；
    - 单行 ellipsis：react-window FixedSizeList 固定 20px 行高，不长内容换行（hover title 补全文）。
-   signature = 左侧 2px 事件色边（currentColor），扫一眼凭色密度感知阶段。 === */
+   signature = 左侧 3px 色带：系统行=事件类型色（currentColor），agent 行（AGENT/TOOL/LLM）
+   =归属指纹色（.log-gutter.ag-N）——同 agent 全行同色带、并发交错=色带交错，AGENT
+   start/end 行 body 带全名作图例锚点。归属呈现前两世（缩进一级 2026-09-02 并发平级
+   无深度可依；●彩色 chip 文字前缀 + hover kin/dim 聚焦 2026-09-03 彩色长名每行重复+
+   划过全屏闪烁）均被真实数据流反馈否决，终局=色带：结构信号、零文字重复、零交互。 === */
 .log-row {
   display: grid;
   /* ts 列 64px：HH:MM:SS（8 字符）在 IBM Plex Mono text-xs 下 ≈57.6px，56px 会截断。
      完整日期时间串（"2026-07-31 10:53:53"）交由 tsClock 削成 HH:MM:SS，hover title 看全文。 */
-  grid-template-columns: 2px 64px 14px 50px minmax(0, 1fr) auto;
+  grid-template-columns: 3px 64px 14px 50px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
   line-height: 20px;
@@ -102,9 +106,9 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
 .log-gutter {
   align-self: stretch;
   height: 100%;
-  background: currentColor;      /* 继承行 ev-* 类别色 → 事件色边 */
+  background: currentColor;      /* 继承行 ev-* 类别色 → 事件色带 */
   opacity: .5;
-  border-radius: 1px;
+  border-radius: 1.5px;
 }
 .log-ts,
 .log-tag,
@@ -123,13 +127,11 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* agent 指纹色调色板（--ag-0..11）：归属 chip 专用，与 --c-* 语义色正交（类型色走
-   gutter/icon/正文，归属色走 chip）。hue 选点避开语义 hue（红5/橙24/黄38/绿142/
-   青190/品红280 ±15°——chip 色撞行类型色时 chip 融进行色，如金 chip 在黄 TOOL 行）。
+/* agent 指纹色调色板（--ag-0..11）：归属色带专用，与 --c-* 语义色正交（类型色走
+   icon/正文，归属色走 gutter 色带）。hue 选点避开语义 hue（红5/橙24/黄38/绿142/
+   青190/品红280 ±15°——归属色带撞行类型色时色带融进行色区）。
    分配按 agent 首见顺序（LogStream useMemo），同屏并发 agent 保证不同色（≤12），
-   超 12 回绕；深主题 L 蓝紫区 66-72%/绿区 58-62%，浅主题对齐 --c-* 深浅梯度。
-   2026-09-03 撤 2026-09-02 版 TOOL/LLM body 缩进一级：并发平级无嵌套深度可依，
-   缩进读不出规律，归属改由 chip 颜色分组。 */
+   超 12 回绕；深主题 L 蓝紫区 66-72%/绿区 58-62%，浅主题对齐 --c-* 深浅梯度。 */
 :root {
   --ag-0: 210 70% 68%;
   --ag-1: 232 68% 70%;
@@ -158,28 +160,18 @@ body { background: var(--void); color: var(--ink); font-family: var(--font-sans)
   --ag-10: 122 45% 34%;
   --ag-11: 165 55% 32%;
 }
-.log-chip {
-  font-weight: 500;
-  margin-right: 1ch;
-  white-space: nowrap;
-}
-.log-chip.ag-0 { color: hsl(var(--ag-0)); }
-.log-chip.ag-1 { color: hsl(var(--ag-1)); }
-.log-chip.ag-2 { color: hsl(var(--ag-2)); }
-.log-chip.ag-3 { color: hsl(var(--ag-3)); }
-.log-chip.ag-4 { color: hsl(var(--ag-4)); }
-.log-chip.ag-5 { color: hsl(var(--ag-5)); }
-.log-chip.ag-6 { color: hsl(var(--ag-6)); }
-.log-chip.ag-7 { color: hsl(var(--ag-7)); }
-.log-chip.ag-8 { color: hsl(var(--ag-8)); }
-.log-chip.ag-9 { color: hsl(var(--ag-9)); }
-.log-chip.ag-10 { color: hsl(var(--ag-10)); }
-.log-chip.ag-11 { color: hsl(var(--ag-11)); }
-.log-row:hover { background: hsl(var(--secondary) / 0.55); }
-/* hover 聚焦（归属可追踪）：hover 有 chip 的行 → 同 agent 行 --kin 提亮、其余 --dim
-   压暗（含无 chip 的 LOG/GITNX 系统行，退后但仍可见=时间上下文）。kin 带 :hover
-   变体——`.log-row:hover`（类+伪类）特异性高于单类，不带则鼠标所在 kin 行反而
-   比其它 kin 行暗（0.55 vs 0.95）。 */
-.log-row--kin, .log-row--kin:hover { background: hsl(var(--secondary) / 0.95); }
-.log-row--dim { opacity: 0.45; }
+.log-gutter.ag-0 { background: hsl(var(--ag-0)); opacity: .9; }
+.log-gutter.ag-1 { background: hsl(var(--ag-1)); opacity: .9; }
+.log-gutter.ag-2 { background: hsl(var(--ag-2)); opacity: .9; }
+.log-gutter.ag-3 { background: hsl(var(--ag-3)); opacity: .9; }
+.log-gutter.ag-4 { background: hsl(var(--ag-4)); opacity: .9; }
+.log-gutter.ag-5 { background: hsl(var(--ag-5)); opacity: .9; }
+.log-gutter.ag-6 { background: hsl(var(--ag-6)); opacity: .9; }
+.log-gutter.ag-7 { background: hsl(var(--ag-7)); opacity: .9; }
+.log-gutter.ag-8 { background: hsl(var(--ag-8)); opacity: .9; }
+.log-gutter.ag-9 { background: hsl(var(--ag-9)); opacity: .9; }
+.log-gutter.ag-10 { background: hsl(var(--ag-10)); opacity: .9; }
+.log-gutter.ag-11 { background: hsl(var(--ag-11)); opacity: .9; }
+/* 无 hover 交互（2026-09-03 撤 kin/dim 聚焦与行 hover 背景，用户实测反馈划过闪烁
+   且不需要高亮）：行正常显示，agent 名经行 title tooltip 渐进披露。 */
 

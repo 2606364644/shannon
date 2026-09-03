@@ -46,12 +46,15 @@ function agentTitle(name: string): string {
   return pfx === "[Agent]" ? name : `${pfx} ${name}`;
 }
 
-/** agent 指纹色：chip=agentTitle（AGENT/TOOL/LLM 行归属徽标），色由 LogStream 按
- *  首见顺序从 12 色调色板分配（events.css --ag-0..11）——同屏并发 agent 保证不同色
- *  （≤12，超 12 回绕），SSE 增量/重放分配稳定。并发平级 agent 交错时缩进无深度可依
- *  （2026-09-02 版缩进一级在真实数据流里读不出规律，已撤），归属靠颜色分组、
- *  AGENT start/end 行成为可按色认领的锚点。 */
-function eventChip(e: NdjsonEvent): string | undefined {
+/** agent-scoped 行（AGENT/TOOL/LLM）的归属键：agentTitle 同款字符串，用于
+ *  gutter 指纹色分配（LogStream 按首见顺序从 12 色调色板取 ag-N，同屏并发
+ *  agent 保证不同色，≤12 超 12 回绕，SSE 增量/重放分配稳定）。归属呈现三层
+ *  （2026-09-03 二次返工，撤 ●彩色 chip 文字前缀 + hover 聚焦——彩色长名每行
+ *  重复是文字噪音、鼠标划过全屏 kin/dim 闪烁，用户实测「好奇怪、还没之前的好看、
+ *  hover 不要高亮」）：①左缘色带（gutter=指纹色，同 agent 全行同色带，并发
+ *  交错=色带交错）；②AGENT start/end 行 body 带全名作段落锚点；③TOOL/LLM 行
+ *  hover title 渐进披露 agent 名。 */
+function agentScopeKey(e: NdjsonEvent): string | undefined {
   if (e.type === "AgentEvent" || e.type === "ToolCallEvent" || e.type === "LlmTurnEvent") {
     return agentTitle(e.agent_name);
   }
@@ -81,9 +84,10 @@ function fmtTokens(input?: number, output?: number): string {
 }
 
 /** 单行结构化描述：icon/tag 放固定列对齐，body 是主体，metrics 右对齐拆出。
- *  chip = agentTitle 归属徽标（●+指纹色，AGENT/TOOL/LLM 行，见 eventChip）。
- *  取代旧版 summarize() 的「图标+type+全文」挤一个 nowrap 串导致的列参差。 */
-type RowDesc = { icon: string; tag: string; chip?: string; body: string; metrics?: string };
+ *  取代旧版 summarize() 的「图标+type+全文」挤一个 nowrap 串导致的列参差。
+ *  AGENT start/end 行 body 带全名（段落锚点，gutter 色带的图例）；TOOL/LLM 行
+ *  body 纯内容不重复名字（归属=左缘指纹色带 + hover title，见 agentScopeKey）。 */
+type RowDesc = { icon: string; tag: string; body: string; metrics?: string };
 
 function describe(e: NdjsonEvent): RowDesc {
   switch (e.type) {
@@ -98,34 +102,34 @@ function describe(e: NdjsonEvent): RowDesc {
     }
 
     case "AgentEvent": {
-      const chip = eventChip(e);
+      const who = agentTitle(e.agent_name);
       if (e.event === "start") {
-        return { icon: "▶", tag: "AGENT", chip, body: `started (attempt ${e.attempt})` };
+        return { icon: "▶", tag: "AGENT", body: `${who} — started (attempt ${e.attempt})` };
       }
       if (e.success === false) {
         const err = e.error ? ` — ${e.error}` : "";
         // discovery 补召回降级（非致命）：⚠ + (recall skipped)，区别于 activity 级红 ✗。
         if (isGnDiscoveryAgent(e.agent_name)) {
-          return { icon: "⚠", tag: "AGENT", chip, body: `failed${err} (recall skipped)`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
+          return { icon: "⚠", tag: "AGENT", body: `${who} — failed${err} (recall skipped)`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
         }
-        return { icon: "✗", tag: "AGENT", chip, body: `failed${err}`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
+        return { icon: "✗", tag: "AGENT", body: `${who} — failed${err}`, metrics: e.duration_ms != null ? fmtDuration(e.duration_ms) : undefined };
       }
       const parts: string[] = [];
       if (e.duration_ms != null) parts.push(fmtDuration(e.duration_ms));
       if (e.cost_usd != null) parts.push(fmtCost(e.cost_usd, e.cost_currency));
       const toks = fmtTokens(e.input_tokens, e.output_tokens);
       if (toks) parts.push(toks);
-      return { icon: "✓", tag: "AGENT", chip, body: "Completed", metrics: parts.join(" · ") || undefined };
+      return { icon: "✓", tag: "AGENT", body: `${who} — Completed`, metrics: parts.join(" · ") || undefined };
     }
 
     case "ToolCallEvent": {
       const params = humanizeToolCall(e.tool_name, e.parameters ?? {});
-      return { icon: "↳", tag: "TOOL", chip: eventChip(e), body: `${e.tool_name}${params ? `: ${params}` : ""}` };
+      return { icon: "↳", tag: "TOOL", body: `${e.tool_name}${params ? `: ${params}` : ""}` };
     }
 
     case "LlmTurnEvent": {
       const line = firstNonemptyLine(e.content);
-      return { icon: "›", tag: "LLM", chip: eventChip(e), body: `Turn ${e.turn}${line ? `: ${line}` : ""}` };
+      return { icon: "›", tag: "LLM", body: `Turn ${e.turn}${line ? `: ${line}` : ""}` };
     }
 
     case "GitnexusLlmEvent": {
@@ -217,56 +221,46 @@ const VIRTUAL_THRESHOLD = 500;
 /** 单事件行：固定列网格（色边|时间|图标|标签|主体|metrics）。
  *  - ev-* 色留在行容器（测试 ROW_SELECTOR 不变量）；ts/tag/metrics 降级 muted + normal。
  *  - data-type 保留 type 身份（hover tooltip + 测试 hook），替代旧版裸 type 名文本。
- *  - chip（AGENT/TOOL/LLM 行）：●+agentTitle 指纹色徽标，body 正文不缩进——
- *    并发平级无嵌套深度可依，缩进读不出规律（2026-09-03 撤 2026-09-02 版缩进一级），
- *    归属改由颜色分组：同 agent 的 start/Completed 行与散落的 TOOL/LLM 行同色认领。
- *  - hover 聚焦（归属可追踪）：hover 有 chip 的行 → 同 agent 行 --kin 提亮、其余
- *    --dim 压暗，散落全流的执行线瞬间浮出；hover 无 chip 行/移出容器 → 恢复全流。 */
-function LogRow({ e, chipCls, hoverChip, onHoverChip, style }: {
-  e: NdjsonEvent; chipCls?: string; hoverChip?: string | null;
-  onHoverChip?: (chip: string | null) => void; style?: CSSProperties;
+ *  - gutter：系统行（PHASE/STEP/LOG/…）= 类型色（currentColor）；agent 行
+ *    （AGENT/TOOL/LLM）= 指纹色 class（ag-N）——归属=左缘色带，同 agent 全行
+ *    同色带、并发交错=色带交错，AGENT start/end 行 body 带全名作图例锚点。
+ *  - 无 hover 交互（2026-09-03 撤 kin/dim 聚焦与行 hover 背景）：行正常显示，
+ *    agent 名经 title tooltip 渐进披露。 */
+function LogRow({ e, agentColor, style }: {
+  e: NdjsonEvent; agentColor?: string; style?: CSSProperties;
 }) {
-  const { icon, tag, chip, body, metrics } = describe(e);
-  // hover title 带完整 ts：窄列只显 HH:MM:SS，悬停看完整 "2026-07-31 10:53:53"。
-  const title = [e.ts, chip ? `${chip} ${body}` : body, metrics].filter(Boolean).join("  ");
-  const focusCls = !hoverChip ? "" : chip === hoverChip ? " log-row--kin" : " log-row--dim";
+  const { icon, tag, body, metrics } = describe(e);
+  // hover title 带完整 ts + agent 名：窄列只显 HH:MM:SS，悬停看完整
+  // "2026-07-31 10:53:53" 与归属（TOOL/LLM 行 body 不含名字）。
+  const who = agentScopeKey(e);
+  const title = [e.ts, who ? `${who} · ${body}` : body, metrics].filter(Boolean).join("  ");
   return (
-    <div
-      style={style}
-      className={`log-row ${rowClass(e)}${focusCls}`}
-      data-type={e.type}
-      title={title}
-      onMouseEnter={() => onHoverChip?.(chip ?? null)}
-    >
-      <span className="log-gutter" aria-hidden />
+    <div style={style} className={`log-row ${rowClass(e)}`} data-type={e.type} title={title}>
+      <span className={`log-gutter${agentColor ? ` ${agentColor}` : ""}`} aria-hidden />
       <span className="log-ts">{tsClock(e.ts)}</span>
       <span className="log-icon" aria-hidden>{icon}</span>
       <span className="log-tag">{tag}</span>
-      <span className="log-body">
-        {chip ? <span className={`log-chip ${chipCls ?? "ag-0"}`}>●{chip}</span> : null}
-        {body}
-      </span>
+      <span className="log-body">{body}</span>
       <span className="log-metrics">{metrics ?? ""}</span>
     </div>
   );
 }
 
-/** chip 指纹色分配：agent（chip 文本）按首见顺序从 12 色板取色（ag-0..11，超 12 回绕）。
- *  SSE 增量到达 / 刷新重放同序 → 分配稳定；同屏并发 agent（≤12）保证互不同色。 */
-function assignChipColors(events: NdjsonEvent[]): Map<string, string> {
+/** agent 指纹色分配：agent（scope key）按首见顺序从 12 色板取 gutter 色 class
+ *  （ag-0..11，超 12 回绕）。SSE 增量到达 / 刷新重放同序 → 分配稳定；
+ *  同屏并发 agent（≤12）保证互不同色。 */
+function assignAgentColors(events: NdjsonEvent[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const e of events) {
-    const chip = eventChip(e);
-    if (chip && !m.has(chip)) m.set(chip, `ag-${m.size % 12}`);
+    const key = agentScopeKey(e);
+    if (key && !m.has(key)) m.set(key, `ag-${m.size % 12}`);
   }
   return m;
 }
 
 interface RowListData {
   events: NdjsonEvent[];
-  chipColors: Map<string, string>;
-  hoverChip: string | null;
-  setHoverChip: (chip: string | null) => void;
+  agentColors: Map<string, string>;
 }
 
 function VirtualRow({ index, style, data }: { index: number; style: CSSProperties; data: RowListData }) {
@@ -274,9 +268,7 @@ function VirtualRow({ index, style, data }: { index: number; style: CSSPropertie
   return (
     <LogRow
       e={e}
-      chipCls={data.chipColors.get(eventChip(e) ?? "")}
-      hoverChip={data.hoverChip}
-      onHoverChip={data.setHoverChip}
+      agentColor={data.agentColors.get(agentScopeKey(e) ?? "")}
       style={style}
     />
   );
@@ -286,10 +278,7 @@ export function LogStream({ events, fill }: { events: NdjsonEvent[]; fill?: bool
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<FixedSizeList>(null);
   const virtual = events.length > VIRTUAL_THRESHOLD;
-  const chipColors = useMemo(() => assignChipColors(events), [events]);
-  // hover 聚焦的 agent（chip 文本）：跨滚动保持（hover 后滚轮找同 agent 其它行），
-  // 移出日志容器或 hover 无 chip 行时清除。
-  const [hoverChip, setHoverChip] = useState<string | null>(null);
+  const agentColors = useMemo(() => assignAgentColors(events), [events]);
 
   // react-window FixedSizeList 需要像素高度。测容器内容区高（clientHeight 减 p-2 上下 padding 共 16px），
   // 容器随视口弹性变化时（fill 模式）实时跟随。jsdom 无 ResizeObserver → guard 跳过、回退初值
@@ -330,7 +319,6 @@ export function LogStream({ events, fill }: { events: NdjsonEvent[]; fill?: bool
         virtual ? "overflow-hidden" : "overflow-y-auto"
       }`}
       aria-live="polite"
-      onMouseLeave={() => setHoverChip(null)}
     >
       {virtual ? (
         <FixedSizeList
@@ -339,7 +327,7 @@ export function LogStream({ events, fill }: { events: NdjsonEvent[]; fill?: bool
           width="100%"
           itemCount={events.length}
           itemSize={ROW_HEIGHT}
-          itemData={{ events, chipColors, hoverChip, setHoverChip } satisfies RowListData}
+          itemData={{ events, agentColors } satisfies RowListData}
         >
           {VirtualRow}
         </FixedSizeList>
@@ -348,9 +336,7 @@ export function LogStream({ events, fill }: { events: NdjsonEvent[]; fill?: bool
           <LogRow
             key={i}
             e={e}
-            chipCls={chipColors.get(eventChip(e) ?? "")}
-            hoverChip={hoverChip}
-            onHoverChip={setHoverChip}
+            agentColor={agentColors.get(agentScopeKey(e) ?? "")}
           />
         ))
       )}

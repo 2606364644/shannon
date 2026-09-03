@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -7,7 +7,10 @@ import { apiGet, scanLogsPath, blackboxRunLogsPath } from "../../api/client";
 import { ErrorState } from "../../components/ErrorState";
 import { Empty } from "../../components/Empty";
 import { Skeleton } from "../../components/ui/skeleton";
-import { parseEventTs, fmtLocalFull } from "../../utils/eventTs";
+import { LogStream } from "../../components/LogStream";
+import type { NdjsonEvent } from "../../api/types";
+import { humanizeToolCall, firstNonemptyLine } from "../../state/formatters";
+import { parseEventTs, fmtClock, fmtLocalFull } from "../../utils/eventTs";
 
 // 按行数（而非字符数）判阈值：spec/log-prose 谈论的是行计数，大日志=多行。
 // 5000 行覆盖典型 workflow.log / activity_failures.log（数百~数千行），同时避免
@@ -29,14 +32,19 @@ type LogEv = {
   data?: unknown;
 };
 
-// agent .log 的 data 按事件类型提取摘要；未知形态兜底 JSON（不丢记录）。
-// content/result 截断上限：单行 div 靠 ellipsis 展示，防 read_file 整文件撑爆 DOM。
-const DATA_SNIPPET_LIMIT = 2000;
+// 单行结构化描述（对齐 live 页 LogStream describe 的 icon/tag/类型色语言）：
+// agent .log 五事件类型 + events 风格 message/tool_name 兜底 + 未知形态 JSON。
+// 2026-09-03 重做：旧版「[完整datetime] type + 原始JSON参数/2000字符result」三段
+// 拼接 + 满屏 cyan 底块 = 用户实测「乱」——改 log-row 网格（HH:MM:SS|图标|TAG|body），
+// tool 参数走 humanizeToolCall 人化、snippet 收紧 160（完整内容行 title 披露）。
+type AgentRow = { icon: string; tag: string; cls: string; body: string; metrics?: string };
 
-function snippet(s: unknown): string {
+const SNIPPET_LIMIT = 160;
+
+function snippet(s: unknown, limit: number = SNIPPET_LIMIT): string {
   if (typeof s !== "string") return "";
   const flat = s.replace(/\s+/g, " ").trim();
-  return flat.length > DATA_SNIPPET_LIMIT ? flat.slice(0, DATA_SNIPPET_LIMIT) + " …" : flat;
+  return flat.length > limit ? flat.slice(0, limit) + " …" : flat;
 }
 
 function safeJson(v: unknown): string {
@@ -47,35 +55,42 @@ function safeJson(v: unknown): string {
   }
 }
 
-function describeData(type?: string, data?: unknown): string {
-  if (data == null) return "";
-  if (typeof data !== "object") return snippet(data);
-  const d = data as Record<string, unknown>;
-  switch (type) {
-    case "llm_response":
-      return `t${d.turn ?? "?"} ${snippet(d.content)}`.trim();
-    case "tool_start":
-      return `${String(d.toolName ?? "tool")} ${snippet(safeJson(d.parameters))}`.trim();
-    case "tool_end":
-      return `→ ${snippet(d.result)}`;
-    case "agent_start":
-      return `${String(d.agentName ?? "")} attempt ${String(d.attemptNumber ?? "")}`.trim();
-    case "agent_end": {
-      const st = d.success === true ? "success" : d.success === false ? "failed" : "";
-      return `${st} ${d.duration_ms != null ? `${d.duration_ms}ms` : ""}`.trim();
-    }
-    default:
-      return snippet(safeJson(data));
-  }
+function fmtDur(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-// JSON 行的显示字段：时间戳两种格式都认，内容 message/tool_name（events.ndjson）优先、
-// agent .log 落 describeData(data)。Row 与非虚拟化分支共用，两处渲染保持一致。
-function evDisplay(ev: LogEv): { ts: string; body: string } {
-  return {
-    ts: ev.ts ?? ev.timestamp ?? "",
-    body: ev.message ?? ev.tool_name ?? describeData(ev.type, ev.data),
-  };
+function describeAgentEvent(ev: LogEv): AgentRow {
+  const d = (ev.data && typeof ev.data === "object" ? ev.data : {}) as Record<string, unknown>;
+  switch (ev.type) {
+    case "agent_start":
+      return { icon: "▶", tag: "AGENT", cls: "ev-agent",
+        body: `${String(d.agentName ?? "")} — started (attempt ${String(d.attemptNumber ?? "?")})` };
+    case "agent_end": {
+      const failed = d.success === false;
+      const ms = typeof d.duration_ms === "number" ? d.duration_ms : null;
+      return { icon: failed ? "✗" : "✓", tag: "AGENT", cls: failed ? "ev-agent-fail" : "ev-agent-ok",
+        body: failed ? "failed" : "Completed", metrics: ms != null ? fmtDur(ms) : undefined };
+    }
+    case "llm_response": {
+      const line = firstNonemptyLine(typeof d.content === "string" ? d.content : "");
+      return { icon: "›", tag: "LLM", cls: "ev-llm",
+        body: `Turn ${String(d.turn ?? "?")}${line ? `: ${snippet(line)}` : ""}` };
+    }
+    case "tool_start": {
+      const toolName = String(d.toolName ?? "tool");
+      const params = humanizeToolCall(toolName, d.parameters ?? {});
+      return { icon: "↳", tag: "TOOL", cls: "ev-tool",
+        body: `${toolName}${params ? `: ${params}` : ""}` };
+    }
+    case "tool_end":
+      return { icon: "⇢", tag: "RESULT", cls: "text-muted-foreground", body: `→ ${snippet(d.result)}` };
+    default:
+      // events 风格行（recon.log 等：message/tool_name 直读）+ 未知形态兜底 JSON（不丢记录）
+      if (ev.message) return { icon: "·", tag: "LOG", cls: "ev-info", body: snippet(ev.message) };
+      if (ev.tool_name) return { icon: "↳", tag: "TOOL", cls: "ev-tool", body: ev.tool_name };
+      return { icon: "·", tag: (ev.type ?? "LOG").toUpperCase(), cls: "text-muted-foreground",
+        body: snippet(safeJson(ev.data ?? ev)) };
+  }
 }
 
 // ev.ts -> browser-local full datetime. Raw ts is worker-UTC (or "t1" placeholder
@@ -87,6 +102,31 @@ function fmtEvTs(ts?: string): string {
   return Number.isNaN(ms) ? ts : fmtLocalFull(ms);
 }
 
+// JSON 行 → log-row 网格（与 live 页 LogStream 同 CSS class：3px 色带|HH:MM:SS|图标|
+// TAG|body|metrics）；非 JSON（agent .log 头部 banner / 坏行）→ muted 原文本。
+// 完整时间戳与完整 body 经行 title 渐进披露（窄列 ellipsis 不丢信息）。
+function renderLine(l: string, key: number) {
+  let ev: LogEv | null = null;
+  try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
+  if (!ev || typeof ev !== "object") {
+    return <div key={key} className="text-sm text-muted-foreground">{l}</div>;
+  }
+  const row = describeAgentEvent(ev);
+  const ts = ev.ts ?? ev.timestamp ?? "";
+  const ms = parseEventTs(ts);
+  const title = [fmtEvTs(ts), ev.type, row.body].filter(Boolean).join("  ");
+  return (
+    <div key={key} className={`log-row ${row.cls}`} data-type={ev.type} title={title}>
+      <span className="log-gutter" aria-hidden />
+      <span className="log-ts">{Number.isNaN(ms) ? ts : fmtClock(ms)}</span>
+      <span className="log-icon" aria-hidden>{row.icon}</span>
+      <span className="log-tag">{row.tag}</span>
+      <span className="log-body">{row.body}</span>
+      <span className="log-metrics">{row.metrics ?? ""}</span>
+    </div>
+  );
+}
+
 // Row 提到模块作用域 + memo：避免每次父组件渲染时重新定义 Row，导致 FixedSizeList
 // 重新渲染所有可见行（react-window 用 children 引用相等性判断是否复用行）。
 const Row = memo(function Row({ index, style, data }: {
@@ -94,18 +134,7 @@ const Row = memo(function Row({ index, style, data }: {
   style: CSSProperties;
   data: string[];
 }) {
-  const l = data[index];
-  let ev: LogEv | null = null;
-  try { ev = JSON.parse(l); } catch { /* 非 JSON，按原文本渲染 */ }
-  if (ev) {
-    const { ts, body } = evDisplay(ev);
-    return (
-      <div style={style} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">
-        [{fmtEvTs(ts)}] {ev.type} {body}
-      </div>
-    );
-  }
-  return <div style={style} className="text-sm text-muted-foreground">{l}</div>;
+  return <div style={style}>{renderLine(data[index], index)}</div>;
 });
 
 // react-window 包装：行高 20px，对齐 Task 8 LogStream 同模式（FixedSizeList + itemData）。
@@ -178,12 +207,29 @@ export function LogsTab() {
   // 换轨/换 run 时旧选中文件不在新列表（run 级文件名含 run 前缀），统一清空回选择提示。
   useEffect(() => { setSel(null); }, [effTrack, selectedRun]);
 
-  // JSON 行渲染门：.log（agents/*.log 与 events 风格）+ .ndjson（events.ndjson/
-  // authcheck-events.ndjson 主事件流，行结构与 events 风格同构）；workflow.log 与
-  // activity_failures.log 是人读文本，走 pre 原样。
-  const isJsonl = (sel?.endsWith(".log") || sel?.endsWith(".ndjson"))
+  // 渲染门三分支：.ndjson（events.ndjson/authcheck-events.ndjson 主事件流——行结构
+  // 与 live SSE 同构，直接喂 LogStream，与 live 页同视觉：网格/类型色/agent 色带/
+  // AGENT 锚点/自带虚拟化）；agents/*.log（{type,timestamp,data} JSON 行 + 头部
+  // banner，走 renderLine 网格）；workflow.log 与 activity_failures.log 是人读文本，
+  // 走 pre 原样。
+  const isNdjson = !!sel?.endsWith(".ndjson");
+  const isAgentLog = !!sel?.endsWith(".log")
     && !sel.endsWith("workflow.log") && !sel.endsWith("activity_failures.log");
-  const lines = content.split(/\r?\n/).filter(Boolean);
+  const lines = useMemo(
+    () => (isNdjson || isAgentLog ? content.split(/\r?\n/).filter(Boolean) : []),
+    [content, isNdjson, isAgentLog],
+  );
+  const ndjsonEvents = useMemo(() => {
+    if (!isNdjson) return [] as NdjsonEvent[];
+    // 坏行（非 JSON / 缺 ts+type 骨架）丢弃——LogStream 只吃结构化事件；文件级
+    // 完整性由原始文件兜底。
+    return lines.flatMap((l) => {
+      try {
+        const e = JSON.parse(l) as Record<string, unknown>;
+        return typeof e?.type === "string" && typeof e?.ts === "string" ? [e as unknown as NdjsonEvent] : [];
+      } catch { return []; }
+    });
+  }, [isNdjson, lines]);
   const big = lines.length > VIRTUAL_LINE_THRESHOLD;
 
   // 布局：grid h-full 吃 ScanDetail 的 flex-1 tab 容器（live/logs 走 flex 链），grid-rows-1 让单行撑满，
@@ -225,26 +271,23 @@ export function LogsTab() {
           </button>
         ))}
       </div>
-      <div ref={viewportRef} className="h-full min-h-0 overflow-auto">
+      {/* ndjson 分支右栏切 flex（LogStream fill 需要 flex 父级）；其余分支维持滚动容器 */}
+      <div
+        ref={viewportRef}
+        className={`h-full min-h-0 ${isNdjson && sel && !contentErr ? "flex flex-col overflow-hidden" : "overflow-auto"}`}
+      >
         {!sel && <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.selectHint")}</div>}
         {sel && contentErr && <ErrorState message={contentErr} />}
-        {sel && !contentErr && isJsonl && big ? (
+        {sel && !contentErr && isNdjson && <LogStream events={ndjsonEvents} fill />}
+        {sel && !contentErr && !isNdjson && isAgentLog && big ? (
           <>
             <div className="text-sm text-muted-foreground">{t("workspaceDetail.logs.bigFileHint", { count: lines.length })}</div>
             <VirtualLines lines={lines} height={viewportH} />
           </>
-        ) : sel && !contentErr && isJsonl ? (
-          lines.map((l, i) => {
-            let ev: LogEv | null = null;
-            try { ev = JSON.parse(l); } catch { /* 非 JSON */ }
-            if (ev) {
-              const { ts, body } = evDisplay(ev);
-              return <div key={i} className="border-l-2 border-cyan/40 bg-cyan/10 px-2 font-mono text-xs leading-5 whitespace-nowrap overflow-hidden text-ellipsis">[{fmtEvTs(ts)}] {ev.type} {body}</div>;
-            }
-            return <div key={i} className="text-sm text-muted-foreground">{l}</div>;
-          })
+        ) : sel && !contentErr && !isNdjson && isAgentLog ? (
+          lines.map((l, i) => renderLine(l, i))
         ) : (
-          sel && !contentErr && <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{content}</pre>
+          sel && !contentErr && !isNdjson && !isAgentLog && <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{content}</pre>
         )}
       </div>
     </div>

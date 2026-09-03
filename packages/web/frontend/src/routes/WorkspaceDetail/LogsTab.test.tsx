@@ -184,14 +184,54 @@ describe("LogsTab", () => {
     await waitFor(() => expect(screen.getByText(/The sink is eval\(req\.body\.preTax\)/)).toBeInTheDocument());
     expect(screen.getByText(/grep/)).toBeInTheDocument();
     expect(screen.getByText(/ContributionsHandler/)).toBeInTheDocument();
-    expect(screen.getByText(/success/)).toBeInTheDocument();
+    // 2026-09-03 网格化：agent_end 终态对齐 live 语言（✓ Completed + metrics 时长），
+    // 旧「success 15052ms」dump 串退役
+    expect(screen.getByText(/Completed/)).toBeInTheDocument();
   });
 
-  it("events.ndjson 走 JSON 行渲染（.ndjson 与 .log 同构，非 pre 原样文本）", async () => {
-    // 后端 list_logs 已列顶层 *.ndjson（events.ndjson/authcheck-events.ndjson）。
-    // ndjson 每行正是 {ts, type, message} 结构——走 JSON 行高亮渲染（border-l-2），
-    // 旧实现 isJsonl 只认 .log → ndjson 落 pre 原样文本。
-    const line = JSON.stringify({ ts: "t1", type: "PhaseEvent", message: "phase recon start" });
+  // ─── 2026-09-03 网格化渲染（对齐 live 页视觉语言）───
+  // 旧版「[完整datetime] type + 原始JSON参数/2000字符result」三段拼接 + 满屏 cyan
+  // 底块（.border-l-2 bg-cyan/10）= 用户实测「乱」。新版：log-row 网格（3px 色带|
+  // HH:MM:SS|图标|TAG|body|metrics）+ ev-* 类型色 + humanize 参数 + title 全文披露。
+  it("agent .log 渲染 log-row 网格行：TOOL 行 humanize 参数非原始 JSON，类型色/图标/tag 齐", async () => {
+    const lines = [
+      "========================================",
+      "Agent: gn-discovery-sink-001",
+      JSON.stringify({ type: "tool_start", timestamp: "2026-09-03T02:34:48.177Z", data: { toolName: "read_file", parameters: { path: "app/data/benefits-dao.js", offset: 0, limit: 50 } } }),
+      JSON.stringify({ type: "llm_response", timestamp: "2026-09-03T02:35:11.334Z", data: { turn: 8, content: "Line1\nLine2 first-nonempty wins" } }),
+    ].join("\n");
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.has("file")) return HttpResponse.json({ content: lines });
+        return HttpResponse.json({ files: ["agents/x_gn-discovery-sink-001_attempt-1.log"] });
+      }),
+    );
+    const { container } = renderAt("/p/ws/scans/scan1/logs");
+    fireEvent.click(await screen.findByText(/gn-discovery-sink-001_attempt-1\.log/));
+    await waitFor(() => expect(container.querySelectorAll(".log-row").length).toBe(2));
+    // TOOL 行：humanize 后的参数（formatters 语义），非原始 JSON 串
+    const toolRow = container.querySelector(".log-row.ev-tool");
+    expect(toolRow?.textContent).toContain("read_file");
+    // 人化 = key=value 形式（path=app/...），非原始 JSON 串
+    expect(toolRow?.textContent).toContain("path=app/data/benefits-dao.js");
+    expect(toolRow?.textContent).not.toContain("{\"path\":");
+    // LLM 行：首段非空行胜出（多行 content 只显第一行）
+    const llmRow = container.querySelector(".log-row.ev-llm");
+    expect(llmRow?.textContent).toContain("Turn 8: Line1");
+    expect(llmRow?.textContent).not.toContain("Line2");
+    // banner 头（非 JSON 行）弱化为 muted 文本，不进网格
+    expect(screen.getByText("Agent: gn-discovery-sink-001").className).toContain("text-muted-foreground");
+    // 行 title 披露完整类型（渐进披露通道在）
+    expect(toolRow?.getAttribute("title")).toContain("tool_start");
+  });
+
+  it("events.ndjson 走 LogStream 渲染（与 live 页同组件同视觉，非 pre 原样文本）", async () => {
+    // 后端 list_logs 已列顶层 *.ndjson（events.ndjson/authcheck-events.ndjson）。ndjson
+    // 行结构与 live SSE 同构（{ts, category, type, ...}）——2026-09-03 起直接喂
+    // LogStream：网格/类型色/agent 色带/AGENT 锚点/内置虚拟化与 live 页一致。
+    // 数据仍是落盘静态文件（apiGet），不接 SSE——「同渲染器」≠「变实时流」。
+    const line = JSON.stringify({ ts: "t1", category: "PHASE", type: "PhaseEvent", phase: "recon", event: "start", steps: [], step_intents: [] });
     server.use(
       http.get("/api/workspaces/:ws/scans/:scanId/logs", ({ request }) => {
         const url = new URL(request.url);
@@ -201,9 +241,9 @@ describe("LogsTab", () => {
     );
     const { container } = renderAt("/p/ws/scans/scan1/logs");
     fireEvent.click(await screen.findByText("events.ndjson"));
-    await waitFor(() => expect(screen.getByText(/phase recon start/)).toBeInTheDocument());
-    // JSON 行渲染分支（ev-info 样式 border-l-2），非 pre 原样渲染
-    expect(container.querySelectorAll(".border-l-2").length).toBe(1);
+    // LogStream 渲染分支：log-row 网格行（PhaseEvent → ev-phase），非 pre 原样渲染
+    await waitFor(() => expect(container.querySelectorAll(".log-row").length).toBe(1));
+    expect(container.querySelector(".log-row")?.className).toContain("ev-phase");
     expect(container.querySelector("pre")).toBeNull();
   });
 
