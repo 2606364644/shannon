@@ -95,6 +95,22 @@ def test_collapse_xss_without_sink_call_keeps_strict_no_overmerge():
     out = collapse_gn_entries(gn)
     assert len(out) == 2
 
+def test_extract_endpoint_strips_trailing_punct():
+    # 尾标点：',' 与全角 ')' 都会污染 key / 报告展示
+    assert extract_endpoint("POST /login, -> handler") == "POST /login"
+    assert extract_endpoint("POST /memos) -> x") == "POST /memos"
+    assert extract_endpoint("GET /allocations/:userId?threshold=1 -> x") == "GET /allocations/:userId"
+
+def test_normalize_placeholders():
+    from supernova_core.code_index.gn_collapse import _normalize_placeholders
+    assert _normalize_placeholders("/allocations/:userId") == "/allocations/{userId}"
+    assert _normalize_placeholders("/benefits") == "/benefits"
+    # 保留参数名（:id ≠ :userId，不得归一成同一形）
+    assert _normalize_placeholders("/a/:id") == "/a/{id}"
+    # 不误伤协议串
+    assert ":https" not in _normalize_placeholders("/x?u=https://a.b")
+
+
 def test_collapse_preserves_placement_annotation():
     """builder 透传的 affected_parameters 注记（'preTax (body)'——placement
     显式信号）折叠时保留；affected_entries[].parameter 保持裸名（行内定位

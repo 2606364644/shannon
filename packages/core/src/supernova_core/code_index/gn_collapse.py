@@ -7,6 +7,14 @@ import re
 
 _METHOD_PATH = re.compile(
     r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(/\S*)")
+# 剥尾标点：闭括号/逗号/分号/引号（含全角），URL 合法尾字符（. 数字）不动
+_TRAILING_PUNCT_RE = re.compile(r"[),.;'\"）]+$")
+_PARAM_PLACEHOLDER_RE = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _normalize_placeholders(path: str) -> str:
+    """路由占位符归一：:userId → {userId}（Express :param ↔ OpenAPI {param} 同义路由）。"""
+    return _PARAM_PLACEHOLDER_RE.sub(r"{\1}", path)
 
 def parse_sink_call_site_id(s: str) -> tuple[str | None, str | None]:
     parts = s.split(":")
@@ -26,6 +34,7 @@ def extract_endpoint(path_or_endpoint: str | None) -> str | None:
     if not m:
         return None
     route = m.group(2).split("?", 1)[0].rstrip("/") or "/"
+    route = _TRAILING_PUNCT_RE.sub("", route).rstrip("/") or "/"
     return f"{m.group(1).upper()} {route}"
 
 def extract_param(source: str | None) -> str | None:
