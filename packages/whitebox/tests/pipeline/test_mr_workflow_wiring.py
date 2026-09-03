@@ -66,3 +66,24 @@ def test_filter_flows_none_scope_returns_pgraph_untouched():
     out = filter_flows_by_mr_scope(pgraph, None)
 
     assert out is pgraph            # 无 scope → 原对象直通（全量扫描零开销）
+
+
+def test_incremental_guidance_ignores_scope_products_even_if_mr_meta_polluted():
+    """铁律前瞻锁定（spec §5.2）：mr_meta 将来混入确定性层产物字段（scope/
+    flow/sink 明细）也不得泄漏进 LLM 轨 prompt——guidance 只从 base/head 派生。
+    与 run_vuln_agent 的 suffix 通道（activities 层唯一调用点，产物=
+    build_mr_incremental_guidance(input.mr_meta)）合起来构成全链锁定。"""
+    mr_meta = {
+        "base_commit": "abc1234", "head_commit": "def5678",
+        # ↓ 混入的确定性产物（当前 wiring 不放这些，防将来回归）
+        "verdict_flow_ids": ["flow-a1", "flow-b2"],
+        "selected_vuln_classes": ["xss", "authz"],
+        "new_entry_point_ids": ["app/routes.js:handler:10"],
+        "removed_protections": [{"file_path": "app/utils.js", "kind": "sanitize"}],
+        "verdict_flow_count": 7,
+    }
+    guidance = build_mr_incremental_guidance(mr_meta)
+    assert "abc1234" in guidance and "def5678" in guidance
+    for banned in ("flow-a1", "flow-b2", "xss", "authz", "handler:10",
+                   "utils.js", "sanitize", "verdict_flow_count"):
+        assert banned not in guidance
