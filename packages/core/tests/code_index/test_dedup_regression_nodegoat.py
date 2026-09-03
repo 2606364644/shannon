@@ -113,14 +113,12 @@ def test_xss_login_never_merges_across_files():
 def test_injection_cross_track_keys_intersect():
     """真实 LLM 卡（INJ-VULN-01 CommandInjection 'POST /contributions' eval）
     × 真实 GN sink_call（F6a 生效形态 path 前缀）→ vtype 归一后 key 相交
-    （修前 CommandInjection≠injection 第一维即断，交集 0）。"""
+    （修前 CommandInjection≠injection 第一维即断，交集 0）。
+
+    INJ-VULN-01 的 sink_call 保持 20260826 真实富文本多行号枚举形不规整
+    （'...:32 (preTax)、:33...'）——parse 拒非 GN 形态后自然语言回退归一
+    出 'eval'，与 GN 侧 sink 维可撞（曾规整 workaround 已删，本测试即锁定）。"""
     llm = _load("injection_llm_queue.json", InjectionVulnerability)
-    # 20260826 LLM sink_call 是富文本多行号枚举形（'...:32 (preTax)、:33...'，
-    # 多冒号被 parse_sink_call_site_id 误解析）；spec §1.2 实证（20260903）为
-    # 简单形 'eval() @ ...:32'——按实证形态规整，vtype 维才是本测试标的。
-    for f in llm:
-        if f.ID == "INJ-VULN-01":
-            f.sink_call = "eval() @ app/routes/contributions.js:32"
     gn_raw = _load("injection_gitnexus_queue.json", InjectionVulnerability)
     for f in gn_raw:
         f.path = f"POST /contributions → {f.path}"

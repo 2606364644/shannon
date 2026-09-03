@@ -36,16 +36,25 @@ def _canonical_vtype(vtype: object) -> str:
         return None
     return _VTYPE_CLASS_MAP.get(str(vtype), str(vtype))
 
+def _is_gn_id_parts(parts: list[str]) -> bool:
+    """GN id 形态判定（Spec A：file:caller:callee:line:col，行号为整数）：
+    ≥4 段且倒数第二段（行号）纯数字。LLM 轨 sink_call 富文本形（多行号枚举
+    '...:32 (preTax)、:33...'、含 URL 多冒号）行号段非纯数字——不当 GN id
+    解析（误解析会把 sink key 维变成行号碎片 '32'，跨轨永不相交，20260826
+    实证），让 merger 走自然语言回退归一出真函数名。"""
+    return len(parts) >= 4 and parts[-2].isdigit()
+
 def parse_sink_call_site_id(s: str) -> tuple[str | None, str | None]:
     parts = s.split(":")
-    if len(parts) < 4:
+    if not _is_gn_id_parts(parts):
         return (None, None)
     return (parts[-3], f"{parts[0]}:{parts[-2]}")
 
 def _sink_file(sink_call: str) -> str | None:
-    """sink_call_site_id 的文件段（不含行号）——_unit_key 文件级回退用。"""
+    """sink_call_site_id 的文件段（不含行号）——_unit_key 文件级回退用。
+    与 parse_sink_call_site_id 同口径拒非 GN 形态。"""
     parts = (sink_call or "").split(":")
-    return parts[0] if len(parts) >= 4 else None
+    return parts[0] if _is_gn_id_parts(parts) else None
 
 def extract_endpoint(path_or_endpoint: str | None) -> str | None:
     if not isinstance(path_or_endpoint, str):

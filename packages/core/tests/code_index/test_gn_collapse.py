@@ -18,6 +18,29 @@ def test_parse_sink_call_site_id():
     assert parse_sink_call_site_id(SINK32) == ("eval", "app/routes/contributions.js:32")
     assert parse_sink_call_site_id("short") == (None, None)
 
+def test_parse_sink_call_site_id_rejects_non_gn_rich_text():
+    """LLM 轨 sink_call 富文本形（≥4 段冒号但行号段非纯数字）不得被当 GN id
+    解析——sink 维会变成行号碎片（'32'），跨轨 key 永不相交（20260826 真实
+    形态实证）。拒收 → (None, None) → merger 走自然语言回退归一出真函数名。"""
+    # 多行号枚举形（NodeGoat 20260826 INJ-VULN-01 原文）
+    rich = ("eval() — app/routes/contributions.js:32 (preTax)、"
+            ":33 (afterTax)、:34 (roth)")
+    assert parse_sink_call_site_id(rich) == (None, None)
+    # URL 多冒号形（4 段但倒数第二段非纯数字）
+    assert parse_sink_call_site_id(
+        "get(url) via http://evil.com — a.js:16") == (None, None)
+    # 合法 GN id（Spec A 五段 file:caller:callee:line:col，line 为整数）不受影响
+    assert parse_sink_call_site_id(SINK32) == ("eval", "app/routes/contributions.js:32")
+
+def test_sink_file_rejects_non_gn_rich_text():
+    """_sink_file 与 parse 同口径：非 GN id 形态不给文件段（防富文本前缀
+    'eval() — app/routes/contributions.js' 被当文件名进 _unit_key 回退分支）。"""
+    from supernova_core.code_index.gn_collapse import _sink_file
+    rich = ("eval() — app/routes/contributions.js:32 (preTax)、"
+            ":33 (afterTax)、:34 (roth)")
+    assert _sink_file(rich) is None
+    assert _sink_file(SINK32) == "app/routes/contributions.js"
+
 def test_extract_endpoint_and_param():
     assert extract_endpoint("POST /contributions → preTax -> x") == "POST /contributions"
     assert extract_endpoint("a → GET /login → b") == "GET /login"
