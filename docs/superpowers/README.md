@@ -23,6 +23,7 @@
 - [recon-dual-track-plan](plans/2026-06-24-recon-dual-track-plan.md) / [pre-recon-dual-track-plan](plans/2026-06-24-pre-recon-dual-track-plan.md) — recon/pre-recon 双轨
 - [framework-analyzer-wiring-plan](plans/2026-06-24-framework-analyzer-wiring-plan.md) — 框架分析器接线
 - [dual-track-decoupling](plans/2026-06-27-dual-track-decoupling.md) / [spec](specs/2026-06-27-dual-track-decoupling-design.md) — 拆确定性→LLM 轨 prompt 注入 🔧
+- [dual-track-dedup-mvp](plans/2026-09-03-dual-track-dedup-mvp.md) / [spec](specs/2026-09-03-dual-track-dedup-mvp-design.md) — 双轨去重断裂修复 MVP（vtype/占位符/标点归一 + endpoint 白名单回填 + 观测；NodeGoat 15 条 XSS 实证驱动）📐
 
 ### GitNexus 轨
 - [gitnexus-track-lifecycle-completion](plans/2026-06-27-gitnexus-track-lifecycle-completion.md) / [spec](specs/2026-06-27-gitnexus-track-lifecycle-completion-design.md) — GitNexus 轨生命周期（A1+A4 done，A2/A3/B open）📐
