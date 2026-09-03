@@ -197,6 +197,7 @@ async def build_xss_findings(
             affected_parameters=placement_noted_params(chain, verdict),
             source_detail=verdict.evidence_chain,
             path=path,
+            endpoint=route_label,          # F6a：确定性 join，miss=None（Task 6 回填兜底）
             sink_function=_sink_function_label(chain.sink_call_site_id),
             # spec 2026-08-26 §7 根因修复：回填 sink 全标识——gn_collapse _unit_key
             # 凭它折叠 GN 单元（缺它 15 条参数×行笛卡尔积链一条不折），

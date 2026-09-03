@@ -256,7 +256,7 @@ async def test_build_ssrf_finding_carries_title():
 @pytest.mark.asyncio
 async def test_build_ssrf_entry_points_route_label():
     """O2 前半：join 命中 → source_endpoint 从 FuncBlock 占位变 "METHOD /path"，
-    path 同步带前缀；miss → 两字段保持原样。"""
+    path 同步带前缀；miss → source_endpoint=None（F6a 去 handler-id 兜底）。"""
     pgraph = ParameterPropagationGraph(
         taint_flows=[_flow()], language_coverage=["python"],
     )
@@ -274,10 +274,11 @@ async def test_build_ssrf_entry_points_route_label():
     assert findings[0].source_endpoint == "GET /proxy"
     assert findings[0].path == "GET /proxy → url->fetch(L5)"
 
-    # miss（不传 kwarg）→ FuncBlock id 占位保持
+    # miss（不传 kwarg）→ source_endpoint=None（F6a：不再兜底 FuncBlock id
+    # handler-id 脏值；缺失路由由 F6-B 白名单回填兜底）
     findings = await build_ssrf_findings(pgraph, verdict_agent=_agent(
             '{"verdict":"vulnerable","witness_payload":"http://127.0.0.1:22/",'
             '"evidence_chain":"url->fetch(L5)","mismatch_reason":"no allowlist",'
             '"confidence":"high"}'))
-    assert findings[0].source_endpoint == "app.py:proxy:1"
+    assert findings[0].source_endpoint is None
     assert findings[0].path == "url->fetch(L5)"

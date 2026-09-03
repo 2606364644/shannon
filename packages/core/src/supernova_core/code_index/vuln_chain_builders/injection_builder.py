@@ -93,6 +93,7 @@ async def build_injection_findings(
             # 仍有位置——PoC 参数位不再依赖文本启发式）。
             affected_parameters=placement_noted_params(chain, verdict),
             path=path,
+            endpoint=route_label,          # F6a：确定性 join，miss=None（Task 6 回填兜底）
             sink_call=chain.sink_call_site_id,
             slot_type=_SLOT_LABEL.get(chain.sink_slot, chain.sink_slot),
             concat_occurrences=concat_note or None,

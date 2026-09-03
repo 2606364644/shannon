@@ -72,7 +72,8 @@ async def build_ssrf_findings(
                  if scs is not None and scs.category == SinkCategory.REDIRECT
                  else "URL_Manipulation")
         # O2 前半：join entry_point 路由。source_endpoint 优先写 "METHOD /path"
-        #（原来是 FuncBlock id 占位，对 PoC 层无路由价值）；join miss → 保持占位。
+        #（原来是 FuncBlock id 占位，对 PoC 层无路由价值）；F6a 后 join miss →
+        # None（不再兜底 handler-id 脏值，Task 6 白名单回填兜底）。
         route_label = http_route_label(chain.entry_point_id, entry_points)
         path = (f"{route_label} → {verdict.evidence_chain}"
                 if route_label else verdict.evidence_chain)
@@ -82,7 +83,7 @@ async def build_ssrf_findings(
             externally_exploitable=(verdict.verdict == "vulnerable"),
             confidence=verdict.confidence,
             title=verdict.title,
-            source_endpoint=route_label or chain.entry_point_id,  # best-effort; renderer tolerant
+            source_endpoint=route_label,  # F6a：不再 or chain.entry_point_id（handler-id 脏值）
             vulnerable_parameter=chain.source_param,
             # placement 分层（Agent 判定优先，source_type 确定性兜底——公共
             # placement_noted_params，同 injection/xss builder）。
@@ -96,6 +97,7 @@ async def build_ssrf_findings(
             suggested_exploit_technique=None,
             # Task 2 fields:
             path=path,
+            endpoint=route_label,          # F6a：确定性 join，miss=None（Task 6 回填兜底）
             verdict=verdict.verdict,
             witness_payload=verdict.witness_payload,
             source_track="gitnexus",
