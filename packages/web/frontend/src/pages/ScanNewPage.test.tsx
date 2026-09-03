@@ -1030,3 +1030,109 @@ describe("correlation topology auto flow", () => {
     expect(submittedYaml).toContain("roles:\n      - entrypoint\n      - backend");
   });
 });
+
+describe("ScanNewPage 链接解析（resolve-link 回填，2026-09-03 仓库入口整合 B 段）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  function renderPageFresh(state?: unknown) {
+    return render(
+      <MemoryRouter initialEntries={[state ? { pathname: "/scan/new", state } : "/scan/new"]}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <ScanNewPage />
+        </SWRConfig>
+      </MemoryRouter>,
+    );
+  }
+
+  const REPOS_READY = () =>
+    http.get("/api/workspaces/:ws/repos", () =>
+      HttpResponse.json([
+        { name: "nodegoat", state: "ready", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+      ]),
+    );
+
+  function mockResolve(body: Record<string, unknown>, status = 200) {
+    return http.post("/api/workspaces/:ws/resolve-link", () =>
+      HttpResponse.json(body, { status }));
+  }
+
+  async function resolveLink(url: string) {
+    fireEvent.change(screen.getByTestId("link-url-input"), { target: { value: url } });
+    fireEvent.click(screen.getByTestId("link-resolve-btn"));
+  }
+
+  it("白盒表单粘 MR 链接：自动切到 MR + 回填 refs + 选中仓库", async () => {
+    server.use(
+      REPOS_READY(),
+      mockResolve({ kind: "mr", repo: "nodegoat", base_ref: "main", head_ref: "feature/xss", repo_state: "ready" }),
+    );
+    renderPageFresh();
+    await selectWorkspace("ws1");
+    // 白盒表单（Step2 代码源）内有链接框
+    await waitFor(() => expect(screen.getByTestId("link-url-input")).toBeInTheDocument());
+    await resolveLink("https://gitlab.example.com/nodegoat/-/merge_requests/42");
+    // 自动切类型：MR 表单渲染 + refs 回填 + repo 选中
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
+    expect((screen.getByTestId("mr-head-ref") as HTMLInputElement).value).toBe("feature/xss");
+    await waitFor(() => expect(screen.getByText("nodegoat")).toBeInTheDocument());
+  });
+
+  it("MR 表单粘仓库链接：提示切白盒，不切类型不回填", async () => {
+    server.use(
+      REPOS_READY(),
+      mockResolve({ kind: "repo", repo: "nodegoat", repo_state: "ready" }),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    await resolveLink("https://gitlab.example.com/nodegoat.git");
+    await waitFor(() => expect(screen.getByText("检测到仓库链接，请切换到白盒扫描类型使用")).toBeInTheDocument());
+    // 未切类型（MR 表单仍在）、refs 未回填
+    expect(screen.getByTestId("mr-form")).toBeInTheDocument();
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("");
+  });
+
+  it("解析失败：行内显示后端错误文案，不阻塞手填", async () => {
+    server.use(
+      REPOS_READY(),
+      mockResolve({ detail: "检测到 GitHub PR 链接，暂仅支持 GitLab MR 链接" }, 422),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    await resolveLink("https://github.com/foo/bar/pull/1");
+    await waitFor(() => expect(screen.getByText("检测到 GitHub PR 链接，暂仅支持 GitLab MR 链接")).toBeInTheDocument());
+    // 手填不受影响
+    fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
+  });
+
+  it("cloning：立即选中仓库并显示下载提示，轮询 ready 后提示消失", async () => {
+    // repos 按 repoReady 标志响应（非计数器——mrRepos key 随类型切换激活会重发请求，
+    // 计数器时序不稳：CloneWatch 挂载时可能已拿到 ready，提示一闪而过抓不到）。
+    let repoReady = false;
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "nodegoat", state: repoReady ? "ready" : "cloning", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+        ]),
+      ),
+      mockResolve({ kind: "mr", repo: "nodegoat", base_ref: "main", head_ref: "feature/xss", repo_state: "cloning" }),
+    );
+    renderPageFresh();
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("link-url-input")).toBeInTheDocument());
+    await resolveLink("https://gitlab.example.com/nodegoat/-/merge_requests/42");
+    // 切到 MR + refs 回填 + 仓库已选中（cloning 也立即选中）
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("nodegoat")).toBeInTheDocument());
+    // 下载中提示出现（CloneWatch 轮询中）
+    await waitFor(() => expect(screen.getByText(/正在下载仓库/)).toBeInTheDocument());
+    // 标志翻转 → 下一次轮询（2s 间隔）拉到 ready → 提示消失
+    repoReady = true;
+    await waitFor(() => expect(screen.queryByText(/正在下载仓库/)).toBeNull(), { timeout: 6000 });
+  });
+});

@@ -5,10 +5,13 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { CorrelationTopologyAnalysis, ScanRequest, ScanResponse, Workspace, ScanAuthentication } from "../api/types";
 import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, startCorrelationTopologyAnalysis } from "../api/client";
-import { useRepos } from "../api/useRepos";
 import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { RepoCombobox } from "../components/RepoCombobox";
+import { LinkResolveBox } from "../components/LinkResolveBox";
+import { RepoQuickActions } from "../components/RepoQuickActions";
+import type { ResolveLinkResult } from "../api/types";
+import { useRepos } from "../api/useRepos";
 import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
 import { CorrelationTopologyFields } from "../components/correlation/CorrelationTopologyFields";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
@@ -222,6 +225,31 @@ export function validateAuth(a: AuthFormState, t: TFunction): string | null {
   for (const acc of a.accounts.slice(1)) {
     if (!acc.username.trim() || !acc.password) return t("scan.errors.authAccountIncomplete");
   }
+  return null;
+}
+
+/** 链接解析触发的下载监视（2026-09-03 仓库入口整合 B 段）：resolve-link 返回
+ *  repo_state=cloning 时由页面挂起，轮询 SWR 共享 key ["repos", ws]（两张表单的
+ *  仓库下拉同缓存，refresh 一处全局生效），repo 脱离忙态即停。
+ *
+ *  放页面级而非 LinkResolveBox 内：白盒解析 MR 链接会切到 MR 表单、卸载白盒侧
+ *  组件实例，提示与轮询态不能随之丢失。 */
+const CLONE_POLL_MS = 2000;
+const CLONE_BUSY_STATES = new Set(["cloning", "pulling", "extracting", "empty"]);
+
+function CloneWatch({ workspace, name, onDone }: { workspace: string; name: string; onDone: () => void }) {
+  const { repos, refresh } = useRepos(workspace || undefined);
+  useEffect(() => {
+    const target = repos.find((r) => r.name === name);
+    if (target && !CLONE_BUSY_STATES.has(target.state)) {
+      onDone();
+      return;
+    }
+    const timer = window.setInterval(() => void refresh(), CLONE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [repos, name, refresh, onDone]);
+  // 纯轮询引擎：显示由表单的仓库 state 区承担（MR 表单 cloning 文案 / 白盒 CloneProgress），
+  // 避免两处渲染同一文案。
   return null;
 }
 
@@ -447,6 +475,8 @@ export function ScanNewPage() {
   const { repos: topologyRepos } = useRepos(topologyReposEnabled ? workspace : "");
   // MR 表单仓库下拉（与上面同 ["repos", ws] SWR key——浏览过仓库 tab / 白盒表单后即时填充）
   const { repos: mrRepos } = useRepos(type === "mr" ? workspace : "");
+  // MR 表单选中仓库对象（C 段快捷操作条 + state 显示）
+  const mrSelectedRepo = mrRepos.find((r) => r.name === f.selectedRepo);
   const { scans } = useScans(type === "correlation" ? workspace : "");
   const setAuth = (patch: Partial<AuthFormState>) => setF((prev) => ({ ...prev, auth: { ...prev.auth, ...patch } }));
   const setHost = (patch: Partial<HostFormState>) => setF((prev) => ({ ...prev, host: { ...prev.host, ...patch } }));
@@ -504,6 +534,21 @@ export function ScanNewPage() {
     try { setAnalysis(await cancelCorrelationTopologyAnalysis(workspace, analysisId)); }
     catch (e) { setAnalysisError(e instanceof Error ? e.message : String(e)); }
   };
+  /** 链接解析回填（2026-09-03 仓库入口整合 B 段）：仓库立即选中（cloning 也选中，
+   *  下载提示由页面级 CloneWatch 承担）；MR 链接附 refs 回填，且在非 MR 表单解析到
+   *  MR 时自动切类型（白盒粘 MR 链接 → setType("mr")，refs 已就位）。 */
+  const [pendingClone, setPendingClone] = useState<string | null>(null);
+  const handleLinkResolved = (r: ResolveLinkResult) => {
+    const patch: Partial<FormState> = { selectedRepo: r.repo };
+    if (r.kind === "mr") {
+      patch.mrBaseRef = r.base_ref ?? "";
+      patch.mrHeadRef = r.head_ref ?? "";
+    }
+    set(patch);
+    if (r.repo_state === "cloning") setPendingClone(r.repo);
+    if (r.kind === "mr" && type !== "mr") setType("mr");
+  };
+
   const selectTopologyRepos = (repos: string[]) => {
     setSelectedTopologyRepos(repos);
     setAnalysisId(null); setAnalysis(null); setAnalysisError(null);
@@ -674,6 +719,7 @@ export function ScanNewPage() {
               wsList={wsList}
               onWorkspaceChange={setWorkspace}
               wsLoading={wsLoading}
+              onLinkResolved={handleLinkResolved}
             />
           ) : type === "mr" ? (
             /* MR 增量扫描（spec 2026-09-03 §3.1/§6）：最小表单——工作区 + 仓库 + base/head ref。
@@ -724,6 +770,16 @@ export function ScanNewPage() {
                       linkedLabel={t("repos.linkedBadge")}
                     />
                     {sourceErr && <div className="text-destructive text-xs">{sourceErr}</div>}
+                    {/* 选中仓库的 state 显示 + 快捷操作条（对齐白盒表单：cloning/pulling 进度、
+                        ready 切分支/更新——免跑去仓库页） */}
+                    {f.selectedRepo && mrSelectedRepo && mrSelectedRepo.state !== "ready" && (
+                      mrSelectedRepo.state === "cloning" || mrSelectedRepo.state === "pulling"
+                        ? <div className="text-xs text-muted-foreground">{t("scan.link.cloning", { name: f.selectedRepo })}</div>
+                        : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: mrSelectedRepo.state })}</div>
+                    )}
+                    {mrSelectedRepo?.state === "ready" && (
+                      <RepoQuickActions workspace={workspace} repo={mrSelectedRepo} />
+                    )}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-medium" htmlFor="mr-base-ref">{t("scan.mrBaseRef")}</Label>
@@ -751,6 +807,8 @@ export function ScanNewPage() {
                       </div>
                     </div>
                     {mrRefsErr && <div className="text-destructive text-xs">{mrRefsErr}</div>}
+                    {/* 或直接粘 MR 链接解析回填（仓库链接在此提示切白盒，accepts=["mr"]） */}
+                    <LinkResolveBox workspace={workspace} accepts={["mr"]} onResolved={handleLinkResolved} />
                   </div>
                 )}
               </section>
@@ -817,6 +875,10 @@ export function ScanNewPage() {
               setHost={setHost}
               hostErr={hostErr}
             />
+          )}
+          {/* 链接解析触发的下载提示（表单区末尾——三张表单共用，不随表单切换卸载） */}
+          {pendingClone && (
+            <CloneWatch workspace={workspace} name={pendingClone} onDone={() => setPendingClone(null)} />
           )}
         </div>
 

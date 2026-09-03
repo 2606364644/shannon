@@ -979,6 +979,17 @@ export interface Repo {
   progress?: number | null;
 }
 
+/** 统一链接解析结果（POST /workspaces/{ws}/resolve-link，2026-09-03 仓库入口整合 A 段）：
+ *  kind=mr 附 base_ref/head_ref（GitLab API 查回的 target/source 分支）；
+ *  repo_state=cloning 表示仓库不在工作区、后端已异步触发 clone（前端轮询 repos 至 ready）。 */
+export interface ResolveLinkResult {
+  kind: "mr" | "repo";
+  repo: string;
+  repo_state: "ready" | "cloning";
+  base_ref?: string;
+  head_ref?: string;
+}
+
 export interface RepoDetail extends Repo {
   recent_events?: Array<Record<string, unknown>>;
 }

@@ -11,6 +11,13 @@ from pydantic import BaseModel
 from supernova_web.auth.dependencies import require_admin, workspace_member
 from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
+from supernova_web.components.link_resolver import (
+    GitLabApiError,
+    MrLink,
+    UnsupportedLinkError,
+    classify_url,
+    fetch_merge_request,
+)
 from supernova_web.components.repo_manager import (
     TooManyClones,
     UploadTooLarge,
@@ -27,6 +34,10 @@ class CreateRepoBody(BaseModel):
     commit: str | None = None
     name: str | None = None
     group: str | None = None
+
+
+class ResolveLinkBody(BaseModel):
+    url: str
 
 
 class LinkDirBody(BaseModel):
@@ -55,6 +66,69 @@ async def create_repo(ws: str, body: CreateRepoBody, request: Request,
     except TooManyClones as e:
         raise HTTPException(409, f"并发 clone 上限 {e.limit}")
     return {"name": name}
+
+
+@router.post("/{ws}/resolve-link", status_code=200)
+async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
+                       _: User = Depends(workspace_member)):
+    """统一链接解析（扫描发起页仓库入口整合 A 段，2026-09-03）。
+
+    MR 链接 → 调 GitLab API 回填 base/head refs；仓库链接 → 直接匹配。仓库不在
+    工作区 → 异步触发 clone（rm.clone 内部 create_task，端点不等待）→ repo_state
+    ="cloning"。匹配两级探测：完整 project path 优先，回落扁平名（clone 默认落名）。
+
+    错误语义：422 不识别链接；503 凭据缺失；404 MR 不存在；502 上游 API 失败；
+    409 clone 冲突/并发上限（对齐 create_repo）。
+    """
+    rm = request.app.state.repo_manager
+    try:
+        link = classify_url(body.url)
+    except UnsupportedLinkError as e:
+        raise HTTPException(422, str(e))
+
+    base_ref = head_ref = None
+    if isinstance(link, MrLink):
+        _, token = rm._git._creds_for(ws)
+        if not token:
+            raise HTTPException(503, "未配置 git 凭据（GITLAB_USER/TOKEN），无法解析 MR 链接")
+        try:
+            mr = await fetch_merge_request(link, token)
+        except GitLabApiError as e:
+            if e.http_status == 404:
+                raise HTTPException(404, "MR 不存在或无权限访问")
+            raise HTTPException(502, f"GitLab API 调用失败：{e}")
+        base_ref, head_ref = mr["target_branch"], mr["source_branch"]
+
+    flat_name = link.project.rsplit("/", 1)[-1]
+    matched = None
+    for cand in (link.project, flat_name):
+        if cand and rm.get_repo(ws, cand) is not None:
+            matched = cand
+            break
+
+    repo_state = "ready"
+    if matched is None:
+        # MR 链接的 clone URL 从链接重建（原 URL 含 /-/merge_requests 段不可用）；
+        # branch 用 MR 源分支（clone 即在 head 上），仓库链接用默认分支。
+        clone_url = (f"{link.scheme}://{link.host}/{link.project}"
+                     if isinstance(link, MrLink) else body.url.strip())
+        try:
+            await rm.clone(ws, clone_url, head_ref, None, None, None)
+        except PermissionError:
+            raise HTTPException(503, "未配置 git 凭据（GITLAB_USER/TOKEN）")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        except TooManyClones as e:
+            raise HTTPException(409, f"并发 clone 上限 {e.limit}")
+        matched = flat_name
+        repo_state = "cloning"
+
+    out = {"kind": "mr" if isinstance(link, MrLink) else "repo",
+           "repo": matched, "repo_state": repo_state}
+    if base_ref is not None:
+        out["base_ref"] = base_ref
+        out["head_ref"] = head_ref
+    return out
 
 
 @router.post("/{ws}/repos/link-dir", status_code=200)

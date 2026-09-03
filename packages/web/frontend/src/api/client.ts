@@ -125,6 +125,11 @@ export const createRepo = (
   body: { git_url: string; branch?: string; commit?: string; name?: string; group?: string },
 ) => apiPost<{ name: string }>(`/workspaces/${encWs(ws)}/repos`, body);
 
+/** 统一链接解析（2026-09-03 仓库入口整合 A 段）：仓库/MR 链接 → 匹配工作区仓库
+ *  （不存在则后端异步 clone，repo_state="cloning"）；MR 附 base/head refs。 */
+export const resolveLink = (ws: string, url: string) =>
+  apiPost<import("./types").ResolveLinkResult>(`/workspaces/${encWs(ws)}/resolve-link`, { url });
+
 /** 批量关联父目录下所有 git 仓库。admin-only；返回 {imported, skipped}。 */
 export const linkReposInDir = (ws: string, body: { path: string }) =>
   apiPost<{ imported: { name: string; path: string }[]; skipped: { name?: string; path: string; reason: string }[] }>(

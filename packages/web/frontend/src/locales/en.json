@@ -342,6 +342,8 @@
     },
     "repo": {
       "selectPlaceholder": "Select a repository",
+      "currentBranch": "Current branch",
+      "updateBtn": "Update",
       "addBtn": "+ Add new repository",
       "notReady": "Repository not ready ({{state}})",
       "ungrouped": "Ungrouped",
@@ -638,7 +640,16 @@
     "subtitleMr": "Give base..head diff range; only incremental changes are scanned",
     "mrBaseRef": "Base ref (branch or commit sha)",
     "mrHeadRef": "Head ref (branch or commit sha)",
-    "mrBaseHeadHint": "Only code added/deleted between base and head is analyzed incrementally"
+    "mrBaseHeadHint": "Only code added/deleted between base and head is analyzed incrementally",
+    "link": {
+      "inputLabel": "Or paste a repo / MR link",
+      "placeholder": "https://gitlab.example.com/group/repo/-/merge_requests/123",
+      "resolveBtn": "Resolve",
+      "resolving": "Resolving…",
+      "resolveFailed": "Failed to resolve link",
+      "cloning": "Downloading {{name}}, will be selected automatically when ready",
+      "repoInMrHint": "Repository link detected — switch to the whitebox scan type to use it"
+    }
   },
   "dashboard": {
     "title": "Dashboard",

@@ -7,6 +7,9 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { RepoCombobox } from "./RepoCombobox";
+import { LinkResolveBox } from "./LinkResolveBox";
+import { RepoQuickActions } from "./RepoQuickActions";
+import type { ResolveLinkResult } from "@/api/types";
 import { CredentialRows } from "./auth/CredentialRows";
 import { AddRepoDialog } from "./AddRepoDialog";
 import { CloneProgress } from "./CloneProgress";
@@ -84,6 +87,9 @@ interface Props {
   wsLoading: boolean;
   /** 重跑预填的黑盒复用 scan_id（同 ws）；首帧保留预填值，不被 ws-change 清空 / 默认选最新覆盖。 */
   presetReuseScanId?: string;
+  /** 链接解析回调（2026-09-03 仓库入口整合 B 段）：白盒 Step2 链接框解析成功时上抛——
+   *  页面统一处理回填 repo + MR 链接自动切类型。缺省不渲染链接框。 */
+  onLinkResolved?: (r: ResolveLinkResult) => void;
 }
 
 /** 分组小标题：coral 竖条 eyebrow（复用 settings Section 的视觉语言，适配中文卡内分组——
@@ -774,6 +780,7 @@ export function ScanFormFields({
   onWorkspaceChange,
   wsLoading,
   presetReuseScanId,
+  onLinkResolved,
 }: Props) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -840,7 +847,8 @@ export function ScanFormFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, f.reuseScanId, wbScans, wbLoadedFor, workspace]);
 
-  const selectedRepoState = repos.find((r) => r.name === f.selectedRepo)?.state;
+  const selectedRepoObj = repos.find((r) => r.name === f.selectedRepo);
+  const selectedRepoState = selectedRepoObj?.state;
 
   // —— 共用：仓库选择器（入口已收窄——仅工作区已下载仓库，无本地路径分支） ——
   // ws 未选时不渲染仓库 picker / 添加按钮（listRepos 必须 ws）
@@ -862,8 +870,15 @@ export function ScanFormFields({
           ? <CloneProgress ws={workspace} name={f.selectedRepo} />
           : <div className="text-xs text-destructive">{t("scan.repo.notReady", { state: selectedRepoState })}</div>
       )}
+      {/* C 段（2026-09-03）：ready 仓库的快捷操作条——切分支/更新，免跑去仓库页 */}
+      {selectedRepoObj?.state === "ready" && (
+        <RepoQuickActions workspace={workspace} repo={selectedRepoObj} />
+      )}
       <AddRepoDialog ws={workspace} open={addOpen} onOpenChange={setAddOpen}
         onCreated={(name) => set({ selectedRepo: name })} />
+      {onLinkResolved && (
+        <LinkResolveBox workspace={workspace} onResolved={onLinkResolved} />
+      )}
     </div>
   ) : (
     <div className="text-xs text-muted-foreground">{t("scan.fields.selectWsFirst")}</div>

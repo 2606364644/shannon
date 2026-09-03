@@ -342,6 +342,8 @@
     },
     "repo": {
       "selectPlaceholder": "选择仓库",
+      "currentBranch": "当前分支",
+      "updateBtn": "更新",
       "addBtn": "+ 添加新仓库",
       "notReady": "仓库未就绪（{{state}}）",
       "ungrouped": "未分组",
@@ -638,7 +640,16 @@
     "subtitleMr": "指定 base..head 变更范围，只对增量改动做安全检测",
     "mrBaseRef": "Base 引用（分支名或 commit sha）",
     "mrHeadRef": "Head 引用（分支名或 commit sha）",
-    "mrBaseHeadHint": "仅对 base 到 head 之间的新增/删除代码做增量检测"
+    "mrBaseHeadHint": "仅对 base 到 head 之间的新增/删除代码做增量检测",
+    "link": {
+      "inputLabel": "或直接粘贴仓库 / MR 链接",
+      "placeholder": "https://gitlab.example.com/group/repo/-/merge_requests/123",
+      "resolveBtn": "解析",
+      "resolving": "解析中…",
+      "resolveFailed": "链接解析失败",
+      "cloning": "正在下载仓库 {{name}}，完成后自动选中",
+      "repoInMrHint": "检测到仓库链接，请切换到白盒扫描类型使用"
+    }
   },
   "dashboard": {
     "title": "仪表盘",
