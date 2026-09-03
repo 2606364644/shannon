@@ -12,7 +12,9 @@ import re
 from dataclasses import dataclass
 
 from supernova_core.code_index.gn_collapse import (
+    _TRAILING_PUNCT_RE,
     _canonical_vtype,
+    _normalize_placeholders,
     collapse_gn_entries,
     extract_endpoint,
     parse_sink_call_site_id,
@@ -51,6 +53,8 @@ def _normalize_endpoint(endpoint: object) -> str | None:
     else:
         method, raw_path = "", parts[0]
     path = raw_path.split("?", 1)[0].rstrip("/") or "/"
+    # F1 剥尾标点 + F4 占位符归一：两轨 ':userId'/'{userId}'、尾 ','/')' 同 key
+    path = _normalize_placeholders(_TRAILING_PUNCT_RE.sub("", path)).rstrip("/") or "/"
     return f"{method} {path}".strip()
 
 

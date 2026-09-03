@@ -157,3 +157,32 @@ async def test_attach_mode_garbage_response_falls_back_deterministic():
     out = await enhance_track_parity(merged, client)
     assert [f.ID for f in out] == [f.ID for f in merged]
     assert all(f.merged_from is None for f in out)
+
+
+# --- spec 2026-09-03 §3 F5：0 产出三态观测（无对 / 全中低置信 / 解析失败可区分）---
+
+@pytest.mark.asyncio
+async def test_track_parity_zero_pairs_logged(caplog):
+    """LLM 返回 0 对（空 merge 列表）→ 显式 WARNING（区分「无对」与「全中低置信」）。"""
+    import logging
+    client = _StubClient(['{"merge": []}'])
+    with caplog.at_level(logging.WARNING, logger="supernova_core.services.track_parity"):
+        out = await enhance_track_parity(_merged(), client)
+    assert len(out) == 2  # 无配对应用，两卡原样
+    assert any("track-parity" in r.getMessage() and "0" in r.getMessage()
+               for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_track_parity_all_below_high_logged(caplog):
+    """有对但全 <high 置信（无一对应用）→ 显式 WARNING。"""
+    import logging
+    pairing = json.dumps({"merge": [
+        {"gn_id": "INJ-GN-01", "llm_id": "INJ-VULN-01",
+         "mode": "merge", "confidence": "medium"}]})
+    client = _StubClient([pairing])
+    with caplog.at_level(logging.WARNING, logger="supernova_core.services.track_parity"):
+        out = await enhance_track_parity(_merged(), client)
+    assert len(out) == 2  # medium 不应用
+    assert any("track-parity" in r.getMessage() and "<high>" in r.getMessage()
+               for r in caplog.records)

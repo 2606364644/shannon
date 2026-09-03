@@ -3,7 +3,10 @@
 一条主记录 + affected_entries 入口列表。不同接口绝不合并。"""
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 _METHOD_PATH = re.compile(
     r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(/\S*)")
@@ -126,4 +129,16 @@ def collapse_gn_entries(findings: list) -> list:
                    key=lambda s: SEVERITY_ORDER.get(s, 0))
         data["severity"] = best
         merged.append(type(primary).model_validate(data))
+    # 分叉率体温计（spec 2026-09-03 §3 F5）：endpoint 组占比 vs 文件回退组——
+    # 回退占比高 = http_route_label join miss 多 = endpoint 回填（F6）该上场。
+    n_endpoint = sum(
+        1 for key in order
+        if key[0] != "__strict__" and isinstance(key[1], str)
+        and _METHOD_PATH.match(key[1]))
+    n_fallback = sum(
+        1 for key in order
+        if key[0] != "__strict__" and not (
+            isinstance(key[1], str) and _METHOD_PATH.match(key[1])))
+    logger.info("gn-collapse: %d groups (%d endpoint, %d file-fallback)",
+                len(order), n_endpoint, n_fallback)
     return merged

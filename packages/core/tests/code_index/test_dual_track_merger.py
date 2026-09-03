@@ -728,3 +728,12 @@ def test_llm_same_key_cards_fold_not_dropped():
     # 折叠：一条主卡 + merged_from 挂靠另一条 ID；不吞卡
     assert len(merged) == 1
     assert sorted(getattr(merged[0], "merged_from") or []) == ["L1"]
+
+
+# --- spec 2026-09-03 §3 F4：_normalize_endpoint 占位符风格不敏感 ---
+
+def test_normalize_endpoint_placeholder_agnostic():
+    from supernova_core.code_index.dual_track_merger import _normalize_endpoint
+    assert _normalize_endpoint("GET /allocations/:userId") == \
+           _normalize_endpoint("GET /allocations/{userId}")
+    assert _normalize_endpoint("POST /login,") == "POST /login"

@@ -58,7 +58,16 @@ async def enhance_track_parity(
                 valid_llm_ids={f.ID for f in llm_only},
             )
             if pairs:
+                high = [p for p in pairs if p.confidence == "high"]
+                if not high:
+                    logger.warning(
+                        "track-parity: %d 对 LLM 判定均 <high> 无配对应用 "
+                        "(llm_only=%d gn_only=%d)", len(pairs), len(llm_only), len(gn_only))
                 merged = apply_pairing_merge(merged, pairs)
+            else:
+                logger.warning(
+                    "track-parity: LLM 返回 0 对（解析失败或全被过滤）"
+                    "(llm_only=%d gn_only=%d)", len(llm_only), len(gn_only))
         except Exception as exc:  # noqa: BLE001 — 增强层不阻塞
             logger.warning("track-parity pairing skipped (LLM unavailable): %s", exc)
     return merged
