@@ -70,11 +70,12 @@ def test_fuse_by_id_verified_with_dynamic_evidence():
     assert xss.poc and xss.poc.request.url.endswith("/memos")
 
 
-def test_fuse_untested_and_blackbox_only():
+def test_fuse_not_covered_and_blackbox_only():
+    """匹配不到 → not-covered（2026-09-03 四态拆分：原 untested 升格细分）。"""
     from supernova_core.services.report_fusion import fuse_report_data
     fused = fuse_report_data(_wb_rd(), _bb_rd())
     by_id = {v.id: v for v in fused.vulnerabilities}
-    assert by_id["SSRF-VULN-01"].cross_verification == "untested"
+    assert by_id["SSRF-VULN-01"].cross_verification == "not-covered"
     assert by_id["INJ-VULN-07"].cross_verification == "blackbox-only"
     # verification_gaps：白盒发现黑盒未测
     gaps = [g["vuln_id"] for g in fused.verification_gaps]
@@ -191,3 +192,83 @@ def test_fuse_quick_reference_failed_to_verify_label():
     fused = fuse_report_data(wb, bb)
     assert fused.vulnerabilities[0].cross_verification == "failed-to-verify"
     assert fused.quick_reference[0].verification == "复验失败"
+
+
+# ── 四态拆分（spec 2026-09-03-blackbox-verification-gap-traceability §6）──
+
+def _bb_rd_with_interrupted():
+    """黑盒报告含 interrupted 未验证卡（gaps 成卡产物）。"""
+    from supernova_core.models.report_data import (
+        ReportData, ReportVulnerability, ScanMeta, VulnEvidence,
+    )
+    return ReportData(
+        scan=ScanMeta(id="s1", track="blackbox"),
+        vulnerabilities=[
+            ReportVulnerability(
+                id="XSS-VULN-01", type="xss", severity=None,
+                endpoints=[{"method": "POST", "path": "/memos"}],
+                evidence=VulnEvidence(
+                    verification="dynamic", verdict="interrupted",
+                    notes="agent 未完成验证闭环（登记 0/15）；工具轨迹显示已对该端点发起过请求，未产出结论"),
+            ),
+        ],
+    )
+
+
+def test_fuse_interrupted_card_gets_interrupted_state():
+    """interrupted 黑盒卡匹配白盒卡 → cross=interrupted（不覆盖动态证据/POC），
+    notes 原因传导进融合卡 evidence.notes。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    wb = _wb_rd()
+    fused = fuse_report_data(wb, _bb_rd_with_interrupted())
+    by_id = {v.id: v for v in fused.vulnerabilities}
+    xss = by_id["XSS-VULN-01"]
+    assert xss.cross_verification == "interrupted"
+    # 白盒静态证据保留（黑盒未出结论，无动态证据可覆盖）
+    assert xss.evidence.verification == "static"
+    # 未验证原因传导
+    assert xss.evidence.notes and "登记 0/15" in xss.evidence.notes
+    # gaps 节含真实原因
+    gap = next(g for g in fused.verification_gaps if g["vuln_id"] == "XSS-VULN-01")
+    assert "登记 0/15" in gap["reason"]
+
+
+def test_fuse_not_covered_class_not_run():
+    """类 verdicts 不存在（agent 未跑该类）→ not-covered，reason=黑盒未跑该类。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    wb = _wb_rd()  # SSRF-VULN-01 无黑盒卡
+    fused = fuse_report_data(
+        wb, _bb_rd(),
+        blackbox_class_meta={"xss": {"exists": True, "ids": {"XSS-VULN-01"}}})
+    by_id = {v.id: v for v in fused.vulnerabilities}
+    assert by_id["SSRF-VULN-01"].cross_verification == "not-covered"
+    gap = next(g for g in fused.verification_gaps if g["vuln_id"] == "SSRF-VULN-01")
+    assert "未跑该类" in gap["reason"]
+
+
+def test_fuse_not_covered_out_of_queue():
+    """类跑了但白盒卡不在黑盒验证范围（无卡无 gap）→ not-covered，reason=不在范围。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    wb = _wb_rd()
+    fused = fuse_report_data(
+        wb, _bb_rd(),
+        blackbox_class_meta={
+            "xss": {"exists": True, "ids": {"XSS-VULN-01"}},
+            "ssrf": {"exists": True, "ids": {"SSRF-VULN-99"}},  # 01 不在范围
+        })
+    by_id = {v.id: v for v in fused.vulnerabilities}
+    assert by_id["SSRF-VULN-01"].cross_verification == "not-covered"
+    gap = next(g for g in fused.verification_gaps if g["vuln_id"] == "SSRF-VULN-01")
+    assert "不在黑盒验证范围" in gap["reason"]
+
+
+def test_fuse_summary_counts_four_states():
+    """摘要 narrative 含四态计数（interrupted/not-covered 分列）。"""
+    from supernova_core.services.report_fusion import fuse_report_data
+    fused = fuse_report_data(
+        _wb_rd(), _bb_rd_with_interrupted(),
+        blackbox_class_meta={"xss": {"exists": True, "ids": {"XSS-VULN-01"}}})
+    n = fused.executive_summary.narrative
+    assert "0 个已实证" in n
+    assert "1 个中断未结论" in n
+    assert "1 个未覆盖" in n

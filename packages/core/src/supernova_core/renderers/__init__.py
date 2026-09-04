@@ -127,6 +127,7 @@ def build_gaps(validation, id_to_endpoints, tool_events=None) -> list[dict]:
                 "id": vid,
                 "reason_type": "rejected",
                 "attempted": None,
+                "endpoints": id_to_endpoints.get(vid, []),
                 "detail": f"agent 已登记验证结论但被校验拒收：{rejected_reason[vid]}",
             })
             continue
@@ -143,6 +144,7 @@ def build_gaps(validation, id_to_endpoints, tool_events=None) -> list[dict]:
             "id": vid,
             "reason_type": "unregistered",
             "attempted": attempted,
+            "endpoints": id_to_endpoints.get(vid, []),
             "detail": detail,
         })
     return gaps

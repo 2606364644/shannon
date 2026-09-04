@@ -29,12 +29,15 @@ from supernova_core.services.severity_rules import SEVERITY_ORDER
 logger = logging.getLogger(__name__)
 
 # cross_verification → 速查表 verification 列中文标签（行级承载
-# 「黑盒验证后情况」；failed 类在卡片 evidence.notes 另有失败说明）
+# 「黑盒验证后情况」；failed/interrupted 类在卡片 evidence.notes 另有原因说明）
 _CROSS_LABELS = {
     "verified": "已实证",
     "failed-to-verify": "复验失败",
-    "untested": "未覆盖",
+    "interrupted": "中断未结论",
+    "not-covered": "未覆盖",
     "blackbox-only": "黑盒独有",
+    # 旧值兼容（2026-09-03 四态拆分前的历史 session 产物）
+    "untested": "未覆盖",
 }
 
 
@@ -75,15 +78,19 @@ def _fuse_card(wb: ReportVulnerability, bb: ReportVulnerability,
 def _deterministic_fusion_summary(fused: list[ReportVulnerability],
                                   gaps_count: int) -> ExecutiveSummary:
     verified = sum(1 for v in fused if v.cross_verification == "verified")
+    failed = sum(1 for v in fused if v.cross_verification == "failed-to-verify")
+    interrupted = sum(1 for v in fused if v.cross_verification == "interrupted")
     bb_only = sum(1 for v in fused if v.cross_verification == "blackbox-only")
     sev_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
     ranked = sorted(fused, key=lambda v: -sev_rank.get(v.severity or "medium", 0))
     top_level = ranked[0].severity if ranked else None
     risk = {"critical": "极高", "high": "高", "medium": "中", "low": "低",
             None: "低"}[top_level]
-    narrative = (f"融合报告：白盒发现经黑盒实测交叉验证——{verified} 个已实证"
-                 f"（verified），{gaps_count} 个白盒发现黑盒未覆盖（untested），"
-                 f"{bb_only} 个黑盒独有发现。优先处置 verified 且 critical/high 项。")
+    narrative = (f"融合报告：白盒发现经黑盒实测交叉验证——{verified} 个已实证，"
+                 f"{failed} 个复验失败，{interrupted} 个中断未结论，"
+                 f"{gaps_count - failed - interrupted} 个未覆盖，"
+                 f"{bb_only} 个黑盒独有发现。优先处置已实证（verified）且 "
+                 f"critical/high 项。")
     top_risks = [
         TopRisk(vuln_id=v.id, reason=v.title,
                 priority="P0" if v.severity == "critical" else "P1")
@@ -92,7 +99,8 @@ def _deterministic_fusion_summary(fused: list[ReportVulnerability],
     return ExecutiveSummary(narrative=narrative, risk_level=risk,
                             top_risks=top_risks,
                             remediation_order="先修已实证（verified）高危项，"
-                                              "再补测 untested 缺口。")
+                                              "复验失败项核对 agent 失败原因，"
+                                              "再补测中断/未覆盖缺口。")
 
 
 def _group_by_type(
@@ -156,9 +164,32 @@ def _fusion_quick_reference(
     return rows
 
 
+def _interrupted_card(wb: ReportVulnerability, bb: ReportVulnerability
+                      ) -> ReportVulnerability:
+    """interrupted 融合卡：白盒静态证据保留（黑盒未出结论，无动态证据可覆盖），
+    未验证原因（gaps detail）传导进 evidence.notes（白盒 notes 兜底）。"""
+    evidence = (wb.evidence or VulnEvidence()).model_copy(deep=True)
+    if bb.evidence is not None and bb.evidence.notes:
+        evidence.notes = bb.evidence.notes
+    return wb.model_copy(update={
+        "evidence": evidence,
+        "cross_verification": "interrupted",
+    })
+
+
 def fuse_report_data(whitebox_rd: ReportData, blackbox_rd: ReportData,
-                     llm_fn=None) -> ReportData:
-    """确定性融合（+可选 LLM 叙事增强）。核心交叉验证永不依赖 LLM。"""
+                     llm_fn=None,
+                     blackbox_class_meta: dict[str, dict] | None = None) -> ReportData:
+    """确定性融合（+可选 LLM 叙事增强）。核心交叉验证永不依赖 LLM。
+
+    四态拆分（spec 2026-09-03-blackbox-verification-gap-traceability §6）：
+    verified / failed-to-verify（agent 登记的失败档）/ interrupted（黑盒未验证卡
+    = agent 中断或登记被拒）/ not-covered（黑盒没跑该类或白盒卡不在验证范围）。
+    ``blackbox_class_meta``：{vuln_class: {"exists": bool, "ids": set}}——
+    调用方读各类 ``{vc}_exploit_verdicts.json`` 构造（exists=文件在，
+    ids=accepted∪gaps∪rejected 的 id 集），用于 not-covered 的成因文案；
+    None（旧调用）时匹配不到一律 not-covered（中性文案）。
+    """
     bb_by_id = {v.id: v for v in blackbox_rd.vulnerabilities}
     bb_by_key: dict[tuple[str, str], ReportVulnerability] = {}
     for v in blackbox_rd.vulnerabilities:
@@ -176,16 +207,33 @@ def fuse_report_data(whitebox_rd: ReportData, blackbox_rd: ReportData,
             if key is not None:
                 bb = bb_by_key.get(key)
         if bb is not None:
-            cross = "verified"
-            if (bb.evidence is not None
-                    and bb.evidence.verdict not in (None, "vulnerable", "exploited")):
-                cross = "failed-to-verify"
+            bb_verdict = bb.evidence.verdict if bb.evidence is not None else None
+            if bb_verdict == "interrupted":
+                cross = "interrupted"
+                card = _interrupted_card(wb, bb)
+                reason = (bb.evidence.notes if bb.evidence is not None else None) \
+                    or "黑盒验证中断未出结论"
+            else:
+                cross = "verified"
+                if bb_verdict not in (None, "vulnerable", "exploited"):
+                    cross = "failed-to-verify"
+                card = _fuse_card(wb, bb, cross)
+                reason = f"黑盒实测复验未成功（verdict={bb_verdict}）" \
+                    if cross == "failed-to-verify" else None
             consumed_bb_ids.add(bb.id)
-            fused.append(_fuse_card(wb, bb, cross))
+            fused.append(card)
+            if cross != "verified":
+                gaps.append({"vuln_id": wb.id, "reason": reason})
         else:
-            fused.append(wb.model_copy(update={"cross_verification": "untested"}))
-            gaps.append({"vuln_id": wb.id,
-                         "reason": "白盒发现，黑盒未覆盖（untested）"})
+            fused.append(wb.model_copy(update={"cross_verification": "not-covered"}))
+            class_meta = (blackbox_class_meta or {}).get(wb.type)
+            if class_meta and class_meta.get("exists"):
+                reason = ("白盒发现不在黑盒验证范围（该条未入黑盒队列或未匹配）"
+                          if wb.id in (class_meta.get("ids") or set())
+                          else "白盒发现不在黑盒验证范围（该条未入黑盒队列）")
+            else:
+                reason = "黑盒未跑该类（agent 未启动或 queue 缺失）"
+            gaps.append({"vuln_id": wb.id, "reason": reason})
     for bb in blackbox_rd.vulnerabilities:
         if bb.id not in consumed_bb_ids:
             fused.append(bb.model_copy(

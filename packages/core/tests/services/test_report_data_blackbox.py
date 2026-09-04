@@ -380,3 +380,68 @@ async def test_legacy_string_steps_normalized_into_steps(tmp_path):
     rd2 = await build_blackbox_report_data(d, ScanMeta(id="bb-4", track="blackbox"))
     assert all(v.evidence is not None and v.evidence.steps == []
                for v in rd2.vulnerabilities if v.type == "xss")
+
+
+# ── 验证缺口留痕（spec 2026-09-03-blackbox-verification-gap-traceability §5）──
+
+@pytest.mark.asyncio
+async def test_gaps_become_interrupted_cards(tmp_path):
+    """verdicts payload 的 gaps 逐条成「未验证卡」：verdict=interrupted、
+    notes=detail 原因、endpoints=queue 端点（融合 (type, path) 匹配键）。"""
+    from supernova_core.services.report_data_blackbox import build_blackbox_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    payload = _payload("xss", [_EXPLOITED_VERDICT.__class__(_EXPLOITED_VERDICT)])
+    payload["accepted_ids"] = ["XSS-VULN-01"]
+    payload["verdicts"] = []  # 0 accepted：全缺口形态（xss agent 中断真机复现）
+    payload["gaps"] = [
+        {"id": "XSS-VULN-01", "reason_type": "unregistered", "attempted": True,
+         "endpoints": ["POST /login"],
+         "detail": "agent 未完成验证闭环（登记 0/1）；工具轨迹显示已对该端点发起过请求，未产出结论"},
+        {"id": "XSS-VULN-02", "reason_type": "rejected", "attempted": None,
+         "endpoints": ["POST /signup"],
+         "detail": "agent 已登记验证结论但被校验拒收：L1 schema: exploited.severity Field required"},
+    ]
+    _write_verdicts(tmp_path, "xss", payload, where="intermediate")
+    rd = await build_blackbox_report_data(tmp_path, ScanMeta(id="s", track="blackbox"))
+    by_id = {v.id: v for v in rd.vulnerabilities}
+    assert set(by_id) == {"XSS-VULN-01", "XSS-VULN-02"}
+    g1 = by_id["XSS-VULN-01"]
+    assert g1.evidence.verdict == "interrupted"
+    assert "登记 0/1" in (g1.evidence.notes or "")
+    assert [(e.method, e.path) for e in g1.endpoints] == [("POST", "/login")]
+    g2 = by_id["XSS-VULN-02"]
+    assert g2.evidence.verdict == "interrupted"
+    assert "L1 schema" in (g2.evidence.notes or "")
+    # interrupted 卡不计入 exploited 统计口径（stats 按类计数但非 exploited）
+    assert rd.stats.by_type["xss"].count == 2
+
+
+@pytest.mark.asyncio
+async def test_no_gaps_no_interrupted_cards(tmp_path):
+    """无 gaps 键 / gaps 空 → 无 interrupted 卡（向后兼容旧 payload）。"""
+    from supernova_core.services.report_data_blackbox import build_blackbox_report_data
+    from supernova_core.models.report_data import ScanMeta
+
+    payload = _payload("injection", [_EXPLOITED_VERDICT])
+    _write_verdicts(tmp_path, "injection", payload, where="intermediate")
+    rd = await build_blackbox_report_data(tmp_path, ScanMeta(id="s", track="blackbox"))
+    assert len(rd.vulnerabilities) == 1
+    assert rd.vulnerabilities[0].evidence.verdict == "exploited"
+
+
+@pytest.mark.asyncio
+async def test_build_class_meta_from_verdicts(tmp_path):
+    """verdicts 文件 → {vc: {exists, ids}}（融合层 not-covered 成因判据，
+    spec 2026-09-03 §6：ids = accepted∪gaps∪rejected 全集）。"""
+    from supernova_core.services.report_data_blackbox import build_class_meta
+
+    payload = _payload("injection", [_EXPLOITED_VERDICT])
+    payload["gaps"] = [{"id": "INJ-VULN-02", "reason_type": "rejected",
+                        "attempted": None, "endpoints": [], "detail": "d"}]
+    payload["rejected"] = [{"id": "INJ-VULN-02", "reason": "L1 schema"}]
+    _write_verdicts(tmp_path, "injection", payload, where="intermediate")
+    meta = await build_class_meta(tmp_path)
+    assert meta["injection"]["exists"] is True
+    assert meta["injection"]["ids"] == {"INJ-VULN-01", "INJ-VULN-02"}
+    assert "xss" not in meta  # 文件不存在 → 键缺席（类未跑）

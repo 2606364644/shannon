@@ -98,6 +98,7 @@ async def _generate_fusion_report(repo_path: str, bb_dict: dict) -> None:
     from supernova_core.services import report_data_builder
     from supernova_core.services.report_data_blackbox import (
         build_blackbox_report_data,
+        build_class_meta,
     )
     from supernova_core.services.report_fusion import fuse_report_data
     from supernova_core.services.report_markdown_exporter import (
@@ -115,7 +116,9 @@ async def _generate_fusion_report(repo_path: str, bb_dict: dict) -> None:
     bb_rd = await build_blackbox_report_data(
         run_dir / "deliverables",
         scan_meta.model_copy(update={"track": "blackbox"}))
-    fused = fuse_report_data(wb_rd, bb_rd)
+    # not-covered 成因判据（spec 2026-09-03 §6）：各类 verdicts 存在性 + 验证范围
+    class_meta = await build_class_meta(run_dir / "deliverables")
+    fused = fuse_report_data(wb_rd, bb_rd, blackbox_class_meta=class_meta)
     out_dir = combined_run_dir(scan_dir, run_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     await report_data_builder.write_report_data(

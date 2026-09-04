@@ -210,6 +210,38 @@ def _render_raw_http(req: PocRequest) -> str:
     return "\n".join(lines)
 
 
+def _map_gap(vc: str, gap: dict) -> ReportVulnerability:
+    """验证缺口 → 未验证卡（spec 2026-09-03 §5）。
+
+    verdict="interrupted" + notes=detail（成因/进度/痕迹/rejected 拒因）；
+    endpoints 解析 gap.endpoints（queue 端点描述 "POST /memos" → EndpointEntry，
+    融合层 (type, path) 匹配键的来源）；无动态证据/POC（agent 未出结论，
+    不编造）。severity/confidence 不新造（融合层与白盒卡对齐时用白盒口径）。
+    """
+    endpoints: list[EndpointEntry] = []
+    for desc in gap.get("endpoints") or []:
+        if not isinstance(desc, str) or not desc.strip():
+            continue
+        parts = desc.split()
+        if len(parts) >= 2 and parts[0].isupper():
+            endpoints.append(
+                EndpointEntry(method=parts[0], path=parts[1].split("?")[0]))
+        else:
+            endpoints.append(EndpointEntry(path=desc.split("?")[0]))
+    evidence = VulnEvidence(
+        verification="dynamic",  # 黑盒 run 的产物（虽未出结论，仍属动态验证尝试）
+        verdict="interrupted",
+        notes=str(gap.get("detail") or "") or None,
+    )
+    return ReportVulnerability(
+        id=str(gap.get("id") or f"{vc}-GAP-UNKNOWN"),
+        type=vc,
+        evidence=evidence,
+        endpoints=endpoints,
+        raw=gap,
+    )
+
+
 def _map_verdict(vc: str, verdict: dict) -> ReportVulnerability:
     status = str(verdict.get("status") or "")
     exploited = status == "exploited"
@@ -336,6 +368,10 @@ async def build_blackbox_report_data(
         for verdict in payload.get("verdicts") or []:
             if isinstance(verdict, dict):
                 vulns.append(_map_verdict(vc, verdict))
+        # 验证缺口成卡（spec 2026-09-03 §5）：黑盒报告包含未验证记录 + 原因。
+        for gap in payload.get("gaps") or []:
+            if isinstance(gap, dict):
+                vulns.append(_map_gap(vc, gap))
     return ReportData(
         scan=scan_meta,
         stats=_aggregate_stats(vulns),
@@ -349,6 +385,36 @@ def json_loads_or_none(text: str) -> "dict | None":
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+async def build_class_meta(deliverables_path: "Path | str") -> dict[str, dict]:
+    """各类 verdicts 存在性 + 验证范围 id 集（融合层 not-covered 成因判据，
+    spec 2026-09-03 §6）。
+
+    ``{vc: {"exists": True, "ids": accepted∪gaps∪rejected}}``；文件缺失 → 键缺席
+    （= 该类未跑，agent 未启动或 queue 缺失）。损坏文件 best-effort：ids 取可解析
+    部分。供 ``fuse_report_data(blackbox_class_meta=...)`` 调用方（combined
+    orchestrator / web scan_manager）共用，避免两处各读一遍 verdicts。
+    """
+    from supernova_core.models.agents import ALL_VULN_CLASSES
+
+    deliverables = Path(deliverables_path)
+    meta: dict[str, dict] = {}
+    for vc in ALL_VULN_CLASSES:
+        path = resolve_track_deliverable(
+            deliverables, BLACKBOX_SUBDIR, f"{vc}_exploit_verdicts.json")
+        if not await async_path_exists(path):
+            continue
+        payload = json_loads_or_none(await async_read_file(path)) or {}
+        ids: set[str] = set(payload.get("accepted_ids") or [])
+        for gap in payload.get("gaps") or []:
+            if isinstance(gap, dict) and gap.get("id"):
+                ids.add(str(gap["id"]))
+        for rej in payload.get("rejected") or []:
+            if isinstance(rej, dict) and rej.get("id"):
+                ids.add(str(rej["id"]))
+        meta[vc] = {"exists": True, "ids": ids}
+    return meta
 
 
 # ── scan meta（session.json → ScanMeta）───────────────────────────────────────
