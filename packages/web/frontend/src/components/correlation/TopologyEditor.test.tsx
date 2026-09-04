@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import {
-  addTopologyNode, createTopologyDraft, deleteTopologyEdge, removeTopologyNode, type TopologyDraftState,
+  addTopologyNode, createTopologyDraft, deleteTopologyEdge, removeTopologyNode,
+  setTopologyEdgeEnabled, type TopologyDraftState,
 } from "@/lib/correlation-topology-draft";
 import type { CorrelationTopologyAnalysis } from "@/api/types";
 import { TopologyEditor } from "./TopologyEditor";
@@ -226,6 +227,59 @@ it("缩放条：＋/− 中心步进、百分比回 100%、fit 适配全图且�
   expect(fit.k).toBe(1);
   expect(fit.x).toBeCloseTo((800 - 505) / 2 - 80, 5);
   expect(fit.y).toBeCloseTo((600 - 158) / 2 - 70, 5);
+});
+
+/* ===== 边命中区 ===== */
+
+/** 边 testid 后缀（与组件内 edge.id 清洗规则一致）。 */
+const edgeTid = (id: string) => `topology-edge-${id.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+
+it("边带宽透明命中区：细线（1.5px × 缩放 k 后 <1 屏幕像素）真实浏览器点不中——命中线 ≥12px 且点它即选中边", () => {
+  // jsdom 无几何命中测试，fireEvent 测的是「处理器存在」不是「点得中」；此处锁定
+  // 命中区结构不变量（TopologyGraph.tsx 同款手法：14px 透明线垫底），防回退成裸细线。
+  let current = state();
+  const onState = (next: typeof current) => { current = next; };
+  render(<TopologyEditor state={current} onState={onState} />);
+  const hit = screen.getByTestId(`topology-edge-hit-ai_web-_order_grpc`);
+  expect(hit.tagName.toLowerCase()).toBe("line");
+  expect(hit.getAttribute("stroke")).toBe("transparent");
+  expect(Number(hit.getAttribute("stroke-width"))).toBeGreaterThanOrEqual(12);
+  // 命中线与可见线同坐标（垫在正下方才算命中区）
+  const visible = screen.getByTestId(edgeTid("ai_web-_order_grpc"));
+  ["x1", "y1", "x2", "y2"].forEach((attr) =>
+    expect(hit.getAttribute(attr)).toBe(visible.getAttribute(attr)));
+  // 点命中区 → 选中边（右栏证据展开）
+  fireEvent.click(hit);
+  expect(screen.getByText(/client\.ts:1/)).toBeInTheDocument();
+});
+
+it("disabled 虚线边的命中区为实线透明（虚线间隙 visiblePainted 不响应指针，由命中线兜住）", () => {
+  let current = setTopologyEdgeEnabled(state(), state().draft.edges[0].id, false);
+  render(<TopologyEditor state={current} onState={(next) => { current = next; }} />);
+  const hit = screen.getByTestId(`topology-edge-hit-ai_web-_order_grpc`);
+  expect(hit.getAttribute("stroke-dasharray")).toBeNull();
+  fireEvent.click(hit);
+  expect(screen.getByText(/client\.ts:1/)).toBeInTheDocument();
+});
+
+/* ===== 证据面板解释性包装 ===== */
+
+it("选边证据面板：叙述句（谁通过什么调谁）+ 调用方/接收方分组 + 缺端显式化", () => {
+  // 证据是 agent 摘录的原样源码行（防伪造），不是总结；看懂它靠呈现层翻译——
+  // 叙述句 + 双端角色分组 + 空端显式说明（handler 缺失本身是可信度信息）。
+  render(<TopologyEditor state={state()} onState={() => {}} />);
+  fireEvent.click(screen.getByTestId("topology-edge-ai_web-_order_grpc"));
+  // 叙述句：主谓宾拼出「web 通过 grpc 调用 order」（代替裸 from → to + 散落小字）
+  expect(screen.getByText(/通过 grpc 调用 order|calls order via grpc/i)).toBeInTheDocument();
+  // confidence 徽标（语义色编码，非裸文本）
+  expect(screen.getByTestId("topology-edge-confidence")).toHaveTextContent(/medium/i);
+  // 双端分组标签：调用方（发起）/ 接收方（处理）
+  expect(screen.getByText(/调用方证据|client evidence/i)).toBeInTheDocument();
+  expect(screen.getByText(/接收方证据|handler evidence/i)).toBeInTheDocument();
+  // fixture handler_evidence 为空 → 显式说明（不再静默缺失）
+  expect(screen.getByText(/无服务端证据|no server-side evidence/i)).toBeInTheDocument();
+  // snippet 用代码块呈现（保留原文、mono 视觉框定）
+  expect(screen.getByText("stub").closest("pre,code")).not.toBeNull();
 });
 
 it("缩放态下拖节点：指针坐标逆变换到世界坐标（不随缩放跑偏）", () => {

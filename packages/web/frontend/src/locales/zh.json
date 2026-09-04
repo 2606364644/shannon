@@ -642,7 +642,14 @@
         "zoomIn": "放大",
         "zoomOut": "缩小",
         "zoomReset": "重置缩放至 100%",
-        "zoomFit": "全图适配视口"
+        "zoomFit": "全图适配视口",
+        "edgeCall": "{{from}} 通过 {{protocol}} 调用 {{to}}",
+        "manualEdge": "手动添加",
+        "clientEvidence": "调用方证据",
+        "handlerEvidence": "接收方证据",
+        "noClientEvidence": "无调用方证据（手动添加的边）",
+        "noHandlerEvidence": "无服务端证据——仅凭调用方代码推断",
+        "invalidEvidence": "校验失败"
       },
       "colFrom": "调用方",
       "colTo": "被调用方"

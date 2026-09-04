@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Info, Redo2, Undo2, LayoutGrid, Maximize, Minus, Plus } from "lucide-react";
+import type { CorrelationTopologyEvidence } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -88,6 +89,74 @@ export function fitTransform(
     x: (CANVAS_W - (maxX - minX) * k) / 2 - minX * k,
     y: (CANVAS_H - (maxY - minY) * k) / 2 - minY * k,
   };
+}
+
+/* ===== 证据面板解释性包装 =====
+ * 证据是 agent 摘录的原样源码行（exact source line，后端校验 snippet 真实出现在
+ * 该 file:line——防伪造），不是 agent 总结；「看得懂」由呈现层负责：叙述句 +
+ * 调用方/接收方双端分组 + 空端显式化（handler 缺失本身是可信度信息）。 */
+
+/** confidence → 语义色（StatusBadge 同款 border/text 语言）。 */
+function confidenceClass(c: string): string {
+  switch (c) {
+    case "high":
+      return "border-green/40 text-green";
+    case "medium":
+      return "border-amber/40 text-amber";
+    default:
+      return "border-border text-muted-foreground";
+  }
+}
+
+/** 单条证据：file:line 头 + 原样 snippet 代码块（保留原文不转述）。valid=false
+ *  （snippet 与源码不符，后端打假）标destructive 并透出校验错误。 */
+function EvidenceItem({ ev }: { ev: CorrelationTopologyEvidence }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-0.5">
+      <div className="font-mono text-[11px] text-muted-foreground">
+        {ev.repo}/{ev.file}:{ev.line ?? "?"}
+        {ev.valid === false && (
+          <span className="ml-1 font-sans text-destructive">
+            {t("scan.correlation.topology.invalidEvidence")}
+          </span>
+        )}
+      </div>
+      {ev.snippet && (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 font-mono text-[11px] leading-relaxed text-foreground">
+          {ev.snippet}
+        </pre>
+      )}
+      {ev.valid === false && ev.validation_errors && ev.validation_errors.length > 0 && (
+        <p className="text-[11px] text-destructive">{ev.validation_errors.join("; ")}</p>
+      )}
+    </div>
+  );
+}
+
+/** 一端证据组：方向符号（⇢ 调用方发出 / ⇠ 接收方收到）+ 角色·仓标签；空端显式说明。 */
+function EdgeEvidenceGroup({
+  dir, label, repo, evidence, emptyText,
+}: {
+  dir: "client" | "handler";
+  label: string;
+  repo: string;
+  evidence: CorrelationTopologyEvidence[];
+  emptyText: string;
+}) {
+  return (
+    <div className="space-y-1" data-testid={`topology-evidence-${dir}`}>
+      <div className="font-medium">
+        <span aria-hidden className="mr-1">{dir === "client" ? "⇢" : "⇠"}</span>
+        {label} · <span className="font-mono">{repo}</span>
+      </div>
+      {evidence.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">{emptyText}</p>
+      ) : (
+        evidence.map((ev, i) => <EvidenceItem key={`${ev.repo}-${ev.file}-${i}`} ev={ev} />)
+      )}
+    </div>
+  );
 }
 
 export function TopologyEditor({ state, onState, scans = [], availableRepos, onAddNode, onRemoveNode }: Props) {
@@ -231,13 +300,26 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
             if (!from || !to) return null;
             // 端点按节点相对位置选面向侧（anchorPair）：自由拖放后连线不再横穿节点本体
             const anchors = anchorPair(boxOf(from), boxOf(to));
-            return <line key={edge.id} data-testid={`topology-edge-${edge.id.replace(/[^A-Za-z0-9_-]/g, "_")}`}
-              x1={anchors.from.x} y1={anchors.from.y} x2={anchors.to.x} y2={anchors.to.y}
-              className={`cursor-pointer ${edge.enabled ? (selectedEdgeId === edge.id ? "stroke-primary" : "stroke-muted-foreground") : "stroke-border"}`}
-              strokeWidth={selectedEdgeId === edge.id ? 2.5 : 1.5} strokeDasharray={edge.enabled ? undefined : "4 4"}
-              markerEnd="url(#topology-arrow)" tabIndex={0} role="button" aria-label={`${edge.from} ${edge.protocol} ${edge.to}`}
-              onPointerDown={() => setSelectedEdgeId(edge.id)} onClick={() => setSelectedEdgeId(edge.id)}
-              onKeyDown={(e) => e.key === "Enter" && setSelectedEdgeId(edge.id)} />;
+            // 命中区：可见细线 1.5px × 缩放 k（0.3 时 ≈0.3 屏幕像素）真实浏览器点不中，
+            // 垫一条 14px 透明实线兜住命中（TopologyGraph 同款手法；disabled 边的虚线
+            // 间隙 visiblePainted 不响应指针，也由它兜住）。命中线在前 = 垫在可见线下层。
+            const tid = edge.id.replace(/[^A-Za-z0-9_-]/g, "_");
+            return (
+              <g key={edge.id} className="cursor-pointer" tabIndex={0} role="button"
+                aria-label={`${edge.from} ${edge.protocol} ${edge.to}`}
+                onPointerDown={() => setSelectedEdgeId(edge.id)} onClick={() => setSelectedEdgeId(edge.id)}
+                onKeyDown={(e) => e.key === "Enter" && setSelectedEdgeId(edge.id)}>
+                <title>{`${edge.from} → ${edge.to} · ${edge.protocol}`}</title>
+                <line data-testid={`topology-edge-hit-${tid}`}
+                  x1={anchors.from.x} y1={anchors.from.y} x2={anchors.to.x} y2={anchors.to.y}
+                  stroke="transparent" strokeWidth={14} />
+                <line data-testid={`topology-edge-${tid}`}
+                  x1={anchors.from.x} y1={anchors.from.y} x2={anchors.to.x} y2={anchors.to.y}
+                  className={edge.enabled ? (selectedEdgeId === edge.id ? "stroke-primary" : "stroke-muted-foreground") : "stroke-border"}
+                  strokeWidth={selectedEdgeId === edge.id ? 2.5 : 1.5} strokeDasharray={edge.enabled ? undefined : "4 4"}
+                  markerEnd="url(#topology-arrow)" pointerEvents="none" />
+              </g>
+            );
           })}
           {/* 连线预览：从起点手柄到当前鼠标的虚线，拖线全程可见 */}
           {connectFromNode && connectPos && (
@@ -318,12 +400,25 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
         {/* 右栏证据/覆盖详情：与画布等高内部滚动（原无上限，evidence 多时把编辑区撑长失衡） */}
         <aside className="space-y-3 rounded-lg border border-border bg-card p-3 xl:max-h-[420px] xl:overflow-y-auto" aria-label={t("scan.correlation.topology.details")}>
           {selectedEdge ? (
-            <div className="space-y-2 text-xs">
-              <div className="font-semibold">{selectedEdge.from} → {selectedEdge.to}</div>
-              <div className="text-muted-foreground">
-                {selectedEdge.confidence ?? "unknown"}
-                {selectedEdge.service ? ` · ${selectedEdge.service}` : ""}
-                {selectedEdge.method ? ` · ${selectedEdge.method}` : ""}
+            <div className="space-y-3 text-xs">
+              {/* 叙述句：数据里已有的语义字段拼成人话（谁通过什么调谁），代替裸 from→to + 散落小字 */}
+              <div className="space-y-1">
+                <div className="text-sm font-semibold leading-snug">
+                  {t("scan.correlation.topology.edgeCall", {
+                    from: selectedEdge.from, protocol: selectedEdge.protocol, to: selectedEdge.to,
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                  <span data-testid="topology-edge-confidence"
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${confidenceClass(selectedEdge.confidence ?? "")}`}>
+                    {selectedEdge.confidence ?? t("scan.correlation.topology.manualEdge")}
+                  </span>
+                  {(selectedEdge.service || selectedEdge.method) && (
+                    <span className="font-mono text-[11px]">
+                      {[selectedEdge.service, selectedEdge.method].filter(Boolean).join(".")}
+                    </span>
+                  )}
+                </div>
               </div>
               <label className="block space-y-1">
                 <span className="text-muted-foreground">{t("scan.correlation.protocolLabel")}</span>
@@ -345,13 +440,15 @@ export function TopologyEditor({ state, onState, scans = [], availableRepos, onA
               <Button type="button" variant="outline" size="sm" onClick={() => onState(deleteTopologyEdge(state, selectedEdge.id))}>
                 {t("scan.correlation.topology.deleteEdge")}
               </Button>
-              <div className="space-y-1 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                {[...(selectedEdge.client_evidence ?? []), ...(selectedEdge.handler_evidence ?? [])].map((ev, i) => (
-                  <div key={`${ev.repo}-${ev.file}-${i}`}>
-                    {ev.repo}/{ev.file}:{ev.line ?? "?"} — {ev.snippet}
-                    {ev.valid === false ? ` · invalid: ${ev.validation_errors?.join(", ")}` : ""}
-                  </div>
-                ))}
+              {/* 证据双端分组：⇢ 调用方（from 仓发起）/ ⇠ 接收方（to 仓处理）——
+                  双端对得上才可信，缺哪端一眼可见 */}
+              <div className="space-y-2 border-t border-border pt-2">
+                <EdgeEvidenceGroup dir="client" label={t("scan.correlation.topology.clientEvidence")}
+                  repo={selectedEdge.from} evidence={selectedEdge.client_evidence ?? []}
+                  emptyText={t("scan.correlation.topology.noClientEvidence")} />
+                <EdgeEvidenceGroup dir="handler" label={t("scan.correlation.topology.handlerEvidence")}
+                  repo={selectedEdge.to} evidence={selectedEdge.handler_evidence ?? []}
+                  emptyText={t("scan.correlation.topology.noHandlerEvidence")} />
               </div>
             </div>
           ) : <p className="text-xs text-muted-foreground">{t("scan.correlation.topology.selectEdge")}</p>}

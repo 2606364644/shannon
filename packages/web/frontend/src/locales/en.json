@@ -642,7 +642,14 @@
         "zoomIn": "Zoom in",
         "zoomOut": "Zoom out",
         "zoomReset": "Reset zoom to 100%",
-        "zoomFit": "Fit all services in view"
+        "zoomFit": "Fit all services in view",
+        "edgeCall": "{{from}} calls {{to}} via {{protocol}}",
+        "manualEdge": "manual",
+        "clientEvidence": "Client evidence",
+        "handlerEvidence": "Handler evidence",
+        "noClientEvidence": "No client-side evidence (manually added edge)",
+        "noHandlerEvidence": "No server-side evidence — inferred from client code only",
+        "invalidEvidence": "failed validation"
       },
       "colFrom": "From",
       "colTo": "To"
