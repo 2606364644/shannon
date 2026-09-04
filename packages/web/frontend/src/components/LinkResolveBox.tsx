@@ -36,8 +36,8 @@ export function LinkResolveBox({ workspace, accepts, onResolved, variant = "comp
   const [error, setError] = useState<string | null>(null);
   const hero = variant === "hero";
 
-  async function onResolve() {
-    const trimmed = url.trim();
+  async function onResolve(urlOverride?: string) {
+    const trimmed = (urlOverride ?? url).trim();
     if (!trimmed || resolving) return;
     setResolving(true);
     setError(null);
@@ -53,6 +53,17 @@ export function LinkResolveBox({ workspace, accepts, onResolved, variant = "comp
     } finally {
       setResolving(false);
     }
+  }
+
+  /** 粘贴即解析（2026-09-04）：hero 框文案承诺「贴入链接，自动填好」，但旧实现只在
+   *  Enter/点「解析」时触发——用户贴完等回填、请求从未发出（web 日志零 resolve-link
+   *  实证）。剪贴板是完整 http(s) 链接时立即解析；普通文本走默认粘贴不惊动。 */
+  function onPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text").trim();
+    if (!/^https?:\/\//i.test(text)) return;
+    e.preventDefault();
+    setUrl(text);
+    void onResolve(text);
   }
 
   return (
@@ -75,6 +86,7 @@ export function LinkResolveBox({ workspace, accepts, onResolved, variant = "comp
             data-testid="link-url-input"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void onResolve(); } }}
             placeholder={t("scan.link.placeholder")}
             size={hero ? "default" : "sm"}

@@ -1378,4 +1378,41 @@ describe("ScanNewPage 链接解析（resolve-link 回填，2026-09-03 仓库入�
     repoReady = true;
     await waitFor(() => expect(screen.queryByText(/正在下载仓库/)).toBeNull(), { timeout: 6000 });
   });
+
+  // 粘贴即解析（2026-09-04）：hero 框文案承诺「贴入 MR 链接，自动填好仓库与变更范围」，
+  // 但旧实现只在 Enter/点「解析」时触发——用户贴完等着、请求从未发出（日志零 resolve-link
+  // 实证），表单像「还要手选」。粘贴 http(s) 链接自动触发解析，按钮/Enter 保留兜底。
+  it("MR 表单粘贴 MR 链接：不点按钮，贴上即自动解析回填", async () => {
+    server.use(
+      REPOS_READY(),
+      mockResolve({ kind: "mr", repo: "nodegoat", base_ref: "main", head_ref: "feature/xss", repo_state: "ready" }),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    fireEvent.paste(screen.getByTestId("link-url-input"), {
+      clipboardData: { getData: () => "https://gitlab.example.com/nodegoat/-/merge_requests/42" },
+    });
+    // 未点「解析」按钮即回填 refs + 选中仓库
+    await waitFor(() =>
+      expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main"));
+    expect((screen.getByTestId("mr-head-ref") as HTMLInputElement).value).toBe("feature/xss");
+    await waitFor(() => expect(screen.getByText("nodegoat")).toBeInTheDocument());
+  });
+
+  it("粘贴非链接文本：不自动解析（无 resolve-link 请求），可继续手填", async () => {
+    server.use(REPOS_READY());
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    fireEvent.paste(screen.getByTestId("link-url-input"), {
+      clipboardData: { getData: () => "随便一段笔记，不是链接" },
+    });
+    // 不触发解析：refs 保持空（若意外发请求，msw onUnhandledRequest=error 会炸测试）
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("");
+    fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
+  });
 });
