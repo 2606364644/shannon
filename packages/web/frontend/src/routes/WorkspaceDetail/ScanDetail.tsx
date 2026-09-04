@@ -79,13 +79,22 @@ function segStatusKey(bbPhase: string | null | undefined, segment: "whitebox" | 
 }
 
 function CombinedDetailTimeline({
-  ws, scanId, bbPhase, onRerunDone,
-}: { ws: string; scanId: string; bbPhase?: string | null; onRerunDone: () => void }) {
+  ws, scanId, bbPhase, runGaps, onRerunDone,
+}: {
+  ws: string; scanId: string; bbPhase?: string | null;
+  // 选中 run 的验证缺口信号（scan_manager 落 run session、bb_runs[] 条目透传；
+  // {vulnClass: gapCount}）。completed + 缺口 → 续跑放行（spec 2026-09-03 §7）。
+  runGaps?: Record<string, number> | null;
+  onRerunDone: () => void;
+}) {
   const { t } = useTranslation();
   const [showRerun, setShowRerun] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const blackboxFailed = bbPhase === "failed";
+  const hasVerificationGaps = bbPhase === "completed"
+    && !!runGaps && Object.keys(runGaps).length > 0;
+  const canRerun = blackboxFailed || hasVerificationGaps;
 
   async function doRerun() {
     setBusy(true);
@@ -113,11 +122,18 @@ function CombinedDetailTimeline({
         <span className="font-medium">{t("workspaceDetail.scans.combined.segmentWhitebox")}</span>
         <span className="text-xs text-muted-foreground">{t(segStatusKey(bbPhase, "whitebox"))}</span>
       </div>
-      {/* 黑盒段（+ 失败时续扫按钮）*/}
+      {/* 黑盒段（+ 失败/验证缺口时续跑按钮）*/}
       <div className="flex items-center gap-2 text-sm" data-testid="combined-segment-blackbox">
         <span className="font-medium">{t("workspaceDetail.scans.combined.segmentBlackbox")}</span>
         <span className="text-xs text-muted-foreground">{t(segStatusKey(bbPhase, "blackbox"))}</span>
-        {blackboxFailed && (
+        {hasVerificationGaps && (
+          <span data-testid="run-verification-gaps" className="text-xs text-amber">
+            {t("workspaceDetail.scans.combined.rerunGapsHint", {
+              count: Object.values(runGaps!).reduce((a, b) => a + b, 0),
+            })}
+          </span>
+        )}
+        {canRerun && (
           <Button size="sm" variant="outline" onClick={() => setShowRerun(true)} disabled={busy}>
             <RefreshCw className="size-3.5" /> {t("workspaceDetail.scans.combined.rerunBlackbox")}
           </Button>
@@ -457,7 +473,8 @@ export default function ScanDetail() {
       {isCombined && !isCorrelation && !loading && (
         <div className={isFlexLayout ? "shrink-0" : ""}>
           <CombinedDetailTimeline
-            ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase} onRerunDone={load}
+            ws={workspace!} scanId={scanId!} bbPhase={meta?.bb_phase}
+            runGaps={selectedRunObj?.verification_gaps} onRerunDone={load}
           />
         </div>
       )}

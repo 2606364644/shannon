@@ -920,7 +920,8 @@
         "segStatusDone": "已完成",
         "segStatusPending": "待接力",
         "segStatusFailed": "失败",
-        "segStatusSkipped": "已跳过"
+        "segStatusSkipped": "已跳过",
+        "rerunGapsHint": "有 {{count}} 条验证缺口"
       },
       "progress": {
         "whitebox": "白盒",
@@ -1280,7 +1281,8 @@
       "hideDetails": "收起明细",
       "chainFollowed": "已追链重判",
       "unfollowed": "函数已删 · 未追链（供人审）"
-    }
+    },
+    "verificationGaps": "验证缺口"
   },
   "theme": {
     "toggleAria": "切换主题",

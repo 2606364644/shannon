@@ -920,7 +920,8 @@
         "segStatusDone": "Done",
         "segStatusPending": "Pending",
         "segStatusFailed": "Failed",
-        "segStatusSkipped": "Skipped"
+        "segStatusSkipped": "Skipped",
+        "rerunGapsHint": "{{count}} verification gap(s)"
       },
       "progress": {
         "whitebox": "Whitebox",
@@ -1280,7 +1281,8 @@
       "hideDetails": "Hide details",
       "chainFollowed": "Chains re-judged",
       "unfollowed": "Function deleted · not followed (manual review)"
-    }
+    },
+    "verificationGaps": "Verification gaps"
   },
   "theme": {
     "toggleAria": "Toggle theme",

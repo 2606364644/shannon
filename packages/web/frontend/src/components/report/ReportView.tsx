@@ -7,6 +7,7 @@ import { ExecutiveSummary } from "./ExecutiveSummary";
 import { StatsRow } from "./StatsRow";
 import { MrIncrementalSummary } from "./MrIncrementalSummary";
 import { QuickReferenceTable } from "./QuickReferenceTable";
+import { VerificationGapsSection } from "./VerificationGapsSection";
 import { VulnerabilityCard } from "./VulnerabilityCard";
 import { RichText } from "./RichText";
 import { ReportToc, REPORT_CHAINS_ID } from "./ReportToc";
@@ -140,6 +141,9 @@ export function ReportView({ data }: { data: ReportData }) {
           />
         ))}
       </div>
+      {/* 验证缺口节（spec 2026-09-03 §8）：融合报告卡片区后——哪些没验证成、
+          为什么（中断元数据/端点痕迹/登记被拒拒因/未跑类）。纯白盒无此字段。 */}
+      <VerificationGapsSection gaps={data.verification_gaps} onLocate={locateVuln} />
       {data.attack_chains.length > 0 && (
         <section
           id={REPORT_CHAINS_ID}

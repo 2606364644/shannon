@@ -839,3 +839,20 @@ describe("VulnerabilityCard trigger_source 徽章（MR 来源标注）", () => {
     expect(screen.queryByTestId("trigger-source-badge")).toBeNull();
   });
 });
+
+describe("ReportView 验证缺口节（spec 2026-09-03 §8）", () => {
+  it("verification_gaps 非空 → 渲染缺口节（卡片区后）；缺省 → 不渲染", () => {
+    const withGaps: ReportData = {
+      ...data,
+      verification_gaps: [
+        { vuln_id: "XSS-VULN-01", reason: "agent 未完成验证闭环（登记 0/15）；工具轨迹显示已对该端点发起过请求，未产出结论" },
+      ],
+    };
+    const { rerender } = render(<ReportView data={withGaps} />);
+    expect(screen.getByTestId("verification-gaps-section")).toBeInTheDocument();
+    expect(screen.getByText(/登记 0\/15/)).toBeInTheDocument();
+    // 缺省（纯白盒）：不渲染
+    rerender(<ReportView data={data} />);
+    expect(screen.queryByTestId("verification-gaps-section")).not.toBeInTheDocument();
+  });
+});

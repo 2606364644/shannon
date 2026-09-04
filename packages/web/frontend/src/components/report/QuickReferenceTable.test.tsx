@@ -164,3 +164,28 @@ describe("QuickReferenceTable（漏洞速查表节）", () => {
     }
   });
 });
+
+  it("验证列融合四态：已实证→绿 / 复验失败→红 / 中断未结论→amber / 未覆盖→muted（spec 2026-09-03）", () => {
+    const fused = [
+      { id: "V-1", title: "a", params: [], endpoints: [], severity: "high",
+        verification: "已实证", confidence: "high" },
+      { id: "V-2", title: "b", params: [], endpoints: [], severity: "high",
+        verification: "复验失败", confidence: "high" },
+      { id: "V-3", title: "c", params: [], endpoints: [], severity: "high",
+        verification: "中断未结论", confidence: "high" },
+      { id: "V-4", title: "d", params: [], endpoints: [], severity: "high",
+        verification: "未覆盖", confidence: "high" },
+      { id: "V-5", title: "e", params: [], endpoints: [], severity: "high",
+        verification: "黑盒独有", confidence: "high" },
+      // 旧值兼容：untested 映射未覆盖
+      { id: "V-6", title: "f", params: [], endpoints: [], severity: "high",
+        verification: "untested", confidence: "high" },
+    ] as never[];
+    render(<QuickReferenceTable rows={fused} onLocate={() => {}} />);
+    expect(screen.getByTestId("quick-ref-verification-V-1").className).toContain("text-green");
+    expect(screen.getByTestId("quick-ref-verification-V-2").className).toContain("text-red");
+    expect(screen.getByTestId("quick-ref-verification-V-3").className).toContain("text-amber");
+    expect(screen.getByTestId("quick-ref-verification-V-4").className).toContain("text-muted-foreground");
+    expect(screen.getByTestId("quick-ref-verification-V-5").className).toContain("text-green");
+    expect(screen.getByTestId("quick-ref-verification-V-6").className).toContain("text-muted-foreground");
+  });

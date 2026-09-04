@@ -156,6 +156,9 @@ export interface BlackboxRunSummary {
   // RunFailureBanner 展示原始 verdict（如 "Target unreachable: ..."）。历史 run 无 -> 可选。
   bb_failure_point?: string | null;
   bb_failure_detail?: string | null;
+  // 验证缺口信号（spec 2026-09-03 §7）：{vulnClass: gapCount}——run completed 但
+  // 黑盒 agent 有未出结论条目时由融合收尾写入；续跑守卫据此放行。无缺口 → 缺席。
+  verification_gaps?: Record<string, number>;
 }
 
 export interface ScanSummary {
@@ -549,6 +552,10 @@ export interface ReportData {
   vulnerabilities: ReportVulnerability[];
   attack_chains: Array<{ id: string; steps?: Record<string, unknown>[]; narrative?: string | null }>;
   quick_reference?: QuickReferenceRow[];
+  // 验证缺口清单（spec 2026-09-03-blackbox-verification-gap-traceability）：
+  // 融合报告产 [{vuln_id, reason}]——reason 是真实成因（中断元数据/端点痕迹/
+  // 登记被拒拒因/未跑类）。纯白盒报告无此字段。
+  verification_gaps?: Array<{ vuln_id: string; reason?: string | null }>;
   qa?: ReportQA | null;
   // MR 增量扫描专属（spec 2026-09-03 §6）；全量扫描为 null。
   incremental_summary?: IncrementalSummary | null;

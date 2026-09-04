@@ -182,3 +182,35 @@ describe("ScanDetail 删除单个黑盒 run", () => {
   });
 });
 
+
+describe("验证缺口续跑按钮（spec 2026-09-03-blackbox-verification-gap-traceability §7）", () => {
+  it("bb_phase=completed + latest run 带 verification_gaps → 续跑按钮出现", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json({
+        ...combinedWithRuns, status: "completed", bb_phase: "completed",
+        latest_bb_run: "run-2",
+        bb_runs: [
+          { run_id: "run-1", status: "completed" },
+          { run_id: "run-2", status: "completed", verification_gaps: { xss: 15 } },
+        ],
+      })),
+    );
+    renderDetail();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /续扫黑盒/ })).toBeInTheDocument());
+  });
+
+  it("bb_phase=completed 无缺口 → 不出现续跑按钮（成功 run 不重跑）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/scans/:id", () => HttpResponse.json({
+        ...combinedWithRuns, status: "completed", bb_phase: "completed",
+        bb_runs: [{ run_id: "run-2", status: "completed" }],
+      })),
+    );
+    renderDetail();
+    // 等段状态渲染完成（黑盒段=已完成），再断言按钮缺席
+    await waitFor(() =>
+      expect(screen.getAllByText("已完成").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: /续跑黑盒|续扫黑盒/ })).not.toBeInTheDocument();
+  });
+});

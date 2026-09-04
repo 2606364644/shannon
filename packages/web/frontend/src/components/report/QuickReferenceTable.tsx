@@ -14,6 +14,23 @@ import { SEV_CAP, SEV_PILL, SEV_EDGE } from "@/lib/severity-visual";
 const isDynamicVerification = (v: string | null | undefined) =>
   !!v && (v.includes("动态") || v.toLowerCase().includes("dynamic"));
 
+/** 融合四态验证列语义色（spec 2026-09-03-blackbox-verification-gap-traceability）：
+ *  后端 report_fusion._CROSS_LABELS 值域——已实证/黑盒独有 → 绿（实锤发现）；
+ *  复验失败 → 红（黑盒测了没成，agent 已给原因）；中断未结论 → amber（agent
+ *  中断/登记被拒，需关注）；未覆盖（含旧值 untested）→ muted。单轨报告标签
+ *  （已动态验证/动态实测等）经 isDynamicVerification 兜进绿。 */
+const verificationToneClass = (v: string | null | undefined): string => {
+  if (!v) return "text-muted-foreground";
+  if (v.includes("复验失败")) return "text-red";
+  if (v.includes("中断未结论") || v.toLowerCase().includes("interrupted")) {
+    return "text-amber";
+  }
+  if (v.includes("已实证") || v.includes("黑盒独有") || isDynamicVerification(v)) {
+    return "text-green";
+  }
+  return "text-muted-foreground"; // 未覆盖 / untested / 未知
+};
+
 /** 置信度待复核判定（QA 风险信号，amber 弱提示）：zh 待复核/未判定、en
  *  Pending Review / Unadjudicated（report_assembler._confidence_cell 值域）。 */
 const isReviewFlagged = (v: string | null | undefined) =>
@@ -123,7 +140,7 @@ export function QuickReferenceTable({
                   </td>
                   <td
                     data-testid={`quick-ref-verification-${r.id}`}
-                    className={`${cellCls} whitespace-nowrap ${isDynamicVerification(r.verification) ? "text-green" : "text-muted-foreground"}`}
+                    className={`${cellCls} whitespace-nowrap ${verificationToneClass(r.verification)}`}
                   >
                     {r.verification ?? "—"}
                   </td>
