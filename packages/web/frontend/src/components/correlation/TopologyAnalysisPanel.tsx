@@ -18,32 +18,48 @@ interface Props {
   onManual: () => void;
 }
 
-/** 过程日志行前缀/配色（与 tool-audit 事件类型一一对应）。 */
-function lineStyle(line: TopologyAuditLine): { mark: string; cls: string } {
+/** 过程日志行 → log-row 网格描述（icon/tag/body/类型色），与 tool-audit 事件类型一一对应。
+ *  对齐扫描 live 页 LogStream 的行语言（events.css .log-row + ev-* 语义色）：三处日志框
+ *  （live / 跨仓关联 / 认证测试）统一视觉——tool_start=ToolCallEvent（↳ TOOL ev-tool）、
+ *  assistant_turn=LlmTurnEvent（› LLM ev-llm）、error=ErrorEvent（✗ ERROR ev-error）、
+ *  tool_end 对齐 LogsTab 的 ⇢ RESULT muted 分支。 */
+function lineDesc(line: TopologyAuditLine): { icon: string; tag: string; cls: string; body: string } {
   switch (line.type) {
-    case "tool_start": return { mark: "▶", cls: "text-foreground" };
-    case "tool_end": return { mark: "✓", cls: "text-muted-foreground" };
-    case "assistant_turn": return { mark: "●", cls: "text-sky-600 dark:text-sky-400" };
-    case "error": return { mark: "✗", cls: "text-destructive" };
-    default: return { mark: "·", cls: "text-muted-foreground" };
+    case "tool_start":
+      return { icon: "↳", tag: "TOOL", cls: "ev-tool",
+        body: `${line.tool ?? "tool"}${line.summary ? `: ${line.summary}` : ""}` };
+    case "tool_end":
+      return { icon: "⇢", tag: "RESULT", cls: "text-muted-foreground", body: `→ ${line.summary}` };
+    case "assistant_turn":
+      return { icon: "›", tag: "LLM", cls: "ev-llm", body: line.summary };
+    case "error":
+      return { icon: "✗", tag: "ERROR", cls: "ev-error", body: line.summary };
+    default:
+      return { icon: "·", tag: "LOG", cls: "text-muted-foreground", body: line.summary };
   }
 }
 
+// 行渲染走与 live 页 LogStream 同款 CSS class（log-gutter|log-ts|log-icon|log-tag|log-body|
+// log-metrics），非自拼串——固定列网格免列参差；窄列 ellipsis，行 title 渐进披露完整 ts+内容。
 function AuditLineRow({ line }: { line: TopologyAuditLine }) {
-  const { mark, cls } = lineStyle(line);
+  const d = lineDesc(line);
   const epoch = parseEventTs(line.ts);
-  const clock = Number.isNaN(epoch) ? "" : fmtClock(epoch);
+  const clock = Number.isNaN(epoch) ? (line.ts ?? "") : fmtClock(epoch);
+  const title = [line.ts, line.tool, line.summary].filter(Boolean).join("  ");
   return (
-    <div className="whitespace-nowrap truncate">
-      {clock && <span className="text-muted-foreground/70">{clock} </span>}
-      <span className={cls}>{mark} </span>
-      {line.tool && <span className="font-semibold">{line.tool} </span>}
-      <span className={cls}>{line.summary}</span>
+    <div className={`log-row ${d.cls}`} data-type={line.type} title={title}>
+      <span className="log-gutter" aria-hidden />
+      <span className="log-ts">{clock}</span>
+      <span className="log-icon" aria-hidden>{d.icon}</span>
+      <span className="log-tag">{d.tag}</span>
+      <span className="log-body">{d.body}</span>
+      <span className="log-metrics" />
     </div>
   );
 }
 
-/** 过程日志尾窗：近底自动跟随（用户上翻查看历史时不拽回），新行到达才滚。 */
+/** 过程日志尾窗：近底自动跟随（用户上翻查看历史时不拽回），新行到达才滚。
+ *  容器与 live 页 LogStream 同款（rounded border bg-background p-2 font-mono text-xs）。 */
 function AuditTrail({ lines, dropped }: { lines: TopologyAuditLine[]; dropped?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const lastNo = lines.length ? lines[lines.length - 1].no : -1;
@@ -55,7 +71,7 @@ function AuditTrail({ lines, dropped }: { lines: TopologyAuditLine[]; dropped?: 
   }, [lastNo]);
   return (
     <div ref={ref}
-      className="h-40 overflow-y-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] leading-5">
+      className="h-40 overflow-y-auto rounded-md border border-border bg-background p-2 font-mono text-xs">
       {dropped ? (
         <div className="text-muted-foreground/60">… {dropped} ↑</div>
       ) : null}
