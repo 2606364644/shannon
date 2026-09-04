@@ -309,3 +309,62 @@ async def test_injection_exploit_writes_verdicts_json(monkeypatch, tmp_path):
     assert "INJ-VULN-01" in payload["accepted_ids"]
     exploited = [v for v in payload["verdicts"] if v.get("status") == "exploited"]
     assert len(exploited) == 1
+
+
+@pytest.mark.asyncio
+async def test_exploit_verdicts_payload_carries_agent_run_and_gaps(monkeypatch, tmp_path):
+    """verdicts.json 含 agent_run 元数据 + gaps 端点痕迹（spec 2026-09-03 §4）。
+
+    executor 包装 tool_audit_logger 缓冲 tool_start 轨迹；未登记条目的 attempted
+    由轨迹判定（curl 过该端点 → True）。agent_run 来自 result 元数据透传。
+    """
+    from supernova_core.agents import executor as exec_mod
+    from supernova_core.models.agents import AgentName
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    deliverables = tmp_path / "deliverables"
+    queue_root = tmp_path / "whitebox-root"
+    (queue_root / "whitebox").mkdir(parents=True)
+    (queue_root / "whitebox" / "injection_exploitation_queue.json").write_text(json.dumps(
+        {"vulnerabilities": [
+            {"ID": "INJ-VULN-01", "vulnerability_type": "SQLi",
+             "externally_exploitable": True, "confidence": "high",
+             "endpoint": "POST /contributions"},
+            {"ID": "INJ-VULN-02", "vulnerability_type": "SQLi",
+             "externally_exploitable": True, "confidence": "high",
+             "endpoint": "POST /memos"}]}))
+
+    async def fake_run(**kw):
+        collector = kw.get("collector")
+        if collector is not None:
+            collector.append_section("add_exploit", {
+                "vulnerability_id": "INJ-VULN-01", "status": "exploited",
+                "severity": "critical", "impact": "i",
+                "exploitation_steps": ["s"], "proof_of_impact": "p"})
+        # provider 层轨迹：调 tool_audit_logger 记 bash curl（INJ-02 端点 /memos）
+        tal = kw.get("tool_audit_logger")
+        await tal.log_tool_start("bash", {
+            "command": "curl -s -X POST 'http://h:4000/memos' -d x=y"})
+        return FakeResult(structured_output=None)
+
+    monkeypatch.setattr(exec_mod, "run_claude_prompt", fake_run)
+    executor = _patch_executor_env(monkeypatch, tmp_path)
+
+    await executor.execute(
+        agent_name=AgentName.INJECTION_EXPLOIT,
+        repo_path=str(repo),
+        deliverables_path=str(deliverables),
+        queue_root=str(queue_root),
+    )
+
+    verdicts_file = deliverables / "blackbox" / "intermediate" / "injection_exploit_verdicts.json"
+    payload = json.loads(verdicts_file.read_text(encoding="utf-8"))
+    # agent_run：result 元数据透传
+    assert payload["agent_run"]["turns"] == 3
+    assert payload["agent_run"]["success"] is True
+    assert payload["agent_run"]["stop_reason"] == "end_turn"
+    # gaps：INJ-VULN-02 未登记但轨迹打过 /memos → unregistered + attempted=True
+    gaps = {g["id"]: g for g in payload["gaps"]}
+    assert gaps["INJ-VULN-02"]["reason_type"] == "unregistered"
+    assert gaps["INJ-VULN-02"]["attempted"] is True

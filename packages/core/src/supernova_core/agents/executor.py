@@ -356,6 +356,11 @@ class AgentExecutor:
         start_time = time.monotonic()
         # 每次 execute 新建 sink（不跨次串账）；provider cancel 分支写入已花值。
         self.usage_sink = UsageSink()
+        # 轨迹缓冲（spec 2026-09-03 验证缺口留痕）：包装审计 logger 无损收集
+        # tool_start 原始参数，落盘 verdicts.json 时读 tool_events 做端点痕迹匹配。
+        from supernova_core.agents.tool_audit_logger import BufferingToolAuditLogger
+
+        trace_logger = BufferingToolAuditLogger(tool_audit_logger)
         result = await run_claude_prompt(
             prompt=prompt,
             repo_path=str(repo),
@@ -364,7 +369,7 @@ class AgentExecutor:
             deliverables_subdir=str(deliverables.relative_to(repo)) if deliverables.is_relative_to(repo) else None,
             structured_output_schema=structured_output_schema,
             audit_logger=audit_logger,
-            tool_audit_logger=tool_audit_logger,
+            tool_audit_logger=trace_logger,
             max_turns=max_turns,
             collector=collector,
             progress=progress,
@@ -593,7 +598,16 @@ class AgentExecutor:
 
                 vc = agent_name.value.removesuffix("-exploit")
                 payload = build_exploit_verdicts_payload(
-                    vc, collector.get_all(), deliverables, queue_root=queue_root)
+                    vc, collector.get_all(), deliverables, queue_root=queue_root,
+                    agent_run={
+                        "turns": int(getattr(result, "turns", 0) or 0),
+                        "duration_ms": int(getattr(result, "duration", 0) or 0),
+                        "success": bool(getattr(result, "success", False)),
+                        "stop_reason": getattr(result, "stop_reason", None),
+                        "error": getattr(result, "error", None),
+                    },
+                    tool_events=trace_logger.tool_events,
+                )
                 # tiering：verdicts 是机器交接数据 → blackbox/intermediate/（evidence
                 # 同桶，机器数据下沉子层）。读方走 resolve_track_deliverable 三级链。
                 atomic_write_json(
