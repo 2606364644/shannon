@@ -32,6 +32,18 @@ RUN npm install -g --prefix=/usr --ignore-scripts --registry=https://mirrors.clo
     && node "$(npm root -g --prefix=/usr)/gitnexus/node_modules/@ladybugdb/core/install.js" \
     && gitnexus --version
 
+# ── LadybugDB fts 扩展 bake（GitNexus 全文检索）──
+# GitNexus 1.6.8 的 FTS 是 LadybugDB(DuckDB 内核)可选扩展；MCP 只读查询路径硬编码
+# load-only 策略（lbug-adapter.js: readOnly -> policy 'load-only'，env auto 对它无效），
+# 扩展未预装即打 "FTS extension unavailable ... continuing without FTS features" 降级。
+# build 时 INSTALL 落盘 ~/.lbdb/extension/<lbug版本>/<arch>/fts/，运行时 LOAD-only 直接命中。
+# --verify-only 是上游官方设计的 Docker build-time gate：以新进程走运行时 LOAD 路径验证，
+# HOME/extension 目录不匹配或 @ladybugdb/core 升级换版本目录(0.17.0)时 build 期爆、
+# 而非运行时静默降级。size 参数脚本无默认（对齐 lbug-config.js 默认 16GB=17179869184）。
+RUN LBDB_EXT="$(npm root -g --prefix=/usr)/gitnexus/scripts/install-duckdb-extension.mjs" \
+    && node "$LBDB_EXT" fts 17179869184 \
+    && node "$LBDB_EXT" fts 17179869184 --verify-only
+
 # ── agent-browser（黑盒默认 browser 引擎）──
 # 不跑 agent-browser install：它下载 Chrome for Testing，无 linux/arm64 build → ARM64 必失败。
 # 改用上方 apt 装的系统 chromium，运行时经 AGENT_BROWSER_EXECUTABLE_PATH env 指定（见下 ENV）。

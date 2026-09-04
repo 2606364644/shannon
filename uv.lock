@@ -1455,6 +1455,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "supernova-core" },
+    { name = "supernova-multi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1467,6 +1468,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "supernova-core", editable = "packages/core" },
+    { name = "supernova-multi", editable = "packages/multi" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
 
