@@ -253,7 +253,7 @@ function CloneWatch({ workspace, name, onDone }: { workspace: string; name: stri
 }
 
 export interface FormState {
-  /** 仓库代码源（白盒必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
+  /** 扫描仓库（白盒必选）。入口已收窄——仅工作区已下载仓库，无本地路径。 */
   selectedRepo: string;
   /** 白盒=组合扫描目标 URL；correlation=黑盒验证 gateway URL（CorrelationFormFields 的
    *  gatewayUrl 即此字段，避免新 state）。可选——空则纯白盒 / 纯关联。 */
@@ -747,7 +747,7 @@ export function ScanNewPage() {
             </section>
           )}
 
-          {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 代码源 并排铺满，③ 满宽；
+          {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 仓库 并排铺满，③ 满宽；
               跨仓关联默认自动拓扑，也保留手工表单/YAML。 */}
           {type === "whitebox" ? (
             <ScanFormFields
@@ -767,7 +767,7 @@ export function ScanNewPage() {
             />
           ) : type === "mr" ? (
             /* MR 增量扫描（spec 2026-09-03 §3.1/§6；2026-09-04 布局重排）：
-               ① 工作区 + 代码源 两列并排（对齐白盒布局语言；IA 不变量：repo 按 ws
+               ① 工作区 + 仓库 两列并排（对齐白盒布局语言；IA 不变量：repo 按 ws
                隔离，选仓前必须先选 ws）→ ② MR 链接导入（hero 粘贴框，贴链接自动回填
                仓库 + refs）→ ③ 变更范围区间控件（base⟷head 一体 + swap + 就绪摘要）。
                必须在 corrMode === "auto" 判断之前（corrMode 初始恒 "auto"，否则 mr 会
@@ -799,7 +799,7 @@ export function ScanNewPage() {
                     )}
                   </div>
                 </section>
-                {/* ①b 代码源：repo 复用 RepoCombobox（与白盒/跨仓同一选择器）+
+                {/* ①b 仓库：repo 复用 RepoCombobox（与白盒/跨仓同一选择器）+
                     state 显示 + 快捷操作条（cloning/pulling 进度、ready 切分支/更新）。 */}
                 <section className="space-y-2">
                   <GroupLabel>{t("scan.steps.source")}</GroupLabel>

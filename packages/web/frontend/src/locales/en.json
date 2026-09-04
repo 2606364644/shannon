@@ -375,13 +375,13 @@
       "selectRefs": "Fill in both base and head refs"
     },
     "title": "New Scan",
-    "subtitleWhitebox": "Select a code source to start a whitebox security audit",
+    "subtitleWhitebox": "Select a repository to start a whitebox security audit",
     "subtitleBlackbox": "Launch a blackbox penetration test against a running target",
     "submitBlackbox": "Start Pentest",
     "footerHintWhitebox": "⌘+Enter to submit",
     "footerHintBlackbox": "Verify the target URL before submitting",
     "steps": {
-      "source": "Code Source",
+      "source": "Repository",
       "targetService": "Target Service",
       "codeContext": "Code Context",
       "workspace": "Workspace",

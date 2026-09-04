@@ -925,14 +925,14 @@ export function ScanFormFields({
     setProfileRefresh((n) => n + 1);
   };
 
-  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 代码源（仅仓库）→ Step 3 黑盒组合（可选）——
+  // —— 白盒布局：Step 1 工作区（容器，解锁 repo）→ Step 2 仓库 → Step 3 黑盒组合（可选）——
   // 白盒已去动态（recon 固定静态，见 f2c64c8b）——纯离线源码审计；web_url 仅留作后端兼容签名。
   // Task 9：Step 3「同时发起黑盒扫描」组合开关——开 → 展开 URL 输入 + 共享 AuthFields。
   // IA 不变量：repo 列表按 ws 隔离（listRepos(workspace)），故「选工作区」必须在「选仓库」之上。
   if (type === "whitebox") {
     return (
       <div className="flex flex-col gap-3.5">
-        {/* 宽屏 ① 工作区 / ② 代码源 并排双栏铺满卡宽（替代旧 ScanNewPage max-w-2xl 左贴致满宽卡右半空洞）；
+        {/* 宽屏 ① 工作区 / ② 仓库 并排双栏铺满卡宽（替代旧 ScanNewPage max-w-2xl 左贴致满宽卡右半空洞）；
             窄屏(<lg)回落 2 步纵向堆叠 → 3 步顺序 ①②③ 移动端零回归。StepGroup 本体不动。 */}
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
           <StepGroup step={1} title={t("scan.steps.workspace")}>

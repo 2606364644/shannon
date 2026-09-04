@@ -77,7 +77,7 @@ async function selectWorkspace(name: string) {
   await selectOption("选择 workspace", name);
 }
 
-// RepoCombobox 在某 StepGroup 内：白盒 Step2="代码源"。
+// RepoCombobox 在某 StepGroup 内：白盒 Step2="仓库"。
 // ws Select 在另一个 StepGroup（"工作区"）——按 step 标题 scope 避开它。
 function repoComboboxIn(stepTitle: string) {
   const step = screen.getByText(stepTitle).closest<HTMLElement>(".rounded-lg")!;
@@ -103,7 +103,7 @@ async function fillValidRepo() {
   );
   await selectWorkspace("ws1");
   await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-  await selectRepoOption("代码源", /foo/);
+  await selectRepoOption("仓库", /foo/);
 }
 
 describe("ScanNewPage", () => {
@@ -274,7 +274,7 @@ describe("ScanNewPage", () => {
     // 选 ws1 → listRepos(ws1) 拉到 foo → 仓库 combobox 显选中短名 foo
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoComboboxIn("代码源")).toHaveTextContent("foo"),
+      expect(repoComboboxIn("仓库")).toHaveTextContent("foo"),
     );
     // 白盒去动态（无 URL 输入）→ 选 ws + 预选 repo 即 enabled，直接提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
@@ -302,7 +302,7 @@ describe("ScanNewPage", () => {
     // 先选 ws1 → repo picker 出现 → 手选 bar
     await selectWorkspace("ws1");
     await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-    await selectRepoOption("代码源", /bar/);
+    await selectRepoOption("仓库", /bar/);
     // 白盒去动态（无 URL 输入）→ 选 ws + repo 即 enabled
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
@@ -325,7 +325,7 @@ describe("ScanNewPage", () => {
     renderPage("/scan/new?repo=wip");
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoComboboxIn("代码源")).toHaveTextContent("wip"),
+      expect(repoComboboxIn("仓库")).toHaveTextContent("wip"),
     );
     // 状态=cloning → CloneProgress 渲染"clone 中"
     await waitFor(() => expect(screen.getByText(/clone 中/)).toBeInTheDocument());
@@ -342,7 +342,7 @@ describe("ScanNewPage", () => {
     renderPage("/scan/new?repo=broken");
     await selectWorkspace("ws1");
     await waitFor(() =>
-      expect(repoComboboxIn("代码源")).toHaveTextContent("broken"),
+      expect(repoComboboxIn("仓库")).toHaveTextContent("broken"),
     );
     expect(screen.getByText(/仓库未就绪/)).toBeInTheDocument();
   });
@@ -358,7 +358,7 @@ describe("ScanNewPage", () => {
     renderPage();
     await selectWorkspace("ws1");
     await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-    await selectRepoOption("代码源", /foo/);
+    await selectRepoOption("仓库", /foo/);
     // 白盒已去动态（recon 固定静态）→ 无 URL 输入框，选 ws + repo 即可提交
     await waitFor(() => expect(screen.getByRole("button", { name: /开始扫描/ })).toBeEnabled());
   });
@@ -413,8 +413,8 @@ describe("ScanNewPage 重跑预填（location.state）", () => {
     renderPage("/scan/new", { type: "blackbox", workspace: "ws1" });
     // PageHeader subtitle 为白盒（黑盒文案已不可达）
     expect(screen.getByText(/启动一次白盒安全审计/)).toBeInTheDocument();
-    // 白盒表单（代码源步骤）在；黑盒 url 输入与跨仓表单不在
-    expect(screen.getByText("代码源")).toBeInTheDocument();
+    // 白盒表单（仓库步骤）在；黑盒 url 输入与跨仓表单不在
+    expect(screen.getByText("仓库")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/http:\/\/example\.com/)).toBeNull();
     expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
   });
@@ -475,15 +475,15 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
     expect(screen.getByRole("button", { name: /YAML 配置/ })).toBeInTheDocument();
     expect(screen.queryByLabelText("YAML 编辑器")).toBeNull(); // 默认收起
     expect(screen.getByText("选择 workspace")).toBeInTheDocument();
-    // 白盒表单（代码源步骤）不再渲染
-    expect(screen.queryByText("代码源")).toBeNull();
+    // 白盒表单（仓库步骤）不再渲染
+    expect(screen.queryByText("仓库")).toBeNull();
     // 选 ws → 仓库卡片区解锁（添加仓库入口出现）
     await selectWorkspace("ws1");
     await waitFor(() => expect(screen.getByRole("button", { name: "+ 添加仓库" })).toBeInTheDocument());
     // 切回白盒 → 跨仓表单消失
     fireEvent.click(screen.getByRole("button", { name: "白盒扫描" }));
     expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
-    expect(screen.getByText("代码源")).toBeInTheDocument();
+    expect(screen.getByText("仓库")).toBeInTheDocument();
   });
 
   it("提交 correlation body 含 config_content + workspace", async () => {
@@ -1109,7 +1109,7 @@ describe("ScanNewPage 链接解析（resolve-link 回填，2026-09-03 仓库入�
     );
     renderPageFresh();
     await selectWorkspace("ws1");
-    // 白盒表单（Step2 代码源）内有链接框
+    // 白盒表单（Step2 仓库）内有链接框
     await waitFor(() => expect(screen.getByTestId("link-url-input")).toBeInTheDocument());
     await resolveLink("https://gitlab.example.com/nodegoat/-/merge_requests/42");
     // 自动切类型：MR 表单渲染 + refs 回填 + repo 选中

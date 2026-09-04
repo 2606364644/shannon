@@ -375,13 +375,13 @@
       "selectRefs": "请填写 base 与 head 引用"
     },
     "title": "新建扫描",
-    "subtitleWhitebox": "选择代码源，启动一次白盒安全审计",
+    "subtitleWhitebox": "选择仓库，启动一次白盒安全审计",
     "subtitleBlackbox": "对运行中的目标服务发起黑盒渗透测试",
     "submitBlackbox": "开始渗透",
     "footerHintWhitebox": "⌘+Enter 快速提交",
     "footerHintBlackbox": "确认目标 URL 正确后提交",
     "steps": {
-      "source": "代码源",
+      "source": "仓库",
       "targetService": "目标服务",
       "codeContext": "代码上下文",
       "workspace": "工作区",

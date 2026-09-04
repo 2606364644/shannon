@@ -92,7 +92,7 @@ async function fillValidRepo() {
   );
   await selectWorkspace("ws1");
   await waitFor(() => screen.getByRole("button", { name: /\+ 添加新仓库/ }));
-  await selectRepoOption("代码源", /foo/);
+  await selectRepoOption("仓库", /foo/);
 }
 
 // === buildBody 纯函数：组合开关决定是否附 url + 认证 ===
