@@ -476,13 +476,7 @@
     },
     "correlation": {
       "subtitle": "Chain calls across repositories and run a cross-repo correlation analysis",
-      "submit": "Start correlation scan",
       "footerHint": "Configure the multi-repo topology, then submit",
-      "mode": {
-        "group": "Build method",
-        "autoDesc": "Analyze source of the selected repositories to infer the call topology",
-        "manualDesc": "Set role, source and relations per repository by hand"
-      },
       "reposSection": "Repositories & services",
       "addRepo": "+ Add repository",
       "reposEmptyHint": "No repositories yet — add the first service with “+ Add repository” above",
@@ -498,18 +492,13 @@
       "removeRepo": "Remove repository",
       "selectRepoFirst": "Select a repository first",
       "reuseEmpty": "No whitebox scan for this repository yet",
-      "relationsTitle": "Call relations",
-      "relationsEmpty": "No relations yet — adding a backend repository links it to the entrypoint automatically",
-      "relationsHint": "Edit complex topologies in YAML",
       "gatewayTitle": "Blackbox verification",
       "gatewayLabel": "Gateway URL",
       "gatewayPlaceholder": "http://gateway.example.com",
       "gatewayHint": "When set, a blackbox verification runs against the entrypoint after correlation (optional)",
-      "yamlToggle": "YAML configuration",
       "yamlSyncHint": "Synced with topology in real time",
       "yamlErrorKeepGraph": "Topology keeps its last valid state until this is fixed",
       "yamlEditor": "YAML editor",
-      "applyYaml": "Apply to form",
       "loadError": "Failed to load correlation detail: {{error}}",
       "pending": "Correlation phase in progress / not started",
       "pendingHint": "The correlation phase has not produced topology artifacts yet; this view fills in as the scan progresses.",
@@ -589,7 +578,6 @@
         "start": "Analyze relationships",
         "retry": "Analyze again",
         "cancel": "Cancel analysis",
-        "manual": "Manual mode",
         "cache": "Cache reused",
         "failed": "Analysis failed; switch to manual mode",
         "noReadyRepos": "No ready repositories in this workspace",
@@ -607,14 +595,12 @@
           "cancelled": "Cancelled",
           "interrupted": "Interrupted"
         },
-        "selectRepos": "Select repositories",
-        "autoMode": "Automatic topology",
-        "manualMode": "Manual mode",
         "submit": "Start cross-repo scan",
         "hint": "Select at least two ready repositories. Analysis is read-only and must be confirmed before scan submission.",
         "history": {
           "title": "Analysis history"
-        }
+        },
+        "sectionTitle": "Auto analysis (optional)"
       },
       "topology": {
         "editor": "Candidate topology editor",
@@ -652,7 +638,18 @@
         "invalidEvidence": "failed validation"
       },
       "colFrom": "From",
-      "colTo": "To"
+      "colTo": "To",
+      "view": {
+        "graph": "Graph",
+        "form": "Form",
+        "yaml": "YAML",
+        "dotError": "Has errors to fix",
+        "dotUnconfirmed": "Topology unconfirmed"
+      },
+      "graphEmptyTitle": "No topology yet — start from any view, the other two update live",
+      "graphEmptyAnalyze": "Analyze repository source",
+      "graphEmptyForm": "Build by hand in the form",
+      "graphEmptyYaml": "Paste YAML config"
     },
     "subtitleMr": "Give base..head diff range; only incremental changes are scanned",
     "mrBaseHeadHint": "Only code added/deleted between base and head is analyzed incrementally",

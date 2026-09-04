@@ -3,11 +3,10 @@ import type { CorrelationTopologyAnalysis } from "@/api/types";
 import { CorrelationTopologyAnalysisPanel } from "./TopologyAnalysisPanel";
 
 const baseHandlers = {
-  onStart: vi.fn(), onRetry: vi.fn(), onCancel: vi.fn(), onManual: vi.fn(),
+  onStart: vi.fn(), onRetry: vi.fn(), onCancel: vi.fn(),
 };
 
-it("shows status, cost, cache and manual fallback", () => {
-  const onManual = vi.fn();
+it("shows status, cost and cache", () => {
   const onRetry = vi.fn();
   render(<CorrelationTopologyAnalysisPanel
     analysis={{
@@ -16,15 +15,13 @@ it("shows status, cost, cache and manual fallback", () => {
       usage: { input_tokens: 1, output_tokens: 2, cost_usd: 3, cost_currency: "CNY" },
     }}
     starting={false} error={null} logLines={[]}
-    onStart={vi.fn()} onRetry={onRetry} onCancel={vi.fn()} onManual={onManual}
+    onStart={vi.fn()} onRetry={onRetry} onCancel={vi.fn()}
   />);
   expect(screen.getByText(/completed/i)).toBeInTheDocument();
   expect(screen.getByText(/¥3\.00/)).toBeInTheDocument();
   expect(screen.getByText(/cache/i)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /analyze again|重新分析/i }));
   expect(onRetry).toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: /manual/i }));
-  expect(onManual).toHaveBeenCalled();
 });
 
 it("renders live audit trail while running", () => {
@@ -75,7 +72,7 @@ it("renders audit lines as log-row grid with ev-* type colors", () => {
 it("hides audit trail when idle with no lines", () => {
   const { container } = render(<CorrelationTopologyAnalysisPanel
     analysis={null} starting={false} error={null} logLines={[]}
-    onStart={vi.fn()} onRetry={vi.fn()} onCancel={vi.fn()} onManual={vi.fn()}
+    onStart={vi.fn()} onRetry={vi.fn()} onCancel={vi.fn()}
   />);
   expect(container.querySelector(".font-mono")).toBeNull();
 });

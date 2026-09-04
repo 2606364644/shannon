@@ -1,6 +1,6 @@
-// D3: 跨仓关联表单组件——repo 卡片增删/角色/来源（重新扫 | 复用历史）+ relations
-// 摘要 + gateway/auth/HOST 块 + YamlPanel 接线。Harness 镜像 ScanNewPage 的单向数据流
-// （表单路径 yaml=formToYaml(state) 派生、YAML 编辑路径仅校验、apply 显式回填），
+// 跨仓关联表单 tab 组件（2026-09-04 tabs 重组瘦身：只留仓库行列表——ws/YAML/黑盒验证
+// 上提 tabs 外，relations chips 撤除）。三方同步（表单→图/YAML）在 ScanNewPage.test.tsx
+// 端到端锁定；本文件聚焦行内交互：增删行/角色/星型边补齐/来源与复用候选/校验。
 // 风格对齐 ScanFormFields.test.tsx：msw + MemoryRouter + i18n zh + fireEvent。
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { useState } from "react";
@@ -10,15 +10,7 @@ import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import i18n from "@/i18n";
 import { CorrelationFormFields } from "./CorrelationFormFields";
-import {
-  formToYaml, yamlToForm, CorrYamlError, type CorrFormState,
-} from "@/lib/correlation-yaml";
-import { DEFAULT_AUTH, DEFAULT_HOST, type AuthFormState, type HostFormState } from "@/pages/ScanNewPage";
-import type { Workspace } from "@/api/types";
-
-const WS_LIST: Workspace[] = [
-  { name: "ws1", scan_type: "correlation", status: "completed", created_at: 0 },
-];
+import type { CorrFormState } from "@/lib/correlation-yaml";
 
 const REPOS_FIXTURE = [
   { name: "frontend", state: "ready", source: { kind: "git", url: "https://gitlab.example/frontend.git" } },
@@ -40,8 +32,6 @@ const WB_SCANS = [
 const server = setupServer(
   http.get("/api/workspaces/:ws/repos", () => HttpResponse.json(REPOS_FIXTURE)),
   http.get("/api/workspaces/:ws/scans", () => HttpResponse.json(WB_SCANS)),
-  http.get("/api/workspaces/:ws/auth-profiles", () => HttpResponse.json([])),
-  http.get("/api/workspaces/:ws/host-profiles", () => HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -49,51 +39,22 @@ beforeEach(() => { i18n.changeLanguage("zh"); });
 afterEach(() => { server.resetHandlers(); cleanup(); });
 afterAll(() => server.close());
 
-/** 复刻 ScanNewPage 的单向数据流包装：表单交互 → onState 重生成 yaml；YAML 编辑 →
- *  仅校验（CorrYamlError + D1 已知限制的裸 TypeError 都纳入 yamlErr）；apply 显式回填。 */
+/** 复刻页面的表单路径（onState 三方扇出的源侧）：记录每次上抛的 state 供断言
+ *  （relations 不再在表单渲染——星型边补齐经 captured state 断言）。 */
+let captured: CorrFormState[] = [];
 function Harness() {
   const [state, setState] = useState<CorrFormState>({ repos: [], relations: [] });
-  const [yamlText, setYamlText] = useState(() => formToYaml({ repos: [], relations: [] }));
-  const [yamlError, setYamlError] = useState<CorrYamlError | null>(null);
-  const [auth, setAuthState] = useState<AuthFormState>(DEFAULT_AUTH);
-  const [host, setHostState] = useState<HostFormState>(DEFAULT_HOST);
-  const updateCorr = (s: CorrFormState) => {
-    setState(s);
-    setYamlText(formToYaml(s));
-    setYamlError(null);
-  };
-  const onYaml = (y: string) => {
-    setYamlText(y);
-    try { yamlToForm(y); setYamlError(null); } catch (e) {
-      setYamlError(e instanceof CorrYamlError ? e : new CorrYamlError([String(e)]));
-    }
-  };
-  const applyYaml = () => {
-    try { updateCorr(yamlToForm(yamlText)); } catch { /* 不可达：有错时 apply disabled */ }
-  };
   return (
     <MemoryRouter>
       <CorrelationFormFields
         state={state}
-        onState={updateCorr}
-        yaml={yamlText}
-        onYaml={onYaml}
-        yamlError={yamlError}
-        onApplyYaml={applyYaml}
+        onState={(s) => { captured.push(s); setState(s); }}
         workspace="ws1"
-        wsList={WS_LIST}
-        onWorkspaceChange={() => {}}
-        wsLoading={false}
-        gatewayUrl=""
-        onGatewayUrl={() => {}}
-        auth={auth}
-        setAuth={(p) => setAuthState((a) => ({ ...a, ...p }))}
-        host={host}
-        setHost={(p) => setHostState((h) => ({ ...h, ...p }))}
       />
     </MemoryRouter>
   );
 }
+const lastState = () => captured.at(-1)!;
 
 // RepoCombobox 触发器（未选中显 placeholder「选择仓库」）——按卡片 scope 取。
 function openRepoPicker(card: HTMLElement) {
@@ -104,13 +65,10 @@ async function pickRepo(name: string) {
   fireEvent.click(await screen.findByText(name));
 }
 
-function openYamlPanel() {
-  fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
-  return screen.findByLabelText("YAML 编辑器");
-}
-
 describe("CorrelationFormFields", () => {
-  it("添加两个仓库 + 角色默认第一个 entrypoint → 生成星型 YAML", async () => {
+  beforeEach(() => { captured = []; });
+
+  it("添加两个仓库 + 角色默认第一个 entrypoint → 命名 backend 时自动补星型边", async () => {
     render(<Harness />);
     // 无卡片 → 添加两次（第一张默认 entrypoint，第二张默认 backend）
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
@@ -124,18 +82,14 @@ describe("CorrelationFormFields", () => {
     await pickRepo("frontend");
     openRepoPicker(cards[1]);
     await pickRepo("order-svc");
-    // 星型边自动补齐（entrypoint → backend）
-    await waitFor(() => expect(screen.getByText(/frontend → order-svc/)).toBeInTheDocument());
-    // YAML 派生：展开面板读 textarea 值
-    const editor = (await openYamlPanel()) as HTMLTextAreaElement;
-    await waitFor(() => expect(editor.value).toContain("role: entrypoint"));
-    expect(editor.value).toContain("frontend:");
-    expect(editor.value).toContain("order-svc:");
-    expect(editor.value).toContain("from: frontend");
-    expect(editor.value).toContain("to: order-svc");
+    // 星型边自动补齐（entrypoint → backend，协议取卡片默认 grpc）——经上抛 state 断言
+    // （chips 摘要已随 tabs 重组撤除，边的可视化主场在图 tab）
+    await waitFor(() => expect(lastState().relations).toEqual([
+      { from: "frontend", to: "order-svc", protocol: "grpc" },
+    ]));
   });
 
-  it("复用模式选历史扫描 → YAML 含 workspace 字段（候选按 repo 过滤）", async () => {
+  it("复用模式选历史扫描 → state 记 reuseScanId（候选按 repo 过滤）", async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
     const card = screen.getByTestId("corr-repo-row");
@@ -147,36 +101,8 @@ describe("CorrelationFormFields", () => {
     fireEvent.click(screen.getByText("选择要复用的白盒扫描").closest("button")!);
     fireEvent.click(await screen.findByRole("option", { name: /20260801-120000/ }));
     expect(screen.queryByRole("option", { name: /20260801-999999/ })).toBeNull();
-    // YAML 派生：复用卡片写 workspace: <scan_id>（D1 formToYaml 语义）
-    const editor = (await openYamlPanel()) as HTMLTextAreaElement;
-    await waitFor(() => expect(editor.value).toContain("workspace: 20260801-120000"));
-  });
-
-  it("YAML 编辑非法引用 → 错误提示 + 应用按钮禁用；修正后恢复可应用", async () => {
-    render(<Harness />);
-    const editor = await openYamlPanel();
-    // 非法：relations 引用未声明服务 ghost
-    fireEvent.change(editor, {
-      target: {
-        value: "repos:\n  frontend:\n    path: frontend\n    role: entrypoint\nrelations:\n  - from: frontend\n    to: ghost\n    protocol: grpc\n",
-      },
-    });
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("ghost");
-    const apply = screen.getByRole("button", { name: /应用到表单/ });
-    expect(apply).toBeDisabled();
-    // 修正为合法拓扑 → 错误消失、apply 恢复
-    fireEvent.change(editor, {
-      target: {
-        value: "repos:\n  frontend:\n    path: frontend\n    role: entrypoint\n  order-svc:\n    path: order-svc\n    role: backend\nrelations:\n  - from: frontend\n    to: order-svc\n    protocol: http\n",
-      },
-    });
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(apply).toBeEnabled();
-    // 显式应用回填表单：两张卡片 + http 协议边
-    fireEvent.click(apply);
-    await waitFor(() => expect(screen.getAllByTestId("corr-repo-row")).toHaveLength(2));
-    expect(screen.getByText(/frontend → order-svc/).textContent).toContain("http");
+    // 上抛 state 记录复用选择（formToYaml 语义：复用卡写 workspace: <scan_id>，页面级 YAML 测）
+    expect(lastState().repos[0].reuseScanId).toBe("20260801-120000");
   });
 
   it("缺 entrypoint 提交校验拦截（唯一卡片切 backend → 显校验问题）", async () => {
@@ -193,15 +119,19 @@ describe("CorrelationFormFields", () => {
       expect(screen.getByTestId("corr-form-issues").textContent).not.toContain("entrypoint"));
   });
 
-  it("YAML 病态 relations（非列表）→ 裸 TypeError 也纳入错误提示（不崩、apply 禁用）", async () => {
+  it("删除仓库行 → 引用该仓的星型边同步清除", async () => {
     render(<Harness />);
-    const editor = await openYamlPanel();
-    // D1 已知限制：yamlToForm 对非列表 relations 抛裸 TypeError（非 CorrYamlError）
-    fireEvent.change(editor, {
-      target: { value: "repos:\n  a:\n    path: a\n    role: entrypoint\nrelations: 5\n" },
-    });
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent!.length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /应用到表单/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
+    const cards = screen.getAllByTestId("corr-repo-row");
+    openRepoPicker(cards[0]);
+    await pickRepo("frontend");
+    openRepoPicker(cards[1]);
+    await pickRepo("order-svc");
+    await waitFor(() => expect(lastState().relations.length).toBe(1));
+    // 删 order-svc 行 → 边引用清除（图 tab 侧同步由页面扇出保证）
+    fireEvent.click(within(cards[1]).getByRole("button", { name: "删除仓库" }));
+    await waitFor(() => expect(lastState().relations).toEqual([]));
+    expect(lastState().repos.map((r) => r.repo)).toEqual(["frontend"]);
   });
 });

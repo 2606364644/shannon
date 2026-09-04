@@ -14,13 +14,16 @@ import { RepoQuickActions } from "../components/RepoQuickActions";
 import type { ResolveLinkResult } from "../api/types";
 import { useRepos } from "../api/useRepos";
 import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
-import { CorrelationTopologyFields } from "../components/correlation/CorrelationTopologyFields";
+import { CorrelationGraphTab } from "../components/correlation/CorrelationGraphTab";
+import { CorrelationGatewayFields } from "../components/correlation/CorrelationGatewayFields";
+import { YamlPanel } from "../components/correlation/YamlPanel";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/PageHeader";
 import { GroupLabel } from "@/components/GroupLabel";
 import { Card } from "@/components/ui/card";
@@ -37,6 +40,10 @@ import {
  *  表单复杂度，见下方 segmented 注释）。黑盒只读分支已删除——
  *  黑盒一律是组合任务的嵌套 run 或经 ScanDetail addBlackboxToWhitebox，无独立创建入口。 */
 type ScanType = "whitebox" | "correlation" | "mr";
+
+/** 跨仓关联三视图子页（2026-09-04 tabs 重组）：图 | 表单 | YAML——同一拓扑的三个透镜，
+ *  实时三方同步；原 auto/manual 模式分页删除。 */
+export type CorrView = "graph" | "form" | "yaml";
 
 export type LoginType = "form" | "sso" | "api" | "basic";
 
@@ -433,12 +440,19 @@ export function ScanNewPage() {
     mrBaseRef: preset.mrBaseRef ?? "",
     mrHeadRef: preset.mrHeadRef ?? "",
   });
-  // —— 跨仓关联表单态（D3 单向数据流）：yaml 是派生态——表单交互路径 formToYaml(state)
-  //    重生成；YAML 编辑路径仅校验（yamlToForm 试解析），回填表单只经显式「应用到表单」。 ——
+  // —— 跨仓关联三方同步（2026-09-04 tabs 重组）：表单 / 拓扑图 / YAML 是同一拓扑的三个
+  //    透镜（corrView 切换），谁被编辑谁就是源——扇出到其他两方、不回写源：
+  //    表单路径 updateCorr（→图+YAML）、图路径 applyTopologyState（→表单+YAML）、文本路径
+  //    onCorrYaml（→表单+图，仅解析成功；非法中间态保持上次有效态+报错）。原 auto/manual
+  //    模式分页删除——AI 自动分析收进图 tab 折叠区块，确认门禁改跟拓扑来源
+  //    （topologyState.analysis 存在=AI 产物须确认；纯手工免确认）。 ——
   const [corrState, setCorrState] = useState<CorrFormState>({ repos: [], relations: [] });
   const [corrYaml, setCorrYaml] = useState<string>(() => formToYaml({ repos: [], relations: [] }));
   const [yamlErr, setYamlErr] = useState<CorrYamlError | null>(null);
-  const [corrMode, setCorrMode] = useState<"auto" | "manual">("auto");
+  const [corrView, setCorrView] = useState<CorrView>("graph");
+  /** 图 tab「自动分析」折叠区块开关：默认展开（自动分析是主路径）；收起时挂起
+   *  latest/历史恢复查询（手工用户零噪音请求），分析轮询不受影响（后台照跑）。 */
+  const [analysisOpen, setAnalysisOpen] = useState(true);
   const [selectedTopologyRepos, setSelectedTopologyRepos] = useState<string[]>([]);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<CorrelationTopologyAnalysis | null>(null);
@@ -452,14 +466,16 @@ export function ScanNewPage() {
   const logCursor = useRef(-1);
   const resetLog = () => { logCursor.current = -1; setLogLines([]); setLogDropped(0); };
   const [topologyState, setTopologyState] = useState<TopologyDraftState | null>(null);
+  /** 表单路径扇出（表单是源）：重生成 YAML（canonical 派生态）+ 重建图（位置/AI 证据按
+   *  identity 继承，语义相同原样返回不惊动确认态——corrFormToTopologyDraft 契约）。 */
   const updateCorr = (s: CorrFormState) => {
     setCorrState(s);
     setCorrYaml(formToYaml(s));
+    setTopologyState((prev) => corrFormToTopologyDraft(s, prev));
     setYamlErr(null);
   };
-  /** 拓扑侧修改统一入口（2026-09-04 双向同步·图→文本）：拓扑态变化的同时刷新
-   *  corrState/corrYaml（草稿派生）——图编辑实时反映到 YAML 视图，无需确认动作。
-   *  文本侧编辑走 onCorrYaml 独立通道（不经这里），用户输入中的文本不被派生回写覆盖。 */
+  /** 图路径扇出（图是源，2026-09-04 三方同步）：拓扑态变化的同时刷新 corrState/corrYaml
+   *  （草稿派生）。文本/表单侧编辑不经过这里，用户输入中的文本不被派生回写覆盖。 */
   const applyTopologyState = (next: TopologyDraftState | null) => {
     setTopologyState(next);
     if (!next) return;
@@ -468,28 +484,20 @@ export function ScanNewPage() {
     setCorrYaml(formToYaml(form));
     setYamlErr(null);
   };
+  /** YAML 路径扇出（文本是源）：解析成功即重建表单+图（贴 YAML 长拓扑/改文本改图），
+   *  用户原文保留（不 canonical 化回写）；失败仅报错，表单/图保持上次有效态。 */
   const onCorrYaml = (y: string) => {
     setCorrYaml(y);
-    // manual 模式保持单向数据流（brief D3）：仅校验，回填表单走显式「应用到表单」。
-    // auto 模式双向同步（2026-09-04）：解析成功即重建拓扑（贴 YAML 长拓扑/改文本改图），
-    // 语义相同则原样保留（不动确认态/历史）；失败仅报错，图保持上次有效态。
     try {
       const form = yamlToForm(y);
+      setCorrState(form);
+      setTopologyState((prev) => corrFormToTopologyDraft(form, prev));
       setYamlErr(null);
-      if (corrMode === "auto") setTopologyState((prev) => corrFormToTopologyDraft(form, prev));
     } catch (e) {
       // D1 已知限制：病态 relations（非列表）抛裸 TypeError——与 CorrYamlError 同道展示。
       setYamlErr(e instanceof CorrYamlError
         ? e
         : new CorrYamlError([e instanceof TypeError ? e.message : String(e)]));
-    }
-  };
-  const applyYaml = () => {
-    try {
-      updateCorr(yamlToForm(corrYaml));
-      setCorrMode("manual");
-    } catch {
-      /* 不可达：YamlPanel 的应用按钮在有错时 disabled */
     }
   };
   // P2: 扫描目标 ws 必须显式选定——选项来自 /workspaces（P1 后端已按当前用户可见性过滤）
@@ -499,7 +507,7 @@ export function ScanNewPage() {
   const [wsLoading, setWsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
-  const topologyReposEnabled = type === "correlation" && corrMode === "auto";
+  const topologyReposEnabled = type === "correlation";
   const { repos: topologyRepos } = useRepos(topologyReposEnabled ? workspace : "");
   // MR 表单仓库下拉（与上面同 ["repos", ws] SWR key——浏览过仓库 tab / 白盒表单后即时填充）
   const { repos: mrRepos } = useRepos(type === "mr" ? workspace : "");
@@ -561,7 +569,7 @@ export function ScanNewPage() {
   // 草稿 effect 因勾选为空短路 → 图/YAML 全空像「没分析过」。函数式 set——
   // 用户已手选仓库时不覆盖其选择。
   useEffect(() => {
-    if (type !== "correlation" || corrMode !== "auto" || !workspace || analysisId) return;
+    if (type !== "correlation" || !analysisOpen || !workspace || analysisId) return;
     let cancelled = false;
     getLatestTopologyAnalysis(workspace)
       .then((a) => {
@@ -580,7 +588,7 @@ export function ScanNewPage() {
       .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, corrMode, workspace]);
+  }, [type, analysisOpen, workspace]);
 
   useEffect(() => {
     if (analysis?.status !== "completed" || !selectedTopologyRepos.length) return;
@@ -664,13 +672,6 @@ export function ScanNewPage() {
     // Selector changes are table-compatible graph edits: preserve compatible nodes/edges/sources.
     applyTopologyState(topologyState ? updateTopologyRepositories(topologyState, repos) : null);
   };
-  const switchCorrMode = (mode: "auto" | "manual") => {
-    if (corrMode === "auto" && mode === "manual" && topologyState) {
-      // Preserve an edited but unconfirmed candidate as a manual draft; evidence remains in analysis state.
-      updateCorr(topologyDraftToCorrForm(topologyState.draft));
-    }
-    setCorrMode(mode);
-  };
 
   const confirmCurrentTopology = () => {
     if (!topologyState) return;
@@ -703,7 +704,10 @@ export function ScanNewPage() {
   const hostErr = (combined || corrGatewayOn) ? validateHost(f.host, t) : null;
   const corrIssues = type === "correlation" ? validateForm(corrState) : [];
   const confirmedTopologyYaml = topologyState?.confirmation.yaml ?? null;
-  const topologyConfirmed = corrMode === "manual" || (
+  // 确认门禁跟拓扑来源（2026-09-04 tabs 重组）：拓扑带 AI 分析来源（analysis 非 null，
+  // 哪怕手工改过）须显式确认才能提交；纯手搭拓扑免确认（自己搭的即确认）。
+  const topologyNeedsConfirm = !!topologyState?.analysis;
+  const topologyConfirmed = !topologyNeedsConfirm || (
     topologyState?.confirmation.status === "confirmed"
     && topologyState.confirmation.fingerprint === topologyDraftFingerprint(topologyState.draft)
     && validateTopologyDraft(topologyState.draft).length === 0
@@ -717,7 +721,9 @@ export function ScanNewPage() {
   async function onSubmit() {
     try {
       setSubmitting(true);
-      const submissionYaml = corrMode === "auto"
+      // 提交 payload（2026-09-04 tabs 重组统一）：带分析来源 → 确认快照原文（锁定确认
+      // 那一刻的文本）；纯手工 → 当前 corrYaml（实时文本即所想即所得）。
+      const submissionYaml = topologyNeedsConfirm
         ? topologyState?.confirmation.yaml ?? ""
         : corrYaml;
       const r = await apiPost<ScanResponse>("/scan", buildBody(type, f, workspace, submissionYaml));
@@ -737,9 +743,7 @@ export function ScanNewPage() {
 
   const subtitleKey = type === "correlation" ? "scan.correlation.subtitle"
     : type === "mr" ? "scan.subtitleMr" : "scan.subtitleWhitebox";
-  const submitLabel = type === "correlation"
-    ? (corrMode === "auto" ? t("scan.correlation.topology.submit") : t("scan.correlation.submit"))
-    : t("scan.submit");
+  const submitLabel = type === "correlation" ? t("scan.correlation.topology.submit") : t("scan.submit");
   const footerHint = type === "correlation" ? t("scan.correlation.footerHint")
     : type === "mr" ? t("scan.mrBaseHeadHint") : t("scan.footerHintWhitebox");
   // ws 空态判定（mr 表单 ws 下拉 + 提示共用；与 CorrelationFormFields/ScanFormFields 同式）
@@ -776,57 +780,39 @@ export function ScanNewPage() {
 
           {/* 跨仓扫描的构建方式（自动拓扑 | 手工模式）：归属于跨仓表单的第一个分组——
               原第二个平级 segmented 与「白盒|跨仓关联」同视觉语言上下叠放，层级读不出
-              从属（反馈「自动拓扑/手动模式应该归属于跨仓扫描」）。radio-card 能承载一句
-              引导说明，选中态 coral 描边对齐全站 token；testid 保持供测试寻址。 */}
+              从属——2026-09-04 tabs 重组后整个模式概念删除：表单/图/YAML 三视图子页
+              （corr-view-tabs）取代 auto/manual 模式分页，AI 自动分析收进图 tab 折叠区块。 */}
           {type === "correlation" && (
             <section className="space-y-2">
-              <GroupLabel>{t("scan.correlation.mode.group")}</GroupLabel>
-              <div
-                className="grid gap-2 sm:grid-cols-2"
-                role="radiogroup"
-                aria-label={t("scan.correlation.mode.group")}
-              >
-                {(["auto", "manual"] as const).map((mode) => (
-                  <label
-                    key={mode}
-                    htmlFor={`corr-mode-radio-${mode}`}
-                    data-testid={`corr-mode-${mode}`}
-                    className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 transition-colors focus-within:ring-1 focus-within:ring-ring ${
-                      corrMode === mode
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-card hover:border-muted-foreground/40"
-                    }`}
-                  >
-                    <input
-                      id={`corr-mode-radio-${mode}`}
-                      type="radio"
-                      name="corr-build-mode"
-                      className="sr-only"
-                      checked={corrMode === mode}
-                      onChange={() => switchCorrMode(mode)}
-                    />
-                    <span
-                      aria-hidden
-                      className={`mt-1 h-2 w-2 shrink-0 rounded-full border ${
-                        corrMode === mode ? "border-primary bg-primary" : "border-muted-foreground/50 bg-transparent"
-                      }`}
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-xs font-semibold text-foreground">
-                        {mode === "auto" ? t("scan.correlation.analysis.autoMode") : t("scan.correlation.analysis.manualMode")}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-                        {mode === "auto" ? t("scan.correlation.mode.autoDesc") : t("scan.correlation.mode.manualDesc")}
-                      </span>
-                    </span>
-                  </label>
-                ))}
+              <GroupLabel>{t("scan.steps.workspace")}</GroupLabel>
+              <div className="space-y-1.5">
+                <Select value={workspace} onValueChange={(ws) => {
+                  setWorkspace(ws);
+                  // ws 切换 → 仓库域隔离：清分析勾选与进行中的分析态（对齐原 auto 分支行为）
+                  selectTopologyRepos([]);
+                }}>
+                  <SelectTrigger className="w-full font-mono text-xs">
+                    <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {wsEmpty ? (
+                      <SelectItem value="__empty__" disabled>{t("scan.fields.wsEmptyOption")}</SelectItem>
+                    ) : wsList.map((w) => (
+                      <SelectItem key={w.name} value={w.name}>{w.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {wsEmpty && (
+                  <div className="flex items-center gap-1.5 text-xs text-amber">
+                    <AlertCircle className="h-3.5 w-3.5" />{t("scan.fields.wsEmptyHintUser")}
+                  </div>
+                )}
               </div>
             </section>
           )}
 
           {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 仓库 并排铺满，③ 满宽；
-              跨仓关联默认自动拓扑，也保留手工表单/YAML。 */}
+              跨仓关联 = 三视图 tabs（图|表单|YAML，同一拓扑三透镜实时同步）。 */}
           {type === "whitebox" ? (
             <ScanFormFields
               type="whitebox"
@@ -848,8 +834,8 @@ export function ScanNewPage() {
                ① 工作区 + 仓库 两列并排（对齐白盒布局语言；IA 不变量：repo 按 ws
                隔离，选仓前必须先选 ws）→ ② MR 链接导入（hero 粘贴框，贴链接自动回填
                仓库 + refs）→ ③ 变更范围区间控件（base⟷head 一体 + swap + 就绪摘要）。
-               必须在 corrMode === "auto" 判断之前（corrMode 初始恒 "auto"，否则 mr 会
-               错渲染跨仓拓扑表单）。base/head 为手输文本（分支名或 commit sha 均可，
+               必须在跨仓关联（corr tabs）判断之前，否则 mr 会错渲染跨仓表单。
+               base/head 为手输文本（分支名或 commit sha 均可，
                BranchCombobox 是行内切换控件非表单样式，且枚举分支列表对 commit sha
                无增益）。纯白盒语义——无 url/认证/HOST。 */
             <div className="space-y-5" data-testid="mr-form">
@@ -943,72 +929,88 @@ export function ScanNewPage() {
                 </>
               )}
             </div>
-          ) : corrMode === "auto" ? (
-            <CorrelationTopologyFields
-              workspace={workspace}
-              wsList={wsList}
-              onWorkspaceChange={(ws) => {
-                setWorkspace(ws);
-                selectTopologyRepos([]);
-              }}
-              wsLoading={wsLoading}
-              repos={topologyRepos}
-              selectedRepos={selectedTopologyRepos}
-              onSelectRepos={selectTopologyRepos}
-              analysis={analysis}
-              starting={analysisStarting}
-              logLines={logLines}
-              logDropped={logDropped}
-              analysisError={analysisError}
-              historyEntries={analysisHistory}
-              historyActiveId={analysisId}
-              onSelectHistoryEntry={(entry) => void selectHistoryEntry(entry)}
-              onStart={() => void startTopologyAnalysis(false)}
-              onRetry={() => void startTopologyAnalysis(true)}
-              onCancel={() => void cancelTopologyAnalysis()}
-              onManual={() => switchCorrMode("manual")}
-              topologyState={topologyState}
-              onTopologyState={applyTopologyState}
-              onConfirm={confirmCurrentTopology}
-              availableRepos={topologyRepos.map((repo) => repo.name)}
-              onAddNode={(repo) => selectTopologyRepos([...new Set([...selectedTopologyRepos, repo])])}
-              onRemoveNode={(repo) => selectTopologyRepos(selectedTopologyRepos.filter((name) => name !== repo))}
-              scans={scans}
-              yaml={corrYaml}
-              onYaml={onCorrYaml}
-              yamlError={yamlErr}
-              gatewayUrl={f.url}
-              onGatewayUrl={(v) => set({ url: v })}
-              gatewayErr={urlErr}
-              auth={f.auth}
-              setAuth={setAuth}
-              authErr={authErr}
-              host={f.host}
-              setHost={setHost}
-              hostErr={hostErr}
-            />
           ) : (
-            <CorrelationFormFields
-              state={corrState}
-              onState={updateCorr}
-              yaml={corrYaml}
-              onYaml={onCorrYaml}
-              yamlError={yamlErr}
-              onApplyYaml={applyYaml}
-              workspace={workspace}
-              wsList={wsList}
-              onWorkspaceChange={setWorkspace}
-              wsLoading={wsLoading}
-              gatewayUrl={f.url}
-              onGatewayUrl={(v) => set({ url: v })}
-              gatewayErr={urlErr}
-              auth={f.auth}
-              setAuth={setAuth}
-              authErr={authErr}
-              host={f.host}
-              setHost={setHost}
-              hostErr={hostErr}
-            />
+            <div className="space-y-4">
+              {/* 三视图子页（2026-09-04 tabs 重组）：图 | 表单 | YAML——同一拓扑的三个透镜，
+                  改任何一方其他两方实时生成（updateCorr / applyTopologyState / onCorrYaml 三扇出）。
+                  tab 标签状态点把别处视图的问题带到眼前：表单校验错 / YAML 错 → 红点，
+                  图有分析来源未确认 → 琥珀点。黑盒验证在 tabs 外（切视图不丢配置）。 */}
+              <Tabs value={corrView} onValueChange={(v) => setCorrView(v as CorrView)}>
+                <TabsList data-testid="corr-view-tabs">
+                  <TabsTrigger value="graph" data-testid="corr-tab-graph">
+                    {t("scan.correlation.view.graph")}
+                    {topologyNeedsConfirm && !topologyConfirmed && (
+                      <span data-testid="corr-tab-dot-graph" aria-label={t("scan.correlation.view.dotUnconfirmed")}
+                        className="ml-1.5 inline-block size-1.5 rounded-full bg-amber" />
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="form" data-testid="corr-tab-form">
+                    {t("scan.correlation.view.form")}
+                    {corrIssues.length > 0 && (
+                      <span data-testid="corr-tab-dot-form" aria-label={t("scan.correlation.view.dotError")}
+                        className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="yaml" data-testid="corr-tab-yaml">
+                    {t("scan.correlation.view.yaml")}
+                    {yamlErr && (
+                      <span data-testid="corr-tab-dot-yaml" aria-label={t("scan.correlation.view.dotError")}
+                        className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="graph">
+                  <CorrelationGraphTab
+                    workspace={workspace}
+                    repos={topologyRepos}
+                    selectedRepos={selectedTopologyRepos}
+                    onSelectRepos={selectTopologyRepos}
+                    analysis={analysis}
+                    starting={analysisStarting}
+                    logLines={logLines}
+                    logDropped={logDropped}
+                    analysisError={analysisError}
+                    historyEntries={analysisHistory}
+                    historyActiveId={analysisId}
+                    onSelectHistoryEntry={(entry) => void selectHistoryEntry(entry)}
+                    onStart={() => void startTopologyAnalysis(false)}
+                    onRetry={() => void startTopologyAnalysis(true)}
+                    onCancel={() => void cancelTopologyAnalysis()}
+                    analysisOpen={analysisOpen}
+                    onAnalysisOpen={setAnalysisOpen}
+                    topologyState={topologyState}
+                    needsConfirm={topologyNeedsConfirm}
+                    confirmed={topologyConfirmed}
+                    onTopologyState={applyTopologyState}
+                    onConfirm={confirmCurrentTopology}
+                    onViewChange={setCorrView}
+                    availableRepos={topologyRepos.map((repo) => repo.name)}
+                    onAddNode={(repo) => selectTopologyRepos([...new Set([...selectedTopologyRepos, repo])])}
+                    onRemoveNode={(repo) => selectTopologyRepos(selectedTopologyRepos.filter((name) => name !== repo))}
+                    scans={scans}
+                  />
+                </TabsContent>
+                <TabsContent value="form">
+                  <CorrelationFormFields state={corrState} onState={updateCorr} workspace={workspace} />
+                </TabsContent>
+                <TabsContent value="yaml">
+                  <YamlPanel yaml={corrYaml} onChange={onCorrYaml} error={yamlErr} synced />
+                </TabsContent>
+              </Tabs>
+              {/* 黑盒验证（可选）：gateway + 认证/HOST——三视图共用，放 tabs 外 */}
+              <CorrelationGatewayFields
+                workspace={workspace}
+                gatewayUrl={f.url}
+                onGatewayUrl={(v) => set({ url: v })}
+                gatewayErr={urlErr}
+                auth={f.auth}
+                setAuth={setAuth}
+                authErr={authErr}
+                host={f.host}
+                setHost={setHost}
+                hostErr={hostErr}
+              />
+            </div>
           )}
           {/* 链接解析触发的下载提示（表单区末尾——三张表单共用，不随表单切换卸载） */}
           {pendingClone && (

@@ -469,27 +469,34 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
     );
   }
 
-  it("类型切换到跨仓关联渲染跨仓表单（含 YAML 面板），白盒表单不再渲染", async () => {
+  it("类型切换到跨仓关联渲染视图 tabs（图|表单|YAML，默认图）——模式 radio 消失，ws/黑盒验证在 tab 外", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
-    fireEvent.click(screen.getByTestId("corr-mode-manual"));
-    // 跨仓表单：YAML 面板（默认收起）+ 工作区下拉
-    expect(screen.getByTestId("corr-yaml-panel")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /YAML 配置/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText("YAML 编辑器")).toBeNull(); // 默认收起
+    // 三视图 tabs（同一拓扑的三个透镜，2026-09-04 三方同步重组），默认图 tab
+    expect(screen.getByTestId("corr-tab-graph")).toHaveAttribute("data-state", "active");
+    expect(screen.getByTestId("corr-tab-form")).toBeInTheDocument();
+    expect(screen.getByTestId("corr-tab-yaml")).toBeInTheDocument();
+    // auto/manual 模式 radio-card 不再渲染（AI 分析收进图 tab 的折叠区块，模式概念删除）
+    expect(screen.queryByTestId("corr-mode-auto")).toBeNull();
+    expect(screen.queryByTestId("corr-mode-manual")).toBeNull();
+    expect(screen.queryByText("构建方式")).toBeNull();
+    // ws 选择在 tab 外（图 tab 下可见，三视图共用）
     expect(screen.getByText("选择 workspace")).toBeInTheDocument();
+    // 黑盒验证在 tab 外：gateway 输入位于 tabs 之后（tab 切换不丢配置）
+    const tabs = screen.getByTestId("corr-view-tabs");
+    const gatewayInput = screen.getByPlaceholderText("http://gateway.example.com");
+    expect(tabs.compareDocumentPosition(gatewayInput)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // 图 tab 空态引导（未跑分析、未编辑过表单/YAML）
+    expect(screen.getByTestId("corr-graph-empty")).toBeInTheDocument();
     // 白盒表单（仓库步骤）不再渲染
     expect(screen.queryByText("仓库")).toBeNull();
-    // 选 ws → 仓库卡片区解锁（添加仓库入口出现）
-    await selectWorkspace("ws1");
-    await waitFor(() => expect(screen.getByRole("button", { name: "+ 添加仓库" })).toBeInTheDocument());
-    // 切回白盒 → 跨仓表单消失
+    // 切回白盒 → 跨仓 tabs 消失
     fireEvent.click(screen.getByRole("button", { name: "白盒扫描" }));
-    expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
+    expect(screen.queryByTestId("corr-tab-graph")).toBeNull();
     expect(screen.getByText("仓库")).toBeInTheDocument();
   });
 
-  it("提交 correlation body 含 config_content + workspace", async () => {
+  it("提交 correlation body 含 config_content + workspace（手工搭拓扑免确认直接可提交）", async () => {
     let captured: Record<string, unknown> | undefined;
     server.use(
       http.get("/api/workspaces/:ws/repos", () =>
@@ -504,15 +511,16 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
     );
     renderPageFresh();
     fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
-    fireEvent.click(screen.getByTestId("corr-mode-manual"));
     await selectWorkspace("ws1");
-    // 添加一张仓库卡（唯一卡默认 entrypoint）→ 选 frontend
+    // 表单 tab：添加一张仓库行（唯一行默认 entrypoint）→ 选 frontend
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
     fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
     fireEvent.click(screen.getByText("选择仓库"));
     fireEvent.click(await screen.findByText("frontend"));
-    // 校验过（有名字的 entrypoint + ws 已选）→ 提交 enabled
-    await waitFor(() => expect(screen.getByRole("button", { name: /开始关联扫描/ })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: /开始关联扫描/ }));
+    // 纯手工（拓扑无 AI 分析来源）→ 无确认门禁：确认按钮不存在，校验过即可提交
+    expect(screen.queryByRole("button", { name: /确认拓扑/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /启动跨仓扫描/ }));
     await waitFor(() => expect(captured).toBeDefined());
     expect(captured!.type).toBe("correlation");
     expect(captured!.workspace).toBe("ws1");
@@ -522,6 +530,181 @@ describe("ScanNewPage 跨仓关联（correlation）", () => {
     expect(captured!.source).toBeUndefined();
     expect(captured!.reuse_whitebox_scan_id).toBeUndefined();
     expect(captured!.url).toBeUndefined(); // 未填 gateway url → 纯关联
+  });
+});
+
+// === 跨仓关联三方同步（2026-09-04 tabs 重组）：表单 / 拓扑图 / YAML 是同一拓扑的三个
+// 透镜——改任何一方，其他两方实时生成。非法中间态（YAML 打字到一半）不回填，视图保持
+// 上次有效态 + 报错；用户 YAML 原文不 canonical 化回写（注释/排版保留）。 ===
+describe("ScanNewPage 跨仓关联三方同步（tabs）", () => {
+  beforeEach(() => i18n.changeLanguage("zh"));
+
+  function renderPageFresh() {
+    return render(
+      <MemoryRouter initialEntries={["/scan/new"]}>
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <ScanNewPage />
+        </SWRConfig>
+      </MemoryRouter>,
+    );
+  }
+
+  const REPOS_THREE = () =>
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "web", state: "ready" }, { name: "order", state: "ready" }, { name: "user", state: "ready" },
+      ])),
+    );
+
+  /** 进入跨仓 + 选 ws + 表单 tab 加 web(entrypoint)/order(backend) 两行（ensureStarEdge 自动补 web→order 边）。 */
+  async function addTwoReposViaForm() {
+    REPOS_THREE();
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    await selectWorkspace("ws1");
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
+    for (const repo of ["web", "order"]) {
+      fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
+      fireEvent.click(screen.getByText("选择仓库"));
+      fireEvent.click(await screen.findByText(repo));
+    }
+  }
+
+  it("表单 → 图 + YAML：表单 tab 加仓库行，图 tab 长节点、YAML tab 文本即时生成", async () => {
+    await addTwoReposViaForm();
+    // 图 tab：两节点长出（表单是源，图实时重建）
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
+    expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-order")).toBeInTheDocument();
+    expect(screen.queryByTestId("corr-graph-empty")).toBeNull(); // 空态引导退场
+    // YAML tab：文本含两仓与自动补的星型边
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    expect(editor.value).toContain("web:");
+    expect(editor.value).toContain("order:");
+    expect(editor.value).toContain("from: web");
+    expect(editor.value).toContain("to: order");
+    // 无「应用到表单」按钮（同步即时，按钮语义消失）
+    expect(screen.queryByRole("button", { name: /应用到表单/ })).toBeNull();
+  });
+
+  it("YAML → 表单 + 图：贴合法配置，图长节点、表单行长行，原文不被 canonical 化", async () => {
+    REPOS_THREE();
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    await selectWorkspace("ws1");
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    const pasted = [
+      "# 手写拓扑（注释应保留）",
+      "repos:",
+      "  web:",
+      "    path: web",
+      "    role: entrypoint",
+      "  user:",
+      "    path: user",
+      "    role: backend",
+      "relations:",
+      "  - from: web",
+      "    to: user",
+      "    protocol: http",
+      "",
+    ].join("\n");
+    fireEvent.change(editor, { target: { value: pasted } });
+    // 图 tab：贴 YAML 即长拓扑
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
+    expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-user")).toBeInTheDocument();
+    // 表单 tab：仓库行同步长出
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
+    expect(await screen.findAllByTestId("corr-repo-row")).toHaveLength(2);
+    // YAML tab：用户原文保留（含注释，不被派生覆盖）
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    expect((screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement).value).toBe(pasted);
+  });
+
+  it("图 → 表单 + YAML：边表加边，YAML 文本与表单行协议即时跟上", async () => {
+    await addTwoReposViaForm();
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
+    expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
+    // 边表加一条 order→web http 边（图是源）——点击目标节点选中后从选中边改，或直接加边
+    fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
+    const fromSelects = screen.getAllByRole("combobox", { name: / from$/ });
+    fireEvent.click(fromSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "order" }));
+    const toSelects = screen.getAllByRole("combobox", { name: / to$/ });
+    fireEvent.click(toSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "web" }));
+    const protocols = screen.getAllByRole("combobox", { name: "protocol" });
+    fireEvent.click(protocols.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "http" }));
+    // YAML tab：新边已在文本里
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    expect(editor.value).toContain("from: order");
+    expect(editor.value).toContain("to: web");
+    // 表单 tab：行还在（节点未动），web 行协议列跟随新入边协议 http
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
+    expect(screen.getAllByTestId("corr-repo-row")).toHaveLength(2);
+  });
+
+  it("YAML 非法中间态：错误可见 + tab 红点，图/表单保持上次有效态；修好恢复同步", async () => {
+    await addTwoReposViaForm();
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    const valid = editor.value;
+    // 打坏（打字中间态）→ 报错 + tab 红点，图保持两节点
+    fireEvent.change(editor, { target: { value: "repos: [broken" } });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByTestId("corr-tab-dot-yaml")).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
+    expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-order")).toBeInTheDocument();
+    expect(screen.getByTestId("corr-tab-dot-yaml")).toBeInTheDocument(); // 切走后红点仍在 trigger 上
+    // 表单也保持
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
+    expect(screen.getAllByTestId("corr-repo-row")).toHaveLength(2);
+    // 修好 → 红点消失，同步恢复（tab 卸载重挂：重新取编辑器引用）
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor2 = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    fireEvent.change(editor2, { target: { value: valid.replace("protocol: grpc", "protocol: http") } });
+    await waitFor(() => expect(screen.queryByTestId("corr-tab-dot-yaml")).toBeNull());
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
+    expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
+  });
+
+  it("分析区块收起后 lazy：换 ws 不再查 latest/历史；展开恢复查询", async () => {
+    let latestCalls = 0;
+    server.use(
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () => {
+        latestCalls++;
+        return new HttpResponse(null, { status: 404 });
+      }),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(latestCalls).toBe(1)); // 默认展开：查了
+    // 收起分析区块 → 换 ws 不触发新查询（手工用户零噪音请求）。已选 ws1 → trigger
+    // 显当前值而非 placeholder，按 ws1 定位（同「ws 下拉」用例的既有姿势）。
+    fireEvent.click(screen.getByTestId("corr-analysis-toggle"));
+    fireEvent.click(screen.getByText("ws1").closest("button")!);
+    fireEvent.click(await screen.findByRole("option", { name: "ws2" }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(latestCalls).toBe(1);
+    // 展开 → 对当前 ws 恢复查询
+    fireEvent.click(screen.getByTestId("corr-analysis-toggle"));
+    await waitFor(() => expect(latestCalls).toBe(2));
+  });
+
+  it("tab 状态点：表单校验问题 → 表单 tab 红点", async () => {
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "跨仓关联" }));
+    await selectWorkspace("ws1");
+    // 表单 tab：加一行但不命名（空仓座行）→ validateForm 报「存在未命名的仓库卡片」
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-form"));
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加仓库" }));
+    await waitFor(() => expect(screen.getByTestId("corr-tab-dot-form")).toBeInTheDocument());
   });
 });
 
@@ -548,7 +731,8 @@ describe("ScanNewPage MR 增量扫描", () => {
 
   it("类型切换到 MR 渲染 MR 表单（ws + 仓库 + base/head），不落跨仓拓扑表单", async () => {
     renderPage();
-    // corrMode 初始恒 "auto"——MR 分支必须排在它之前，否则错渲染跨仓拓扑表单（进度 §3.1 的缺口）
+    // 渲染分支顺序锁定：MR 分支必须排在跨仓关联（corr tabs）之前，否则错渲染跨仓表单
+    // （原 corrMode 初始恒 auto 时代的坑；tabs 化后顺序事实不变，仍锁）
     fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
     const form = screen.getByTestId("mr-form");
     expect(screen.queryByTestId("corr-yaml-panel")).toBeNull();
@@ -1032,9 +1216,10 @@ describe("correlation topology auto flow", () => {
     return screen.findByTestId("topology-node-web");
   }
 
-  /** 展开 YAML 面板，返回编辑器 textarea（双向同步的文本侧入口）。 */
+  /** 切到 YAML tab，返回编辑器 textarea（三方同步的文本侧入口——2026-09-04 tabs 重组后
+   *  YAML 是独立视图子页，不再有折叠展开步骤）。 */
   async function openYamlEditor() {
-    fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
     return screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
   }
 
@@ -1063,17 +1248,11 @@ describe("correlation topology auto flow", () => {
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
-    // Manual fallback preserves the edited graph before confirmation.
-    fireEvent.click(screen.getAllByRole("button", { name: /手工模式/ }).at(-1)!);
-    expect(screen.getAllByTestId("corr-relation-chip").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByTestId("corr-mode-auto"));
-    fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
-    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
 
-    // 双向同步契约（2026-09-04）：YAML 编辑即时生效——语义变化打回确认并即时重建拓扑；
-    // 纯文本变化（注释）语义等价，不动确认态。
-    fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
-    const editor = screen.getByLabelText("YAML 编辑器");
+    // 三方同步契约（2026-09-04）：YAML 编辑即时生效——语义变化打回确认并即时重建拓扑；
+    // 纯文本变化（注释）语义等价，不动确认态。分析来源的拓扑须确认（needsConfirm），
+    // 模式 radio 已删——切视图 tabs 不再重置确认态。
+    const editor = await openYamlEditor();
     const confirmedYaml = (editor as HTMLTextAreaElement).value;
     // 纯注释（语义不变）→ canonical 等价，确认仍有效
     fireEvent.change(editor, { target: { value: `${confirmedYaml}\n# comment only` } });
@@ -1081,8 +1260,10 @@ describe("correlation topology auto flow", () => {
     // 语义变化（改一条边 to: order → to: user）→ 拓扑即时重建 + 打回确认
     fireEvent.change(editor, { target: { value: confirmedYaml.replace("to: order", "to: user") } });
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
-    // 改回原文 → 图复原；文本编辑过的拓扑须重新确认（保守：fingerprint 复原不自动恢复确认态）
+    // 改回原文 → 图复原；文本编辑过的拓扑须重新确认（保守：fingerprint 复原不自动恢复确认态）。
+    // 确认按钮在图 tab——切回去操作（YAML tab 下已卸载）。
     fireEvent.change(editor, { target: { value: confirmedYaml } });
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
     expect(screen.getByRole("button", { name: /确认拓扑/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
@@ -1101,11 +1282,12 @@ describe("correlation topology auto flow", () => {
   it("图侧编辑（分析完成 + 边表加边）实时同步到 YAML 面板，无需确认动作", async () => {
     useTopologyCompleted();
     await analyzeToTopology();
-    // 分析完成即同步：YAML 面板内容已是当前草稿的派生（AI 边 web→order 已在文本里）
+    // 分析完成即同步：切到 YAML tab，内容已是当前草稿的派生（AI 边 web→order 已在文本里）
     const editor = await openYamlEditor();
     expect(editor.value).toContain("from: web");
     expect(editor.value).toContain("to: order");
-    // 边表加一条 web→admin http 边（未确认）→ 文本立即跟上
+    // 切回图 tab，边表加一条 web→admin http 边（未确认）
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
     fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
     const fromSelects = screen.getAllByRole("combobox", { name: / from$/ });
     fireEvent.click(fromSelects.at(-1)!);
@@ -1116,7 +1298,9 @@ describe("correlation topology auto flow", () => {
     const protocols = screen.getAllByRole("combobox", { name: "protocol" });
     fireEvent.click(protocols.at(-1)!);
     fireEvent.click(await screen.findByRole("option", { name: "http" }));
-    expect(editor.value).toContain("to: admin");
+    // 切回 YAML tab：新边已在文本里（tab 卸载重挂：重新取编辑器引用）
+    const editor2 = await openYamlEditor();
+    expect(editor2.value).toContain("to: admin");
     // 双视图之间不再有「应用到表单」按钮（同步即时，按钮语义消失），且提示实时同步
     expect(screen.queryByRole("button", { name: /应用到表单/ })).toBeNull();
     expect(screen.getByText("与拓扑实时同步")).toBeInTheDocument();
@@ -1149,25 +1333,32 @@ describe("correlation topology auto flow", () => {
       "",
     ].join("\n");
     fireEvent.change(editor, { target: { value: withoutOrder } });
+    // 切回图 tab 断言重建结果：order 节点消失（无需任何应用按钮），其余保留
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
     await waitFor(() => expect(screen.queryByTestId("topology-node-order")).toBeNull());
     expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-admin")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-user")).toBeInTheDocument();
     // 语法错误 → 报错可见，图保持上次有效态（web/admin/user 三节点不被破坏）
-    fireEvent.change(editor, { target: { value: "repos: [broken" } });
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-yaml"));
+    const editor2 = screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+    fireEvent.change(editor2, { target: { value: "repos: [broken" } });
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByTestId("corr-tab-graph"));
     expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
     expect(screen.getByTestId("topology-node-admin")).toBeInTheDocument();
     expect(screen.getByTestId("topology-node-user")).toBeInTheDocument();
   });
 
-  // 布局重排（2026-09-04 反馈「YAML 配置与拓扑应放到一块，中间别隔黑盒验证」）：
-  // auto 模式下 YAML 面板必须排在黑盒验证（gateway）区块之前。
-  it("YAML 面板紧邻拓扑区块，位于黑盒验证（gateway）之前", async () => {
+  // 布局重组（2026-09-04 tabs 化，承「YAML 与拓扑放一块，别隔黑盒验证」反馈）：三个视图
+  // 收进同一 tabs 组（图|表单|YAML 互为透镜），黑盒验证在 tabs 之外——tab 切换不丢配置。
+  it("视图 tabs（含 YAML tab）位于黑盒验证（gateway）之前", async () => {
     useTopologyCompleted();
     await analyzeToTopology();
-    const yamlPanel = screen.getByTestId("corr-yaml-panel");
+    const tabs = screen.getByTestId("corr-view-tabs");
     const gatewayInput = screen.getByPlaceholderText("http://gateway.example.com");
-    // Node.DOCUMENT_POSITION_FOLLOWING = 4：gateway 在 YAML 面板之后
-    expect(yamlPanel.compareDocumentPosition(gatewayInput)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // Node.DOCUMENT_POSITION_FOLLOWING = 4：gateway 在 tabs 之后
+    expect(tabs.compareDocumentPosition(gatewayInput)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("刷新恢复：选 ws 后找回 running 分析，恢复状态轮询并显示过程日志", async () => {

@@ -476,13 +476,7 @@
     },
     "correlation": {
       "subtitle": "串联多个仓库的调用链，发起跨仓关联分析",
-      "submit": "开始关联扫描",
       "footerHint": "配置多仓拓扑后提交",
-      "mode": {
-        "group": "构建方式",
-        "autoDesc": "分析所选仓库源码，自动推断服务调用拓扑",
-        "manualDesc": "逐仓手填角色、来源与调用关系"
-      },
       "reposSection": "仓库与服务",
       "addRepo": "+ 添加仓库",
       "reposEmptyHint": "还没有仓库——点击右上「+ 添加仓库」加入第一个服务",
@@ -498,18 +492,13 @@
       "removeRepo": "删除仓库",
       "selectRepoFirst": "请先选择仓库",
       "reuseEmpty": "该仓库还没有可复用的白盒扫描",
-      "relationsTitle": "调用关系",
-      "relationsEmpty": "暂无调用关系——添加后端仓库会自动连到入口",
-      "relationsHint": "复杂拓扑请在 YAML 中编辑",
       "gatewayTitle": "黑盒验证",
       "gatewayLabel": "网关地址",
       "gatewayPlaceholder": "http://gateway.example.com",
       "gatewayHint": "填写后，关联完成时对入口服务发起黑盒验证（可选）",
-      "yamlToggle": "YAML 配置",
       "yamlSyncHint": "与拓扑实时同步",
       "yamlErrorKeepGraph": "拓扑保持上次有效状态，修正后继续同步",
       "yamlEditor": "YAML 编辑器",
-      "applyYaml": "应用到表单",
       "loadError": "加载关联详情失败：{{error}}",
       "pending": "关联阶段进行中 / 未开始",
       "pendingHint": "关联阶段尚未产出拓扑等工件，扫描推进后本视图自动补全。",
@@ -589,7 +578,6 @@
         "start": "自动关联分析",
         "retry": "重新分析",
         "cancel": "取消分析",
-        "manual": "手工模式",
         "cache": "复用缓存",
         "failed": "分析失败，可切换手工模式",
         "noReadyRepos": "当前工作区没有可用仓库",
@@ -607,14 +595,12 @@
           "cancelled": "已取消",
           "interrupted": "已中断"
         },
-        "selectRepos": "选择仓库",
-        "autoMode": "自动拓扑",
-        "manualMode": "手工模式",
         "submit": "启动跨仓扫描",
         "hint": "先选择至少两个 ready 仓库。分析只读源码，结果必须人工确认后才能启动扫描。",
         "history": {
           "title": "历史分析"
-        }
+        },
+        "sectionTitle": "自动分析（可选）"
       },
       "topology": {
         "editor": "候选拓扑编辑器",
@@ -652,7 +638,18 @@
         "invalidEvidence": "校验失败"
       },
       "colFrom": "调用方",
-      "colTo": "被调用方"
+      "colTo": "被调用方",
+      "view": {
+        "graph": "拓扑图",
+        "form": "表单",
+        "yaml": "YAML",
+        "dotError": "有错误待处理",
+        "dotUnconfirmed": "拓扑待确认"
+      },
+      "graphEmptyTitle": "还没有拓扑——从任一视图开始，其他两方实时生成",
+      "graphEmptyAnalyze": "自动分析仓库源码",
+      "graphEmptyForm": "在表单中手工搭建",
+      "graphEmptyYaml": "粘贴 YAML 配置"
     },
     "subtitleMr": "指定 base..head 变更范围，只对增量改动做安全检测",
     "mrBaseHeadHint": "仅对 base 到 head 之间的新增/删除代码做增量检测",
