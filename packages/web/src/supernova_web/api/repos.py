@@ -13,6 +13,7 @@ from supernova_web.auth.models import User
 from supernova_web.components.event_tailer import EventTailer
 from supernova_web.components.link_resolver import (
     GitLabApiError,
+    branch_exists,
     MrLink,
     UnsupportedLinkError,
     classify_url,
@@ -113,6 +114,16 @@ async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
                 raise HTTPException(404, "MR 不存在或无权限访问")
             raise HTTPException(502, f"GitLab API 调用失败：{e}")
         base_ref, head_ref = mr["target_branch"], mr["source_branch"]
+        # 已合并/关闭的 MR 源分支常被删（GitLab 记录仍保留 source_branch 字段）——
+        # 增量扫描 checkout 不到必失败。贴链接当场拦截并给出路（2026-09-04 shorturl
+        # MR !99 事故：15s 后才见零信息 workflow FAILED）。opened 不查（分支必然在）。
+        if mr.get("state") in ("merged", "closed") and \
+                not await branch_exists(link, head_ref, token):
+            raise HTTPException(
+                422, f"MR 已{('合并' if mr['state'] == 'merged' else '关闭')}，"
+                     f"源分支 {head_ref} 已被删除，无法增量扫描。"
+                     f"可在 GitLab MR 页恢复源分支后重试；"
+                     f"若已合入 {base_ref}，也可直接对 {base_ref} 全量扫描。")
 
     flat_name = link.project.rsplit("/", 1)[-1]
     matched = None

@@ -75,6 +75,17 @@ def _mock_mr(monkeypatch, *, result=None, error=None, calls=None):
     monkeypatch.setattr(repos_mod, "fetch_merge_request", fake_fetch)
 
 
+def _mock_branch_exists(monkeypatch, *, exists=True, calls=None):
+    """遮蔽 repos.branch_exists 接缝（外部 GitLab API，mock 不可避免）。"""
+    async def fake_exists(link, branch, token):
+        if calls is not None:
+            calls.append((branch, token))
+        return exists
+
+    import supernova_web.api.repos as repos_mod
+    monkeypatch.setattr(repos_mod, "branch_exists", fake_exists)
+
+
 def _mock_clone(app, monkeypatch, calls=None, error=None):
     """实例级遮蔽 rm.clone：记录调用参数，不起真 git 子进程。"""
     async def fake_clone(ws, url, branch, commit, name, group=None):
@@ -191,6 +202,56 @@ def test_resolve_mr_prefers_full_path_over_flat(tmp_path, monkeypatch):
                     headers={"X-CSRF-Token": _csrf(client)})
     assert r.status_code == 200
     assert r.json()["repo"] == "group/repo"
+
+
+# ---- 端点：MR 已合并/关闭 + 源分支已删 → 提交前拦截（2026-09-04 shorturl 事故）----
+
+def test_resolve_mr_merged_source_branch_deleted_422(tmp_path, monkeypatch):
+    # GitLab 合并时勾「删源分支」：MR 记录的 source_branch 永远保留，但分支已不在——
+    # 增量扫描 checkout 不到必失败。贴链接当场拦截并给引导，不让用户走完表单再等 15s。
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feature/safe",
+                                  "target_branch": "master", "state": "merged"})
+    _mock_branch_exists(monkeypatch, exists=False)
+    clone_calls = []
+    _mock_clone(app, monkeypatch, calls=clone_calls)
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "feature/safe" in detail and "已合并" in detail
+    assert "恢复" in detail or "master" in detail  # 必须给出路（恢复分支 / 全量扫）
+    assert clone_calls == []
+
+
+def test_resolve_mr_merged_branch_present_still_resolves(tmp_path, monkeypatch):
+    # 合并时没删源分支的 MR 仍可增量扫描 → 正常回填不拦截
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feat/x",
+                                  "target_branch": "main", "state": "merged"})
+    _mock_branch_exists(monkeypatch, exists=True)
+    _mock_clone(app, monkeypatch, calls=[])
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 200, r.text
+    assert r.json()["head_ref"] == "feat/x"
+
+
+def test_resolve_mr_opened_skips_branch_check(tmp_path, monkeypatch):
+    # opened MR 源分支必然存在 → 不多打一次分支查询 API
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feat/x",
+                                  "target_branch": "main", "state": "opened"})
+    branch_calls = []
+    _mock_branch_exists(monkeypatch, exists=False, calls=branch_calls)
+    _mock_clone(app, monkeypatch, calls=[])
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 200, r.text
+    assert branch_calls == []
 
 
 def test_resolve_mr_api_404(tmp_path, monkeypatch):

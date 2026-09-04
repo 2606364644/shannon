@@ -1005,6 +1005,9 @@ class MrScanWorkflow:
 
         self._state.start_time = workflow.time_ns() / 1e9
         self._state.current_phase = "mr-setup"
+        # worker 路径门控（对齐 WhiteboxScanWorkflow）：event_file 非 None = web 提交，
+        # 失败时经 finalize_summary 写 scan_end + session failed；CLI 路径外层收尾。
+        is_worker_path = input.event_file is not None
         act_input = ActivityInput(
             repo_path=input.repo_path,
             web_url=input.web_url,
@@ -1023,54 +1026,100 @@ class MrScanWorkflow:
             mr_head_ref=input.mr_head_ref,
         )
 
-        # 1. repo prepare（fetch→checkout head→merge-base）
-        prepared = await workflow.execute_activity(
-            mr_activities.run_mr_repo_prepare, act_input,
-            start_to_close_timeout=timedelta(minutes=2),
-            retry_policy=RetryPolicy(maximum_attempts=1),
-        )
-        # 2. diff 解析落盘（vuln 类启发式随返）
-        diff_result = await workflow.execute_activity(
-            mr_activities.run_git_diff, act_input,
-            start_to_close_timeout=timedelta(minutes=2),
-            retry_policy=retry_for("standard"),
-        )
-        # 空 diff 快速终态（spec §7）：base==head（stats.files==0）→ 不跑双轨
-        # （删防护判定/child 全跳过），finalize 产「无变更」报告即 completed。
-        if not (diff_result.get("stats") or {}).get("files"):
-            await workflow.execute_activity(
-                mr_activities.run_mr_empty_diff_finalize, act_input,
+        # child 启动标志：child 自带 try/except 收尾（其 finalize_summary 已写
+        # scan_end），child 阶段的失败不再由 Mr 侧 finalize（防双 scan_end）。
+        child_launched = False
+        try:
+            # 1. repo prepare（fetch→checkout head→merge-base）
+            prepared = await workflow.execute_activity(
+                mr_activities.run_mr_repo_prepare, act_input,
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=RetryPolicy(maximum_attempts=1),
             )
-            self._state.status = "completed"
-            self._state.current_phase = "mr-empty-diff"
+            # 2. diff 解析落盘（vuln 类启发式随返）
+            diff_result = await workflow.execute_activity(
+                mr_activities.run_git_diff, act_input,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_for("standard"),
+            )
+            # 空 diff 快速终态（spec §7）：base==head（stats.files==0）→ 不跑双轨
+            # （删防护判定/child 全跳过），finalize 产「无变更」报告即 completed。
+            if not (diff_result.get("stats") or {}).get("files"):
+                await workflow.execute_activity(
+                    mr_activities.run_mr_empty_diff_finalize, act_input,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+                self._state.status = "completed"
+                self._state.current_phase = "mr-empty-diff"
+                return self._state
+            # 3. diff.patch → 删防护 LLM 判定（降级不阻塞）
+            await workflow.execute_activity(
+                mr_activities.run_protection_removal_analysis, act_input,
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=retry_for("standard"),
+            )
+
+            # mr_meta 摘要穿给 child：base/head/verdict 候选计数 + MR 启发式 vuln 类
+            # （构造收口 _mr_child_input 纯函数——穿线语义单测锁定，workflow 级端到端
+            # 由独立脚本验证：pytest WorkflowEnvironment + child workflow 在本机有
+            # 预存挂起（CLAUDE.md 测试陷阱，heartbeat 基准同挂），不引入挂起测试。）
+            child_input = _mr_child_input(input, prepared, diff_result)
+
+            # 4. child workflow 跑全量主体（MR 消费点在其内生效）
+            child_launched = True
+            child_state = await workflow.execute_child_workflow(
+                WhiteboxScanWorkflow.run,
+                args=[child_input],
+                id=f"{workflow.info().workflow_id}-wb",
+                retry_policy=RetryPolicy(maximum_attempts=1),
+                run_timeout=_MR_CHILD_TIMEOUT,
+            )
+            # 泡沫：child 完成了 MR 主流程，返回其 PipelineState（状态/错误沿用）
+            self._state.status = child_state.status
+            self._state.errors = list(child_state.errors)
+            self._state.completed_agents = list(child_state.completed_agents)
+            self._state.agent_metrics = dict(child_state.agent_metrics)
+            self._state.error_code = child_state.error_code
+            self._state.current_phase = None
             return self._state
-        # 3. diff.patch → 删防护 LLM 判定（降级不阻塞）
-        await workflow.execute_activity(
-            mr_activities.run_protection_removal_analysis, act_input,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=retry_for("standard"),
-        )
-
-        # mr_meta 摘要穿给 child：base/head/verdict 候选计数 + MR 启发式 vuln 类
-        # （构造收口 _mr_child_input 纯函数——穿线语义单测锁定，workflow 级端到端
-        # 由独立脚本验证：pytest WorkflowEnvironment + child workflow 在本机有
-        # 预存挂起（CLAUDE.md 测试陷阱，heartbeat 基准同挂），不引入挂起测试。）
-        child_input = _mr_child_input(input, prepared, diff_result)
-
-        # 4. child workflow 跑全量主体（MR 消费点在其内生效）
-        child_state = await workflow.execute_child_workflow(
-            WhiteboxScanWorkflow.run,
-            args=[child_input],
-            id=f"{workflow.info().workflow_id}-wb",
-            retry_policy=RetryPolicy(maximum_attempts=1),
-            run_timeout=_MR_CHILD_TIMEOUT,
-        )
-        # 泡沫：child 完成了 MR 主流程，返回其 PipelineState（状态/错误沿用）
-        self._state.status = child_state.status
-        self._state.errors = list(child_state.errors)
-        self._state.completed_agents = list(child_state.completed_agents)
-        self._state.agent_metrics = dict(child_state.agent_metrics)
-        self._state.error_code = child_state.error_code
-        return self._state
+        except CancelledError:
+            # 对齐 WhiteboxScanWorkflow：cancel 终态写入由 web 侧负责
+            # （scan_manager._mark_cancelled），此处不调 finalize_summary（防双 scan_end）。
+            self._state.status = "cancelled"
+            self._state.current_phase = None
+            return self._state
+        except Exception as e:
+            # 取消类异常按 cancelled 语义收尾（cancel 注入丢失时以 ChildWorkflowError
+            # 形态上抛——对齐 WhiteboxScanWorkflow 同款分支）。
+            if is_cancellation(e):
+                self._state.status = "cancelled"
+                self._state.current_phase = None
+                return self._state
+            # session-status 同步（2026-09-04 shorturl MR !99 事故）：前置 activity
+            # PentestError（源分支已删除 → git rev-parse 失败等）旧版直接上抛零落盘，
+            # 用户等 15s 才见 web _watch 兜底的零信息 "workflow FAILED"。对齐
+            # WhiteboxScanWorkflow：finalize_summary 写 scan_end 带真实错误 + session
+            # failed，再 raise 让 Temporal 标 FAILED（web describe 兜底依赖此信号）。
+            self._state.status = "failed"
+            if not self._state.errors:
+                self._state.errors.append(f"{type(e).__name__}: {e}")
+            if is_worker_path and not child_launched:
+                summary = {
+                    "status": "failed",
+                    "total_duration_ms": int(
+                        (workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+                    "total_cost_usd": 0.0,
+                    "completed_agents": [],
+                    "agent_metrics": {},
+                    "error": self._state.errors[0],
+                }
+                try:
+                    await workflow.execute_activity(
+                        activities.finalize_summary, args=[act_input, summary],
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=retry_for("standard"),
+                    )
+                except Exception:
+                    pass  # finalize 自身失败不掩盖原异常；workflow 仍 FAILED，web 兜底
+            raise

@@ -81,7 +81,7 @@ def classify_url(url: str) -> MrLink | RepoLink:
 
 
 async def fetch_merge_request(link: MrLink, token: str) -> dict:
-    """查 MR 的 source/target 分支。返回 {"source_branch", "target_branch"}。
+    """查 MR 的 source/target 分支与状态。返回 {"source_branch", "target_branch", "state"}。
 
     失败映射 GitLabApiError：404（MR 不存在/无权限）、401（凭据拒绝）、其余网络/
     上游故障。凭据缺失由调用方前置检查（503 语义，区别于凭据被拒）。
@@ -102,4 +102,25 @@ async def fetch_merge_request(link: MrLink, token: str) -> dict:
     data = resp.json()
     if not data.get("source_branch") or not data.get("target_branch"):
         raise GitLabApiError(0, "GitLab API 返回缺失分支信息")
-    return {"source_branch": data["source_branch"], "target_branch": data["target_branch"]}
+    return {"source_branch": data["source_branch"], "target_branch": data["target_branch"],
+            "state": data.get("state", "opened")}
+
+
+async def branch_exists(link: MrLink, branch: str, token: str) -> bool:
+    """查 project 分支是否仍存在于远端（merged/closed MR 的源分支常被删）。
+
+    降级语义：网络/凭据/上游异常 → True（放行）。误拦截（明明能扫却被 422 挡死）
+    伤害大于漏拦截（放行后走原失败路径，workflow 收尾透传真实原因）。
+    """
+    project_enc = quote(link.project, safe="")
+    branch_enc = quote(branch, safe="")
+    api = (f"{link.scheme}://{link.host}/api/v4/projects/{project_enc}"
+           f"/repository/branches/{branch_enc}")
+    try:
+        async with httpx.AsyncClient(timeout=_API_TIMEOUT) as client:
+            resp = await client.get(api, headers={"PRIVATE-TOKEN": token})
+    except httpx.HTTPError:
+        return True
+    if resp.status_code == 404:
+        return False
+    return True
