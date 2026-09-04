@@ -35,6 +35,9 @@ const server = setupServer(
   // 需恢复场景的用例各自 server.use 注入。
   http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () =>
     new HttpResponse(null, { status: 404 })),
+  // 分析历史列表（2026-09-04）：默认空=无历史，有用例各自注入。
+  http.get("/api/workspaces/:ws/correlation-topology/analyses", () =>
+    HttpResponse.json([])),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -1195,6 +1198,79 @@ describe("correlation topology auto flow", () => {
     expect(await screen.findByRole("button", { name: /取消/ })).toBeInTheDocument();
     expect(await screen.findByText(/tracing gateway→identity/)).toBeInTheDocument();
     expect(screen.getByText(/pattern=identity/)).toBeInTheDocument();
+  });
+
+  // 恢复断链修复（2026-09-04 反馈「点进来又是空又要重新分析」）：latest 恢复此前只
+  // 回状态帧不回填勾选仓库 → 草稿 effect 因 selectedTopologyRepos 空而短路，图/YAML
+  // 全空。修复 = 恢复时回填 repos，勾选 + 拓扑 + YAML 一次全回来，零重新分析。
+  it("刷新恢复：最近一次完成分析自动回填勾选仓库与拓扑", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "web", state: "ready" }, { name: "order", state: "ready" },
+      ])),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/latest", () =>
+        HttpResponse.json({
+          analysis_id: "topology-c1", workspace: "ws1", status: "completed",
+          repos: ["web", "order"],
+          result: {
+            nodes: [{ repo: "web", roles: ["entrypoint"] }, { repo: "order", roles: ["backend"] }],
+            edges: [{ from: "web", to: "order", protocol: "grpc", confidence: "high" }],
+            uncertain: [], coverage: [],
+          },
+        })),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses", () =>
+        HttpResponse.json([{
+          analysis_id: "topology-c1", workspace: "ws1", status: "completed",
+          repos: ["web", "order"], created_at: "2026-09-03T06:22:00Z",
+        }])),
+    );
+    renderAutoPage();
+    fireEvent.click(screen.getByTestId("scan-type-correlation"));
+    await selectWorkspace("ws1");
+    expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-order")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "web" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("checkbox", { name: "order" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("分析历史：列表按时间倒序可点选，点击切换恢复对应勾选/拓扑（单条拉全量 result）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () => HttpResponse.json([
+        { name: "web", state: "ready" }, { name: "order", state: "ready" },
+        { name: "admin", state: "ready" }, { name: "user", state: "ready" },
+      ])),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses", () =>
+        HttpResponse.json([
+          { analysis_id: "topology-h2", workspace: "ws1", status: "completed",
+            repos: ["admin", "user"], cache_hit: true, created_at: "2026-09-03T08:00:00Z" },
+          { analysis_id: "topology-h1", workspace: "ws1", status: "completed",
+            repos: ["web", "order"], created_at: "2026-09-02T08:00:00Z" },
+        ])),
+      http.get("/api/workspaces/:ws/correlation-topology/analyses/topology-h2", () =>
+        HttpResponse.json({
+          analysis_id: "topology-h2", workspace: "ws1", status: "completed",
+          repos: ["admin", "user"], cache_hit: true,
+          result: {
+            nodes: [{ repo: "admin", roles: ["entrypoint"] }, { repo: "user", roles: ["backend"] }],
+            edges: [{ from: "admin", to: "user", protocol: "http", confidence: "medium" }],
+            uncertain: [], coverage: [],
+          },
+        })),
+    );
+    renderAutoPage();
+    fireEvent.click(screen.getByTestId("scan-type-correlation"));
+    await selectWorkspace("ws1");
+    // 历史条目按识别键（repo 组合）出现，倒序：最新在前
+    const rows = await screen.findAllByRole("button", { name: /, / });
+    expect(rows[0].textContent).toContain("admin, user");
+    expect(rows[1].textContent).toContain("web, order");
+    fireEvent.click(rows[0]);
+    // 拓扑换成 h2 的世界，勾选同步，当前条目亮竖条
+    expect(await screen.findByTestId("topology-node-admin")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-user")).toBeInTheDocument();
+    expect(screen.queryByTestId("topology-node-web")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "admin" }).getAttribute("aria-checked")).toBe("true");
+    expect(rows[0].getAttribute("aria-current")).toBe("true");
   });
 });
 

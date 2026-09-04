@@ -611,7 +611,10 @@
         "autoMode": "Automatic topology",
         "manualMode": "Manual mode",
         "submit": "Start cross-repo scan",
-        "hint": "Select at least two ready repositories. Analysis is read-only and must be confirmed before scan submission."
+        "hint": "Select at least two ready repositories. Analysis is read-only and must be confirmed before scan submission.",
+        "history": {
+          "title": "Analysis history"
+        }
       },
       "topology": {
         "editor": "Candidate topology editor",

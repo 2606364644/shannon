@@ -534,3 +534,45 @@ async def test_api_latest_analysis_for_refresh_recovery(authed_client, tmp_path)
     assert r.status_code == 200
     assert r.json()["analysis_id"] == "topology-00000000000b"
     assert r.json()["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_api_list_analyses_history(authed_client, tmp_path):
+    # 分析历史列表（摘要）：created_at 降序；只带历史行渲染所需摘要字段——
+    # result/usage/error 大字段不下发（单条 {analysis_id} 才拉全量）。
+    app = authed_client.app
+    store = TopologyAnalysisStore(tmp_path / "workspaces")
+    app.state.topology_manager = TopologyAnalysisManager(
+        tmp_path / "workspaces", repo_manager=None)
+
+    r = authed_client.get("/api/workspaces/ws1/correlation-topology/analyses")
+    assert r.status_code == 200 and r.json() == []
+
+    def _state(aid: str, status: str, created: str, repos: list[str],
+               result: dict | None = None, ws: str = "ws1") -> dict:
+        state = {"analysis_id": aid, "workspace": ws, "status": status,
+                 "repos": repos, "fingerprint": aid,
+                 "created_at": created, "updated_at": created, "progress": 100,
+                 "cache_hit": False}
+        if result is not None:
+            state["result"] = result
+        return state
+
+    store.create("ws1", _state("topology-00000000000a", "completed", "2026-01-01T00:00:00Z",
+                               ["a", "b"], {"nodes": [], "edges": [], "uncertain": [], "coverage": []}))
+    store.create("ws1", _state("topology-00000000000b", "failed", "2026-01-03T00:00:00Z", ["c", "d"]))
+    store.create("ws2", _state("topology-00000000000c", "completed", "2026-01-02T00:00:00Z",
+                               ["x", "y"], ws="ws2"))
+
+    r = authed_client.get("/api/workspaces/ws1/correlation-topology/analyses")
+    assert r.status_code == 200
+    body = r.json()
+    assert [a["analysis_id"] for a in body] == ["topology-00000000000b", "topology-00000000000a"]
+    assert body[0]["repos"] == ["c", "d"] and body[0]["status"] == "failed"
+    for a in body:
+        assert not a.get("result") and not a.get("usage") and not a.get("error")
+
+    # 单条仍带 result（选中历史后前端拉全量重建拓扑）
+    r2 = authed_client.get(
+        "/api/workspaces/ws1/correlation-topology/analyses/topology-00000000000a")
+    assert r2.status_code == 200 and r2.json()["result"] is not None

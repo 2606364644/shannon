@@ -414,6 +414,19 @@ class TopologyAnalysisManager:
         newest = max(records, key=lambda s: s.get("created_at") or "")
         return self.api_view(ws, newest["analysis_id"])
 
+    def list_analyses(self, ws: str) -> list[dict[str, Any]]:
+        """分析历史（摘要）：created_at 降序。只带历史行渲染所需字段——
+        result/usage/error 大字段不下发，选中条目后前端经 get(api_view) 拉全量。"""
+        records = sorted(self.store.list(ws),
+                         key=lambda s: s.get("created_at") or "", reverse=True)
+        return [{
+            "analysis_id": s.get("analysis_id"), "workspace": s.get("workspace"),
+            "status": s.get("status"), "repos": s.get("repos"),
+            "progress": s.get("progress"), "cache_hit": s.get("cache_hit"),
+            "fingerprint": s.get("fingerprint"),
+            "created_at": s.get("created_at"), "updated_at": s.get("updated_at"),
+        } for s in records]
+
     def api_view(self, ws: str, analysis_id: str) -> dict[str, Any]:
         """Minimal frontend response; persisted paths/manifests/raw output stay server-side."""
         state = self.get(ws, analysis_id)

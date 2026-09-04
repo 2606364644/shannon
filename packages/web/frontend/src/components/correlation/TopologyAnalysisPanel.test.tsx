@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { CorrelationTopologyAnalysis } from "@/api/types";
 import { CorrelationTopologyAnalysisPanel } from "./TopologyAnalysisPanel";
 
 const baseHandlers = {
@@ -77,4 +78,27 @@ it("hides audit trail when idle with no lines", () => {
     onStart={vi.fn()} onRetry={vi.fn()} onCancel={vi.fn()} onManual={vi.fn()}
   />);
   expect(container.querySelector(".font-mono")).toBeNull();
+});
+
+it("renders history entries and forwards selection (restore without re-analysis)", () => {
+  const onSelectHistoryEntry = vi.fn();
+  const entry: CorrelationTopologyAnalysis = {
+    analysis_id: "topology-h1", workspace: "ws1", status: "completed",
+    repos: ["api-gateway", "user-svc"], created_at: "2026-09-03T06:22:00Z",
+  };
+  render(<CorrelationTopologyAnalysisPanel
+    analysis={null} starting={false} error={null} logLines={[]}
+    historyEntries={[entry]} historyActiveId="topology-h1"
+    onSelectHistoryEntry={onSelectHistoryEntry}
+    {...baseHandlers}
+  />);
+  expect(screen.getByTestId("topology-history")).toBeInTheDocument();
+  expect(screen.getByText("api-gateway, user-svc")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /api-gateway/ }));
+  expect(onSelectHistoryEntry).toHaveBeenCalledWith(entry);
+  // 无历史数据源（未传 onSelectHistoryEntry）→ 历史区不渲染
+  const bare = render(<CorrelationTopologyAnalysisPanel
+    analysis={null} starting={false} error={null} logLines={[]} {...baseHandlers}
+  />);
+  expect(bare.container.querySelector("[data-testid='topology-history']")).toBeNull();
 });

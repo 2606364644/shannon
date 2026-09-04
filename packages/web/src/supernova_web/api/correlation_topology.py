@@ -56,6 +56,14 @@ async def start_analysis(ws: str, body: StartTopologyBody, request: Request,
     return {"analysis_id": analysis_id}
 
 
+@router.get("/{ws}/correlation-topology/analyses")
+async def list_analyses(ws: str, request: Request, _: User = Depends(workspace_member)):
+    """分析历史列表（摘要，created_at 降序）：前端「历史分析」选择器数据源；
+    选中条目后经 /{analysis_id} 拉全量（result）。路径无尾段，与 /{analysis_id}
+    动态路由天然不冲突。"""
+    return request.app.state.topology_manager.list_analyses(ws)
+
+
 @router.get("/{ws}/correlation-topology/analyses/latest")
 async def latest_analysis(ws: str, request: Request, _: User = Depends(workspace_member)):
     """刷新恢复入口：页面 mount 时取最近一条 analysis 恢复状态/日志轮询。

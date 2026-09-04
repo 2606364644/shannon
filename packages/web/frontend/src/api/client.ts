@@ -400,6 +400,11 @@ export function getLatestTopologyAnalysis(ws: string): Promise<CorrelationTopolo
   return apiGet<CorrelationTopologyAnalysis>(
     `/workspaces/${encWs(ws)}/correlation-topology/analyses/${encWs("latest")}`);
 }
+// 分析历史（摘要列表，created_at 降序；不含 result——选中条目经 getCorrelationTopologyAnalysis 拉全量）
+export function listCorrelationTopologyAnalyses(ws: string): Promise<CorrelationTopologyAnalysis[]> {
+  return apiGet<CorrelationTopologyAnalysis[]>(
+    `/workspaces/${encWs(ws)}/correlation-topology/analyses`);
+}
 
 // ── 多仓配置（对齐 backend api/multi_configs.py + MultiRepoConfigStore）─────────
 // GET /api/multi-configs → 配置名 list[str]（sorted）；POST 返 201 {name}

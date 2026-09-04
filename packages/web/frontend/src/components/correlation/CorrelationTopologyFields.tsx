@@ -26,6 +26,9 @@ interface Props {
   analysis: CorrelationTopologyAnalysis | null;
   starting: boolean;
   analysisError: string | null;
+  historyEntries?: CorrelationTopologyAnalysis[];
+  historyActiveId?: string | null;
+  onSelectHistoryEntry?: (entry: CorrelationTopologyAnalysis) => void;
   logLines: TopologyAuditLine[];
   logDropped?: number;
   onStart: () => void;
@@ -91,7 +94,9 @@ export function CorrelationTopologyFields(props: Props) {
         <CorrelationTopologyAnalysisPanel analysis={props.analysis} starting={props.starting}
           error={props.analysisError} logLines={props.logLines} logDropped={props.logDropped}
           onStart={props.onStart} onRetry={props.onRetry}
-          onCancel={props.onCancel} onManual={props.onManual} />
+          onCancel={props.onCancel} onManual={props.onManual}
+          historyEntries={props.historyEntries} historyActiveId={props.historyActiveId}
+          onSelectHistoryEntry={props.onSelectHistoryEntry} />
       </Section>
 
       {props.topologyState && (

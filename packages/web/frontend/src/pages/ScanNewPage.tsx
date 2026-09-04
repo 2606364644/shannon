@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { CorrelationTopologyAnalysis, ScanRequest, ScanResponse, TopologyAuditLine, Workspace, ScanAuthentication } from "../api/types";
-import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, getLatestTopologyAnalysis, getTopologyAnalysisLog, startCorrelationTopologyAnalysis } from "../api/client";
+import { apiGet, apiPost, ApiError, cancelCorrelationTopologyAnalysis, getCorrelationTopologyAnalysis, getLatestTopologyAnalysis, getTopologyAnalysisLog, listCorrelationTopologyAnalyses, startCorrelationTopologyAnalysis } from "../api/client";
 import { useScans } from "../routes/WorkspaceDetail/useScans";
 import { ScanFormFields } from "../components/ScanFormFields";
 import { RepoCombobox } from "../components/RepoCombobox";
@@ -33,7 +33,8 @@ import {
   type TopologyDraftState,
 } from "@/lib/correlation-topology-draft";
 
-/** 页面可达类型（D3）：白盒 | 跨仓关联，顶部 segmented 切换。黑盒只读分支已删除——
+/** 页面可达类型（D3）：白盒 | MR 增量 | 跨仓关联，顶部 segmented 切换（顺序=频率与
+ *  表单复杂度，见下方 segmented 注释）。黑盒只读分支已删除——
  *  黑盒一律是组合任务的嵌套 run 或经 ScanDetail addBlackboxToWhitebox，无独立创建入口。 */
 type ScanType = "whitebox" | "correlation" | "mr";
 
@@ -441,6 +442,8 @@ export function ScanNewPage() {
   const [selectedTopologyRepos, setSelectedTopologyRepos] = useState<string[]>([]);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<CorrelationTopologyAnalysis | null>(null);
+  // 分析历史（摘要列表）：「换一组仓库」不用重新分析——点历史条目恢复该次世界
+  const [analysisHistory, setAnalysisHistory] = useState<CorrelationTopologyAnalysis[]>([]);
   const [analysisStarting, setAnalysisStarting] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   // 过程日志：after 行号游标 + 前端保留窗（200 行，更早累计进 dropped）
@@ -554,6 +557,9 @@ export function ScanNewPage() {
   // 刷新恢复：进入页面（ws 确定且本会话未发起过新分析）时找回最近一条 analysis，
   // active → 恢复状态/日志轮询；终态 → 直接展示结果（retry 语义不变）。404 静默。
   // 仅 correlation+auto 模式查——白盒/MR 无拓扑分析，不白发请求。
+  // 完成态回填勾选仓库（2026-09-04 恢复断链修复）：此前只回状态帧不回 repos，
+  // 草稿 effect 因勾选为空短路 → 图/YAML 全空像「没分析过」。函数式 set——
+  // 用户已手选仓库时不覆盖其选择。
   useEffect(() => {
     if (type !== "correlation" || corrMode !== "auto" || !workspace || analysisId) return;
     let cancelled = false;
@@ -563,7 +569,14 @@ export function ScanNewPage() {
         resetLog();
         setAnalysis(a);
         setAnalysisId(a.analysis_id);
+        if (a.status === "completed" && a.result) {
+          setSelectedTopologyRepos((prev) => (prev.length ? prev : a.repos));
+        }
       })
+      .catch(() => {});
+    // 分析历史（同页拉取）：历史条目选择器数据源；失败静默=无历史可恢复
+    listCorrelationTopologyAnalyses(workspace)
+      .then((list) => { if (!cancelled) setAnalysisHistory(list); })
       .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -572,10 +585,41 @@ export function ScanNewPage() {
   useEffect(() => {
     if (analysis?.status !== "completed" || !selectedTopologyRepos.length) return;
     if (topologyState?.analysis?.analysis_id === analysis.analysis_id) return;
+    // 用户已在编辑（手贴 YAML / 手选仓库建过图）→ 恢复不覆盖其工作
+    if (topologyState) return;
     const sources = Object.fromEntries(corrState.repos.map((repo) => [repo.repo, repo.reuseScanId]));
     applyTopologyState(createTopologyDraft(selectedTopologyRepos, analysis, sources));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, selectedTopologyRepos]);
+
+  // 当前 analysis upsert 进历史列表：新发起的分析入列置顶、轮询推进的状态实时反映
+  useEffect(() => {
+    if (!analysis) return;
+    setAnalysisHistory((prev) => [
+      { ...analysis, result: undefined },
+      ...prev.filter((e) => e.analysis_id !== analysis.analysis_id),
+    ]);
+  }, [analysis]);
+
+  /** 历史条目选择：换回该次分析的世界——回填勾选仓库、拉全量（list 摘要无
+   *  result）、清当前草稿 → 完成→草稿 effect 重建拓扑/YAML，全程零重新分析。
+   *  active 条目（running/queued）同样可选：恢复后轮询 effect 自动接管。 */
+  const selectHistoryEntry = async (entry: CorrelationTopologyAnalysis) => {
+    if (!workspace || entry.analysis_id === analysisId) return;
+    resetLog();
+    setAnalysisError(null);
+    setTopologyState(null);
+    setSelectedTopologyRepos(entry.repos);
+    setAnalysis(entry);
+    setAnalysisId(entry.analysis_id);
+    if (entry.status === "completed") {
+      try {
+        setAnalysis(await getCorrelationTopologyAnalysis(workspace, entry.analysis_id));
+      } catch (e) {
+        setAnalysisError(e instanceof Error ? e.message : String(e));
+      }
+    }
+  };
 
   const startTopologyAnalysis = async (refresh = false) => {
     if (!workspace || selectedTopologyRepos.length < 2) return;
@@ -709,10 +753,12 @@ export function ScanNewPage() {
       {/* 整张卡片：类型 segmented + 单栏表单 + 底部操作 */}
       <Card className="overflow-hidden">
         <div className="p-5 space-y-4">
-          {/* 类型切换 segmented（D3）：白盒 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run）；
-              MR 增量扫描（spec 2026-09-03）：base..head 增量检测 */}
+          {/* 类型切换 segmented（D3）：白盒 | MR 增量 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run）。
+              顺序即频率与复杂度（2026-09-04 重排）：MR 增量（spec 2026-09-03，base..head、纯白盒
+              语义）是日常高频且表单最简，紧跟白盒成「单仓检测」组；跨仓关联（多仓拓扑/YAML/编辑器）
+              是低频深度分析、表单最重，殿后。 */}
           <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-            {(["whitebox", "correlation", "mr"] as const).map((v) => (
+            {(["whitebox", "mr", "correlation"] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -914,6 +960,9 @@ export function ScanNewPage() {
               logLines={logLines}
               logDropped={logDropped}
               analysisError={analysisError}
+              historyEntries={analysisHistory}
+              historyActiveId={analysisId}
+              onSelectHistoryEntry={(entry) => void selectHistoryEntry(entry)}
               onStart={() => void startTopologyAnalysis(false)}
               onRetry={() => void startTopologyAnalysis(true)}
               onCancel={() => void cancelTopologyAnalysis()}
