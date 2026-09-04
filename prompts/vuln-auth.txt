@@ -197,6 +197,17 @@ From `{{DELIVERABLES_PATH}}/pre_recon_deliverable.md`, use Section 3 and 6 to he
 - nOAuth check: Verify user identification uses the immutable `sub` (subject) claim, NOT deterministic/mutable attributes like `email`, `preferred_username`, `name`, or other user-controllable claims. Using mutable attributes allows attackers to create their own OAuth tenant, set matching attributes, and impersonate users.
 **If failed → classify:** `login_flow_logic` or `token_management_issue` → **suggested attack:** oauth_code_interception / token_replay / noauth_attribute_hijack.
 
+## 10) Existence oracles (duplicate-check / availability / lookup-by-identifier endpoints)
+- Grep the codebase for endpoints whose business function answers "does this identifier already exist / is it already registered?" — search route registrations, controllers, and service methods for `duplicate`, `check-duplicate`, `exists`, `availability`, `is-registered`, `check-username`, `check-email`, `check-phone`, `lookup`, etc. (use TodoWrite to track each endpoint found).
+- Do NOT limit this to login/signup routes: ANY endpoint (anonymous/pre-auth or authenticated, in any workflow — registration, account opening, profile, password reset) that takes an identity-bearing identifier (national ID / certificate no., passport no., phone, email, username, account/customer no.) as a lookup condition and returns an existence-semantic response qualifies. Anonymous "duplicate check" endpoints in pre-registration flows are prime candidates — "no auth middleware" is the design for such flows, not a defense.
+- For each such endpoint, drive the Task Agent to read the handler → service → response mapping, and verify:
+  1. **Identifier binding:** the queried identifier is bound to the caller's own identity server-side (e.g., cid injected from `ctx.user.uid`). If the identifier comes straight from the request body/params, anyone's identifier can be probed → arbitrary-user enumeration.
+  2. **Minimum disclosure:** the response reveals the minimum — a boolean is the ceiling. Echoing the matched existing account/customer id or profile fields (phone, name, email — masked or not) exceeds it.
+  3. **Server-enforced masking:** redaction/masking must be enforced server-side. A client-controlled flag (`mask: false`, `verbose`, `debug`) that unmasks or enriches the response is a defect.
+  4. **Throttling:** per-IP / per-identifier rate limiting or CAPTCHA exists. If absent, the oracle is batch-harvestable — also classify under check 2) (`abuse_defenses_missing`).
+**If failed → classify:** `login_flow_logic` (+ `abuse_defenses_missing` when unthrottled) → **suggested attack:** account_enumeration.
+**Safe verdict:** the identifier is strictly bound to the caller's own identity, OR the response is strictly boolean with server-enforced throttling → NOT vulnerable; document via `set_safe_vectors`.
+
 # Confidence scoring (analysis phase; applies to all checks above)
 - **High** — The flaw is directly established and deterministic in the target context. You have direct evidence or equivalent (code/config that creates the condition, or a single safe interaction that shows it) with no material alternate control. Scope is clear (which endpoints/flows).
 - **Medium** — The flaw is strongly indicated but there is at least one material uncertainty (e.g., possible upstream control, conditional behavior, or partial coverage). Signals are mostly consistent but a reasonable alternative explanation remains.
