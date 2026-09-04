@@ -634,8 +634,12 @@
         "selectNode": "选择服务",
         "removedAi": "已移除的 AI 建议",
         "restore": "恢复",
-        "canvasHint": "拖动节点调整布局；从节点右侧 ○ 手柄拉到目标节点上松开添加关系（Esc 取消）",
-        "connectHandle": "按住拖到目标节点上松开，添加一条关系；再点手柄或按 Esc 取消"
+        "canvasHint": "拖动节点调整布局；从节点右侧 ○ 手柄拉到目标节点上松开添加关系（Esc 取消）；空白处拖动平移，滚轮缩放",
+        "connectHandle": "按住拖到目标节点上松开，添加一条关系；再点手柄或按 Esc 取消",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "zoomReset": "重置缩放至 100%",
+        "zoomFit": "全图适配视口"
       },
       "colFrom": "调用方",
       "colTo": "被调用方"

@@ -634,8 +634,12 @@
         "selectNode": "Select service",
         "removedAi": "Removed AI suggestions",
         "restore": "Restore",
-        "canvasHint": "Drag nodes to rearrange; drag a node's ○ handle onto a target and release to add an edge (Esc cancels)",
-        "connectHandle": "Hold and drag onto a target node, then release to add an edge; click the handle again or press Esc to cancel"
+        "canvasHint": "Drag nodes to rearrange; drag a node's ○ handle onto a target and release to add an edge (Esc cancels); drag empty space to pan, scroll to zoom",
+        "connectHandle": "Hold and drag onto a target node, then release to add an edge; click the handle again or press Esc to cancel",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "zoomReset": "Reset zoom to 100%",
+        "zoomFit": "Fit all services in view"
       },
       "colFrom": "From",
       "colTo": "To"
