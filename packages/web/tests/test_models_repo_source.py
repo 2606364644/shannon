@@ -35,3 +35,17 @@ def test_mr_rejects_non_repo_source():
     with pytest.raises(ValidationError):
         ScanRequest(type="mr", source={"kind": "path", "value": "/tmp/x"},
                     base_ref="main", head_ref="feature/x")
+
+
+def test_mr_accepts_merged_fallback_commits():
+    # merged 改道（2026-09-04）：源分支已删的已合并 MR，head_commit（merge_commit_sha）
+    # 是实际扫描把手，base_commit 可选（FF 形态 diff_refs.base_sha，true merge 为 None
+    # 由 worker 解 head^1）。head_ref 仍必填（表单展示用）。
+    req = ScanRequest(type="mr", source={"kind": "repo", "value": "foo"},
+                      base_ref="main", head_ref="feature/safe",
+                      head_commit="6f77f8b2", base_commit=None)
+    assert req.head_commit == "6f77f8b2" and req.base_commit is None
+    req_ff = ScanRequest(type="mr", source={"kind": "repo", "value": "foo"},
+                         base_ref="main", head_ref="feature/safe",
+                         head_commit="abc1234", base_commit="10eb3bd")
+    assert req_ff.base_commit == "10eb3bd"

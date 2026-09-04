@@ -29,6 +29,12 @@ class PipelineInput(BasePipelineInput):
     # None = 全量扫描（零行为变化）。MrScanWorkflow 前置消费后把摘要塞 child 的 mr_meta。
     mr_base_ref: str | None = None
     mr_head_ref: str | None = None
+    # MR merged 改道（2026-09-04）：源分支已删的已合并 MR，resolve-link 改传 commit 对
+    # ——head=merge_commit_sha（true merge/squash）或 MR.sha（FF，配显式 mr_base_commit=
+    # diff_refs.base_sha）。非 None = 改道模式（不 fetch/rev-parse 分支名，diff 区间直接
+    # 由 commit 对给定，base 缺省解析 head^1 first-parent）。None = 分支名模式（零变化）。
+    mr_head_commit: str | None = None
+    mr_base_commit: str | None = None
     mr_meta: dict | None = None   # child workflow 消费点用（MrScanWorkflow 填）
 
 
@@ -75,6 +81,10 @@ class ActivityInput:
     # None = 全量扫描（零行为变化）；MR 模式由 MrScanWorkflow 前置 activity 消费。
     mr_base_ref: str | None = None
     mr_head_ref: str | None = None
+    # MR merged 改道（2026-09-04）：commit 对把手（PipelineInput 同名字段灌入），
+    # 语义见 PipelineInput 注释。
+    mr_head_commit: str | None = None
+    mr_base_commit: str | None = None
     # MR 元信息（MrScanWorkflow 前置产物摘要，穿给 child workflow 消费点）：
     # {base_commit, head_commit, selected_vuln_classes, verdict_flow_count}
     mr_meta: dict | None = None

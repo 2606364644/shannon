@@ -1024,6 +1024,8 @@ class MrScanWorkflow:
             env_overrides=input.env_overrides,
             mr_base_ref=input.mr_base_ref,
             mr_head_ref=input.mr_head_ref,
+            mr_head_commit=input.mr_head_commit,   # merged 改道（2026-09-04）
+            mr_base_commit=input.mr_base_commit,
         )
 
         # child 启动标志：child 自带 try/except 收尾（其 finalize_summary 已写

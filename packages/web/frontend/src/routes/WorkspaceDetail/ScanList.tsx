@@ -390,6 +390,9 @@ function ScanRow({ ws, scan, scansById, onChanged }: {
       if (scan.scan_type === "mr") {
         if (detail.mr_base_ref) state.mrBaseRef = detail.mr_base_ref;
         if (detail.mr_head_ref) state.mrHeadRef = detail.mr_head_ref;
+        // merged 改道把手（2026-09-04）：改道扫描的重跑仍走 commit 对（不撞已删源分支）。
+        if (detail.mr_head_commit) state.mrHeadCommit = detail.mr_head_commit;
+        if (detail.mr_base_commit) state.mrBaseCommit = detail.mr_base_commit;
       }
       if (detail.bb_url) {
         state.url = detail.bb_url;

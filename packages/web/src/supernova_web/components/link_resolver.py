@@ -81,7 +81,11 @@ def classify_url(url: str) -> MrLink | RepoLink:
 
 
 async def fetch_merge_request(link: MrLink, token: str) -> dict:
-    """查 MR 的 source/target 分支与状态。返回 {"source_branch", "target_branch", "state"}。
+    """查 MR 的 source/target 分支与状态 + 合入把手（merged 改道用）。
+
+    返回 {"source_branch", "target_branch", "state", "merge_commit_sha", "sha",
+    "diff_refs"}——后三者是 MR 记录里持久保留的 commit 定位信息（源分支删除后
+    仍可查询），merged 改道公式（merged_fallback_commits）的输入。
 
     失败映射 GitLabApiError：404（MR 不存在/无权限）、401（凭据拒绝）、其余网络/
     上游故障。凭据缺失由调用方前置检查（503 语义，区别于凭据被拒）。
@@ -103,7 +107,31 @@ async def fetch_merge_request(link: MrLink, token: str) -> dict:
     if not data.get("source_branch") or not data.get("target_branch"):
         raise GitLabApiError(0, "GitLab API 返回缺失分支信息")
     return {"source_branch": data["source_branch"], "target_branch": data["target_branch"],
-            "state": data.get("state", "opened")}
+            "state": data.get("state", "opened"),
+            "merge_commit_sha": data.get("merge_commit_sha"),
+            "sha": data.get("sha"),
+            "diff_refs": data.get("diff_refs")}
+
+
+def merged_fallback_commits(mr: dict) -> tuple[str, str | None] | None:
+    """已合并 MR 的增量扫描把手（源分支已删时改道用）。
+
+    返回 (head_commit, base_commit)；base_commit=None 表示 base 交给 worker 按
+    head^1（first-parent）解析。两种合并形态统一归结为 commit 对：
+    - true merge / squash：merge_commit_sha 即 head；diff = head^1..head 正是 MR
+      合入目标分支的全部变更（squash 时 merge_commit_sha 就是 squash commit）。
+    - fast-forward：无 merge_commit_sha → MR.sha（FF 后即在目标分支历史上）+
+      diff_refs.base_sha（merge-base，同样可达）。
+    把手全缺（老 API / 极端）→ None，调用方维持拦截 422。
+    """
+    mcs = mr.get("merge_commit_sha")
+    if mcs:
+        return mcs, None
+    sha = mr.get("sha")
+    base_sha = (mr.get("diff_refs") or {}).get("base_sha")
+    if sha and base_sha:
+        return sha, base_sha
+    return None
 
 
 async def branch_exists(link: MrLink, branch: str, token: str) -> bool:

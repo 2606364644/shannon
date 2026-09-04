@@ -527,12 +527,15 @@ class ScanManager:
             elif req.type == "mr":
                 # MR 增量扫描（spec 2026-09-03 §3.2）：纯白盒语义 + diff 前置，
                 # 无组合/认证/HOST。提交 MrScanWorkflow（worker 内 child 跑全量主体）。
+                # head/base_commit = merged 改道把手（源分支已删的已合并 MR，2026-09-04）。
                 handle = await self._submit_mr(
                     target, ws, scan_id, scan_dir, event_file,
-                    req.base_ref, req.head_ref)
+                    req.base_ref, req.head_ref, req.head_commit, req.base_commit)
                 SessionManager(scan_dir.parent).update_session(
                     scan_dir, {"source_repo": req.source.value if req.source else None,
-                               "mr_base_ref": req.base_ref, "mr_head_ref": req.head_ref})
+                               "mr_base_ref": req.base_ref, "mr_head_ref": req.head_ref,
+                               "mr_head_commit": req.head_commit,
+                               "mr_base_commit": req.base_commit})
         except BaseException as exc:
             self._active_reqs.pop(scan_key, None)
             self._handles.pop(scan_key, None)
@@ -866,12 +869,16 @@ class ScanManager:
 
     async def _submit_mr(self, target: str | None, ws: str, scan_id: str,
                          scan_dir: Path, event_file: Path,
-                         base_ref: str | None, head_ref: str | None) -> Any:
+                         base_ref: str | None, head_ref: str | None,
+                         head_commit: str | None = None,
+                         base_commit: str | None = None) -> Any:
         """提交 MrScanWorkflow（MR 增量扫描，spec 2026-09-03 §3.2）。
 
         与 _submit_whitebox 同源：先解析 provider 配置，再 start_workflow 到
         WEB_TASK_QUEUE_WHITEBOX（worker 注册了 MrScanWorkflow）。base/head ref
-        经 PipelineInput.mr_base_ref/mr_head_ref 穿给 workflow 前置 activities。
+        经 PipelineInput.mr_base_ref/mr_head_ref 穿给 workflow 前置 activities；
+        head/base_commit（merged 改道，2026-09-04）经同路径穿 mr_head_commit/
+        mr_base_commit——worker 前置 activity 有 commit 对时按 commit 定位增量。
         """
         provider_config = self._resolve_provider_config(ws)
         client = await Client.connect(self._temporal_address())
@@ -886,6 +893,8 @@ class ScanManager:
             enable_llm_track=self._resolve_llm_track(ws),
             mr_base_ref=base_ref,
             mr_head_ref=head_ref,
+            mr_head_commit=head_commit,
+            mr_base_commit=base_commit,
         )
         handle = await client.start_workflow(
             MrScanWorkflow.run, inp, id=workflow_id,

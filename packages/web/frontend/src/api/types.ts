@@ -208,6 +208,10 @@ export interface ScanSummary {
   // 列表「MR」徽标 base..head 标识 + 重跑预填用；非 MR 扫描不返 -> 可选。
   mr_base_ref?: string | null;
   mr_head_ref?: string | null;
+  // merged 改道把手（2026-09-04）：session.mr_head_commit/mr_base_commit 透传，
+  // 重跑预填沿用；未写 -> 可选。
+  mr_head_commit?: string | null;
+  mr_base_commit?: string | null;
 }
 
 export interface SessionMetrics {
@@ -284,6 +288,9 @@ export interface SessionData {
   // MR 增量扫描 refs（spec 2026-09-03 §6）：重跑预填 base/head（非 MR 不返）。
   mr_base_ref?: string | null;
   mr_head_ref?: string | null;
+  // merged 改道把手（2026-09-04）：重跑预填实际扫描 commit 对（未写 -> 分支名模式）。
+  mr_head_commit?: string | null;
+  mr_base_commit?: string | null;
 }
 
 export type MergeSource = "llm-only" | "gitnexus-only" | "both" | string;
@@ -929,6 +936,9 @@ export interface ScanRequest {
   // MR 增量扫描（spec 2026-09-03）：type="mr" 必填 base/head ref（分支名或 commit sha）。
   base_ref?: string;
   head_ref?: string;
+  // MR merged 改道（2026-09-04）：源分支已删的已合并 MR 的 commit 把手（后端同名字段）。
+  head_commit?: string;
+  base_commit?: string;
   // final-review C2: 字段名必须与 backend ScanRequest (models.py) 一致 = `workspace`。
   // pydantic v2 默认不容未知键, 旧 `workspace_name` 会被静默丢弃 -> req.workspace=None -> 422。
   workspace?: string;
@@ -1002,13 +1012,19 @@ export interface Repo {
 
 /** 统一链接解析结果（POST /workspaces/{ws}/resolve-link，2026-09-03 仓库入口整合 A 段）：
  *  kind=mr 附 base_ref/head_ref（GitLab API 查回的 target/source 分支）；
- *  repo_state=cloning 表示仓库不在工作区、后端已异步触发 clone（前端轮询 repos 至 ready）。 */
+ *  repo_state=cloning 表示仓库不在工作区、后端已异步触发 clone（前端轮询 repos 至 ready）。
+ *  merged 改道（2026-09-04）：已合并 + 源分支已删的 MR 附 mr_merged=true + head_commit
+ *  （merge_commit_sha 把手）+ base_commit（FF 形态 diff_refs.base_sha；true merge 为 null，
+ *  worker 解 first-parent）——提交时透传，表单显示改道提示。 */
 export interface ResolveLinkResult {
   kind: "mr" | "repo";
   repo: string;
   repo_state: "ready" | "cloning";
   base_ref?: string;
   head_ref?: string;
+  mr_merged?: boolean;
+  head_commit?: string;
+  base_commit?: string | null;
 }
 
 export interface RepoDetail extends Repo {

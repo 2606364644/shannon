@@ -67,11 +67,17 @@ def _rev_parse(repo: Path, ref: str) -> str:
 async def run_mr_repo_prepare(input: ActivityInput) -> dict:
     """fetch（best-effort）→ 解析 base/head → merge-base → checkout head。
 
+    merged 改道（2026-09-04）：mr_head_commit 非空时不碰分支名——源分支已删的
+    已合并 MR 按 commit 对定位（head=merge_commit_sha；base 显式给或解析 head^1
+    first-parent），fetch 目标分支把 merge commit 带下来即可。
+
     fail-fast 语义（spec §7）：ref 解析不到 / 无共同祖先 → PentestError。
     """
     repo = Path(input.repo_path)
     base_ref = input.mr_base_ref or ""
     head_ref = input.mr_head_ref or ""
+    if input.mr_head_commit:
+        return await _prepare_by_commits(repo, input)
     if not base_ref or not head_ref:
         raise PentestError(
             "MR 模式需要 base_ref 与 head_ref", category="mr_prepare",
@@ -102,9 +108,44 @@ async def run_mr_repo_prepare(input: ActivityInput) -> dict:
     }
 
 
+async def _prepare_by_commits(repo: Path, input: ActivityInput) -> dict:
+    """merged 改道：commit 对解析 → checkout head（无需源分支）。
+
+    base 缺省解析 head^1（true merge 的目标分支侧 / squash 的前驱）；FF 形态由
+    resolve-link 显式穿 mr_base_commit（diff_refs.base_sha）。
+    """
+    # merge commit 在目标分支历史上——fetch 目标分支即带下（best-effort 同上）。
+    if input.mr_base_ref:
+        _git(repo, "fetch", "origin", input.mr_base_ref, check=False)
+
+    try:
+        head_commit = _rev_parse(repo, input.mr_head_commit or "")
+    except PentestError as e:
+        raise PentestError(
+            f"MR 已合并但合入 commit {input.mr_head_commit} 在仓库中解析不到"
+            f"（可能目标分支被改写），无法增量扫描: {e}",
+            category="mr_prepare", error_code=ErrorCode.REPO_NOT_FOUND,
+        ) from e
+    base_commit = (_rev_parse(repo, input.mr_base_commit)
+                   if input.mr_base_commit
+                   else _rev_parse(repo, (input.mr_head_commit or "") + "^1"))
+
+    _git(repo, "checkout", "-q", head_commit)
+    logger.info("MR repo prepared (merged fallback): base=%s head=%s",
+                base_commit[:8], head_commit[:8])
+    return {
+        "base_commit": base_commit,
+        "head_commit": head_commit,
+        "merge_base": base_commit,  # 改道区间直接给定（base..head），无 merge-base 步
+    }
+
+
 @activity.defn
 async def run_git_diff(input: ActivityInput) -> dict:
     """merge-base..head 的 unified diff → DiffManifest + patch 落盘。
+
+    merged 改道（mr_head_commit 非空）：diff 区间直接由 commit 对给定（base 缺省
+    head^1 first-parent），不经 merge-base。
 
     返回 stats + select_vuln_classes（child workflow 的 vuln 类选择输入）。
     自包含重解析 ref（activity 重试幂等，不依赖 repo_prepare 的内存返回）。
@@ -113,12 +154,18 @@ async def run_git_diff(input: ActivityInput) -> dict:
     from supernova_core.mr_scan.incremental_scope import select_vuln_classes
 
     repo = Path(input.repo_path)
-    head_commit = _rev_parse(repo, input.mr_head_ref or "")
-    base_commit = _rev_parse(repo, input.mr_base_ref or "")
-    merge_base = _git(repo, "merge-base", base_commit, head_commit)
+    if input.mr_head_commit:
+        head_commit = _rev_parse(repo, input.mr_head_commit)
+        base_commit = (_rev_parse(repo, input.mr_base_commit)
+                       if input.mr_base_commit
+                       else _rev_parse(repo, input.mr_head_commit + "^1"))
+    else:
+        head_commit = _rev_parse(repo, input.mr_head_ref or "")
+        base_commit = _rev_parse(repo, input.mr_base_ref or "")
+        base_commit = _git(repo, "merge-base", base_commit, head_commit)
 
-    diff_text = _git(repo, "diff", "-U3", "--no-color", f"{merge_base}..{head_commit}")
-    manifest = parse_unified_diff(diff_text, base_commit=merge_base, head_commit=head_commit)
+    diff_text = _git(repo, "diff", "-U3", "--no-color", f"{base_commit}..{head_commit}")
+    manifest = parse_unified_diff(diff_text, base_commit=base_commit, head_commit=head_commit)
 
     mr_dir = _mr_dir(input)
     (mr_dir / "diff_manifest.json").write_text(manifest.model_dump_json(indent=2))
@@ -127,7 +174,7 @@ async def run_git_diff(input: ActivityInput) -> dict:
     return {
         "stats": manifest.stats.model_dump(),
         "selected_vuln_classes": select_vuln_classes(manifest),
-        "base_commit": merge_base,
+        "base_commit": base_commit,
         "head_commit": head_commit,
     }
 

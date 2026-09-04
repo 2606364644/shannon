@@ -43,13 +43,41 @@ def mr_repo(tmp_path):
 def _act(repo: Path, tmp_path: Path, **kw) -> ActivityInput:
     scan_dir = tmp_path / "scan"
     scan_dir.mkdir(exist_ok=True)
+    defaults = dict(mr_base_ref="main~1", mr_head_ref="main")
+    defaults.update(kw)
     return ActivityInput(
         repo_path=str(repo),
         workspace_path=str(scan_dir),
-        mr_base_ref="main~1",
-        mr_head_ref="main",
-        **kw,
+        **defaults,
     )
+
+
+@pytest.fixture()
+def merged_repo(tmp_path):
+    """GitLab「合并后删源分支」形态：main 上 true merge commit（--no-ff），
+    feature/safe 已删。返回 (repo, merge_sha)——merge_sha 即 resolve-link 改道
+    穿下来的 head_commit（MR API merge_commit_sha）。"""
+    repo = tmp_path / "merged"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    f = repo / "app.py"
+    f.write_text("def h(req):\n    q = req['q']\n    q = sanitize(q)\n    return db(q)\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "feature/safe")
+    f.write_text("def h(req):\n    q = req['q']\n    return db(q)\n"
+                 "\n\ndef new_route(req):\n    return db(req['id'])\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--no-ff", "-qm", "merge MR !99", "feature/safe")
+    _git(repo, "branch", "-qD", "feature/safe")  # 模拟合并后删源分支
+    merge_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                               capture_output=True, text=True,
+                               check=True).stdout.strip()
+    return repo, merge_sha
 
 
 async def test_repo_prepare_resolves_merge_base_and_checks_out_head(mr_repo, tmp_path):
@@ -69,6 +97,77 @@ async def test_repo_prepare_fails_fast_on_unresolvable_ref(mr_repo, tmp_path):
 
     with pytest.raises(PentestError):
         await run_mr_repo_prepare(act)
+
+
+# ---- merged 改道模式（2026-09-04：源分支已删的已合并 MR，按 commit 对定位）----
+
+def _merged_act(repo: Path, tmp_path: Path, merge_sha: str, **kw) -> ActivityInput:
+    """改道入参：head_ref 仍是已删分支名（仅展示），实际把手 mr_head_commit。"""
+    defaults = dict(mr_base_ref="main", mr_head_ref="feature/safe",
+                    mr_head_commit=merge_sha)
+    defaults.update(kw)
+    return _act(repo, tmp_path, **defaults)
+
+
+async def test_repo_prepare_merged_fallback_resolves_first_parent(merged_repo, tmp_path):
+    repo, merge_sha = merged_repo
+
+    result = await run_mr_repo_prepare(_merged_act(repo, tmp_path, merge_sha))
+
+    # base = merge commit 的第一父（true merge 的目标分支侧）→ diff 区间恰好是
+    # MR 合入的全部变更；head checkout 到 merge commit（无需已删的源分支）。
+    first_parent = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"], cwd=repo,
+        capture_output=True, text=True, check=True).stdout.strip()
+    assert result["head_commit"] == merge_sha
+    assert result["base_commit"] == first_parent
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert head == merge_sha
+
+
+async def test_repo_prepare_merged_fallback_explicit_base_commit(merged_repo, tmp_path):
+    """FF 形态：resolve-link 显式穿 base_commit（diff_refs.base_sha），worker 不猜 ^1。"""
+    repo, merge_sha = merged_repo
+    base_sha = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"], cwd=repo,
+        capture_output=True, text=True, check=True).stdout.strip()
+
+    result = await run_mr_repo_prepare(
+        _merged_act(repo, tmp_path, merge_sha, mr_base_commit=base_sha))
+
+    assert result["base_commit"] == base_sha
+    assert result["head_commit"] == merge_sha
+
+
+async def test_repo_prepare_merged_fallback_unresolvable_commit_fails_fast(
+        merged_repo, tmp_path):
+    """merge commit 在目标分支上解析不到（被 force-push 等）→ fail-fast 带原因。"""
+    repo, merge_sha = merged_repo
+    with pytest.raises(PentestError, match="61da230a"):
+        await run_mr_repo_prepare(
+            _merged_act(repo, tmp_path, merge_sha,
+                        mr_head_commit="61da230a"))
+
+
+async def test_git_diff_merged_fallback_covers_mr_changes_only(merged_repo, tmp_path):
+    """改道 diff = first-parent 区间：只含 MR 变更（app.py 的删防护+新路由），
+    不含 base 之前的历史；manifest/patch 照常落盘（增量三方向管道输入不变）。"""
+    repo, merge_sha = merged_repo
+
+    result = await run_git_diff(_merged_act(repo, tmp_path, merge_sha))
+
+    mr_dir = tmp_path / "scan" / "deliverables" / "whitebox" / "intermediate" / MR_DIR_NAME
+    manifest = json.loads((mr_dir / "diff_manifest.json").read_text())
+    assert "diff --git" in (mr_dir / "diff.patch").read_text()
+    assert {h["file_path"] for h in manifest["hunks"]} == {"app.py"}
+    assert manifest["stats"]["insertions"] >= 1
+    assert "injection" in result["selected_vuln_classes"]
+    first_parent = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"], cwd=repo,
+        capture_output=True, text=True, check=True).stdout.strip()
+    assert result["base_commit"] == first_parent
+    assert result["head_commit"] == merge_sha
 
 
 async def test_git_diff_writes_manifest_and_patch(mr_repo, tmp_path):

@@ -204,15 +204,59 @@ def test_resolve_mr_prefers_full_path_over_flat(tmp_path, monkeypatch):
     assert r.json()["repo"] == "group/repo"
 
 
-# ---- 端点：MR 已合并/关闭 + 源分支已删 → 提交前拦截（2026-09-04 shorturl 事故）----
+# ---- 端点：MR 已合并 + 源分支已删 → 自动改道 merge commit 增量（2026-09-04 shorturl !99 事故）----
 
-def test_resolve_mr_merged_source_branch_deleted_422(tmp_path, monkeypatch):
-    # GitLab 合并时勾「删源分支」：MR 记录的 source_branch 永远保留，但分支已不在——
-    # 增量扫描 checkout 不到必失败。贴链接当场拦截并给引导，不让用户走完表单再等 15s。
+def test_resolve_mr_merged_deleted_falls_back_to_merge_commit(tmp_path, monkeypatch):
+    # GitLab 合并时勾「删源分支」是常态：不拦截，改道按 merge_commit_sha first-parent
+    # 增量扫。head_ref 仍回填分支名（表单展示），实际扫描把手走 head_commit。
     app = _app(tmp_path, monkeypatch, {"repo": "ready"})
     client = _authed(app)
     _mock_mr(monkeypatch, result={"source_branch": "feature/safe",
-                                  "target_branch": "master", "state": "merged"})
+                                  "target_branch": "master", "state": "merged",
+                                  "merge_commit_sha": "6f77f8b2", "sha": "61da230a"})
+    _mock_branch_exists(monkeypatch, exists=False)
+    _mock_clone(app, monkeypatch, calls=[])
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["head_ref"] == "feature/safe"   # 展示仍用分支名
+    assert body["base_ref"] == "master"
+    assert body["mr_merged"] is True            # 改道标记（前端提示/提交透传用）
+    assert body["head_commit"] == "6f77f8b2"    # true merge/squash：base 由 worker 算 ^1
+    assert body["base_commit"] is None
+
+
+def test_resolve_mr_merged_deleted_ff_uses_diff_refs(tmp_path, monkeypatch):
+    # fast-forward 合并无 merge_commit_sha → 用 MR.sha + diff_refs.base_sha（两者都在
+    # 目标分支历史上，可达可 fetch）。
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feat/x",
+                                  "target_branch": "main", "state": "merged",
+                                  "merge_commit_sha": None, "sha": "abc1234",
+                                  "diff_refs": {"base_sha": "10eb3bd",
+                                                "head_sha": "abc1234"}})
+    _mock_branch_exists(monkeypatch, exists=False)
+    _mock_clone(app, monkeypatch, calls=[])
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mr_merged"] is True
+    assert body["head_commit"] == "abc1234"
+    assert body["base_commit"] == "10eb3bd"
+
+
+def test_resolve_mr_merged_deleted_no_sha_handles_422(tmp_path, monkeypatch):
+    # 连改道把手都没有（merge_commit_sha/sha/diff_refs 全缺）→ 无法定位合入内容，
+    # 维持拦截并给引导（恢复分支 / 对目标分支全量扫）。
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feature/safe",
+                                  "target_branch": "master", "state": "merged",
+                                  "merge_commit_sha": None, "sha": None,
+                                  "diff_refs": None})
     _mock_branch_exists(monkeypatch, exists=False)
     clone_calls = []
     _mock_clone(app, monkeypatch, calls=clone_calls)
@@ -221,8 +265,42 @@ def test_resolve_mr_merged_source_branch_deleted_422(tmp_path, monkeypatch):
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
     assert "feature/safe" in detail and "已合并" in detail
-    assert "恢复" in detail or "master" in detail  # 必须给出路（恢复分支 / 全量扫）
+    assert "恢复" in detail or "master" in detail  # 必须给出路
     assert clone_calls == []
+
+
+def test_resolve_mr_closed_deleted_still_422(tmp_path, monkeypatch):
+    # closed 未合并 + 分支已删：变更从未落地、commits 不可达 → 拦截（唯一出路是恢复分支）
+    app = _app(tmp_path, monkeypatch, {"repo": "ready"})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feat/x",
+                                  "target_branch": "main", "state": "closed",
+                                  "merge_commit_sha": "6f77f8b2", "sha": "61da230a"})
+    _mock_branch_exists(monkeypatch, exists=False)
+    clone_calls = []
+    _mock_clone(app, monkeypatch, calls=clone_calls)
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 422, r.text
+    assert "已关闭" in r.json()["detail"]
+    assert clone_calls == []
+
+
+def test_resolve_mr_merged_deleted_clone_uses_base_ref(tmp_path, monkeypatch):
+    # 首次贴链接（仓库未 clone）：源分支已删，按 head_ref clone 必失败 → 用目标分支
+    app = _app(tmp_path, monkeypatch, {})
+    client = _authed(app)
+    _mock_mr(monkeypatch, result={"source_branch": "feature/safe",
+                                  "target_branch": "master", "state": "merged",
+                                  "merge_commit_sha": "6f77f8b2"})
+    _mock_branch_exists(monkeypatch, exists=False)
+    clone_calls = []
+    _mock_clone(app, monkeypatch, calls=clone_calls)
+    r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL},
+                    headers={"X-CSRF-Token": _csrf(client)})
+    assert r.status_code == 200, r.text
+    assert len(clone_calls) == 1
+    assert clone_calls[0]["branch"] == "master"  # 改道时 clone 目标分支（非已删源分支）
 
 
 def test_resolve_mr_merged_branch_present_still_resolves(tmp_path, monkeypatch):
@@ -360,3 +438,71 @@ def test_resolve_requires_auth(tmp_path, monkeypatch):
     client = TestClient(app)  # 未登录
     r = client.post(f"{BASE}/resolve-link", json={"url": MR_URL})
     assert r.status_code in (401, 403)
+
+
+# ---- fetch_merge_request 字段映射 + merged 改道公式（mock httpx，外部 API 不可避免）----
+
+class _FakeResp:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    """占位 httpx.AsyncClient：只实现 async-with + get，返回预置响应。"""
+
+    resp = None
+
+    def __init__(self, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url, headers=None):
+        return self.resp
+
+
+def test_fetch_merge_request_maps_commit_handles(monkeypatch):
+    import asyncio
+    from supernova_web.components import link_resolver as lr
+    _FakeAsyncClient.resp = _FakeResp(payload={
+        "source_branch": "feat/x", "target_branch": "main", "state": "merged",
+        "merge_commit_sha": "6f77f8b2", "sha": "61da230a",
+        "diff_refs": {"base_sha": "10eb3bd", "head_sha": "61da230a"}})
+    monkeypatch.setattr(lr.httpx, "AsyncClient", _FakeAsyncClient)
+    link = lr.classify_url(MR_URL)
+    out = asyncio.run(lr.fetch_merge_request(link, "tok"))
+    assert out["merge_commit_sha"] == "6f77f8b2"
+    assert out["sha"] == "61da230a"
+    assert out["diff_refs"]["base_sha"] == "10eb3bd"
+
+
+def test_merged_fallback_commits_true_merge():
+    # true merge/squash：merge_commit_sha 即把手，base 交给 worker 算 first-parent
+    from supernova_web.components.link_resolver import merged_fallback_commits
+    mr = {"merge_commit_sha": "6f77f8b2", "sha": "61da230a",
+          "diff_refs": {"base_sha": "10eb3bd"}}
+    assert merged_fallback_commits(mr) == ("6f77f8b2", None)
+
+
+def test_merged_fallback_commits_ff():
+    # fast-forward：无 merge_commit_sha → MR.sha + diff_refs.base_sha（都在目标分支历史上）
+    from supernova_web.components.link_resolver import merged_fallback_commits
+    mr = {"merge_commit_sha": None, "sha": "abc1234",
+          "diff_refs": {"base_sha": "10eb3bd", "head_sha": "abc1234"}}
+    assert merged_fallback_commits(mr) == ("abc1234", "10eb3bd")
+
+
+def test_merged_fallback_commits_no_handles():
+    # 全缺 → None（调用方维持拦截 422）
+    from supernova_web.components.link_resolver import merged_fallback_commits
+    assert merged_fallback_commits({"merge_commit_sha": None, "sha": None,
+                                    "diff_refs": None}) is None
+    assert merged_fallback_commits({}) is None

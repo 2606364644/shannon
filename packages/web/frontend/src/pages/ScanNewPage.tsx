@@ -157,9 +157,13 @@ export interface RerunPreset {
    *  hostProfileId 非空 → profile 模式；仅 hostUrl → url 模式；后端 _scan_detail 暂未返（前端先就位）。 */
   hostProfileId?: string;
   hostUrl?: string;
-  /** MR 增量（spec 2026-09-03 §6）：原扫描的 base/head refs，重跑时预填。 */
+  /** MR 增量（spec 2026-09-03 §6）：原扫描的 base/head refs，重跑时预填。
+   *  merged 改道（2026-09-04）：mrHeadCommit/mrBaseCommit 是实际扫描 commit 把手
+   *  （源分支已删的已合并 MR），重跑预填沿用——仍按改道扫而非撞已删分支。 */
   mrBaseRef?: string;
   mrHeadRef?: string;
+  mrHeadCommit?: string;
+  mrBaseCommit?: string | null;
 }
 
 /** RerunPreset → AuthFormState：profile 模式（authProfileId 非空）优先于 inline（auth）。
@@ -276,9 +280,13 @@ export interface FormState {
   /** 白盒「同时发起黑盒扫描」组合开关（Task 9）。可选——旧 FormState 字面量（如单测 baseF）不传 = false。
    *  true 时 buildBody whitebox 分支附 url + 认证字段，后端 Task 1 识别为组合扫描。 */
   combined?: boolean;
-  /** MR 增量扫描（spec 2026-09-03）：type="mr" 用的 base/head ref（分支名或 commit sha）。 */
+  /** MR 增量扫描（spec 2026-09-03）：type="mr" 用的 base/head ref（分支名或 commit sha）。
+   *  merged 改道（2026-09-04）：mrHeadCommit 非空 = 按合入 commit 对扫描（源分支已删
+   *  的已合并 MR）；mrBaseCommit 为 null 时 base 交给 worker 解 first-parent。 */
   mrBaseRef?: string;
   mrHeadRef?: string;
+  mrHeadCommit?: string;
+  mrBaseCommit?: string | null;
 }
 
 /** 将 AuthFormState 写入 ScanRequest 认证字段（auth-profile-vault 双来源）：
@@ -333,10 +341,14 @@ function assignHostToBody(body: ScanRequest, h: HostFormState): void {
 export function buildBody(type: ScanType, f: FormState, workspace: string, corrYaml = ""): ScanRequest {
   if (type === "mr") {
     // MR 增量扫描（spec 2026-09-03）：repo + base_ref/head_ref，纯白盒语义（无 url/认证/HOST）。
+    // merged 改道（2026-09-04）：附 head_commit/base_commit——worker 按 commit 对定位增量
+    //（源分支已删的已合并 MR）；base_commit null 省略（worker 解 first-parent）。
     const body: ScanRequest = { type, workspace: workspace || undefined };
     body.source = { kind: "repo", value: f.selectedRepo };
     body.base_ref = f.mrBaseRef?.trim() || undefined;
     body.head_ref = f.mrHeadRef?.trim() || undefined;
+    body.head_commit = f.mrHeadCommit?.trim() || undefined;
+    body.base_commit = f.mrBaseCommit?.trim() || undefined;
     return body;
   }
   if (type === "correlation") {
@@ -436,9 +448,12 @@ export function ScanNewPage() {
     // 组合任务重跑预填：开关随 preset 打开（显式字段——correlation preset 也带 url
     // 但不吃 combined，不按 url 推导误开）。
     combined: preset.combined ?? false,
-    // MR 重跑预填（spec 2026-09-03 §6）：base/head refs 原样回填。
+    // MR 重跑预填（spec 2026-09-03 §6）：base/head refs 原样回填；merged 改道把手
+    //（2026-09-04）随行——改道扫描的重跑仍走 commit 对，不撞已删源分支。
     mrBaseRef: preset.mrBaseRef ?? "",
     mrHeadRef: preset.mrHeadRef ?? "",
+    mrHeadCommit: preset.mrHeadCommit ?? undefined,
+    mrBaseCommit: preset.mrBaseCommit ?? undefined,
   });
   // —— 跨仓关联三方同步（2026-09-04 tabs 重组）：表单 / 拓扑图 / YAML 是同一拓扑的三个
   //    透镜（corrView 切换），谁被编辑谁就是源——扇出到其他两方、不回写源：
@@ -657,6 +672,10 @@ export function ScanNewPage() {
     if (r.kind === "mr") {
       patch.mrBaseRef = r.base_ref ?? "";
       patch.mrHeadRef = r.head_ref ?? "";
+      // merged 改道（2026-09-04）：commit 把手随行；非改道 MR 显式清空——用户先贴
+      // 改道 MR 再贴普通 MR 时，不得残留上一条的 commit 对（会误导 worker 按旧把手扫）。
+      patch.mrHeadCommit = r.mr_merged ? (r.head_commit ?? undefined) : undefined;
+      patch.mrBaseCommit = r.mr_merged ? (r.base_commit ?? undefined) : undefined;
     }
     set(patch);
     if (r.repo_state === "cloning") setPendingClone(r.repo);
@@ -925,6 +944,16 @@ export function ScanNewPage() {
                       error={mrRefsErr}
                       flashAt={mrFlashAt}
                     />
+                    {/* merged 改道（2026-09-04）：源分支已删的已合并 MR——refs 展示仍是
+                        分支名，实际按合入 commit 扫。琥珀提示显式告知，用户不困惑
+                        「分支不是没了吗怎么还能扫」。 */}
+                    {f.mrHeadCommit && (
+                      <p data-testid="mr-merged-hint"
+                         className="flex items-center gap-1.5 text-xs text-amber">
+                        {t("scan.mr.mergedFallbackHint",
+                           { commit: f.mrHeadCommit.slice(0, 8) })}
+                      </p>
+                    )}
                   </section>
                 </>
               )}

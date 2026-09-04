@@ -658,6 +658,7 @@
       "importHint": "贴入 GitLab MR 链接，自动填好仓库与变更范围",
       "rangeGroup": "变更范围",
       "rangeHint": "分支名或 commit sha 均可",
+      "mergedFallbackHint": "MR 已合并且源分支已删除，将按合并提交 {{commit}} 做增量扫描（检出范围仍只含此 MR 的新增/删除改动）",
       "baseLabel": "Base",
       "headLabel": "Head",
       "swap": "交换 Base 与 Head",

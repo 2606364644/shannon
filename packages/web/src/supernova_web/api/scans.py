@@ -123,6 +123,9 @@ def _scan_detail(request: Request, ws: str, scan_id: str, scan_dir) -> dict:
         # MR 增量扫描 refs（spec 2026-09-03 §6）：重跑预填 base/head（非 MR 未写 → None）。
         "mr_base_ref": data.get("mr_base_ref"),
         "mr_head_ref": data.get("mr_head_ref"),
+        # merged 改道把手（2026-09-04）：重跑预填实际扫描 commit 对（无则分支名模式）。
+        "mr_head_commit": data.get("mr_head_commit"),
+        "mr_base_commit": data.get("mr_base_commit"),
         # 组合扫描黑盒段重跑预填：目标 url + 认证档案引用（与 authentication 互斥——
         # profile 模式时后者的 scan-config.yaml 不 dump 认证明文，profile 引用是唯一来源）。
         "bb_url": data.get("bb_url"),

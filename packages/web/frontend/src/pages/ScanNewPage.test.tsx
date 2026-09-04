@@ -1606,4 +1606,62 @@ describe("ScanNewPage 链接解析（resolve-link 回填，2026-09-03 仓库入�
     fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
     expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
   });
+
+  // merged 改道（2026-09-04 shorturl !99 事故）：贴已合并 + 源分支已删的 MR 链接，
+  // resolve-link 返回 commit 把手——表单显示改道提示（不让用户困惑 head 为何是已删分支），
+  // 提交 body 携带 head_commit（base_commit=null 时省略，worker 解 first-parent）。
+  it("贴已合并且源分支已删的 MR：改道提示 + 提交 body 带 head_commit", async () => {
+    let captured: Record<string, unknown> | undefined;
+    server.use(
+      REPOS_READY(),
+      mockResolve({ kind: "mr", repo: "nodegoat", repo_state: "ready",
+                    base_ref: "master", head_ref: "feature/safe",
+                    mr_merged: true, head_commit: "6f77f8b2", base_commit: null }),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "nodegoat-mr-2" }, { status: 202 });
+      }),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => expect(screen.getByTestId("mr-form")).toBeInTheDocument());
+    await resolveLink("https://gitlab.example.com/nodegoat/-/merge_requests/99");
+    // refs 回填（展示仍是分支名）+ 改道提示出现（含 merge commit）
+    await waitFor(() =>
+      expect((screen.getByTestId("mr-head-ref") as HTMLInputElement).value).toBe("feature/safe"));
+    expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("master");
+    await waitFor(() =>
+      expect(screen.getByText(/已合并.*6f77f8b2/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.head_commit).toBe("6f77f8b2");
+    expect(captured!.base_commit).toBeUndefined();  // true merge：base 交给 worker 解 ^1
+    expect(captured!.head_ref).toBe("feature/safe");
+  });
+
+  it("普通 MR（未改道）：提交 body 不带 head_commit（零回归）", async () => {
+    let captured: Record<string, unknown> | undefined;
+    server.use(
+      REPOS_READY(),
+      http.post("/api/scan", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ workspace: "ws1", scan_id: "nodegoat-mr-3" }, { status: 202 });
+      }),
+    );
+    renderPageFresh();
+    fireEvent.click(screen.getByRole("button", { name: "MR 增量扫描" }));
+    await selectWorkspace("ws1");
+    await waitFor(() => screen.getByText("选择仓库"));
+    fireEvent.click(screen.getByText("选择仓库"));
+    fireEvent.click(await screen.findByText("nodegoat"));
+    fireEvent.change(screen.getByTestId("mr-base-ref"), { target: { value: "main" } });
+    fireEvent.change(screen.getByTestId("mr-head-ref"), { target: { value: "feature/x" } });
+    // 无改道提示
+    expect(screen.queryByText(/已合并/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await waitFor(() => expect(captured).toBeDefined());
+    expect(captured!.head_commit).toBeUndefined();
+    expect(captured!.base_commit).toBeUndefined();
+  });
 });

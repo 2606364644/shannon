@@ -415,6 +415,10 @@ class ScanSummary:
     # 非 MR 扫描未写 → None（零回归）。
     mr_base_ref: str | None = None
     mr_head_ref: str | None = None
+    # merged 改道把手（2026-09-04）：session.mr_head_commit/mr_base_commit 透传——
+    # 已合并 + 源分支已删的 MR 实际按 commit 对扫描，重跑预填沿用；未写 → None。
+    mr_head_commit: str | None = None
+    mr_base_commit: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -445,6 +449,8 @@ class ScanSummary:
             "corr_children": self.corr_children,
             "mr_base_ref": self.mr_base_ref,
             "mr_head_ref": self.mr_head_ref,
+            "mr_head_commit": self.mr_head_commit,
+            "mr_base_commit": self.mr_base_commit,
         }
 
 
@@ -753,6 +759,9 @@ class ScanStore:
             # MR refs（spec 2026-09-03 §6）：非 MR 扫描未写 → None（读法对齐 corr_children）
             mr_base_ref=data.get("mr_base_ref") if isinstance(data, dict) else None,
             mr_head_ref=data.get("mr_head_ref") if isinstance(data, dict) else None,
+            # merged 改道把手（2026-09-04）：读法同上
+            mr_head_commit=data.get("mr_head_commit") if isinstance(data, dict) else None,
+            mr_base_commit=data.get("mr_base_commit") if isinstance(data, dict) else None,
         )
 
     def _legacy_scan_id(self, ws_dir: Path) -> str:

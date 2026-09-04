@@ -30,6 +30,12 @@ class ScanRequest(BaseModel):
     # （分支名或 commit sha），source.kind=="repo" 必填。
     base_ref: str | None = None
     head_ref: str | None = None
+    # MR merged 改道（2026-09-04）：源分支已删的已合并 MR，实际扫描把手是 commit 对
+    # ——head_commit=merge_commit_sha（true merge/squash）或 MR.sha（FF，配 base_commit=
+    # diff_refs.base_sha；true merge 时 base_commit=None，worker 解 head^1）。可选：
+    # 缺省 = 分支名模式（零变化）。head_ref 仍必填（表单展示/报告标识）。
+    head_commit: str | None = None
+    base_commit: str | None = None
     reuse_latest: bool = False
     # 黑盒「复用白盒结果」：要复用的白盒 scan_id（工作区内某 whitebox scan）。
     # 黑盒 = 白盒下游 exploitation-only（阶段 2）：恒复用白盒结果，model_validator

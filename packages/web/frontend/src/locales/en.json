@@ -658,6 +658,7 @@
       "importHint": "Paste a GitLab MR link to fill the repo and diff range automatically",
       "rangeGroup": "Diff range",
       "rangeHint": "Branch name or commit sha",
+      "mergedFallbackHint": "This MR is merged and its source branch was deleted — incremental scan will use merge commit {{commit}} (scope still covers only this MR's added/removed changes)",
       "baseLabel": "Base",
       "headLabel": "Head",
       "swap": "Swap base and head",

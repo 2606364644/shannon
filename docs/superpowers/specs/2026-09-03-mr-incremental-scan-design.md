@@ -160,6 +160,8 @@ diff 触及后端路由/controller → inj/ssrf/authz（有服务端渲染加 xs
 | 场景 | 行为 |
 |---|---|
 | head_ref/base_ref fetch 失败或解析不到 | repo prepare **fail-fast**，扫描不开始，web 返回明确错误 |
+| **MR 已合并 + 源分支已删（2026-09-04 补，shorturl !99 事故）** | **自动改道**：resolve-link 按 MR 记录的 commit 把手定位——true merge/squash 用 `merge_commit_sha`（base 解 first-parent `^1`），FF 用 `MR.sha` + `diff_refs.base_sha`；commit 对经 `mr_head_commit/mr_base_commit` 穿线，worker 按 commit 对 diff/checkout（不碰分支名）。增量三方向（A/B/C）管道不变。把手全缺 → 拦截 422 给引导；首次贴链接 clone 用目标分支 |
+| **MR closed 未合并 + 源分支已删** | 拦截 422：变更从未落地、commits 不可达，唯一出路是在 GitLab 恢复源分支 |
 | 无 merge-base（不相关历史） | fail-fast |
 | diff 为空（base==head） | 快速终态：产「无变更」报告（含 ref 信息），**不跑双轨** |
 | 文件 rename | DiffManifest 记 rename 映射；added 行判定用新路径；RemovedProtection.file_path 经映射转新路径再匹配 |

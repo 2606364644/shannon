@@ -14,6 +14,7 @@ from supernova_web.components.event_tailer import EventTailer
 from supernova_web.components.link_resolver import (
     GitLabApiError,
     branch_exists,
+    merged_fallback_commits,
     MrLink,
     UnsupportedLinkError,
     classify_url,
@@ -103,6 +104,8 @@ async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
         raise HTTPException(422, str(e))
 
     base_ref = head_ref = None
+    mr_merged = False
+    head_commit = base_commit = None
     if isinstance(link, MrLink):
         _, token = rm._git._creds_for(ws)
         if not token:
@@ -115,15 +118,27 @@ async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
             raise HTTPException(502, f"GitLab API 调用失败：{e}")
         base_ref, head_ref = mr["target_branch"], mr["source_branch"]
         # 已合并/关闭的 MR 源分支常被删（GitLab 记录仍保留 source_branch 字段）——
-        # 增量扫描 checkout 不到必失败。贴链接当场拦截并给出路（2026-09-04 shorturl
-        # MR !99 事故：15s 后才见零信息 workflow FAILED）。opened 不查（分支必然在）。
+        # 按分支名 checkout 不到必失败（2026-09-04 shorturl MR !99 事故）。opened
+        # 不查（分支必然在）。
         if mr.get("state") in ("merged", "closed") and \
                 not await branch_exists(link, head_ref, token):
-            raise HTTPException(
-                422, f"MR 已{('合并' if mr['state'] == 'merged' else '关闭')}，"
-                     f"源分支 {head_ref} 已被删除，无法增量扫描。"
-                     f"可在 GitLab MR 页恢复源分支后重试；"
-                     f"若已合入 {base_ref}，也可直接对 {base_ref} 全量扫描。")
+            if mr["state"] == "merged":
+                # merged：改道按 MR 记录的 commit 把手增量扫（merge_commit_sha 的
+                # first-parent diff = MR 合入目标分支的全部变更），无需源分支。
+                fallback = merged_fallback_commits(mr)
+                if fallback is not None:
+                    mr_merged = True
+                    head_commit, base_commit = fallback
+                else:  # 把手全缺，改道也无从定位 → 拦截给引导
+                    raise HTTPException(
+                        422, f"MR 已合并，源分支 {head_ref} 已被删除且无合入 commit "
+                             f"信息，无法增量扫描。可在 GitLab MR 页恢复源分支后重试；"
+                             f"若已合入 {base_ref}，也可直接对 {base_ref} 全量扫描。")
+            else:
+                # closed 未合并：变更从未落地、commits 不可达 → 唯一出路是恢复分支。
+                raise HTTPException(
+                    422, f"MR 已关闭，源分支 {head_ref} 已被删除，无法增量扫描。"
+                         f"可在 GitLab MR 页恢复源分支后重试。")
 
     flat_name = link.project.rsplit("/", 1)[-1]
     matched = None
@@ -135,11 +150,13 @@ async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
     repo_state = "ready"
     if matched is None:
         # MR 链接的 clone URL 从链接重建（原 URL 含 /-/merge_requests 段不可用）；
-        # branch 用 MR 源分支（clone 即在 head 上），仓库链接用默认分支。
+        # branch 用 MR 源分支（clone 即在 head 上）；merged 改道时源分支已删 → 用
+        # 目标分支。仓库链接用默认分支。
         clone_url = (f"{link.scheme}://{link.host}/{link.project}"
                      if isinstance(link, MrLink) else body.url.strip())
+        clone_branch = base_ref if mr_merged else head_ref
         try:
-            await rm.clone(ws, clone_url, head_ref, None, None, None)
+            await rm.clone(ws, clone_url, clone_branch, None, None, None)
         except PermissionError:
             raise HTTPException(503, "未配置 git 凭据（GITLAB_USER/TOKEN）")
         except ValueError as e:
@@ -154,6 +171,10 @@ async def resolve_link(ws: str, body: ResolveLinkBody, request: Request,
     if base_ref is not None:
         out["base_ref"] = base_ref
         out["head_ref"] = head_ref
+    if mr_merged:
+        out["mr_merged"] = True
+        out["head_commit"] = head_commit
+        out["base_commit"] = base_commit
     return out
 
 
