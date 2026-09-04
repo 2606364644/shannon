@@ -368,6 +368,65 @@ export function topologyDraftToCorrForm(draft: TopologyDraft): CorrFormState {
   };
 }
 
+/** CorrFormState（YAML 解析产物）→ TopologyDraftState：文本→图方向（2026-09-04 拓扑↔YAML
+ *  双向同步）。YAML 文本是权威——form 未声明的节点/边不保留；文本不携带的图上下文
+ *  （节点位置、referenceOnly、capabilities、同 identity 边的 AI 证据）从 prev 同名/同边
+ *  继承，语义未变（fingerprint 相同，纯排版差异）时原样返回 prev——确认态与历史不受
+ *  文本微调惊动。语义有变则推入 undo 历史并重置确认（改错可撤销回文本编辑前的图）。 */
+export function corrFormToTopologyDraft(
+  form: CorrFormState,
+  prev: TopologyDraftState | null,
+): TopologyDraftState {
+  const prevNode = new Map((prev?.draft.nodes ?? []).map((node) => [node.repo, node] as const));
+  const rolesOf = (repo: CorrFormState["repos"][number]) =>
+    effectiveRoles({ roles: repo.roles?.length ? repo.roles : [repo.role] });
+  const nodes: TopologyNodeDraft[] = form.repos.map((repo, index) => {
+    const roles = rolesOf(repo);
+    const kept = prevNode.get(repo.repo);
+    return {
+      repo: repo.repo,
+      roles,
+      reuseScanId: repo.reuseScanId,
+      protoRoots: repo.protoRoots,
+      position: kept?.position ?? defaultPosition(roles, index),
+      referenceOnly: kept?.referenceOnly,
+      capabilities: kept?.capabilities,
+    };
+  });
+  const prevEdge = new Map(
+    (prev?.draft.edges ?? []).map((edge) => [`${edge.from}\n${edge.to}\n${edge.protocol}`, edge] as const));
+  const edges: TopologyEdgeDraft[] = form.relations.map((relation) => {
+    const kept = prevEdge.get(`${relation.from}\n${relation.to}\n${relation.protocol}`);
+    if (kept) return { ...kept, from: relation.from, to: relation.to, protocol: relation.protocol, enabled: true };
+    return {
+      id: `yaml:${relation.from}->${relation.to}:${relation.protocol}`,
+      from: relation.from,
+      to: relation.to,
+      protocol: relation.protocol,
+      enabled: true,
+      origin: "manual",
+      client_evidence: [],
+      handler_evidence: [],
+    };
+  });
+  const draft: TopologyDraft = {
+    nodes,
+    edges,
+    uncertain: prev?.draft.uncertain ?? [],
+    coverage: prev?.draft.coverage ?? [],
+  };
+  if (prev && topologyDraftFingerprint(draft) === topologyDraftFingerprint(prev.draft)) return prev;
+  return {
+    selectedRepos: prev?.selectedRepos ?? [],
+    analysis: prev?.analysis ?? null,
+    draft,
+    history: prev
+      ? { past: [...prev.history.past, cloneDraft(prev.draft)].slice(-50), future: [] }
+      : { past: [], future: [] },
+    confirmation: { status: "unconfirmed", fingerprint: null, yaml: null, issues: [] },
+  };
+}
+
 export function topologyDraftFingerprint(draft: TopologyDraft): string {
   const semanticView = {
     nodes: draft.nodes.map(({ repo, roles, reuseScanId, referenceOnly }) => ({

@@ -28,7 +28,7 @@ import {
   formToYaml, yamlToForm, validateForm, CorrYamlError, type CorrFormState,
 } from "@/lib/correlation-yaml";
 import {
-  confirmTopologyDraft, createTopologyDraft, topologyDraftFingerprint,
+  confirmTopologyDraft, corrFormToTopologyDraft, createTopologyDraft, topologyDraftFingerprint,
   topologyDraftToCorrForm, updateTopologyRepositories, validateTopologyDraft,
   type TopologyDraftState,
 } from "@/lib/correlation-topology-draft";
@@ -399,6 +399,12 @@ function validateUrl(v: string, t: TFunction): string | null {
   return /^https?:\/\//.test(v) ? null : t("scan.errors.urlScheme");
 }
 
+/** YAML 文本 canonical 化（语义比较用，2026-09-04 双向同步）：解析失败回落原文
+ *  （错误路径由 yamlErr 兜底，这里只服务「注释/排版差异不算编辑」的等价判断）。 */
+function canonicalYaml(y: string): string {
+  try { return formToYaml(yamlToForm(y)); } catch { return y; }
+}
+
 export function ScanNewPage() {
   const { t } = useTranslation();
   const nav = useNavigate();
@@ -448,11 +454,26 @@ export function ScanNewPage() {
     setCorrYaml(formToYaml(s));
     setYamlErr(null);
   };
+  /** 拓扑侧修改统一入口（2026-09-04 双向同步·图→文本）：拓扑态变化的同时刷新
+   *  corrState/corrYaml（草稿派生）——图编辑实时反映到 YAML 视图，无需确认动作。
+   *  文本侧编辑走 onCorrYaml 独立通道（不经这里），用户输入中的文本不被派生回写覆盖。 */
+  const applyTopologyState = (next: TopologyDraftState | null) => {
+    setTopologyState(next);
+    if (!next) return;
+    const form = topologyDraftToCorrForm(next.draft);
+    setCorrState(form);
+    setCorrYaml(formToYaml(form));
+    setYamlErr(null);
+  };
   const onCorrYaml = (y: string) => {
     setCorrYaml(y);
+    // manual 模式保持单向数据流（brief D3）：仅校验，回填表单走显式「应用到表单」。
+    // auto 模式双向同步（2026-09-04）：解析成功即重建拓扑（贴 YAML 长拓扑/改文本改图），
+    // 语义相同则原样保留（不动确认态/历史）；失败仅报错，图保持上次有效态。
     try {
-      yamlToForm(y); // 仅校验（不回填 state）
+      const form = yamlToForm(y);
       setYamlErr(null);
+      if (corrMode === "auto") setTopologyState((prev) => corrFormToTopologyDraft(form, prev));
     } catch (e) {
       // D1 已知限制：病态 relations（非列表）抛裸 TypeError——与 CorrYamlError 同道展示。
       setYamlErr(e instanceof CorrYamlError
@@ -552,7 +573,7 @@ export function ScanNewPage() {
     if (analysis?.status !== "completed" || !selectedTopologyRepos.length) return;
     if (topologyState?.analysis?.analysis_id === analysis.analysis_id) return;
     const sources = Object.fromEntries(corrState.repos.map((repo) => [repo.repo, repo.reuseScanId]));
-    setTopologyState(createTopologyDraft(selectedTopologyRepos, analysis, sources));
+    applyTopologyState(createTopologyDraft(selectedTopologyRepos, analysis, sources));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, selectedTopologyRepos]);
 
@@ -597,7 +618,7 @@ export function ScanNewPage() {
     setSelectedTopologyRepos(repos);
     setAnalysisId(null); setAnalysis(null); setAnalysisError(null); resetLog();
     // Selector changes are table-compatible graph edits: preserve compatible nodes/edges/sources.
-    setTopologyState((previous) => previous ? updateTopologyRepositories(previous, repos) : null);
+    applyTopologyState(topologyState ? updateTopologyRepositories(topologyState, repos) : null);
   };
   const switchCorrMode = (mode: "auto" | "manual") => {
     if (corrMode === "auto" && mode === "manual" && topologyState) {
@@ -609,9 +630,18 @@ export function ScanNewPage() {
 
   const confirmCurrentTopology = () => {
     if (!topologyState) return;
-    const next = confirmTopologyDraft(topologyState);
-    setTopologyState(next);
-    if (next.confirmation.status === "confirmed") updateCorr(topologyDraftToCorrForm(next.draft));
+    let next = confirmTopologyDraft(topologyState);
+    if (next.confirmation.status === "confirmed") {
+      // 快照对齐当前 YAML 文本（2026-09-04 双向同步）：确认时 corrYaml 与草稿语义恒一致
+      // （图路径=canonical 派生 / 文本路径=拓扑由文本重建），保留用户原文（注释/排版）
+      // 作为提交 payload——不重写 textarea（updateCorr 会 canonical 化，故此处只同步 corrState）。
+      if (!yamlErr) next = { ...next, confirmation: { ...next.confirmation, yaml: corrYaml } };
+      setTopologyState(next);
+      setCorrState(topologyDraftToCorrForm(next.draft));
+      setYamlErr(null);
+    } else {
+      setTopologyState(next);
+    }
   };
 
   // 校验：白盒 = repo + url(可选) + ws；correlation = validateForm(corrState) 空 + 无
@@ -633,7 +663,9 @@ export function ScanNewPage() {
     topologyState?.confirmation.status === "confirmed"
     && topologyState.confirmation.fingerprint === topologyDraftFingerprint(topologyState.draft)
     && validateTopologyDraft(topologyState.draft).length === 0
-    && (confirmedTopologyYaml === null || corrYaml === confirmedTopologyYaml)
+    // YAML 侧按 canonical 语义比较（2026-09-04）：注释/排版差异不算编辑——真语义
+    // 变化已由「文本→图重建重置确认」拦下，这里只放行语义等价的文本抖动。
+    && (confirmedTopologyYaml === null || canonicalYaml(corrYaml) === canonicalYaml(confirmedTopologyYaml))
   );
   const isValid = !sourceErr && !urlErr && !authErr && !hostErr && !mrRefsErr && !!workspace
     && (type === "mr" || type === "whitebox" || (corrIssues.length === 0 && !yamlErr && topologyConfirmed));
@@ -887,7 +919,7 @@ export function ScanNewPage() {
               onCancel={() => void cancelTopologyAnalysis()}
               onManual={() => switchCorrMode("manual")}
               topologyState={topologyState}
-              onTopologyState={setTopologyState}
+              onTopologyState={applyTopologyState}
               onConfirm={confirmCurrentTopology}
               availableRepos={topologyRepos.map((repo) => repo.name)}
               onAddNode={(repo) => selectTopologyRepos([...new Set([...selectedTopologyRepos, repo])])}
@@ -896,7 +928,6 @@ export function ScanNewPage() {
               yaml={corrYaml}
               onYaml={onCorrYaml}
               yamlError={yamlErr}
-              onApplyYaml={applyYaml}
               gatewayUrl={f.url}
               onGatewayUrl={(v) => set({ url: v })}
               gatewayErr={urlErr}

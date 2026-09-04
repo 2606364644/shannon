@@ -506,6 +506,8 @@
       "gatewayPlaceholder": "http://gateway.example.com",
       "gatewayHint": "When set, a blackbox verification runs against the entrypoint after correlation (optional)",
       "yamlToggle": "YAML configuration",
+      "yamlSyncHint": "Synced with topology in real time",
+      "yamlErrorKeepGraph": "Topology keeps its last valid state until this is fixed",
       "yamlEditor": "YAML editor",
       "applyYaml": "Apply to form",
       "loadError": "Failed to load correlation detail: {{error}}",

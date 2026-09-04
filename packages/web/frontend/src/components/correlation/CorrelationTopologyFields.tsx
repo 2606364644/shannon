@@ -42,7 +42,6 @@ interface Props {
   yaml: string;
   onYaml: (y: string) => void;
   yamlError: CorrYamlError | null;
-  onApplyYaml: () => void;
   gatewayUrl: string;
   onGatewayUrl: (v: string) => void;
   gatewayErr?: string | null;
@@ -107,6 +106,12 @@ export function CorrelationTopologyFields(props: Props) {
         </Section>
       )}
 
+      {/* YAML 配置与拓扑同区块连续排布（2026-09-04 反馈「放到一块，中间别隔黑盒验证」）：
+          synced 双向实时同步——图编辑实时派生文本、贴/改 YAML 即时重建图（无应用按钮）；
+          无 border-t 分隔（连续性信号），与下方黑盒验证的分组隔断相区别。
+          topologyState 未就绪（未跑分析）时也在此——直接贴合法 YAML 即长出拓扑。 */}
+      <YamlPanel yaml={props.yaml} onChange={props.onYaml} error={props.yamlError} synced />
+
       <section className="space-y-2.5 border-t border-border pt-4">
         <GroupLabel>{t("scan.correlation.gatewayTitle")}</GroupLabel>
         <div className="space-y-1.5">
@@ -118,10 +123,6 @@ export function CorrelationTopologyFields(props: Props) {
         <AuthFields value={props.auth} onChange={props.setAuth} workspace={props.workspace}
           authErr={props.authErr ?? null} refreshSignal={0} />
         <HostFields value={props.host} onChange={props.setHost} workspace={props.workspace} error={props.hostErr} />
-      </section>
-
-      <section className="border-t border-border pt-4">
-        <YamlPanel yaml={props.yaml} onChange={props.onYaml} error={props.yamlError} onApply={props.onApplyYaml} />
       </section>
     </div>
   );

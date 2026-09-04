@@ -506,6 +506,8 @@
       "gatewayPlaceholder": "http://gateway.example.com",
       "gatewayHint": "填写后，关联完成时对入口服务发起黑盒验证（可选）",
       "yamlToggle": "YAML 配置",
+      "yamlSyncHint": "与拓扑实时同步",
+      "yamlErrorKeepGraph": "拓扑保持上次有效状态，修正后继续同步",
       "yamlEditor": "YAML 编辑器",
       "applyYaml": "应用到表单",
       "loadError": "加载关联详情失败：{{error}}",

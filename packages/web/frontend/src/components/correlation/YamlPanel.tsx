@@ -6,29 +6,40 @@ import { Textarea } from "@/components/ui/textarea";
 import type { CorrYamlError } from "@/lib/correlation-yaml";
 import { formatCorrIssue } from "./corr-issues-i18n";
 
-/** 跨仓关联 YAML 面板（D3）：折叠（默认收起）+ textarea + 错误行提示 + 「应用到表单」按钮。
- *  单向数据流约定（brief）：表单交互路径 yaml 由父层 formToYaml(state) 派生；本面板的
- *  textarea 编辑仅向上 onYaml（父层校验、错误经 error 回显），回填表单必须走显式
- *  onApply 按钮——不在输入中间态实时回填（防抖动/防回路）。 */
-export function YamlPanel({ yaml, onChange, error, onApply }: {
+/** 跨仓关联 YAML 面板（D3）：折叠（默认收起）+ textarea + 错误行提示。
+ *
+ *  两种形态（2026-09-04 拓扑↔YAML 双向同步）：
+ *    - synced（auto 模式，与拓扑同区块）：双向实时同步——图编辑实时派生文本、文本
+ *      解析成功即时重建图。「应用到表单」按钮消失（无「未应用」中间态），标题行标注
+ *      同步语义；出错时图保持上次有效态，错误行说明这一行为。
+ *    - 默认（manual 模式）：单向数据流（brief 约定）——表单交互路径 yaml 由父层
+ *      formToYaml(state) 派生；textarea 编辑仅向上 onYaml（父层校验、错误经 error 回显），
+ *      回填表单必须走显式 onApply 按钮——不在输入中间态实时回填（防抖动/防回路）。 */
+export function YamlPanel({ yaml, onChange, error, onApply, synced = false }: {
   yaml: string;
   onChange: (y: string) => void;
   error: CorrYamlError | null;
-  onApply: () => void;
+  onApply?: () => void;
+  synced?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <div data-testid="corr-yaml-panel" className="space-y-2">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex items-center gap-0.5 text-xs font-medium text-primary hover:underline"
-      >
-        <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />
-        {t("scan.correlation.yamlToggle")}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex items-center gap-0.5 text-xs font-medium text-primary hover:underline"
+        >
+          <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />
+          {t("scan.correlation.yamlToggle")}
+        </button>
+        {synced && (
+          <span className="text-[11px] text-muted-foreground">{t("scan.correlation.yamlSyncHint")}</span>
+        )}
+      </div>
       {open && (
         <div className="space-y-2">
           <Textarea
@@ -39,16 +50,19 @@ export function YamlPanel({ yaml, onChange, error, onApply }: {
             className="font-mono text-xs w-full"
             spellCheck={false}
           />
-          {error && (
+          {error ? (
             <p role="alert" className="text-destructive text-xs">
               {error.issues.map((m) => formatCorrIssue(m, t)).join("; ")}
+              {synced && <span className="block text-muted-foreground">{t("scan.correlation.yamlErrorKeepGraph")}</span>}
             </p>
+          ) : null}
+          {!synced && onApply && (
+            <div>
+              <Button type="button" variant="outline" onClick={onApply} disabled={!!error}>
+                {t("scan.correlation.applyYaml")}
+              </Button>
+            </div>
           )}
-          <div>
-            <Button type="button" variant="outline" onClick={onApply} disabled={!!error}>
-              {t("scan.correlation.applyYaml")}
-            </Button>
-          </div>
         </div>
       )}
     </div>

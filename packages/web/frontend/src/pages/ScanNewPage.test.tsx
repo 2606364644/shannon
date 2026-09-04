@@ -973,8 +973,8 @@ describe("correlation topology auto flow", () => {
       </MemoryRouter>,
     );
   }
-  it("analyzes, confirms topology, gates submission, and posts confirmed YAML", async () => {
-    let submitted: Record<string, unknown> | undefined;
+  /** 完成态分析 fixture（三用例共用）：4 仓 + 3 条 AI 边 + 提交捕获（onSubmitted 可选）。 */
+  function useTopologyCompleted(onSubmitted?: (b: Record<string, unknown>) => void) {
     server.use(
       // 隔离刷新恢复：本用例从"无历史分析"出发（默认 latest 404 会被下面的 :id
       // 动态段拦截——msw use 优先且 :id 匹配字面量 latest——须显式再 use 一个 404）。
@@ -1009,10 +1009,15 @@ describe("correlation topology auto flow", () => {
         },
       })),
       http.post("/api/scan", async ({ request }) => {
-        submitted = await request.json() as Record<string, unknown>;
+        const body = await request.json() as Record<string, unknown>;
+        onSubmitted?.(body);
         return HttpResponse.json({ workspace: "ws1", scan_id: "scan-1" });
       }),
     );
+  }
+
+  /** 走完「选 4 仓 → 自动分析 → 拓扑出现」前置流程，返回出现后的首个节点断言。 */
+  async function analyzeToTopology() {
     renderAutoPage();
     fireEvent.click(screen.getByTestId("scan-type-correlation"));
     await selectWorkspace("ws1");
@@ -1020,6 +1025,25 @@ describe("correlation topology auto flow", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: /order/ }));
     fireEvent.click(await screen.findByRole("checkbox", { name: /admin/ }));
     fireEvent.click(await screen.findByRole("checkbox", { name: /user/ }));
+    fireEvent.click(screen.getByRole("button", { name: /自动关联分析/ }));
+    return screen.findByTestId("topology-node-web");
+  }
+
+  /** 展开 YAML 面板，返回编辑器 textarea（双向同步的文本侧入口）。 */
+  async function openYamlEditor() {
+    fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
+    return screen.getByLabelText("YAML 编辑器") as HTMLTextAreaElement;
+  }
+
+  it("analyzes, confirms topology, gates submission, and posts confirmed YAML", async () => {
+    let submitted: Record<string, unknown> | undefined;
+    useTopologyCompleted((b) => { submitted = b; });
+    renderAutoPage();
+    fireEvent.click(screen.getByTestId("scan-type-correlation"));
+    await selectWorkspace("ws1");
+    for (const repo of ["web", "order", "admin", "user"]) {
+      fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(repo) }));
+    }
     fireEvent.click(screen.getByRole("button", { name: /自动关联分析/ }));
     expect(await screen.findByTestId("topology-node-web")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
@@ -1043,13 +1067,22 @@ describe("correlation topology auto flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
 
-    // An unapplied YAML edit must invalidate confirmation and cannot bypass submission.
+    // 双向同步契约（2026-09-04）：YAML 编辑即时生效——语义变化打回确认并即时重建拓扑；
+    // 纯文本变化（注释）语义等价，不动确认态。
     fireEvent.click(screen.getByRole("button", { name: /YAML 配置/ }));
     const editor = screen.getByLabelText("YAML 编辑器");
     const confirmedYaml = (editor as HTMLTextAreaElement).value;
-    fireEvent.change(editor, { target: { value: `${confirmedYaml}\n# unconfirmed edit` } });
+    // 纯注释（语义不变）→ canonical 等价，确认仍有效
+    fireEvent.change(editor, { target: { value: `${confirmedYaml}\n# comment only` } });
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
+    // 语义变化（改一条边 to: order → to: user）→ 拓扑即时重建 + 打回确认
+    fireEvent.change(editor, { target: { value: confirmedYaml.replace("to: order", "to: user") } });
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
+    // 改回原文 → 图复原；文本编辑过的拓扑须重新确认（保守：fingerprint 复原不自动恢复确认态）
     fireEvent.change(editor, { target: { value: confirmedYaml } });
+    expect(screen.getByRole("button", { name: /确认拓扑/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /确认拓扑/ }));
     expect(screen.getByRole("button", { name: /启动跨仓扫描/ })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /启动跨仓扫描/ }));
     await waitFor(() => expect(submitted).toBeDefined());
@@ -1059,6 +1092,79 @@ describe("correlation topology auto flow", () => {
     expect(submittedYaml).toContain("from: admin");
     expect(submittedYaml).toContain("to: user");
     expect(submittedYaml).toContain("roles:\n      - entrypoint\n      - backend");
+  });
+
+  // === 拓扑↔YAML 双向同步（2026-09-04）：图编辑实时派生 YAML，无需等确认 ===
+  it("图侧编辑（分析完成 + 边表加边）实时同步到 YAML 面板，无需确认动作", async () => {
+    useTopologyCompleted();
+    await analyzeToTopology();
+    // 分析完成即同步：YAML 面板内容已是当前草稿的派生（AI 边 web→order 已在文本里）
+    const editor = await openYamlEditor();
+    expect(editor.value).toContain("from: web");
+    expect(editor.value).toContain("to: order");
+    // 边表加一条 web→admin http 边（未确认）→ 文本立即跟上
+    fireEvent.click(screen.getByRole("button", { name: /添加关系/ }));
+    const fromSelects = screen.getAllByRole("combobox", { name: / from$/ });
+    fireEvent.click(fromSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "web" }));
+    const toSelects = screen.getAllByRole("combobox", { name: / to$/ });
+    fireEvent.click(toSelects.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "admin" }));
+    const protocols = screen.getAllByRole("combobox", { name: "protocol" });
+    fireEvent.click(protocols.at(-1)!);
+    fireEvent.click(await screen.findByRole("option", { name: "http" }));
+    expect(editor.value).toContain("to: admin");
+    // 双视图之间不再有「应用到表单」按钮（同步即时，按钮语义消失），且提示实时同步
+    expect(screen.queryByRole("button", { name: /应用到表单/ })).toBeNull();
+    expect(screen.getByText("与拓扑实时同步")).toBeInTheDocument();
+  });
+
+  it("YAML 编辑即时重建拓扑（贴合法 YAML 长出/裁剪图节点），错误时图保持上次有效态", async () => {
+    useTopologyCompleted();
+    await analyzeToTopology();
+    const editor = await openYamlEditor();
+    // 语义变化：删掉 order 仓库（及其两条边）→ 图上 order 节点即时消失（无需任何应用按钮）
+    const withoutOrder = [
+      "repos:",
+      "  web:",
+      "    path: web",
+      "    role: entrypoint",
+      "    roles: [entrypoint, backend]",
+      "  admin:",
+      "    path: admin",
+      "    role: entrypoint",
+      "  user:",
+      "    path: user",
+      "    role: backend",
+      "relations:",
+      "  - from: web",
+      "    to: user",
+      "    protocol: http",
+      "  - from: admin",
+      "    to: user",
+      "    protocol: http",
+      "",
+    ].join("\n");
+    fireEvent.change(editor, { target: { value: withoutOrder } });
+    await waitFor(() => expect(screen.queryByTestId("topology-node-order")).toBeNull());
+    expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
+    // 语法错误 → 报错可见，图保持上次有效态（web/admin/user 三节点不被破坏）
+    fireEvent.change(editor, { target: { value: "repos: [broken" } });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-admin")).toBeInTheDocument();
+    expect(screen.getByTestId("topology-node-user")).toBeInTheDocument();
+  });
+
+  // 布局重排（2026-09-04 反馈「YAML 配置与拓扑应放到一块，中间别隔黑盒验证」）：
+  // auto 模式下 YAML 面板必须排在黑盒验证（gateway）区块之前。
+  it("YAML 面板紧邻拓扑区块，位于黑盒验证（gateway）之前", async () => {
+    useTopologyCompleted();
+    await analyzeToTopology();
+    const yamlPanel = screen.getByTestId("corr-yaml-panel");
+    const gatewayInput = screen.getByPlaceholderText("http://gateway.example.com");
+    // Node.DOCUMENT_POSITION_FOLLOWING = 4：gateway 在 YAML 面板之后
+    expect(yamlPanel.compareDocumentPosition(gatewayInput)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("刷新恢复：选 ws 后找回 running 分析，恢复状态轮询并显示过程日志", async () => {
