@@ -811,6 +811,8 @@ export function ScanNewPage() {
                         repos={mrRepos}
                         value={f.selectedRepo || null}
                         onChange={(v) => set({ selectedRepo: v })}
+                        onClear={() => set({ selectedRepo: "" })}
+                        clearLabel={t("scan.repo.clearLabel")}
                         placeholder={t("scan.repo.selectPlaceholder")}
                         searchPlaceholder={t("scan.repo.searchPlaceholder")}
                         emptyText={t("scan.repo.noMatch")}

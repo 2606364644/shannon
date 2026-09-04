@@ -103,4 +103,42 @@ describe("RepoCombobox", () => {
     await screen.findByText("admin");
     expect(screen.queryByText("关联")).not.toBeInTheDocument();
   });
+
+  // 取消选择（2026-09-04，MR 表单场景）：已选仓库可清空——用户先手选了仓库、
+  // 后想改走 MR 链接导入路径时需要回到「未选」态。onClear 未传 = 零变化（其它调用方）。
+  it("传入 onClear 且有选中值时点击 × 触发 onClear 且不打开下拉", () => {
+    const onClear = vi.fn();
+    render(
+      <RepoCombobox
+        {...baseProps}
+        value="frontend/admin"
+        onChange={() => {}}
+        onClear={onClear}
+        clearLabel="清除选择"
+      />,
+    );
+    const clearBtn = screen.getByRole("button", { name: "清除选择" });
+    fireEvent.click(clearBtn);
+    expect(onClear).toHaveBeenCalledTimes(1);
+    // 下拉未打开（搜索框不存在）——× 点击不得冒泡成 trigger
+    expect(screen.queryByPlaceholderText("搜索仓库...")).not.toBeInTheDocument();
+  });
+
+  it("传入 onClear 但无选中值时不渲染 ×（无可清除内容）", () => {
+    render(
+      <RepoCombobox
+        {...baseProps}
+        value={null}
+        onChange={() => {}}
+        onClear={() => {}}
+        clearLabel="清除选择"
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "清除选择" })).not.toBeInTheDocument();
+  });
+
+  it("未传 onClear 时选中态不渲染 ×（向后兼容）", () => {
+    render(<RepoCombobox {...baseProps} value="frontend/admin" onChange={() => {}} />);
+    expect(screen.queryByRole("button", { name: /clear|清除/i })).not.toBeInTheDocument();
+  });
 });

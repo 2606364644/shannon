@@ -348,7 +348,8 @@
       "notReady": "仓库未就绪（{{state}}）",
       "ungrouped": "未分组",
       "searchPlaceholder": "搜索仓库…",
-      "noMatch": "无匹配仓库"
+      "noMatch": "无匹配仓库",
+      "clearLabel": "取消选择仓库"
     },
     "submit": "开始扫描",
     "errors": {

@@ -348,7 +348,8 @@
       "notReady": "Repository not ready ({{state}})",
       "ungrouped": "Ungrouped",
       "searchPlaceholder": "Search repositories...",
-      "noMatch": "No matching repositories"
+      "noMatch": "No matching repositories",
+      "clearLabel": "Clear selected repository"
     },
     "submit": "Start scan",
     "errors": {

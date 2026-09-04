@@ -646,6 +646,26 @@ describe("ScanNewPage MR 增量扫描", () => {
     expect((screen.getByTestId("mr-base-ref") as HTMLInputElement).value).toBe("main");
     expect((screen.getByTestId("mr-head-ref") as HTMLInputElement).value).toBe("feature/xss");
   });
+
+  it("已选仓库可 × 取消选择——回到未选态（改走 MR 链接导入路径的前置）", async () => {
+    server.use(
+      http.get("/api/workspaces/:ws/repos", () =>
+        HttpResponse.json([
+          { name: "nodegoat", state: "ready", source: { kind: "git", url: "https://gitlab.example/nodegoat.git" } },
+        ]),
+      ),
+    );
+    renderPageFresh();
+    await switchToMrAndSelectWs();
+    await waitFor(() => screen.getByText("选择仓库"));
+    // 手选仓库 → 必填错误消失
+    fireEvent.click(screen.getByText("选择仓库"));
+    fireEvent.click(await screen.findByText("nodegoat"));
+    await waitFor(() => expect(screen.queryByText("请选择仓库")).toBeNull());
+    // 点 ×（RepoCombobox onClear 接线）→ 回到未选态，必填错误重现
+    fireEvent.click(screen.getByRole("button", { name: "取消选择仓库" }));
+    await waitFor(() => expect(screen.getByText("请选择仓库")).toBeInTheDocument());
+  });
 });
 
 describe("ScanNewPage 配色 · coral 收窄到点缀（对齐全站克制基调）", () => {

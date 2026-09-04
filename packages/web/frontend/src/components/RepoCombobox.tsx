@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -28,6 +28,12 @@ export interface RepoComboboxProps {
   ungroupedLabel?: string;
   /** 关联仓库（按路径关联、共享/只读）的标记文案 */
   linkedLabel?: string;
+  /** 取消选择回调（可选，2026-09-04）：传入且有选中值时触发器显示 ×——已选仓库
+   *  可一键回到「未选」态（如 MR 表单从手选仓库切回 MR 链接导入路径）。
+   *  span 封装（Button 内不可再嵌 button）+ stopPropagation（× 不得误开下拉）。 */
+  onClear?: () => void;
+  /** × 的无障碍名（aria-label，i18n 由调用方传入） */
+  clearLabel?: string;
 }
 
 export function RepoCombobox({
@@ -39,6 +45,8 @@ export function RepoCombobox({
   emptyText = "No match",
   ungroupedLabel = "Ungrouped",
   linkedLabel = "Linked",
+  onClear,
+  clearLabel = "Clear selection",
 }: RepoComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -63,10 +71,28 @@ export function RepoCombobox({
           aria-expanded={open}
           className="w-full justify-between font-normal font-mono text-xs"
         >
-          <span className={cn(!selected && "text-muted-foreground")}>
+          <span className={cn("min-w-0 truncate", !selected && "text-muted-foreground")}>
             {selectedLabel}
           </span>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          <span className="flex shrink-0 items-center gap-1">
+            {onClear && selected && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={clearLabel}
+                data-testid="repo-clear"
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onClear();
+                }}
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            )}
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
