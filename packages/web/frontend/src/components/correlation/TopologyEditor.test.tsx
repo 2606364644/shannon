@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import {
-  addTopologyNode, createTopologyDraft, deleteTopologyEdge, removeTopologyNode,
+  createTopologyDraft, deleteTopologyEdge, removeTopologyNode,
   setTopologyEdgeEnabled, type TopologyDraftState,
 } from "@/lib/correlation-topology-draft";
 import type { CorrelationTopologyAnalysis } from "@/api/types";
@@ -22,39 +22,46 @@ function state(): TopologyDraftState {
   return createTopologyDraft(["web", "order"], analysis, {});
 }
 
-it("supports SVG graph and accessible table editing parity", async () => {
+it("属性面板双模式（2026-09-04 撤 TopologyTables 并轨）：点节点编辑属性 / 点边看证据与协议", async () => {
   let current = state();
   const onState = (next: typeof current) => { current = next; };
-  const { rerender } = render(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
+  const { rerender } = render(<TopologyEditor state={current} onState={onState} />);
   expect(screen.getByTestId("topology-node-web")).toBeInTheDocument();
   expect(screen.getByTestId("topology-edge-ai_web-_order_grpc")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByTestId("topology-edge-ai_web-_order_grpc"));
-  expect(screen.getByText(/client\.ts:1/)).toBeInTheDocument();
-
-  const role = screen.getByRole("checkbox", { name: /web.*backend/ });
-  fireEvent.click(role);
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
+  // 点节点（pointerdown→pointerup 无位移 = 点击）→ 右栏切节点属性模式
+  fireEvent.pointerDown(screen.getByTestId("topology-node-web"));
+  fireEvent.pointerUp(screen.getByTestId("topology-node-web"));
+  expect(screen.getByTestId("topology-node-panel")).toBeInTheDocument();
+  // 角色去 backend（原节点表能力）
+  fireEvent.click(screen.getByRole("checkbox", { name: /web.*backend/ }));
+  rerender(<TopologyEditor state={current} onState={onState} />);
   expect(current.draft.nodes[0].roles).toEqual(["entrypoint"]);
+  // 来源下拉（重扫 ↔ 复用）：哨兵映射回 null
+  fireEvent.click(screen.getByRole("combobox", { name: /web source/i }));
+  expect(await screen.findByRole("option", { name: /重新扫描|rescan/i })).toBeInTheDocument();
 
-  // 协议下拉：Radix Select 交互（click trigger → click option；原生 select 已换 ui/Select）
-  fireEvent.click(screen.getByRole("combobox", { name: "protocol" }));
+  // 点边 → 右栏切边模式（与节点选中互斥），证据 + 协议编辑（原边表能力）
+  fireEvent.click(screen.getByTestId("topology-edge-ai_web-_order_grpc"));
+  expect(screen.queryByTestId("topology-node-panel")).toBeNull();
+  expect(screen.getByText(/client\.ts:1/)).toBeInTheDocument();
+  // 协议下拉：Radix Select 交互（click trigger → click option；原生 select 已换 ui/Select）。
+  // 可访问名从右栏 label 推导为 "Protocol"（原边表的小写 aria-label 已随表撤除）
+  fireEvent.click(screen.getByRole("combobox", { name: /protocol/i }));
   fireEvent.click(await screen.findByRole("option", { name: "http" }));
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
+  rerender(<TopologyEditor state={current} onState={onState} />);
   expect(current.draft.edges[0].protocol).toBe("http");
 
-  fireEvent.click(screen.getAllByRole("button", { name: /delete edge/i }).at(-1)!);
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
+  // 边模式删除边（原边表「删除关系」）
+  fireEvent.click(screen.getAllByRole("button", { name: /删除关系|delete edge/i }).at(-1)!);
+  rerender(<TopologyEditor state={current} onState={onState} />);
   expect(current.draft.edges).toHaveLength(0);
-  fireEvent.click(screen.getByRole("combobox", { name: /select service|选择服务/i }));
-  fireEvent.click(await screen.findByRole("option", { name: "payment" }));
-  fireEvent.click(screen.getByRole("button", { name: /add service|添加服务/i }));
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} />);
-  expect(current.draft.nodes.some((node) => node.repo === "payment")).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: /undo/i }));
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} />);
-  fireEvent.click(screen.getByRole("button", { name: /undo/i }));
-  rerender(<TopologyEditor state={current} onState={onState} availableRepos={["web", "order", "payment"]} onAddNode={(repo) => { current = addTopologyNode(current, repo); }} />);
+
+  // undo 两次：恢复删除的边 + 撤销协议改动
+  fireEvent.click(screen.getByRole("button", { name: /undo|撤销/i }));
+  rerender(<TopologyEditor state={current} onState={onState} />);
+  fireEvent.click(screen.getByRole("button", { name: /undo|撤销/i }));
+  rerender(<TopologyEditor state={current} onState={onState} />);
   expect(current.draft.edges).toHaveLength(1);
 });
 
@@ -74,14 +81,17 @@ it("retains and restores deleted AI evidence", () => {
 });
 
 
-it("supports keyboard-accessible node deletion", () => {
+it("节点移除走属性面板（点节点 → 移除服务），键盘可达（Enter 选中节点）", () => {
   let current = state();
   const onState = (next: typeof current) => { current = next; };
   const { rerender } = render(
     <TopologyEditor state={current} onState={onState}
       onRemoveNode={(repo) => { current = removeTopologyNode(current, repo); }} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Delete web" }));
+  // 键盘选中节点（tabIndex=0 + Enter——SVG g 组键盘可达）
+  fireEvent.keyDown(screen.getByTestId("topology-node-web"), { key: "Enter" });
+  expect(screen.getByTestId("topology-node-panel")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /移除服务 web|remove service web/i }));
   rerender(<TopologyEditor state={current} onState={onState}
     onRemoveNode={(repo) => { current = removeTopologyNode(current, repo); }} />);
   expect(current.draft.nodes.some((node) => node.repo === "web")).toBe(false);
@@ -198,6 +208,28 @@ it("空白处拖动平移画布（节点落点不触发），拖动态切 grabbi
   fireEvent.pointerUp(svg);
   expect(svg.getAttribute("class")).toContain("cursor-grab");
   expect(parseViewport(container)).toEqual({ x: 300, y: 220, k: 1 });
+});
+
+it("挂载自动 fit：节点包围盒溢出画布（AI 分析恢复 5+ 服务）初始视口缩到全图可见；无溢出不惊动", () => {
+  // 5 个 backend 纵向 110px 步进 → 第 5 个 y=620 溢出 600 viewBox
+  const overflowAnalysis: CorrelationTopologyAnalysis = {
+    ...analysis,
+    result: {
+      ...analysis.result!,
+      nodes: [
+        { repo: "web", roles: ["entrypoint"], capabilities: [] },
+        ...["a", "b", "c", "d", "e"].map((repo) => ({ repo, roles: ["backend"] as Array<"backend">, capabilities: [] })),
+      ],
+      edges: [],
+    },
+  };
+  const s = createTopologyDraft(["web", "a", "b", "c", "d", "e"], overflowAnalysis, {});
+  const { container } = render(<TopologyEditor state={s} onState={() => {}} />);
+  const v = parseViewport(container);
+  expect(v.k).toBeLessThan(1); // 缩小到全图可见
+  // 反例：两节点（无溢出）保持 {0,0,1}——小图维持 100% 细节
+  const { container: small } = render(<TopologyEditor state={state()} onState={() => {}} />);
+  expect(parseViewport(small)).toEqual({ x: 0, y: 0, k: 1 });
 });
 
 it("缩放条：＋/− 中心步进、百分比回 100%、fit 适配全图且不放大", () => {

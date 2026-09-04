@@ -16,6 +16,7 @@ import { useRepos } from "../api/useRepos";
 import { CorrelationFormFields } from "../components/correlation/CorrelationFormFields";
 import { CorrelationGraphTab } from "../components/correlation/CorrelationGraphTab";
 import { CorrelationGatewayFields } from "../components/correlation/CorrelationGatewayFields";
+import { TopologyConfirmBar } from "../components/correlation/TopologyConfirmBar";
 import { YamlPanel } from "../components/correlation/YamlPanel";
 import type { CredentialDraft } from "../components/auth/CredentialRows";
 import { AlertCircle } from "lucide-react";
@@ -779,38 +780,35 @@ export function ScanNewPage() {
           {/* 类型切换 segmented（D3）：白盒 | MR 增量 | 跨仓关联（黑盒无独立入口——组合任务的嵌套 run）。
               顺序即频率与复杂度（2026-09-04 重排）：MR 增量（spec 2026-09-03，base..head、纯白盒
               语义）是日常高频且表单最简，紧跟白盒成「单仓检测」组；跨仓关联（多仓拓扑/YAML/编辑器）
-              是低频深度分析、表单最重，殿后。 */}
-          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
-            {(["whitebox", "mr", "correlation"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setType(v)}
-                aria-pressed={type === v}
-                data-testid={`scan-type-${v}`}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  type === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t(`scan.type.${v}`)}
-              </button>
-            ))}
-          </div>
-
-          {/* 跨仓扫描的构建方式（自动拓扑 | 手工模式）：归属于跨仓表单的第一个分组——
-              原第二个平级 segmented 与「白盒|跨仓关联」同视觉语言上下叠放，层级读不出
-              从属——2026-09-04 tabs 重组后整个模式概念删除：表单/图/YAML 三视图子页
-              （corr-view-tabs）取代 auto/manual 模式分页，AI 自动分析收进图 tab 折叠区块。 */}
-          {type === "correlation" && (
-            <section className="space-y-2">
-              <GroupLabel>{t("scan.steps.workspace")}</GroupLabel>
-              <div className="space-y-1.5">
+              是低频深度分析、表单最重，殿后。
+              跨仓关联时本行右侧并排工作区下拉（2026-09-04 工作台化）：ws 是全局环境选择
+              （切 ws 清空分析域），与类型切换同层级——不再独占一行浪费纵向空间；白盒/MR
+              的 ws 仍在各自表单字段里（与仓库字段成组）。 */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+              {(["whitebox", "mr", "correlation"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setType(v)}
+                  aria-pressed={type === v}
+                  data-testid={`scan-type-${v}`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    type === v ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t(`scan.type.${v}`)}
+                </button>
+              ))}
+            </div>
+            {type === "correlation" && (
+              <div className="w-60 space-y-1">
                 <Select value={workspace} onValueChange={(ws) => {
                   setWorkspace(ws);
                   // ws 切换 → 仓库域隔离：清分析勾选与进行中的分析态（对齐原 auto 分支行为）
                   selectTopologyRepos([]);
                 }}>
-                  <SelectTrigger className="w-full font-mono text-xs">
+                  <SelectTrigger className="w-full font-mono text-xs" aria-label={t("scan.steps.workspace")}>
                     <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -827,8 +825,8 @@ export function ScanNewPage() {
                   </div>
                 )}
               </div>
-            </section>
-          )}
+            )}
+          </div>
 
           {/* 表单区：白盒由 ScanFormFields 内 lg:grid-cols-2 把 ① 工作区 / ② 仓库 并排铺满，③ 满宽；
               跨仓关联 = 三视图 tabs（图|表单|YAML，同一拓扑三透镜实时同步）。 */}
@@ -963,31 +961,37 @@ export function ScanNewPage() {
               {/* 三视图子页（2026-09-04 tabs 重组）：图 | 表单 | YAML——同一拓扑的三个透镜，
                   改任何一方其他两方实时生成（updateCorr / applyTopologyState / onCorrYaml 三扇出）。
                   tab 标签状态点把别处视图的问题带到眼前：表单校验错 / YAML 错 → 红点，
-                  图有分析来源未确认 → 琥珀点。黑盒验证在 tabs 外（切视图不丢配置）。 */}
+                  图有分析来源未确认 → 琥珀点。tabs 行右侧挂确认门禁状态条（三视图共享——
+                  2026-09-04 工作台化上移：AI 草稿须确认才可提交，不该埋在图编辑器底部）。
+                  黑盒验证在 tabs 外（切视图不丢配置）。 */}
               <Tabs value={corrView} onValueChange={(v) => setCorrView(v as CorrView)}>
-                <TabsList data-testid="corr-view-tabs">
-                  <TabsTrigger value="graph" data-testid="corr-tab-graph">
-                    {t("scan.correlation.view.graph")}
-                    {topologyNeedsConfirm && !topologyConfirmed && (
-                      <span data-testid="corr-tab-dot-graph" aria-label={t("scan.correlation.view.dotUnconfirmed")}
-                        className="ml-1.5 inline-block size-1.5 rounded-full bg-amber" />
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="form" data-testid="corr-tab-form">
-                    {t("scan.correlation.view.form")}
-                    {corrIssues.length > 0 && (
-                      <span data-testid="corr-tab-dot-form" aria-label={t("scan.correlation.view.dotError")}
-                        className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="yaml" data-testid="corr-tab-yaml">
-                    {t("scan.correlation.view.yaml")}
-                    {yamlErr && (
-                      <span data-testid="corr-tab-dot-yaml" aria-label={t("scan.correlation.view.dotError")}
-                        className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
-                    )}
-                  </TabsTrigger>
-                </TabsList>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <TabsList data-testid="corr-view-tabs">
+                    <TabsTrigger value="graph" data-testid="corr-tab-graph">
+                      {t("scan.correlation.view.graph")}
+                      {topologyNeedsConfirm && !topologyConfirmed && (
+                        <span data-testid="corr-tab-dot-graph" aria-label={t("scan.correlation.view.dotUnconfirmed")}
+                          className="ml-1.5 inline-block size-1.5 rounded-full bg-amber" />
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="form" data-testid="corr-tab-form">
+                      {t("scan.correlation.view.form")}
+                      {corrIssues.length > 0 && (
+                        <span data-testid="corr-tab-dot-form" aria-label={t("scan.correlation.view.dotError")}
+                          className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="yaml" data-testid="corr-tab-yaml">
+                      {t("scan.correlation.view.yaml")}
+                      {yamlErr && (
+                        <span data-testid="corr-tab-dot-yaml" aria-label={t("scan.correlation.view.dotError")}
+                          className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive" />
+                      )}
+                    </TabsTrigger>
+                  </TabsList>
+                  <TopologyConfirmBar needsConfirm={topologyNeedsConfirm} confirmed={topologyConfirmed}
+                    onConfirm={confirmCurrentTopology} />
+                </div>
                 <TabsContent value="graph">
                   <CorrelationGraphTab
                     workspace={workspace}
@@ -1008,13 +1012,8 @@ export function ScanNewPage() {
                     analysisOpen={analysisOpen}
                     onAnalysisOpen={setAnalysisOpen}
                     topologyState={topologyState}
-                    needsConfirm={topologyNeedsConfirm}
-                    confirmed={topologyConfirmed}
                     onTopologyState={applyTopologyState}
-                    onConfirm={confirmCurrentTopology}
                     onViewChange={setCorrView}
-                    availableRepos={topologyRepos.map((repo) => repo.name)}
-                    onAddNode={(repo) => selectTopologyRepos([...new Set([...selectedTopologyRepos, repo])])}
                     onRemoveNode={(repo) => selectTopologyRepos(selectedTopologyRepos.filter((name) => name !== repo))}
                     scans={scans}
                   />
