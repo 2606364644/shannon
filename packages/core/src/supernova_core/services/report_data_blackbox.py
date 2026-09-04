@@ -407,13 +407,15 @@ async def build_class_meta(deliverables_path: "Path | str") -> dict[str, dict]:
             continue
         payload = json_loads_or_none(await async_read_file(path)) or {}
         ids: set[str] = set(payload.get("accepted_ids") or [])
+        gap_count = 0
         for gap in payload.get("gaps") or []:
             if isinstance(gap, dict) and gap.get("id"):
                 ids.add(str(gap["id"]))
+                gap_count += 1
         for rej in payload.get("rejected") or []:
             if isinstance(rej, dict) and rej.get("id"):
                 ids.add(str(rej["id"]))
-        meta[vc] = {"exists": True, "ids": ids}
+        meta[vc] = {"exists": True, "ids": ids, "gap_count": gap_count}
     return meta
 
 

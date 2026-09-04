@@ -216,3 +216,68 @@ async def test_run_blackbox_phase_custom_suffix_propagated(mgr, tmp_path):
             scan_dir, ws, scan_id, {"profile_id": None}, "run-5",
             workflow_id_suffix="-bb-5")
         assert sb.call_args.kwargs.get("workflow_id_suffix") == "-bb-5"
+
+
+# ── 验证缺口续跑放行（spec 2026-09-03-blackbox-verification-gap-traceability §7）──
+
+async def test_rerun_allows_completed_with_verification_gaps(mgr, tmp_path):
+    """latest completed 但带 verification_gaps 信号 → 放行续跑（建 run-2）。
+
+    agent 层业务失败（0 verdict / gaps）此前锁死续跑入口——completed+缺口是
+    「用户可自行决定补测」的新放行态（status 仍 completed 不标 failed）。
+    """
+    ws, scan_id = "ws-a", "s1"
+    scan_dir = _make_combined(tmp_path, ws, scan_id)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run(ws, scan_id)
+    store.update_blackbox_run(
+        ws, scan_id, "run-1", status="completed", phase="completed",
+        extra={"verification_gaps": {"xss": 15}})
+    bb_handle = MagicMock(); bb_handle.result = AsyncMock(return_value=None)
+    with patch.object(mgr, "_run_precheck", new=AsyncMock(return_value=True)), \
+         patch.object(mgr, "_submit_blackbox", new=AsyncMock(return_value=bb_handle)) as sb, \
+         patch.object(mgr, "_generate_combined_report", new=AsyncMock()), \
+         patch.object(mgr, "_write_scan_end", new=AsyncMock()), \
+         patch.object(mgr, "_mark_run", new=AsyncMock()):
+        run_id = await mgr.rerun_blackbox(ws, scan_id)
+        await _drain_bg_tasks(mgr)
+    assert run_id == "run-2"
+    sb.assert_awaited_once()
+
+
+async def test_rerun_still_rejects_plain_completed(mgr, tmp_path):
+    """completed 无缺口信号 → 仍拒（成功 run 不重跑，零回归）。"""
+    ws, scan_id = "ws-a", "s1"
+    _make_combined(tmp_path, ws, scan_id)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run(ws, scan_id)
+    store.update_blackbox_run(
+        ws, scan_id, "run-1", status="completed", phase="completed",
+        extra={"verification_gaps": {}})  # 空 gaps = 无缺口
+    with patch.object(mgr, "_submit_blackbox", new=AsyncMock()) as sb:
+        with pytest.raises(ValueError, match="latest"):
+            await mgr.rerun_blackbox(ws, scan_id)
+        sb.assert_not_awaited()
+
+
+async def test_generate_combined_report_writes_gaps_signal(mgr, tmp_path):
+    """融合报告生成时聚合各类 gaps → run session verification_gaps（守卫依据）。"""
+    ws, scan_id = "ws-a", "s1"
+    scan_dir = _make_combined(tmp_path, ws, scan_id)
+    store = ScanStore(tmp_path); mgr._store = store
+    store.create_blackbox_run(ws, scan_id)
+    # 黑盒 run-1 产物：xss 全缺口形态（0 accepted + 1 gap）
+    bb_inter = scan_dir / "blackbox-runs" / "run-1" / "deliverables" / \
+        "blackbox" / "intermediate"
+    bb_inter.mkdir(parents=True)
+    (bb_inter / "xss_exploit_verdicts.json").write_text(json.dumps({
+        "vuln_class": "xss", "accepted_ids": [], "verdicts": [], "rejected": [],
+        "gaps": [{"id": "XSS-VULN-01", "reason_type": "unregistered",
+                  "attempted": True, "endpoints": ["POST /login"],
+                  "detail": "agent 未完成验证闭环（登记 0/1）"}]}))
+    await mgr._generate_combined_report(scan_dir, "run-1")
+    run_session = json.loads(
+        (scan_dir / "blackbox-runs" / "run-1" / "session.json").read_text())
+    assert run_session.get("verification_gaps") == {"xss": 1}
+    # 融合产物本身存在（报告主链路不受影响）
+    assert (scan_dir / "combined" / "run-1" / "report_data.json").exists()

@@ -444,4 +444,5 @@ async def test_build_class_meta_from_verdicts(tmp_path):
     meta = await build_class_meta(tmp_path)
     assert meta["injection"]["exists"] is True
     assert meta["injection"]["ids"] == {"INJ-VULN-01", "INJ-VULN-02"}
+    assert meta["injection"]["gap_count"] == 1  # gaps 数（run 收尾聚合信号）
     assert "xss" not in meta  # 文件不存在 → 键缺席（类未跑）

@@ -3004,8 +3004,16 @@ class ScanManager:
             raise ValueError("白盒产物需完好才能续跑黑盒")
         runs = self._store.list_blackbox_runs(ws, scan_id)
         latest = runs[-1] if runs else None
-        if latest and latest.get("status") not in ("failed", "skipped", None):
-            raise ValueError("仅 latest run 失败/跳过时可续跑（新建 run）")
+        # 守卫（spec 2026-09-03 §7 扩展）：failed/skipped/无 run 可续跑；
+        # completed + verification_gaps 信号（agent 业务失败缺口，非 run 失败）
+        # 同样放行——用户看到缺口原因后自行决定补测。
+        if latest:
+            status = latest.get("status")
+            has_gaps = bool(latest.get("verification_gaps"))
+            rerunnable = status in ("failed", "skipped", None) or (
+                status == "completed" and has_gaps)
+            if not rerunnable:
+                raise ValueError("仅 latest run 失败/跳过/有验证缺口时可续跑（新建 run）")
         return await self._add_blackbox_run(ws, scan_id, new_auth)
 
     async def _rerun_orchestrator(self, scan_key: tuple[str, str], scan_dir: Path,
@@ -3246,6 +3254,18 @@ class ScanManager:
             # not-covered 成因判据（spec 2026-09-03 §6）：各类 verdicts 存在性 + 验证范围
             class_meta = await build_class_meta(run_dir / "deliverables")
             fused = fuse_report_data(wb_rd, bb_rd, blackbox_class_meta=class_meta)
+            # run 收尾缺口聚合（spec 2026-09-03 §7）：completed + verification_gaps
+            # 信号 → 续跑守卫放行依据（status 仍 completed，不标 failed——多数类
+            # 可能已成功）。best-effort：信号写失败不阻塞报告产出。
+            gaps_signal = {vc: m["gap_count"] for vc, m in class_meta.items()
+                           if m.get("gap_count")}
+            if gaps_signal:
+                try:
+                    self._store.update_blackbox_run(
+                        self._ws_of(scan_dir), self._scan_id_of(scan_dir), run_id,
+                        extra={"verification_gaps": gaps_signal})
+                except Exception:  # noqa: BLE001 — best-effort 缺口信号
+                    pass
             out_dir.mkdir(parents=True, exist_ok=True)
             await report_data_builder.write_report_data(
                 fused, out_dir / "report_data.json")
