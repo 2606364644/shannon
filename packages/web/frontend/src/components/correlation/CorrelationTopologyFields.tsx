@@ -66,7 +66,6 @@ export function CorrelationTopologyFields(props: Props) {
     <div className="flex flex-col gap-4">
       <Section title={t("scan.steps.workspace")}>
         <div className="space-y-1.5">
-          <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
           <Select value={props.workspace} onValueChange={props.onWorkspaceChange}>
             <SelectTrigger className="w-full font-mono text-xs">
               <SelectValue placeholder={t("scan.fields.wsSelectPlaceholder")} />

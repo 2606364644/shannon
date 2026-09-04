@@ -319,7 +319,7 @@
       "reuse": "Reuse",
       "urlLabel": "Target URL",
       "urlOptionalSuffix": " (optional)",
-      "wsSelectLabel": "Target workspace",
+      "wsSelectLabel": "Workspace",
       "wsSelectPlaceholder": "Select workspace",
       "selectWsFirst": "Select a workspace first (repos are scoped per-ws)",
       "wsEmptyOption": "No workspaces available",

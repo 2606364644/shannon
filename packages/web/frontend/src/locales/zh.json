@@ -319,7 +319,7 @@
       "reuse": "复用",
       "urlLabel": "目标 URL",
       "urlOptionalSuffix": "（可选）",
-      "wsSelectLabel": "目标 workspace",
+      "wsSelectLabel": "工作区",
       "wsSelectPlaceholder": "选择 workspace",
       "selectWsFirst": "请先选择 workspace（仓库列表按 ws 隔离）",
       "wsEmptyOption": "暂无可用的工作区",

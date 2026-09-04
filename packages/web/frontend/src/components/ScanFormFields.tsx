@@ -910,7 +910,6 @@ export function ScanFormFields({
   );
   const workspaceField = (
     <div className="space-y-1.5">
-      <Label className="text-xs font-medium">{t("scan.fields.wsSelectLabel")}</Label>
       {wsSelectInner}
     </div>
   );
