@@ -57,6 +57,26 @@ def test_mr_except_exception_reraises():
         "except Exception 分支末尾必须裸 raise")
 
 
+def test_mr_empty_diff_finalizes_completed():
+    """空 diff 快速终态也须 finalize_summary 写 scan_end/session completed.
+
+    旧版只产「无变更」报告零收尾：web _watch 只认 FAILED 三态，COMPLETED +
+    无 scan_end = 无限空转（生产 SCAN_TIMEOUT=0 无 deadline）→ 永久占并发
+    槽位 + session 永远 running（幽灵）。触发面不小：已合并 MR 且分支未删 +
+    merge-commit 方式合入（GitLab 默认）→ merge-base==head → 空 diff.
+    """
+    src = _mr_wf_src()
+    ed = src.find("run_mr_empty_diff_finalize")
+    assert ed != -1, "须有 run_mr_empty_diff_finalize"
+    ret = src.find("return", ed)
+    branch = src[ed:ret]
+    assert "finalize_summary" in branch, (
+        "空 diff 快速终态分支必须调 activities.finalize_summary 写 scan_end + "
+        "session completed（报告产了但状态零收尾 → web _watch 无限空转占并发槽）")
+    assert '"completed"' in branch, (
+        "空 diff finalize 的 summary status 必须是 'completed'")
+
+
 def test_mr_worker_path_gate():
     """finalize 收尾须按 is_worker_path 门控（CLI 路径 event_file=None 由外层收尾）."""
     src = _mr_wf_src()

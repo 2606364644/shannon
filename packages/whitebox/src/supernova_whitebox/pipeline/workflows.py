@@ -1050,6 +1050,26 @@ class MrScanWorkflow:
                     start_to_close_timeout=timedelta(minutes=2),
                     retry_policy=RetryPolicy(maximum_attempts=1),
                 )
+                # 快速终态也须 finalize 收尾（2026-09-04 研究缺口）：报告产了但
+                # 旧版零收尾——web _watch 只认 FAILED 三态，COMPLETED + 无 scan_end
+                # = 无限空转（生产 SCAN_TIMEOUT=0 无 deadline）→ 永久占并发槽 +
+                # session 幽灵 running。对齐 WhiteboxScanWorkflow 正常路径；finalize
+                # 失败自然落入下方 except Exception 收尾链（不吞）。
+                if is_worker_path:
+                    await workflow.execute_activity(
+                        activities.finalize_summary,
+                        args=[act_input, {
+                            "status": "completed",
+                            "total_duration_ms": int(
+                                (workflow.time_ns() / 1e9 - self._state.start_time) * 1000),
+                            "total_cost_usd": 0.0,
+                            "completed_agents": [],
+                            "agent_metrics": {},
+                            "error": None,
+                        }],
+                        start_to_close_timeout=timedelta(seconds=30),
+                        retry_policy=retry_for("standard"),
+                    )
                 self._state.status = "completed"
                 self._state.current_phase = "mr-empty-diff"
                 return self._state
